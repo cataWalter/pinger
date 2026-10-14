@@ -359,6 +359,7 @@ func (d *DesktopApp) showMain() {
 	d.chat.SetReplyHandler(d.sendReply, d.chat.selectReply)
 	d.chat.SetReactionHandler(d.reactToMessage)
 	d.chat.SetEditHandler(d.editMessage)
+	d.chat.SetEditSendHandler(d.sendEditedMessage)
 	d.chat.SetRedactHandler(d.confirmRedact)
 	d.chat.SetSearchHandler(d.searchMessages)
 	d.chat.SetLeaveHandler(d.confirmLeaveRoom)
@@ -602,19 +603,22 @@ func (d *DesktopApp) reactToMessage(message matrix.Message, emoji string) {
 }
 
 func (d *DesktopApp) editMessage(message matrix.Message) {
-	roomID := d.selectedRoom
-	editor := dialog.NewEntryDialog("Edit message", "Update the message text:", func(text string) {
-		if strings.TrimSpace(text) == "" {
+	d.chat.BeginEdit(message)
+	d.window.Canvas().Focus(d.chat.input.Entry)
+}
+
+func (d *DesktopApp) sendEditedMessage(roomID, text, eventID string) {
+	go func() {
+		if err := d.backend.EditMessage(d.ctx, roomID, text, eventID); err != nil {
+			fyne.Do(func() {
+				if d.ctx.Err() == nil {
+					d.showError(err)
+				}
+			})
 			return
 		}
-		go func() {
-			if err := d.backend.EditMessage(d.ctx, roomID, text, message.ID); err != nil {
-				fyne.Do(func() { d.showError(err) })
-			}
-		}()
-	}, d.window)
-	editor.SetText(message.Body)
-	editor.Show()
+		fyne.Do(func() { d.reloadMessages(roomID) })
+	}()
 }
 
 func (d *DesktopApp) confirmRedact(message matrix.Message) {
@@ -676,6 +680,126 @@ func (d *DesktopApp) downloadMedia(message matrix.Message) {
 			d.showMediaSaveDialog(data, message.MediaMIME)
 		})
 	}()
+}
+
+func (d *DesktopApp) exportRoomKeys() {
+	passphrase := widget.NewPasswordEntry()
+	confirmation := widget.NewPasswordEntry()
+	form := dialog.NewForm(
+		"Export encrypted room keys",
+		"Continue",
+		"Cancel",
+		[]*widget.FormItem{
+			widget.NewFormItem("Backup passphrase", passphrase),
+			widget.NewFormItem("Confirm passphrase", confirmation),
+		},
+		func(confirmed bool) {
+			if !confirmed {
+				return
+			}
+			if passphrase.Text == "" || passphrase.Text != confirmation.Text {
+				dialog.ShowError(errors.New("enter and confirm the same non-empty passphrase"), d.window)
+				return
+			}
+			secret := passphrase.Text
+			go func() {
+				data, err := d.backend.ExportRoomKeys(d.ctx, secret)
+				fyne.Do(func() {
+					if d.ctx.Err() != nil {
+						return
+					}
+					if err != nil {
+						d.showError(err)
+						return
+					}
+					save := dialog.NewFileSave(func(writer fyne.URIWriteCloser, saveErr error) {
+						if saveErr != nil {
+							d.showError(saveErr)
+							return
+						}
+						if writer == nil {
+							return
+						}
+						go func() {
+							_, writeErr := writer.Write(data)
+							closeErr := writer.Close()
+							if writeErr == nil {
+								writeErr = closeErr
+							}
+							if writeErr != nil {
+								fyne.Do(func() {
+									if d.ctx.Err() == nil {
+										d.showError(fmt.Errorf("save room key backup: %w", writeErr))
+									}
+								})
+							}
+						}()
+					}, d.window)
+					save.SetFileName("matrix-room-keys.txt")
+					save.Show()
+				})
+			}()
+		},
+		d.window,
+	)
+	form.Show()
+}
+
+func (d *DesktopApp) importRoomKeys() {
+	open := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+		if err != nil {
+			d.showError(err)
+			return
+		}
+		if reader == nil {
+			return
+		}
+		go func() {
+			defer reader.Close()
+			const maxKeyBackupBytes = 100 << 20
+			data, readErr := io.ReadAll(io.LimitReader(reader, maxKeyBackupBytes+1))
+			if readErr == nil && len(data) > maxKeyBackupBytes {
+				readErr = fmt.Errorf("room key backup exceeds %d MiB", maxKeyBackupBytes>>20)
+			}
+			fyne.Do(func() {
+				if d.ctx.Err() != nil {
+					return
+				}
+				if readErr != nil {
+					d.showError(fmt.Errorf("read room key backup: %w", readErr))
+					return
+				}
+				passphrase := widget.NewPasswordEntry()
+				passphrase.SetPlaceHolder("Passphrase used when exporting this backup")
+				dialog.ShowForm("Import encrypted room keys", "Import", "Cancel", []*widget.FormItem{
+					widget.NewFormItem("Backup passphrase", passphrase),
+				}, func(confirmed bool) {
+					if !confirmed {
+						return
+					}
+					if passphrase.Text == "" {
+						dialog.ShowError(errors.New("enter the room key backup passphrase"), d.window)
+						return
+					}
+					secret := passphrase.Text
+					go func() {
+						imported, total, importErr := d.backend.ImportRoomKeys(d.ctx, secret, data)
+						fyne.Do(func() {
+							if d.ctx.Err() != nil {
+								return
+							}
+							if importErr != nil {
+								d.showError(importErr)
+								return
+							}
+							dialog.ShowInformation("Room keys imported", fmt.Sprintf("Imported %d of %d room keys.", imported, total), d.window)
+						})
+					}()
+				}, d.window)
+			})
+		}()
+	}, d.window)
+	open.Show()
 }
 
 func (d *DesktopApp) showMediaSaveDialog(data []byte, mediaMIME string) {

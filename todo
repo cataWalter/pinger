@@ -7,70 +7,70 @@ A lightweight, non-Electron native desktop client for Matrix and Beeper, powered
 ## 🏗️ Phase 1: Foundation & Core Backend Integration
 - [ ] **Repository & Module Setup:**
   - [ ] Initialize Go 1.22+ module (`go mod init`).
-  - [ ] Import `gomuks` backend SDK packages (`go.mau.fi/gomuks/...`).
-  - [ ] Setup UI framework dependencies (Fyne v2 or Wails).
+  - [x] Import `gomuks` backend SDK packages (`go.mau.fi/gomuks/...`).
+  - [x] Setup UI framework dependencies (Fyne v2 or Wails).
   - [ ] Configure local storage directory paths (`os.UserConfigDir()` and `os.UserCacheDir()`) for SQLite databases and credentials.
 - [ ] **Matrix Engine Wrapper (`matrix/client.go`):**
-  - [ ] Wrap `gomuks` client lifecycle (start, stop, background sync loop).
-  - [ ] Implement channel/callback event dispatching for incoming sync events (messages, room updates, read receipts).
-  - [ ] Ensure GUI thread safety: dispatch background sync events to the UI thread via `fyne.Do(...)` or framework-specific event loops.
+  - [x] Wrap `gomuks` client lifecycle (start, stop, background sync loop).
+  - [x] Implement channel/callback event dispatching for incoming sync events (messages, room updates, read receipts).
+  - [x] Ensure GUI thread safety: dispatch background sync events to the UI thread via `fyne.Do(...)` or framework-specific event loops.
 - [ ] **Error Handling & Offline State:**
   - [ ] Implement network reconnect logic with exponential backoff.
-  - [ ] Add state tracking: `Connecting`, `Syncing`, `Connected`, `Offline`.
+  - [x] Add state tracking: `Connecting`, `Syncing`, `Connected`, `Offline`.
 
 ---
 
 ## 🔐 Phase 2: Authentication & End-to-End Encryption (E2EE)
 - [ ] **Login Screen:**
-  - [ ] Form fields: Homeserver URL (default `https://matrix.org`), Username/Matrix ID, Password.
-  - [ ] Beeper support: Support logging in with `https://matrix.beeper.com` using Beeper Matrix credentials.
+  - [x] Form fields: Homeserver URL (default `https://matrix.org`), Username/Matrix ID, Password.
+  - [x] Beeper support: Support logging in with `https://matrix.beeper.com` using Beeper Matrix credentials.
   - [ ] Secure credential persistence: Save access tokens, device ID, and homeserver URL securely in local store/keyring.
-  - [ ] Auto-login on app launch if a valid session exists.
+  - [x] Auto-login on app launch if a valid session exists.
 - [ ] **Device Verification & Cross-Signing:**
   - [ ] SAS (emoji/number) verification modal to verify sessions against Beeper Mobile/Desktop.
-  - [ ] Recovery Key input modal: Prompt user to enter their 48-character Beeper/Matrix Security Key to restore Olm/Megolm encryption keys.
+  - [x] Recovery Key input modal: Prompt user to enter their 48-character Beeper/Matrix Security Key to restore Olm/Megolm encryption keys.
 - [ ] **Session & Key Management:**
-  - [ ] Verify incoming message decryption using the local SQLite Megolm store.
-  - [ ] Export/Import Megolm room keys for manual backup.
+  - [x] Verify incoming message decryption using the local SQLite Megolm store.
+  - [x] Export/Import Megolm room keys for manual backup.
 
 ---
 
 ## 📥 Phase 3: Sidebar, Room Navigation & "Unanswered" Triage
 - [ ] **Tab Switcher (Top of Sidebar):**
-  - [ ] Tab 1: **All Chats** (`All`).
-  - [ ] Tab 2: **Needs Reply** (`Unanswered`) with dynamic count badge (e.g., `[4]`).
+  - [x] Tab 1: **All Chats** (`All`).
+  - [x] Tab 2: **Needs Reply** (`Unanswered`) with dynamic count badge (e.g., `[4]`).
 - [ ] **"Unanswered" Logic & Persistence:**
-  - [ ] Create local SQLite table: `room_unanswered_status (room_id TEXT PRIMARY KEY, dismissed_event_id TEXT, dismissed_at INTEGER)`.
-  - [ ] Room enters "Unanswered" if: `last_event.sender != current_user` OR `unread_count > 0`.
-  - [ ] Room leaves "Unanswered" if: Current user sends a message in the room OR explicitly marks it as done.
-  - [ ] Re-activation: If the other party sends a new message (`new_event.id != dismissed_event_id`), the room automatically returns to "Unanswered".
+  - [x] Create local SQLite table: `room_unanswered_status (room_id TEXT PRIMARY KEY, dismissed_event_id TEXT, dismissed_at INTEGER)`.
+  - [x] Room enters "Unanswered" if: `last_event.sender != current_user` OR `unread_count > 0`.
+  - [x] Room leaves "Unanswered" if: Current user sends a message in the room OR explicitly marks it as done.
+  - [x] Re-activation: If the other party sends a new message (`new_event.id != dismissed_event_id`), the room automatically returns to "Unanswered".
 - [ ] **Triage Keyboard Shortcuts & Ergonomics:**
-  - [ ] Shortcut key: **`E`** (or `Ctrl+D` / `⌘D`) to mark the selected chat as answered.
-  - [ ] Disable triage shortcuts whenever text input focus is inside the message composer.
-  - [ ] **Auto-Advance:** Automatically shift selection to the immediate next room in the list when dismissing.
-  - [ ] Toast notification with **Undo** action (`Ctrl+Z`) to restore a dismissed room.
+  - [x] Shortcut key: **`E`** (or `Ctrl+D` / `⌘D`) to mark the selected chat as answered.
+  - [x] Disable triage shortcuts whenever text input focus is inside the message composer.
+  - [x] **Auto-Advance:** Automatically shift selection to the immediate next room in the list when dismissing.
+  - [x] Toast notification with **Undo** action (`Ctrl+Z`) to restore a dismissed room.
 - [ ] **Room List Visuals:**
-  - [ ] Virtualized/Recycled room list widget for high performance with 500+ chats.
+  - [x] Virtualized/Recycled room list widget for high performance with 500+ chats.
   - [ ] Beeper network badges overlaid on room avatars (WhatsApp, Telegram, Signal, iMessage, SMS, Matrix).
   - [ ] Unread indicators: Subtle gray dot for regular unread; colored pill with number for direct mentions.
-  - [ ] Room categorization sections: Pinned/Favorites, Direct Messages (1:1), and Groups.
-  - [ ] Quick Search bar at the top of the sidebar (`Ctrl+K` trigger).
+  - [x] Room categorization sections: Pinned/Favorites, Direct Messages (1:1), and Groups.
+  - [x] Quick Search bar at the top of the sidebar (`Ctrl+K` trigger).
 
 ---
 
 ## 💬 Phase 4: Message Timeline & Rendering
 - [ ] **Smart Message Grouping:**
-  - [ ] Group consecutive messages from the same sender within a 5-minute threshold.
-  - [ ] Collapse repeated avatars and sender display names to minimize vertical clutter.
+  - [x] Group consecutive messages from the same sender within a 5-minute threshold.
+  - [x] Collapse repeated avatars and sender display names to minimize vertical clutter.
 - [ ] **Rich Text & Content Rendering:**
-  - [ ] Parse and render Markdown (bold, italic, strikethrough, inline code, links).
+  - [x] Parse and render Markdown (bold, italic, strikethrough, inline code, links).
   - [ ] Syntax-highlighted code blocks with a "Copy Code" button.
-  - [ ] Blockquotes with an accent left-border for quoted text.
+  - [x] Blockquotes with an accent left-border for quoted text.
 - [ ] **Replies & Context:**
   - [ ] Reply quote cards: Indented card displaying the original author's name and a one-line truncated preview.
   - [ ] Clicking a reply card scrolls the timeline to the original message.
 - [ ] **Reactions (Pill UI):**
-  - [ ] Render emoji reaction pills below messages with counter (`[❤️ 2]`, `[👍 1]`).
+  - [x] Render emoji reaction pills below messages with counter (`[❤️ 2]`, `[👍 1]`).
   - [ ] Highlight reaction pill border if reacted by the current user.
   - [ ] Hover action bar on messages with a `+` button to open the emoji reaction picker.
 - [ ] **Media & Attachments:**
@@ -96,69 +96,69 @@ A lightweight, non-Electron native desktop client for Matrix and Beeper, powered
   - [ ] "Replying to [User]" banner with a dismiss (`✕`) button above the input field.
   - [ ] "Editing message" banner with an exit edit mode button (`Esc`).
 - [ ] **Attachment & Input Actions:**
-  - [ ] Paperclip button opening native system file selector.
-  - [ ] Emoji picker popover button.
-  - [ ] Send button that activates/highlights only when input contains text or attachments.
+  - [x] Paperclip button opening native system file selector.
+  - [x] Emoji picker popover button.
+  - [x] Send button that activates/highlights only when input contains text or attachments.
 - [ ] **Clipboard & Drag-and-Drop:**
   - [ ] Paste images directly from clipboard (`Ctrl+V` / `⌘V`).
   - [ ] Window drag-and-drop overlay zone (*"Drop files here to upload"*).
 - [ ] **Typing Indicators:**
-  - [ ] Emit typing notifications to homeserver during active typing.
-  - [ ] Display animated *"Alice is typing..."* indicator above composer.
+  - [x] Emit typing notifications to homeserver during active typing.
+  - [x] Display animated *"Alice is typing..."* indicator above composer.
 
 ---
 
 ## ⚙️ Phase 6: Settings Menu (Preferences)
 - [ ] **Settings Modal / Drawer (`Ctrl+,` / `⌘,`):**
-  - [ ] Vertical tabbed navigation layout.
+  - [x] Vertical tabbed navigation layout.
 - [ ] **Tab 1: Account & Session:**
-  - [ ] Current profile view: Avatar, Display Name, Matrix ID (`@user:server`).
-  - [ ] Homeserver URL display.
-  - [ ] Active device list with remote logout/revoke capability.
+  - [x] Current profile view: Avatar, Display Name, Matrix ID (`@user:server`).
+  - [x] Homeserver URL display.
+  - [x] Active device list with remote logout/revoke capability.
   - [ ] **Log Out** button with confirmation prompt and cache wipe option.
 - [ ] **Tab 2: Appearance & Theming:**
-  - [ ] Theme selector: System Default, Dark, Light, OLED Black.
+  - [x] Theme selector: System Default, Dark, Light, OLED Black.
   - [ ] Message layout mode: **Bubble View** (chat bubbles) vs **Compact View** (IRC/Discord style).
-  - [ ] Font size slider (Small, Medium, Large).
-  - [ ] Toggle to show/hide avatars in timeline.
-  - [ ] Timestamp format: 12-hour (AM/PM) vs 24-hour; relative vs absolute dates.
+  - [x] Font size slider (Small, Medium, Large).
+  - [x] Toggle to show/hide avatars in timeline.
+  - [x] Timestamp format: 12-hour (AM/PM) vs 24-hour; relative vs absolute dates.
 - [ ] **Tab 3: Notifications & Sound:**
-  - [ ] Toggle desktop notifications.
-  - [ ] Notification privacy selector: *Show sender & message preview* vs *Show sender only* vs *Hidden content*.
+  - [x] Toggle desktop notifications.
+  - [x] Notification privacy selector: *Show sender & message preview* vs *Show sender only* vs *Hidden content*.
   - [ ] Notification sound toggle and volume slider.
 - [ ] **Tab 4: Keyboard Shortcuts & Behaviors:**
-  - [ ] Send shortcut toggle: `Enter` vs `Ctrl+Enter`.
+  - [x] Send shortcut toggle: `Enter` vs `Ctrl+Enter`.
   - [ ] Configurable "Mark Answered" shortcut (default `E`).
-  - [ ] "Close window minimizes to system tray" toggle.
-  - [ ] "Launch on system startup" toggle.
+  - [x] "Close window minimizes to system tray" toggle.
+  - [x] "Launch on system startup" toggle.
 - [ ] **Tab 5: Storage & Cache Management:**
   - [ ] Storage breakdown: Database size vs Media cache size.
   - [ ] **"Clear Media Cache"** button (purges local images/videos without deleting message history).
-  - [ ] **"Optimize Database"** button (runs SQLite `VACUUM`).
+  - [x] **"Optimize Database"** button (runs SQLite `VACUUM`).
 - [ ] **Tab 6: Security & Encryption:**
-  - [ ] Session verification status badge.
-  - [ ] Export Megolm encryption keys to a passphrase-protected file.
-  - [ ] Import Megolm encryption keys from backup.
-  - [ ] Enter Recovery Key to re-sync encrypted chat history.
+  - [x] Session verification status badge.
+  - [x] Export Megolm encryption keys to a passphrase-protected file.
+  - [x] Import Megolm encryption keys from backup.
+  - [x] Enter Recovery Key to re-sync encrypted chat history.
 - [ ] **Tab 7: About:**
-  - [ ] Application name, version tag, build date, and Git commit hash.
-  - [ ] gomuks engine version.
-  - [ ] Links to GitHub repository, issue tracker, and licenses.
+  - [x] Application name, version tag, build date, and Git commit hash.
+  - [x] gomuks engine version.
+  - [x] Links to GitHub repository, issue tracker, and licenses.
 
 ---
 
 ## 🖥️ Phase 7: Desktop Polish & System Integration
 - [ ] **System Tray / Menubar Applet:**
-  - [ ] App stays running in system tray when main window is closed (configurable).
-  - [ ] Unread indicator dot/badge on the tray icon.
-  - [ ] Tray context menu: *Open*, *Mark All as Read*, *Quit*.
+  - [x] App stays running in system tray when main window is closed (configurable).
+  - [x] Unread indicator dot/badge on the tray icon.
+  - [x] Tray context menu: *Open*, *Mark All as Read*, *Quit*.
 - [ ] **Native OS Desktop Notifications:**
-  - [ ] Trigger desktop notifications on mentions or direct messages when window is unfocused.
+  - [x] Trigger desktop notifications on mentions or direct messages when window is unfocused.
   - [ ] Clicking notification brings the app window to the front and navigates to the relevant room.
 - [ ] **Global Quick Switcher (`Ctrl+K` / `⌘K`):**
-  - [ ] Spotlight-style centered modal popover.
-  - [ ] Instant fuzzy search across room names and contact handles.
-  - [ ] Keyboard navigation (`Up`/`Down` arrows, `Enter` to open room, `Esc` to close).
+  - [x] Spotlight-style centered modal popover.
+  - [x] Instant fuzzy search across room names and contact handles.
+  - [x] Keyboard navigation (`Up`/`Down` arrows, `Enter` to open room, `Esc` to close).
 
 ---
 

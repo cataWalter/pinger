@@ -82,6 +82,48 @@ func TestMessageFromEventMapsMediaMetadata(t *testing.T) {
 	}
 }
 
+func TestMessageFromEventIncludesEditRedactionAndDecryptionStatus(t *testing.T) {
+	editedRow := database.EventRowID(2)
+	tests := []struct {
+		name           string
+		event          *database.Event
+		wantBody       string
+		wantEdited     bool
+		wantRedacted   bool
+		wantDecryption string
+	}{
+		{
+			name:       "edited",
+			event:      &database.Event{ID: "$edited", Type: event.EventMessage.Type, Content: json.RawMessage(`{"body":"updated"}`), LastEditRowID: &editedRow},
+			wantBody:   "updated",
+			wantEdited: true,
+		},
+		{
+			name:         "redacted",
+			event:        &database.Event{ID: "$redacted", Type: event.EventMessage.Type, RedactedBy: "$redaction"},
+			wantEdited:   false,
+			wantRedacted: true,
+		},
+		{
+			name:           "decryption failure",
+			event:          &database.Event{ID: "$encrypted", Type: event.EventEncrypted.Type, DecryptionError: "missing room key"},
+			wantDecryption: "missing room key",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			message, ok := messageFromEvent(test.event)
+			if !ok {
+				t.Fatal("expected event to be represented in the timeline")
+			}
+			if message.Body != test.wantBody || message.Edited != test.wantEdited ||
+				message.Redacted != test.wantRedacted || message.DecryptionError != test.wantDecryption {
+				t.Fatalf("unexpected event status: %+v", message)
+			}
+		})
+	}
+}
+
 func TestMessageFromEventIgnoresNonMessages(t *testing.T) {
 	tests := []struct {
 		name string

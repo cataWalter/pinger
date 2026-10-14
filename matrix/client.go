@@ -28,6 +28,7 @@ import (
 	"go.mau.fi/gomuks/pkg/hicli/jsoncmd"
 	"go.mau.fi/util/dbutil"
 	"maunium.net/go/mautrix"
+	mautrixcrypto "maunium.net/go/mautrix/crypto"
 	"maunium.net/go/mautrix/crypto/attachment"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -56,27 +57,40 @@ type Room struct {
 }
 
 type Message struct {
-	ID             string
-	TransactionID  string
-	Sender         string
-	SenderName     string
-	Avatar         string
-	Body           string
-	FormattedBody  string
-	Timestamp      time.Time
-	TimelineCursor int64
-	Sending        bool
-	SendError      string
-	Own            bool
-	Reactions      map[string]int
-	MediaURI       string
-	MediaMIME      string
-	MediaEncrypted *event.EncryptedFileInfo
+	ID              string
+	TransactionID   string
+	Sender          string
+	SenderName      string
+	Avatar          string
+	Body            string
+	FormattedBody   string
+	Timestamp       time.Time
+	TimelineCursor  int64
+	Sending         bool
+	SendError       string
+	Own             bool
+	Reactions       map[string]int
+	MediaURI        string
+	MediaMIME       string
+	MediaSize       int
+	MediaEncrypted  *event.EncryptedFileInfo
+	Encrypted       bool
+	DecryptionError string
+	Edited          bool
+	Redacted        bool
 }
 
 type Member struct {
 	ID          string
 	DisplayName string
+}
+
+type Device struct {
+	ID          string
+	DisplayName string
+	LastSeenIP  string
+	LastSeenAt  time.Time
+	Current     bool
 }
 
 type AccountProfile struct {
@@ -499,6 +513,95 @@ func (c *Client) Verify(ctx context.Context, recoveryKeyOrPassphrase string) err
 	defer finish()
 	if err = c.engine.Verify(ctx, recoveryKeyOrPassphrase); err != nil {
 		return fmt.Errorf("verify Matrix encryption keys: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) ExportRoomKeys(ctx context.Context, passphrase string) ([]byte, error) {
+	if strings.TrimSpace(passphrase) == "" {
+		return nil, errors.New("key export passphrase is empty")
+	}
+	ctx, finish, err := c.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	export, err := mautrixcrypto.ExportKeysIter(passphrase, c.engine.CryptoStore.GetAllGroupSessions(ctx))
+	if err != nil {
+		if errors.Is(err, mautrixcrypto.ErrNoSessionsForExport) {
+			return nil, errors.New("there are no Megolm room keys to export")
+		}
+		return nil, fmt.Errorf("export Megolm room keys: %w", err)
+	}
+	return export, nil
+}
+
+func (c *Client) ImportRoomKeys(ctx context.Context, passphrase string, data []byte) (int, int, error) {
+	if strings.TrimSpace(passphrase) == "" {
+		return 0, 0, errors.New("key export passphrase is empty")
+	}
+	if len(data) == 0 {
+		return 0, 0, errors.New("key export file is empty")
+	}
+	ctx, finish, err := c.beginOperation(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer finish()
+	imported, total, err := c.engine.Crypto.ImportKeys(ctx, passphrase, data)
+	if err != nil {
+		return imported, total, fmt.Errorf("import Megolm room keys: %w", err)
+	}
+	return imported, total, nil
+}
+
+func (c *Client) Devices(ctx context.Context) ([]Device, error) {
+	ctx, finish, err := c.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	response, err := c.engine.Client.GetDevicesInfo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list Matrix devices: %w", err)
+	}
+	profile := c.Profile()
+	devices := make([]Device, 0, len(response.Devices))
+	for _, device := range response.Devices {
+		deviceInfo := Device{
+			ID:          string(device.DeviceID),
+			DisplayName: device.DisplayName,
+			LastSeenIP:  device.LastSeenIP,
+			Current:     device.DeviceID.String() == profile.DeviceID,
+		}
+		if device.LastSeenTS > 0 {
+			deviceInfo.LastSeenAt = time.UnixMilli(device.LastSeenTS)
+		}
+		devices = append(devices, deviceInfo)
+	}
+	sort.Slice(devices, func(i, j int) bool {
+		if devices[i].Current != devices[j].Current {
+			return devices[i].Current
+		}
+		return devices[i].LastSeenAt.After(devices[j].LastSeenAt)
+	})
+	return devices, nil
+}
+
+func (c *Client) RevokeDevice(ctx context.Context, deviceID string) error {
+	if strings.TrimSpace(deviceID) == "" {
+		return errors.New("Matrix device ID is empty")
+	}
+	if deviceID == c.Profile().DeviceID {
+		return errors.New("cannot revoke the current device from this session")
+	}
+	ctx, finish, err := c.beginOperation(ctx)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	if err = c.engine.Client.DeleteDevice(ctx, id.DeviceID(deviceID), &mautrix.ReqDeleteDevice[any]{}); err != nil {
+		return fmt.Errorf("revoke Matrix device %q: %w", deviceID, err)
 	}
 	return nil
 }
@@ -1198,6 +1301,24 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 		return Message{}, false
 	}
 	evtType := evt.GetType().Type
+	if evt.RedactedBy != "" {
+		return Message{
+			ID:        evt.ID.String(),
+			Sender:    evt.Sender.String(),
+			Timestamp: evt.Timestamp.Time,
+			Edited:    evt.LastEditRowID != nil,
+			Redacted:  true,
+		}, true
+	}
+	if evt.DecryptionError != "" {
+		return Message{
+			ID:              evt.ID.String(),
+			Sender:          evt.Sender.String(),
+			Timestamp:       evt.Timestamp.Time,
+			Encrypted:       true,
+			DecryptionError: evt.DecryptionError,
+		}, true
+	}
 	if evtType != event.EventMessage.Type && evtType != event.EventSticker.Type {
 		return Message{}, false
 	}
@@ -1229,6 +1350,9 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 		MediaURI:       mediaURI,
 		MediaEncrypted: content.File,
 		MediaMIME:      mediaMIME(content.Info),
+		MediaSize:      mediaSize(content.Info),
+		Encrypted:      evt.MegolmSessionID != "",
+		Edited:         evt.LastEditRowID != nil,
 	}, true
 }
 
@@ -1237,6 +1361,13 @@ func mediaMIME(info *event.FileInfo) string {
 		return ""
 	}
 	return info.MimeType
+}
+
+func mediaSize(info *event.FileInfo) int {
+	if info == nil {
+		return 0
+	}
+	return info.Size
 }
 
 func (c *Client) storeLocalMessage(roomID string, message Message) {

@@ -16,22 +16,25 @@ import (
 )
 
 type ChatView struct {
-	title      *widget.Label
-	topic      *widget.Label
-	status     *widget.Label
-	typing     *widget.Label
-	empty      *widget.Label
-	roomAvatar *avatarView
-	loadOlder  *widget.Button
-	replyLabel *widget.Label
-	attach     *widget.Button
-	emoji      *widget.Button
-	completion *widget.Select
-	favorite   *widget.Button
-	mute       *widget.Button
-	messages   *widget.List
-	input      *composerEntry
-	send       *widget.Button
+	title       *widget.Label
+	topic       *widget.Label
+	status      *widget.Label
+	typing      *widget.Label
+	empty       *widget.Label
+	roomAvatar  *avatarView
+	loadOlder   *widget.Button
+	replyLabel  *widget.Label
+	replyCancel *widget.Button
+	editLabel   *widget.Label
+	editCancel  *widget.Button
+	attach      *widget.Button
+	emoji       *widget.Button
+	completion  *widget.Select
+	favorite    *widget.Button
+	mute        *widget.Button
+	messages    *widget.List
+	input       *composerEntry
+	send        *widget.Button
 
 	room            matrix.Room
 	history         []matrix.Message
@@ -47,6 +50,7 @@ type ChatView struct {
 	onReply         func(matrix.Message)
 	onReact         func(matrix.Message, string)
 	onEdit          func(matrix.Message)
+	onEditSend      func(roomID, text, editID string)
 	onRedact        func(matrix.Message)
 	onLoadOlder     func(roomID string, before int64)
 	onSearch        func(roomID string)
@@ -67,11 +71,13 @@ type ChatView struct {
 	statusText      string
 	typingText      string
 	replyTarget     *matrix.Message
+	editTarget      *matrix.Message
 	members         []matrix.Member
 	completions     []completionOption
 	mentionNames    map[string]string
 	showAvatars     bool
 	time24Hour      bool
+	relativeTime    bool
 }
 
 func (v *ChatView) SetShowAvatars(show bool) {
@@ -81,6 +87,11 @@ func (v *ChatView) SetShowAvatars(show bool) {
 
 func (v *ChatView) Set24HourTime(enabled bool) {
 	v.time24Hour = enabled
+	v.messages.Refresh()
+}
+
+func (v *ChatView) SetRelativeTimestamps(enabled bool) {
+	v.relativeTime = enabled
 	v.messages.Refresh()
 }
 
@@ -106,6 +117,10 @@ func (v *ChatView) SetReactionHandler(handler func(matrix.Message, string)) {
 
 func (v *ChatView) SetEditHandler(handler func(matrix.Message)) {
 	v.onEdit = handler
+}
+
+func (v *ChatView) SetEditSendHandler(handler func(roomID, text, editID string)) {
+	v.onEditSend = handler
 }
 
 func (v *ChatView) SetRedactHandler(handler func(matrix.Message)) {
@@ -177,6 +192,7 @@ func NewChatView(onSend func(roomID, text string)) *ChatView {
 	}
 	view.input = newComposerEntry(view.submit)
 	view.input.SetPlaceHolder("Write a message... (Enter to send, Shift+Enter for a new line)")
+	view.input.SetMinRowsVisible(1)
 	view.empty.Wrapping = fyne.TextWrapWord
 	view.loadOlder = widget.NewButton("Load older", view.requestOlder)
 	view.loadOlder.Disable()
@@ -222,9 +238,17 @@ func NewChatView(onSend func(roomID, text string)) *ChatView {
 				previous := view.history[id-1]
 				showSender = !shouldGroupMessages(previous, message)
 			}
-			detailsText := message.Timestamp.Local().Format(timeFormat)
+			detailsText := messageTimestamp(message.Timestamp.Local(), timeFormat, view.relativeTime, time.Now())
 			if showSender {
 				detailsText = senderName + " | " + detailsText
+			}
+			if message.Edited {
+				detailsText += " | edited"
+			}
+			if message.DecryptionError != "" {
+				detailsText += " | ⚠ decryption failed"
+			} else if message.Encrypted {
+				detailsText += " | 🔒 encrypted"
 			}
 			details := detailsText
 			if message.Sending {
@@ -234,7 +258,13 @@ func NewChatView(onSend func(roomID, text string)) *ChatView {
 			}
 			content := box.Objects[1].(*fyne.Container)
 			content.Objects[0].(*widget.Label).SetText(details)
-			content.Objects[1].(*widget.RichText).ParseMarkdown(message.Body)
+			body := message.Body
+			if message.Redacted {
+				body = "This message was deleted"
+			} else if message.DecryptionError != "" {
+				body = "Unable to decrypt this message"
+			}
+			content.Objects[1].(*widget.RichText).ParseMarkdown(body)
 			content.Objects[2].(*widget.Label).SetText(formatReactions(message.Reactions))
 			retry := view.retryButtons[box]
 			if message.SendError != "" && message.TransactionID != "" && view.onRetry != nil {
@@ -282,6 +312,8 @@ func NewChatView(onSend func(roomID, text string)) *ChatView {
 			if message.MediaURI != "" && view.onDownload != nil {
 				if strings.HasPrefix(message.MediaMIME, "image/") {
 					download.SetText("Preview")
+				} else if message.MediaSize > 0 {
+					download.SetText(fmt.Sprintf("Download · %s", humanBytes(int64(message.MediaSize))))
 				} else {
 					download.SetText("Download")
 				}
@@ -322,6 +354,12 @@ func NewChatView(onSend func(roomID, text string)) *ChatView {
 	})
 	view.replyLabel = widget.NewLabel("")
 	view.replyLabel.Hide()
+	view.replyCancel = widget.NewButton("×", view.clearReply)
+	view.replyCancel.Hide()
+	view.editLabel = widget.NewLabel("")
+	view.editLabel.Hide()
+	view.editCancel = widget.NewButton("Cancel edit", view.cancelEdit)
+	view.editCancel.Hide()
 	view.completion = widget.NewSelect(nil, view.applyCompletion)
 	view.completion.Hide()
 	view.input.OnChanged = func(text string) {
@@ -358,7 +396,9 @@ func (v *ChatView) Object() fyne.CanvasObject {
 		v.loadOlder,
 	), v.title)
 	header := container.NewVBox(titleBar, v.topic, v.typing, v.status, widget.NewSeparator())
-	composer := container.NewVBox(v.replyLabel, v.completion, container.NewBorder(nil, nil, container.NewHBox(v.attach, v.emoji), v.send, v.input))
+	replyBanner := container.NewBorder(nil, nil, nil, v.replyCancel, v.replyLabel)
+	editBanner := container.NewBorder(nil, nil, nil, v.editCancel, v.editLabel)
+	composer := container.NewVBox(replyBanner, editBanner, v.completion, container.NewBorder(nil, nil, container.NewHBox(v.attach, v.emoji), v.send, v.input))
 	bottom := composer
 	return container.NewBorder(header, bottom, nil, nil, container.NewStack(v.messages, container.NewCenter(v.empty)))
 }
@@ -368,7 +408,9 @@ func (v *ChatView) SetRoom(room matrix.Room) {
 		v.typingTimer.Stop()
 	}
 	v.replyLabel.Hide()
+	v.replyCancel.Hide()
 	v.replyTarget = nil
+	v.clearEdit()
 	clear(v.mentionNames)
 	v.members = nil
 	v.completion.Hide()
@@ -570,6 +612,27 @@ func shouldGroupMessages(previous, current matrix.Message) bool {
 	return previous.Sender == current.Sender && delta >= 0 && delta <= 5*time.Minute
 }
 
+func messageTimestamp(timestamp time.Time, clockFormat string, relative bool, now time.Time) string {
+	if !relative {
+		return timestamp.Format(clockFormat)
+	}
+	delta := now.Sub(timestamp)
+	switch {
+	case delta < 0:
+		return timestamp.Format(clockFormat)
+	case delta < time.Minute:
+		return "now"
+	case delta < time.Hour:
+		return fmt.Sprintf("%dm ago", int(delta.Minutes()))
+	case delta < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(delta.Hours()))
+	case delta < 7*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(delta.Hours()/24))
+	default:
+		return timestamp.Format("Jan 2")
+	}
+}
+
 func sortMessages(messages []matrix.Message) {
 	sort.SliceStable(messages, func(i, j int) bool {
 		if messages[i].Timestamp.Equal(messages[j].Timestamp) {
@@ -608,7 +671,21 @@ func (v *ChatView) SetTypingStatus(users []string) {
 
 func (v *ChatView) submit() {
 	text := strings.TrimSpace(v.input.Text)
-	if v.room.ID == "" || text == "" || (v.onSend == nil && v.onSendMentions == nil && v.onSendReply == nil) {
+	if v.room.ID == "" || text == "" {
+		return
+	}
+	if v.editTarget != nil {
+		if v.onEditSend == nil {
+			return
+		}
+		editID := v.editTarget.ID
+		roomID := v.room.ID
+		v.clearEdit()
+		v.input.SetText("")
+		v.onEditSend(roomID, text, editID)
+		return
+	}
+	if v.onSend == nil && v.onSendMentions == nil && v.onSendReply == nil {
 		return
 	}
 	mentionIDs := make([]string, 0, len(v.mentionNames))
@@ -636,8 +713,55 @@ func (v *ChatView) selectReply(message matrix.Message) {
 		return
 	}
 	v.replyTarget = &message
-	v.replyLabel.SetText("Replying to " + message.SenderName + ": " + message.Body)
+	sender := message.SenderName
+	if sender == "" {
+		sender = message.Sender
+	}
+	body := strings.ReplaceAll(message.Body, "\n", " ")
+	if len([]rune(body)) > 100 {
+		body = string([]rune(body)[:97]) + "…"
+	}
+	v.replyLabel.SetText("Replying to " + sender + ": " + body)
 	v.replyLabel.Show()
+	v.replyCancel.Show()
+	v.editTarget = nil
+	v.editLabel.Hide()
+	v.editCancel.Hide()
+}
+
+func (v *ChatView) clearReply() {
+	v.replyTarget = nil
+	v.replyLabel.Hide()
+	v.replyCancel.Hide()
+}
+
+func (v *ChatView) BeginEdit(message matrix.Message) {
+	if message.ID == "" || strings.HasPrefix(message.ID, "~") {
+		return
+	}
+	v.clearReply()
+	v.editTarget = &message
+	v.editLabel.SetText("Editing message")
+	v.editLabel.Show()
+	v.editCancel.Show()
+	v.input.SetText(message.Body)
+	v.updateComposerState()
+}
+
+func (v *ChatView) clearEdit() {
+	v.editTarget = nil
+	if v.editLabel != nil {
+		v.editLabel.Hide()
+	}
+	if v.editCancel != nil {
+		v.editCancel.Hide()
+	}
+}
+
+func (v *ChatView) cancelEdit() {
+	v.clearEdit()
+	v.input.SetText("")
+	v.updateComposerState()
 }
 
 func formatReactions(reactions map[string]int) string {
