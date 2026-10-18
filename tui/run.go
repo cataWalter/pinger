@@ -9,13 +9,18 @@ import (
 
 	"mychat/matrix"
 	"mychat/notifications"
+	sharedpreferences "mychat/preferences"
 )
 
-func Run(client *matrix.Client) error {
+func Run(client *matrix.Client, stores ...*sharedpreferences.Store) error {
 	if client == nil {
 		return fmt.Errorf("Matrix client is required")
 	}
-	model := NewModel(client)
+	var store *sharedpreferences.Store
+	if len(stores) > 0 {
+		store = stores[0]
+	}
+	model := newModel(client, store)
 	model.nativeImages = os.Getenv("GOMUKS_TUI_IMAGES") == "1"
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
@@ -25,6 +30,11 @@ func Run(client *matrix.Client) error {
 		if lifecycle, ok := model.notifier.(notifications.Lifecycle); ok {
 			if closeErr := lifecycle.Close(); closeErr != nil {
 				fmt.Fprintf(os.Stderr, "stop native notifications: %v\n", closeErr)
+			}
+		}
+		if store != nil {
+			if closeErr := store.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "close shared preferences: %v\n", closeErr)
 			}
 		}
 		client.Close()
@@ -48,6 +58,23 @@ func Run(client *matrix.Client) error {
 			}
 		}
 	}()
+	if store != nil {
+		changes, unsubscribe := store.Subscribe(8)
+		defer unsubscribe()
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case _, ok := <-changes:
+					if !ok {
+						return
+					}
+					p.Send(PreferencesChangedMsg{})
+				}
+			}
+		}()
+	}
 	if client.IsLoggedIn() {
 		go func() {
 			if err := client.StartWithRetry(ctx); err != nil && ctx.Err() == nil {

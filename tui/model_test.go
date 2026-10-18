@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"mychat/matrix"
 	"mychat/notifications"
+	sharedpreferences "mychat/preferences"
 )
 
 type tuiNotification struct {
@@ -68,6 +70,38 @@ func TestRoomsFiltered(t *testing.T) {
 	fr = rm.filteredRooms()
 	if len(fr) != 3 {
 		t.Fatalf("expected 3, got %d", len(fr))
+	}
+}
+
+func TestSharedRoomPreferencesApplyAndToggle(t *testing.T) {
+	store, err := sharedpreferences.Open(filepath.Join(t.TempDir(), "preferences.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.SetAccount("primary", "room.favorite.!room:example.org", true); err != nil {
+		t.Fatal(err)
+	}
+	model := *newModel(nil, store)
+	model.loginActive = false
+	updated, _ := model.Update(MatrixUpdateMsg{Update: matrix.Update{Rooms: []matrix.Room{{ID: "!room:example.org", Name: "Room"}}}})
+	model = updated.(Model)
+	if model.currentRoom == nil || !model.currentRoom.Favorite {
+		t.Fatalf("current room = %+v, want favorite", model.currentRoom)
+	}
+
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'F'}})
+	if command == nil {
+		t.Fatal("favorite toggle did not return a command")
+	}
+	updated, _ = updated.(Model).Update(command())
+	model = updated.(Model)
+	values, err := store.Snapshot("primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["room.favorite.!room:example.org"] != false {
+		t.Fatalf("favorite preference = %#v, want false", values["room.favorite.!room:example.org"])
 	}
 }
 

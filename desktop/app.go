@@ -12,12 +12,14 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"mychat/matrix"
 	"mychat/notifications"
+	sharedpreferences "mychat/preferences"
 )
 
 const (
 	updateEventName            = "matrix:update"
 	hostErrorEventName         = "matrix:host-error"
 	attachmentSentEventName    = "matrix:attachment-sent"
+	preferencesUpdateEventName = "preferences:update"
 	scheduledReminderEventName = "scheduler:reminder"
 	notificationOpenRoomName   = "notification:open-room"
 )
@@ -27,20 +29,27 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 	if err != nil {
 		return fmt.Errorf("open embedded frontend assets: %w", err)
 	}
-	preferences, err := NewPreferenceStore(preferencesPath)
+	sharedPreferences, err := sharedpreferences.Open(filepath.Join(dataDir, "preferences.db"))
 	if err != nil {
-		return fmt.Errorf("open desktop preferences: %w", err)
+		return fmt.Errorf("open shared preferences: %w", err)
+	}
+	if preferencesPath != "" {
+		if _, importErr := sharedPreferences.ImportLegacy(preferencesPath, primaryAccountID); importErr != nil {
+			log.Printf("could not import legacy preferences: %v", importErr)
+		}
 	}
 	scheduledJobs, err := newScheduledJobStore(filepath.Join(filepath.Dir(preferencesPath), "scheduled-jobs.json"))
 	if err != nil {
+		_ = sharedPreferences.Close()
 		return fmt.Errorf("open scheduled jobs: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	notifier := notifications.New()
-	service := &AppService{client: client, preferences: preferences, notifier: notifier, ctx: ctx, cancel: cancel, scheduled: scheduledJobs}
+	service := &AppService{client: client, sharedPreferences: sharedPreferences, notifier: notifier, ctx: ctx, cancel: cancel, scheduled: scheduledJobs}
 	if err = service.initializeAccounts(dataDir, mediaCacheDir); err != nil {
 		cancel()
+		_ = sharedPreferences.Close()
 		client.Close()
 		return fmt.Errorf("initialize Matrix accounts: %w", err)
 	}
@@ -86,17 +95,17 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 		}
 		return app.Autostart.Disable()
 	}
-	launchAtStartup, _ := preferences.All()["system.launch_at_startup"].(bool)
+	launchAtStartup, _ := service.preferenceValues()["system.launch_at_startup"].(bool)
 	if err = service.setAutostart(launchAtStartup); err != nil {
 		log.Printf("apply launch at startup preference: %v", err)
 	}
 
 	// The menu-bar icon is the only way to reopen a hidden window, so hiding to tray and starting minimized require it.
 	menuBarIconEnabled := func() bool {
-		value, ok := preferences.All()["window.menu_bar_icon"].(bool)
+		value, ok := service.preferenceValues()["window.menu_bar_icon"].(bool)
 		return !ok || value
 	}
-	startMinimized, _ := preferences.All()["window.start_minimized"].(bool)
+	startMinimized, _ := service.preferenceValues()["window.start_minimized"].(bool)
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:               "main",
 		Title:              "Pinger",
@@ -170,11 +179,11 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 		}
 	}
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
-		if quitOnClose, _ := preferences.All()["window.quit_on_close"].(bool); quitOnClose {
+		if quitOnClose, _ := service.preferenceValues()["window.quit_on_close"].(bool); quitOnClose {
 			app.Quit()
 			return
 		}
-		if minimizeToTray, _ := preferences.All()["window.minimize_to_tray"].(bool); minimizeToTray && menuBarIconEnabled() {
+		if minimizeToTray, _ := service.preferenceValues()["window.minimize_to_tray"].(bool); minimizeToTray && menuBarIconEnabled() {
 			event.Cancel()
 			window.Hide()
 		}
@@ -213,6 +222,9 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 			lastUnread = unread
 		}
 		app.Event.Emit(updateEventName, update)
+	})
+	service.startPreferencePump(func(state Snapshot) {
+		app.Event.Emit(preferencesUpdateEventName, state)
 	})
 	service.startScheduledJobWorker()
 

@@ -277,14 +277,13 @@ func (s *AppService) AccountRooms() []Room {
 		return nil
 	}
 	clients := s.accountClientsSnapshot()
-	preferences := s.preferences.All()
 	var rooms []Room
 	for _, stored := range registry.All() {
 		client := clients[stored.ID]
 		if client == nil || !client.IsLoggedIn() {
 			continue
 		}
-		accountRooms := mapRoomsWithPreferences(client.Rooms(), preferences)
+		accountRooms := mapRoomsWithPreferences(client.Rooms(), s.preferenceValuesForAccount(stored.ID))
 		tagRooms(accountRooms, stored.ID)
 		rooms = append(rooms, accountRooms...)
 	}
@@ -401,7 +400,7 @@ func (s *AppService) startAccountEventPump(accountID string, client *matrix.Clie
 					return
 				}
 				if s.currentAccountID() == accountID {
-					mapped := mapUpdate(update, s.preferences.All())
+					mapped := mapUpdate(update, s.preferenceValuesForAccount(accountID))
 					tagRooms(mapped.Rooms, accountID)
 					emit(mapped)
 				}

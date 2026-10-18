@@ -15,6 +15,8 @@ type keyMap struct {
 	FilterUnread     key.Binding
 	FilterFavorite   key.Binding
 	FilterNeeds      key.Binding
+	ToggleFavorite   key.Binding
+	ToggleMuted      key.Binding
 	Reply            key.Binding
 	Edit             key.Binding
 	MarkRead         key.Binding
@@ -40,7 +42,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{k.Quit, k.Help},
 		{k.FocusRooms, k.FocusTimeline, k.FocusComposer},
 		{k.FilterAll, k.FilterUnread, k.FilterFavorite, k.FilterNeeds},
-		{k.NextRoom, k.PrevRoom, k.Reply, k.Edit, k.MarkRead, k.OpenMedia, k.PlayAudio, k.RecordVoice, k.SelectMicrophone, k.ViewImage, k.Retry, k.Delete},
+		{k.NextRoom, k.PrevRoom, k.ToggleFavorite, k.ToggleMuted, k.Reply, k.Edit, k.MarkRead, k.OpenMedia, k.PlayAudio, k.RecordVoice, k.SelectMicrophone, k.ViewImage, k.Retry, k.Delete},
 	}
 }
 
@@ -80,6 +82,14 @@ var keys = keyMap{
 	FilterNeeds: key.NewBinding(
 		key.WithKeys("n"),
 		key.WithHelp("n", "rooms needing reply"),
+	),
+	ToggleFavorite: key.NewBinding(
+		key.WithKeys("F"),
+		key.WithHelp("F", "toggle favorite"),
+	),
+	ToggleMuted: key.NewBinding(
+		key.WithKeys("M"),
+		key.WithHelp("M", "toggle mute"),
 	),
 	Reply: key.NewBinding(
 		key.WithKeys("r"),

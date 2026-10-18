@@ -1140,6 +1140,16 @@ function App() {
         }
       }
     })
+    const unsubscribePreferences = Events.On('preferences:update', (event: any) => {
+      if (!active) return
+      const state = event.data as Snapshot | undefined
+      if (!state) return
+      setSnapshot(state)
+      setSelectedRoomID((current) => {
+        if (current && (state.rooms ?? []).some((room) => room.id === current)) return current
+        return (state.rooms ?? [])[0]?.id || ''
+      })
+    })
     const unsubscribeHostError = Events.On('matrix:host-error', (event: any) => {
       const message = (event.data as { error?: string } | undefined)?.error
       if (active && message) setError(message)
@@ -1193,6 +1203,7 @@ function App() {
     return () => {
       active = false
       unsubscribe()
+      unsubscribePreferences()
       unsubscribeHostError()
       unsubscribeNotificationOpenRoom()
       unsubscribeAttachmentSent()

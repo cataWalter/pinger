@@ -123,7 +123,7 @@ func aiHealthCheck(ctx context.Context, client *http.Client, endpoint string) er
 }
 
 func (s *AppService) aiEndpointSettings() (string, string, error) {
-	preferences := s.preferences.All()
+	preferences := s.preferenceValues()
 	endpoint, _ := preferences["ai.endpoint"].(string)
 	model, _ := preferences["ai.model"].(string)
 	if endpoint == "" {

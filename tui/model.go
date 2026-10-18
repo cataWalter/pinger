@@ -11,6 +11,7 @@ import (
 
 	"mychat/matrix"
 	"mychat/notifications"
+	sharedpreferences "mychat/preferences"
 )
 
 type Focus int
@@ -53,24 +54,96 @@ type Model struct {
 	notice                   string
 	confirmDelete            string
 	notifier                 notifications.Notifier
+	preferenceStore          *sharedpreferences.Store
+	preferenceValues         map[string]any
+	preferenceAccountID      string
 }
 
 func NewModel(client *matrix.Client) *Model {
-	return &Model{
-		client:            client,
-		rooms:             newRoomsModel(),
-		timeline:          newTimelineModel(),
-		composer:          newComposerModel(),
-		login:             newLoginModel(),
-		help:              newHelpModel(),
-		focus:             FocusRooms,
-		loginActive:       client == nil || !client.IsLoggedIn(),
-		showHelp:          false,
-		connection:        matrix.StateOffline,
-		typing:            make(map[string][]string),
-		needsVerif:        false,
-		notifier:          notifications.New(),
-		autoPlayNextAudio: true,
+	return newModel(client, nil)
+}
+
+func newModel(client *matrix.Client, preferenceStore *sharedpreferences.Store) *Model {
+	model := &Model{
+		client:              client,
+		rooms:               newRoomsModel(),
+		timeline:            newTimelineModel(),
+		composer:            newComposerModel(),
+		login:               newLoginModel(),
+		help:                newHelpModel(),
+		focus:               FocusRooms,
+		loginActive:         client == nil || !client.IsLoggedIn(),
+		connection:          matrix.StateOffline,
+		typing:              make(map[string][]string),
+		needsVerif:          false,
+		notifier:            notifications.New(),
+		autoPlayNextAudio:   true,
+		preferenceStore:     preferenceStore,
+		preferenceValues:    make(map[string]any),
+		preferenceAccountID: "primary",
+	}
+	model.applyPreferences()
+	return model
+}
+
+func (m *Model) applyPreferences() {
+	if m.preferenceStore == nil {
+		return
+	}
+	values, err := m.preferenceStore.Snapshot(m.preferenceAccountID)
+	if err != nil {
+		m.errorMsg = fmt.Sprintf("read preferences: %v", err)
+		return
+	}
+	m.preferenceValues = values
+	if enabled, ok := values["voice.autoplay_next"].(bool); ok {
+		m.autoPlayNextAudio = enabled
+	}
+	if device, ok := values["audio.input_device"].(string); ok {
+		m.voiceInputDeviceID = device
+	}
+	for index := range m.roomsList {
+		m.roomsList[index] = m.applyRoomPreferences(m.roomsList[index])
+	}
+	if m.roomsList != nil {
+		m.updateRooms(m.roomsList)
+	}
+}
+
+func (m Model) applyRoomPreferences(room matrix.Room) matrix.Room {
+	if favorite, ok := m.preferenceValues["room.favorite."+room.ID].(bool); ok {
+		room.Favorite = favorite
+	}
+	if muted, ok := m.preferenceValues["room.muted."+room.ID].(bool); ok {
+		room.Muted = muted
+	}
+	return room
+}
+
+func (m Model) preferenceBool(key string, fallback bool) bool {
+	value, ok := m.preferenceValues[key].(bool)
+	if !ok {
+		return fallback
+	}
+	return value
+}
+
+type PreferencesChangedMsg struct{}
+
+type roomPreferenceResultMsg struct {
+	err error
+}
+
+func (m Model) setRoomPreference(key string, value bool) tea.Cmd {
+	room := m.currentRoom
+	store := m.preferenceStore
+	accountID := m.preferenceAccountID
+	if room == nil || store == nil {
+		return nil
+	}
+	roomID := room.ID
+	return func() tea.Msg {
+		return roomPreferenceResultMsg{err: store.SetAccount(accountID, key+roomID, value)}
 	}
 }
 
@@ -218,6 +291,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					err := m.client.MarkRead(context.Background(), m.currentRoom.ID, m.currentRoom.LastEventID)
 					return ActionResultMsg{Err: err}
 				}
+			}
+		case "F", "M":
+			if m.currentRoom != nil && m.preferenceStore != nil && m.focus != FocusComposer {
+				key := "room.favorite."
+				if msg.String() == "M" {
+					key = "room.muted."
+				}
+				current := m.currentRoom.Favorite
+				if msg.String() == "M" {
+					current = m.currentRoom.Muted
+				}
+				return m, m.setRoomPreference(key, !current)
 			}
 		case "r":
 			if m.focus == FocusTimeline {
@@ -473,8 +558,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case MatrixUpdateMsg:
 		update := msg.Update
 		if update.Rooms != nil {
-			m.roomsList = update.Rooms
-			m.updateRooms(update.Rooms)
+			m.roomsList = make([]matrix.Room, len(update.Rooms))
+			for index, room := range update.Rooms {
+				m.roomsList[index] = m.applyRoomPreferences(room)
+			}
+			m.updateRooms(m.roomsList)
 		}
 		if update.ConnectionState != "" {
 			m.connection = update.ConnectionState
@@ -496,6 +584,16 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		notificationCmd = m.notificationCmd(update.Notifications)
+
+	case PreferencesChangedMsg:
+		m.applyPreferences()
+
+	case roomPreferenceResultMsg:
+		if msg.err != nil {
+			m.errorMsg = msg.err.Error()
+			break
+		}
+		m.applyPreferences()
 	}
 
 	var cmd tea.Cmd
@@ -510,7 +608,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) notificationCmd(incoming []matrix.Notification) tea.Cmd {
-	if m.notifier == nil || len(incoming) == 0 {
+	if m.notifier == nil || len(incoming) == 0 || !m.preferenceBool("notifications.enabled", true) {
 		return nil
 	}
 	type pendingNotification struct {

@@ -8,6 +8,7 @@ import (
 
 	"mychat/matrix"
 	"mychat/migration"
+	sharedpreferences "mychat/preferences"
 )
 
 // Main runs the terminal client; diagnostics go to tui.log so they do not draw over the screen.
@@ -41,8 +42,18 @@ func Main() error {
 	if err != nil {
 		return err
 	}
+	preferenceStore, err := sharedpreferences.Open(filepath.Join(paths.DataDir, "preferences.db"))
+	if err != nil {
+		client.Close()
+		return err
+	}
+	if paths.PreferencesFile != "" {
+		if _, importErr := preferenceStore.ImportLegacy(paths.PreferencesFile, "primary"); importErr != nil {
+			log.Printf("could not import legacy preferences: %v", importErr)
+		}
+	}
 	if cacheDir, cacheErr := os.UserCacheDir(); cacheErr == nil && cacheDir != "" {
 		client.SetMediaCacheDir(filepath.Join(cacheDir, "gomuks-desktop", "media"))
 	}
-	return Run(client)
+	return Run(client, preferenceStore)
 }

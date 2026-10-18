@@ -435,7 +435,7 @@ jobs:
           wget -c "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" \
             -O dist/appimagetool
           chmod +x dist/appimagetool
-          ARCH=x86_64 dist/appimagetool "$appdir" \
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 dist/appimagetool "$appdir" \
             "dist/Pinger-${VERSION}-linux-amd64.AppImage"
           ls -lh dist/*.AppImage
 

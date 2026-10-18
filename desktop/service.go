@@ -16,32 +16,35 @@ import (
 
 	"mychat/matrix"
 	"mychat/notifications"
+	sharedpreferences "mychat/preferences"
 )
 
 type AppService struct {
-	client               *matrix.Client
-	clientMu             sync.RWMutex
-	accountMu            sync.RWMutex
-	accountRegistry      *accountRegistry
-	accountClients       map[string]*matrix.Client
-	accountEventPumps    map[string]bool
-	accountSyncStarted   map[string]bool
-	accountDataDir       string
-	accountMediaCacheDir string
-	activeAccountID      string
-	preferences          *PreferenceStore
-	notifier             notifications.Notifier
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	quit                 func()
-	setAutostart         func(bool) error
-	setMenuBarIcon       func(bool)
-	chooseSavePath       func(directory, filename string) (string, error)
-	chooseDownloadFolder func() (string, error)
-	activeRoomMu         sync.RWMutex
-	activeRoomID         string
-	workers              sync.WaitGroup
-	scheduled            *scheduledJobStore
+	client                 *matrix.Client
+	clientMu               sync.RWMutex
+	accountMu              sync.RWMutex
+	accountRegistry        *accountRegistry
+	accountClients         map[string]*matrix.Client
+	accountEventPumps      map[string]bool
+	accountSyncStarted     map[string]bool
+	accountDataDir         string
+	accountMediaCacheDir   string
+	activeAccountID        string
+	preferences            *PreferenceStore
+	sharedPreferences      *sharedpreferences.Store
+	preferencesUnsubscribe func()
+	notifier               notifications.Notifier
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	quit                   func()
+	setAutostart           func(bool) error
+	setMenuBarIcon         func(bool)
+	chooseSavePath         func(directory, filename string) (string, error)
+	chooseDownloadFolder   func() (string, error)
+	activeRoomMu           sync.RWMutex
+	activeRoomID           string
+	workers                sync.WaitGroup
+	scheduled              *scheduledJobStore
 
 	emitUpdate   func(Update)
 	emitReminder func(ScheduledJob)
@@ -203,7 +206,7 @@ func (s *AppService) Snapshot() (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	profile := client.Profile()
-	preferences := s.preferences.All()
+	preferences := s.preferenceValues()
 	rooms := mapRoomsWithPreferences(client.Rooms(), preferences)
 	tagRooms(rooms, s.currentAccountID())
 	return Snapshot{
@@ -224,6 +227,66 @@ func (s *AppService) Snapshot() (Snapshot, error) {
 		Rooms:           rooms,
 		Preferences:     preferences,
 	}, nil
+}
+
+func (s *AppService) preferenceValues() map[string]any {
+	return s.preferenceValuesForAccount(s.currentAccountID())
+}
+
+func (s *AppService) preferenceValuesForAccount(accountID string) map[string]any {
+	if s.sharedPreferences != nil {
+		values, err := s.sharedPreferences.Snapshot(accountID)
+		if err != nil {
+			log.Printf("read shared preferences: %v", err)
+			return map[string]any{}
+		}
+		return values
+	}
+	if s.preferences != nil {
+		return s.preferences.All()
+	}
+	return map[string]any{}
+}
+
+func (s *AppService) setPreference(key string, value any) error {
+	if s.sharedPreferences != nil {
+		if sharedpreferences.IsAccountKey(key) {
+			return s.sharedPreferences.SetAccount(s.currentAccountID(), key, value)
+		}
+		return s.sharedPreferences.SetGlobal(key, value)
+	}
+	if s.preferences == nil {
+		return errors.New("preference store is unavailable")
+	}
+	return s.preferences.Set(key, value)
+}
+
+func (s *AppService) startPreferencePump(emit func(Snapshot)) {
+	if s.sharedPreferences == nil || emit == nil {
+		return
+	}
+	changes, unsubscribe := s.sharedPreferences.Subscribe(8)
+	s.preferencesUnsubscribe = unsubscribe
+	s.workers.Add(1)
+	go func() {
+		defer s.workers.Done()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case _, ok := <-changes:
+				if !ok || s.ctx.Err() != nil {
+					return
+				}
+				state, err := s.Snapshot()
+				if err != nil {
+					log.Printf("build preference update: %v", err)
+					continue
+				}
+				emit(state)
+			}
+		}
+	}()
 }
 
 func (s *AppService) Login(homeserver, username, password string) error {
@@ -255,7 +318,7 @@ func (s *AppService) Verify(recoveryKey string) error {
 func (s *AppService) History(roomID string, before int64) (HistoryPage, error) {
 	initialLimit := 100
 	if before == 0 {
-		if configured, ok := s.preferences.All()["history.initial_messages"].(string); ok {
+		if configured, ok := s.preferenceValues()["history.initial_messages"].(string); ok {
 			if value, parseErr := strconv.Atoi(configured); parseErr == nil {
 				initialLimit = value
 			}
@@ -504,7 +567,7 @@ func (s *AppService) SaveMedia(mxc, filename string) (string, error) {
 		return "", errors.New("no media data to save")
 	}
 	name := safeDownloadName(filename)
-	preferences := s.preferences.All()
+	preferences := s.preferenceValues()
 	directory, _ := preferences["downloads.folder"].(string)
 	if directory == "" {
 		home, homeErr := os.UserHomeDir()
@@ -663,11 +726,11 @@ func (s *AppService) SetRoomUnanswered(roomID string, unanswered bool) error {
 
 func (s *AppService) SetBooleanPreference(key string, value bool) error {
 	if key == "system.launch_at_startup" && s.setAutostart != nil {
-		previous, _ := s.preferences.All()[key].(bool)
+		previous, _ := s.preferenceValues()[key].(bool)
 		if err := s.setAutostart(value); err != nil {
 			return fmt.Errorf("update launch at startup: %w", err)
 		}
-		if err := s.preferences.Set(key, value); err != nil {
+		if err := s.setPreference(key, value); err != nil {
 			if rollbackErr := s.setAutostart(previous); rollbackErr != nil {
 				return errors.Join(err, fmt.Errorf("restore launch at startup: %w", rollbackErr))
 			}
@@ -675,7 +738,7 @@ func (s *AppService) SetBooleanPreference(key string, value bool) error {
 		}
 		return nil
 	}
-	if err := s.preferences.Set(key, value); err != nil {
+	if err := s.setPreference(key, value); err != nil {
 		return err
 	}
 	if key == "window.menu_bar_icon" && s.setMenuBarIcon != nil {
@@ -742,7 +805,7 @@ func (s *AppService) markAllRead() error {
 }
 
 func (s *AppService) SetStringPreference(key, value string) error {
-	return s.preferences.Set(key, value)
+	return s.setPreference(key, value)
 }
 
 func (s *AppService) NativeNotificationsSupported() bool {
@@ -918,6 +981,15 @@ func (s *AppService) processDueScheduledJobs() {
 func (s *AppService) close() {
 	s.cancel()
 	s.workers.Wait()
+	if s.preferencesUnsubscribe != nil {
+		s.preferencesUnsubscribe()
+		s.preferencesUnsubscribe = nil
+	}
+	if s.sharedPreferences != nil {
+		if err := s.sharedPreferences.Close(); err != nil {
+			log.Printf("close shared preferences: %v", err)
+		}
+	}
 }
 
 func mapRooms(rooms []matrix.Room) []Room {
