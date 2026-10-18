@@ -1158,6 +1158,7 @@ func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, da
 	if message, ok := messageFromEvent(evt); ok {
 		message.Sending = true
 		message.Own = c.isOwnMessage(message)
+		message = c.enrichOwnMessage(ctx, roomID, message)
 		c.storeLocalMessage(roomID, message)
 	}
 	c.publishTimeline([]string{roomID}, "")
@@ -1185,6 +1186,7 @@ func (c *Client) sendMessage(ctx context.Context, roomID, text string, relation 
 	if message, ok := messageFromEvent(evt); ok {
 		message.Sending = true
 		message.Own = c.isOwnMessage(message)
+		message = c.enrichOwnMessage(ctx, roomID, message)
 		c.storeLocalMessage(roomID, message)
 	}
 	c.publishTimeline([]string{roomID}, "")
@@ -1281,6 +1283,29 @@ func (c *Client) RedactMessage(ctx context.Context, roomID, eventID string) erro
 
 func (c *Client) isOwnMessage(message Message) bool {
 	return c.engine.Account != nil && message.Sender == c.engine.Account.UserID.String()
+}
+
+func (c *Client) enrichOwnMessage(ctx context.Context, roomID string, message Message) Message {
+	profile := c.Profile()
+	if message.Sender == "" {
+		message.Sender = profile.UserID
+	}
+	if !message.Own && (profile.UserID == "" || message.Sender != profile.UserID) {
+		return message
+	}
+	message.Own = true
+	if message.Avatar == "" && message.Sender != "" {
+		profiled := []Message{message}
+		c.populateMessageProfiles(ctx, roomID, profiled)
+		message = profiled[0]
+	}
+	if message.SenderName == "" {
+		message.SenderName = profile.DisplayName
+	}
+	if message.Avatar == "" {
+		message.Avatar = profile.AvatarURI
+	}
+	return message
 }
 
 func (c *Client) RetryMessage(ctx context.Context, transactionID string) error {
@@ -1721,6 +1746,7 @@ func (c *Client) handleBackendEvent(raw any) {
 				message.Sending = false
 				message.SendError = ""
 				message.Own = c.isOwnMessage(message)
+				message = c.enrichOwnMessage(context.Background(), evt.Event.RoomID.String(), message)
 				if evt.Error != nil {
 					message.SendError = evt.Error.Error()
 					c.storeFailedMessage(evt.Event.RoomID.String(), message)
@@ -1877,6 +1903,7 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 				}
 				if preview, ok := messageFromEvent(evt); ok && preview.Body != "" {
 					room.Preview = preview.Body
+					room.LastEventSender = preview.Sender
 					previewResolved = true
 				}
 				break
@@ -1890,7 +1917,6 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 			if !evt.Timestamp.Time.Before(room.LastEventAt) {
 				room.LastEventAt = evt.Timestamp.Time
 				room.LastEventID = evt.ID.String()
-				room.LastEventSender = evt.Sender.String()
 			}
 			inTimeline := isTimelineEvent(syncRoom.Timeline, evt.RowID)
 			if message, ok := messageFromEvent(evt); ok && !previewResolved && evt.CanUseForPreview() {
@@ -1901,6 +1927,7 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 				if room.Preview == "" || (inTimeline && !message.Timestamp.Before(room.LastSeen)) {
 					room.LastSeen = message.Timestamp
 					room.Preview = message.Body
+					room.LastEventSender = message.Sender
 				}
 			}
 			if notify && inTimeline {
@@ -2094,6 +2121,9 @@ func bridgeLabel(room *database.Room) string {
 
 func messageFromEvent(evt *database.Event) (Message, bool) {
 	if evt == nil {
+		return Message{}, false
+	}
+	if evt.RelationType == event.RelReplace {
 		return Message{}, false
 	}
 	evtType := evt.GetType().Type

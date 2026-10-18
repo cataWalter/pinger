@@ -162,8 +162,7 @@ textarea:focus-visible {
   animation: panel-enter 420ms var(--ease-out) both;
 }
 
-.auth-brand,
-.sidebar-brand {
+.auth-brand {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -370,49 +369,6 @@ textarea:focus-visible {
   background: var(--forest-deep);
 }
 
-.sidebar-brand {
-  min-height: 37px;
-  padding: 0 9px;
-  color: #f4faf6;
-  font-size: 16px;
-}
-
-.sidebar-brand .brand-glyph {
-  width: 30px;
-  height: 30px;
-  color: var(--forest-deep);
-  background: var(--mint);
-}
-
-.brand-edition {
-  align-self: flex-end;
-  margin: 0 0 4px -5px;
-  color: rgba(221, 238, 228, 0.55);
-  font-size: 8px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-}
-
-.room-list-heading {
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-start;
-  margin: 39px 9px 17px;
-}
-
-.room-list-heading .eyebrow {
-  color: #8ab39c;
-}
-
-.room-list-heading h1 {
-  margin: 5px 0 0;
-  color: #f3f7f4;
-  font-family: var(--font-display);
-  font-size: 27px;
-  font-weight: 600;
-  line-height: 1.1;
-}
-
 .room-search {
   display: flex;
   align-items: center;
@@ -586,7 +542,6 @@ textarea:focus-visible {
 
 .room-avatar,
 .conversation-room-avatar,
-.message-avatar,
 .profile-avatar {
   display: grid;
   place-items: center;
@@ -1463,8 +1418,7 @@ textarea:focus-visible {
 
 .message-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 11px;
+  grid-template-columns: minmax(0, 1fr);
   max-width: 820px;
   animation: message-enter 230ms ease-out both;
   animation-delay: calc(var(--message-index, 0) * 18ms);
@@ -1477,23 +1431,6 @@ textarea:focus-visible {
 .message-row.is-own {
   align-self: flex-end;
   width: min(100%, 820px);
-  grid-template-columns: minmax(0, 1fr) 34px;
-}
-
-.message-avatar {
-  width: 32px;
-  height: 32px;
-  color: #5a5848;
-  background: #e4d9bd;
-  border-radius: 50%;
-  font-size: 10px;
-}
-
-.message-row.is-own .message-avatar {
-  grid-column: 2;
-  grid-row: 1;
-  color: #f6fbf7;
-  background: #527e68;
 }
 
 .message-body-wrap {
@@ -3392,14 +3329,6 @@ textarea:focus-visible {
   border-radius: 3px;
 }
 
-.app-shell[data-show-avatars='false'] .message-avatar {
-  display: none;
-}
-
-.app-shell[data-show-avatars='false'] .message-row {
-  grid-template-columns: minmax(0, 1fr);
-}
-
 @keyframes screen-enter {
   from {
     opacity: 0;
@@ -3496,15 +3425,6 @@ textarea:focus-visible {
     padding-left: 9px;
   }
 
-  .sidebar-brand {
-    gap: 7px;
-    padding: 0 5px;
-  }
-
-  .brand-edition {
-    display: none;
-  }
-
   .room-filters button {
     font-size: 8px;
   }
@@ -3557,17 +3477,6 @@ textarea:focus-visible {
   .timeline {
     gap: 16px;
     padding: 20px 12px;
-  }
-
-  .message-row {
-    grid-template-columns: 27px minmax(0, 1fr);
-    gap: 7px;
-  }
-
-  .message-avatar {
-    width: 26px;
-    height: 26px;
-    font-size: 9px;
   }
 
   .message-body {
@@ -3673,11 +3582,6 @@ textarea:focus-visible {
   box-shadow: var(--shadow-xs), inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
-.sidebar-brand .brand-glyph {
-  background: var(--mint);
-  box-shadow: none;
-}
-
 .auth-panel {
   animation: panel-enter 420ms var(--ease-out) both;
 }
@@ -3761,10 +3665,6 @@ textarea:focus-visible {
   padding: 20px 12px 12px;
   border-right: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.18);
-}
-
-.room-list-heading h1 {
-  letter-spacing: -0.02em;
 }
 
 .connection-badge {
@@ -3924,11 +3824,6 @@ day-divider::after,
 
 .message-row {
   animation: message-enter 220ms var(--ease-out) both;
-}
-
-.message-avatar {
-  border-radius: 11px;
-  box-shadow: var(--shadow-xs);
 }
 
 .message-meta strong {
@@ -4424,12 +4319,6 @@ day-divider::after,
   margin-top: -12px;
 }
 
-.message-row.is-grouped .message-avatar {
-  visibility: hidden;
-  height: 0;
-  min-height: 0;
-}
-
 .message-row.is-grouped .message-body-wrap {
   padding-top: 0;
 }
@@ -4440,10 +4329,6 @@ day-divider::after,
 
 .message-row.is-own.is-grouped .message-body {
   border-top-right-radius: 10px;
-}
-
-.app-shell[data-show-avatars='false'] .message-row.is-grouped {
-  margin-top: -14px;
 }
 
 .room-button.is-muted {
@@ -4500,10 +4385,6 @@ day-divider::after,
   transform: translateY(-0.5px);
 }
 
-.message-row.is-own .message-avatar {
-  background: linear-gradient(135deg, #7fb59d, #527e68);
-}
-
 /* fix earlier typo selector (missing dot) */
 
 /* Signal desk visual system */
@@ -4556,19 +4437,6 @@ day-divider::after,
   box-shadow: none;
 }
 
-.sidebar-brand .brand-glyph {
-  color: var(--forest-deep);
-  background: var(--signal);
-}
-
-.room-list-heading .eyebrow {
-  color: #b7c0cd;
-}
-
-.room-list-heading h1 {
-  color: #f4f6f9;
-}
-
 .connection-badge {
   border-color: #394555;
 }
@@ -4608,7 +4476,7 @@ day-divider::after,
 
 .room-scope-filters {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 2px;
   padding: 2px;
   background: #1c3a30;
@@ -4618,7 +4486,7 @@ day-divider::after,
 
 .room-refinement-filters {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 3px;
 }
 
@@ -4803,15 +4671,6 @@ day-divider::after,
   gap: 15px;
   padding-top: 22px;
   padding-bottom: 18px;
-}
-
-.message-row {
-  gap: 10px;
-}
-
-.message-avatar {
-  border-radius: 5px;
-  box-shadow: none;
 }
 
 .message-meta {
@@ -5702,21 +5561,11 @@ day-divider::after,
   border-right-color: var(--sidebar-border);
 }
 
-.app-shell[data-theme='bosco'] .sidebar-brand .brand-glyph,
-.app-shell[data-theme='rosa'] .sidebar-brand .brand-glyph {
-  color: var(--sidebar-bg);
-  background: var(--signal);
-}
-
-.app-shell[data-theme='bosco'] .room-list-heading .eyebrow,
-.app-shell[data-theme='rosa'] .room-list-heading .eyebrow,
 .app-shell[data-theme='bosco'] .room-section-label,
 .app-shell[data-theme='rosa'] .room-section-label {
   color: var(--sidebar-muted);
 }
 
-.app-shell[data-theme='bosco'] .room-list-heading h1,
-.app-shell[data-theme='rosa'] .room-list-heading h1,
 .app-shell[data-theme='bosco'] .profile-copy strong,
 .app-shell[data-theme='rosa'] .profile-copy strong {
   color: var(--sidebar-ink);
@@ -6578,4 +6427,88 @@ day-divider::after,
 
 .mention-menu.emoji-menu .mention-option span {
   margin-right: 4px;
+}
+
+@media (max-width: 420px) {
+  .composer-footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+  }
+
+  .composer-tools {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+    width: 100%;
+  }
+
+  .composer-tools .icon-button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .composer-tools > span {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  .composer-footer > .send-button {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+
+/* Keep grouped outgoing messages visually joined while reserving the tail for the final bubble. */
+.message-row.is-own.is-first:not(.is-last) .message-body {
+  border-bottom-right-radius: 4px;
+}
+
+.message-row.is-own.is-grouped:not(.is-last) .message-body {
+  border-radius: 4px 4px 4px 14px;
+}
+
+.message-row.is-own.is-tail .message-body {
+  position: relative;
+  border-bottom-right-radius: 4px;
+}
+
+/* Square corner lets the wedge join the bubble edge instead of floating off the curve. */
+.message-row.is-own.is-tail .message-body::after {
+  position: absolute;
+  right: -7px;
+  bottom: -1px;
+  width: 10px;
+  height: 10px;
+  content: '';
+  background: inherit;
+  clip-path: polygon(0 0, 100% 100%, 0 100%);
+}
+
+/* Keep consecutive bubbles close without letting their corners collapse into each other. */
+.message-row.is-grouped {
+  margin-top: -14px;
+}
+
+.message-row.is-grouped .message-body {
+  border-top-left-radius: 5px;
+  border-top-right-radius: 5px;
+}
+
+.message-row.is-grouped:not(.is-last) .message-body {
+  border-bottom-right-radius: 5px;
+  border-bottom-left-radius: 5px;
+}
+
+.message-row.is-own.is-first:not(.is-last) .message-body {
+  border-radius: 14px 4px 4px 14px;
+}
+
+.message-row.is-own.is-grouped:not(.is-last) .message-body {
+  border-radius: 14px 4px 4px 14px;
+}
+
+.message-row.is-own.is-grouped.is-last .message-body {
+  border-radius: 14px 4px 4px 14px;
 }

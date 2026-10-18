@@ -231,6 +231,18 @@ func TestMessageFromEventIncludesEditRedactionAndDecryptionStatus(t *testing.T) 
 	}
 }
 
+func TestMessageFromEventSkipsEditEvent(t *testing.T) {
+	message, ok := messageFromEvent(&database.Event{
+		ID:           "$edit-event",
+		Type:         event.EventMessage.Type,
+		RelationType: event.RelReplace,
+		Content:      json.RawMessage(`{"body":"corrected text"}`),
+	})
+	if ok {
+		t.Fatalf("edit event should not become a separate message: %+v", message)
+	}
+}
+
 func TestMessageFromEventIgnoresNonMessages(t *testing.T) {
 	tests := []struct {
 		name string
@@ -424,6 +436,44 @@ func TestApplySyncPrefersAuthoritativePreviewEvent(t *testing.T) {
 	}
 }
 
+func TestApplySyncKeepsPreviewSenderOnMessageEvent(t *testing.T) {
+	client := &Client{
+		events: make(chan Update, 1),
+		done:   make(chan struct{}),
+		rooms:  map[string]Room{},
+	}
+	roomID := id.RoomID("!chat:example.org")
+	latest := time.Date(2026, time.October, 17, 13, 0, 0, 0, time.UTC)
+	client.rooms[roomID.String()] = Room{ID: roomID.String(), Name: "Andrea"}
+	client.applySync(&jsoncmd.SyncComplete{
+		Rooms: map[id.RoomID]*jsoncmd.SyncRoom{
+			roomID: {
+				Meta: &database.Room{ID: roomID, PreviewEventRowID: 5},
+				Events: []*database.Event{
+					{
+						RowID:     5,
+						Type:      event.EventMessage.Type,
+						Sender:    id.UserID("@me:example.org"),
+						Content:   json.RawMessage(`{"body":"my latest message"}`),
+						Timestamp: jsontime.UM(latest),
+					},
+					{
+						RowID:     6,
+						Type:      event.StateMember.Type,
+						Sender:    id.UserID("@alice:example.org"),
+						Timestamp: jsontime.UM(latest.Add(time.Minute)),
+					},
+				},
+			},
+		},
+	}, false)
+
+	rooms := client.Rooms()
+	if len(rooms) != 1 || rooms[0].Preview != "my latest message" || rooms[0].LastEventSender != "@me:example.org" {
+		t.Fatalf("preview sender = %+v, want own message sender", rooms)
+	}
+}
+
 // A freshly sent own message can arrive in `events` before it has a timeline
 // row (the timeline insert may land a sync later). It must still seed an
 // otherwise-empty preview, otherwise the sidebar falls back to the room topic
@@ -593,6 +643,45 @@ func TestApplySyncUsesDirectRoomMemberAvatar(t *testing.T) {
 	rooms := client.Rooms()
 	if len(rooms) != 1 || rooms[0].Avatar != string(avatar) {
 		t.Fatalf("direct room avatar = %+v, want %q", rooms, avatar)
+	}
+}
+
+func TestEnrichOwnMessageUsesRoomMemberAvatar(t *testing.T) {
+	client, err := New(filepath.Join(t.TempDir(), "profile", "matrix.db"))
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	roomID := id.RoomID("!chat:example.org")
+	userID := id.UserID("@me:example.org")
+	avatar := id.ContentURIString("mxc://example.org/me-avatar")
+	stateKey := userID.String()
+	if err = client.engine.DB.Room.CreateRow(ctx, roomID); err != nil {
+		t.Fatalf("create room row: %v", err)
+	}
+	memberEvent := &database.Event{
+		RoomID:    roomID,
+		ID:        id.EventID("$me-member"),
+		Sender:    userID,
+		Type:      event.StateMember.Type,
+		StateKey:  &stateKey,
+		Timestamp: jsontime.UM(time.Now()),
+		Content:   json.RawMessage(`{"displayname":"Me","avatar_url":"` + string(avatar) + `"}`),
+		Unsigned:  json.RawMessage(`{}`),
+	}
+	rowID, err := client.engine.DB.Event.Insert(ctx, memberEvent)
+	if err != nil {
+		t.Fatalf("insert member state: %v", err)
+	}
+	if err = client.engine.DB.CurrentState.Set(ctx, roomID, event.StateMember, userID.String(), rowID, ""); err != nil {
+		t.Fatalf("set current member state: %v", err)
+	}
+
+	message := client.enrichOwnMessage(ctx, roomID.String(), Message{Sender: userID.String(), Own: true})
+	if message.Avatar != string(avatar) || message.SenderName != "Me" {
+		t.Fatalf("own message profile = %+v, want member avatar and display name", message)
 	}
 }
 

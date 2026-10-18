@@ -22,6 +22,12 @@ tasks:
     cmds:
       - task: "darwin:package"
 
+  package:go:
+    summary: Builds a named macOS app bundle from the Go binary
+    platforms: [darwin]
+    cmds:
+      - sh scripts/build-macos-app.sh
+
   run:
     summary: Runs the macOS application
     cmds:

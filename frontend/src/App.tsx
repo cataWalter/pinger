@@ -70,8 +70,8 @@ type MatrixNotification = {
 }
 
 type PreferenceValues = NonNullable<Snapshot['preferences']>
-type RoomScope = 'all' | 'direct' | 'group' | 'archived'
-type RoomRefinements = { unread: boolean; unanswered: boolean; favorite: boolean }
+type RoomScope = 'all' | 'archived'
+type RoomRefinements = { unanswered: boolean; favorite: boolean }
 type PendingSend = { roomID: string; text: string; replyTo: Message | null; mentionUserIDs: string[]; mentionBindings: { token: string; userID: string }[]; timer: number }
 type MessageMenuItem = { key: string; label: string; ariaLabel: string; icon: ReactElement; danger?: boolean; disabled?: boolean; run: () => void }
 type SettingsTab = 'General' | 'Appearance' | 'Notifications' | 'Keyboard' | 'History' | 'Account' | 'Devices' | 'Storage' | 'Security' | 'Help' | 'About' | 'Integrations'
@@ -147,13 +147,12 @@ function loadAvatarSource(uri: string) {
   return request
 }
 
-function Avatar({ uri, label, className, style, deferLoad = false, 'aria-hidden': ariaHidden }: {
+function Avatar({ uri, label, className, style, deferLoad = false }: {
   uri?: string
   label: string
   className: string
   style?: React.CSSProperties
   deferLoad?: boolean
-  'aria-hidden'?: boolean
 }) {
   const avatarRef = useRef<HTMLDivElement>(null)
   const [source, setSource] = useState(() => uri ? avatarSources.get(uri) ?? null : null)
@@ -197,7 +196,7 @@ function Avatar({ uri, label, className, style, deferLoad = false, 'aria-hidden'
   }, [uri, nearViewport])
 
   return (
-    <div ref={avatarRef} className={className} style={style} aria-hidden={ariaHidden}>
+    <div ref={avatarRef} className={className} style={style}>
       {source ? <img className="avatar-image" src={source} alt="" /> : initials(label)}
     </div>
   )
@@ -566,7 +565,7 @@ function App() {
   const [mobilePane, setMobilePane] = useState<'rooms' | 'conversation'>('rooms')
   const [search, setSearch] = useState('')
   const [roomScope, setRoomScope] = useState<RoomScope>('all')
-  const [roomRefinements, setRoomRefinements] = useState<RoomRefinements>({ unread: false, unanswered: false, favorite: false })
+  const [roomRefinements, setRoomRefinements] = useState<RoomRefinements>({ unanswered: false, favorite: false })
   const [inboxAccountScope, setInboxAccountScope] = useState('all')
   const [otherAccountRooms, setOtherAccountRooms] = useState<Room[]>([])
   const [messages, setMessages] = useState<Message[]>([])
@@ -787,11 +786,9 @@ function App() {
     const matchesQuery = !query || `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query)
     const archived = preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
     const matchesArchive = roomScope === 'archived' ? archived : !archived
-    const matchesScope = roomScope === 'all' || roomScope === 'archived' || (roomScope === 'direct' ? room.direct : !room.direct)
-    const matchesRefinements = (!roomRefinements.unread || room.unread > 0 || room.markedUnread)
-      && (!roomRefinements.unanswered || room.unanswered)
+    const matchesRefinements = (!roomRefinements.unanswered || room.unanswered)
       && (!roomRefinements.favorite || room.favorite)
-    return matchesQuery && matchesArchive && matchesScope && matchesRefinements
+    return matchesQuery && matchesArchive && matchesRefinements
   }).sort((left, right) => preferenceString(preferences, 'sidebar.pinned_style', 'Top of list') === 'Top of list' ? Number(right.favorite) - Number(left.favorite) : 0)
   const quickSwitcherRooms = rankQuickSwitcherRooms(rooms, quickSwitcherQuery)
   const unansweredCount = scopedRooms.filter((room) => room.unanswered && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length
@@ -941,7 +938,8 @@ function App() {
   function scrollTimelineToBottom(behavior: ScrollBehavior = 'auto') {
     const timeline = timelineRef.current
     if (!timeline) return
-    timeline.scrollTo({ top: timeline.scrollHeight, behavior })
+    if (typeof timeline.scrollTo === 'function') timeline.scrollTo({ top: timeline.scrollHeight, behavior })
+    else timeline.scrollTop = timeline.scrollHeight
   }
 
   function jumpToLatest() {
@@ -1030,11 +1028,11 @@ function App() {
       return
     }
     if (roomSwitchRef.current || stickToBottomRef.current) {
-      roomSwitchRef.current = false
       timeline.scrollTop = timeline.scrollHeight
+      if (!roomSwitchRef.current || historyRoomIDRef.current === selectedRoomID) roomSwitchRef.current = false
       setShowJumpToLatest(false)
     }
-  }, [messages])
+  }, [messages, selectedRoomID])
 
   useEffect(() => {
     setSearchOpen(false)
@@ -1699,8 +1697,14 @@ function App() {
   }
 
   function showRoom(roomID: string) {
+    roomSwitchRef.current = true
+    stickToBottomRef.current = true
     setSelectedRoomID(roomID)
     setMobilePane(roomID ? 'conversation' : 'rooms')
+    requestAnimationFrame(() => {
+      if (roomID) composerInputRef.current?.focus()
+      if (roomID === selectedRoomRef.current) scrollTimelineToBottom()
+    })
   }
 
   function isActiveAccountRoom(room: Room) {
@@ -1802,13 +1806,13 @@ function App() {
       if (event.shiftKey && key === 'a') {
         event.preventDefault()
         setRoomScope('all')
-        setRoomRefinements({ unread: false, unanswered: false, favorite: false })
+        setRoomRefinements({ unanswered: false, favorite: false })
         return
       }
       if (event.shiftKey && key === 'u') {
         event.preventDefault()
         setRoomScope('all')
-        setRoomRefinements({ unread: false, unanswered: true, favorite: false })
+        setRoomRefinements({ unanswered: true, favorite: false })
         return
       }
       if (event.shiftKey && key === 'l') {
@@ -2017,6 +2021,13 @@ function App() {
     }
   }
 
+  async function refreshRoomSnapshotAfterSend() {
+    try {
+      setSnapshot(await AppService.Snapshot())
+    } catch {
+    }
+  }
+
   function notificationRoomName(notification: MatrixNotification) {
     return notification.room || roomsRef.current.find((room) => room.id === notification.roomId)?.name || notification.roomId
   }
@@ -2139,6 +2150,7 @@ function App() {
     setPendingSendPreview(null)
     try {
       await dispatchMessage(pending)
+      await refreshRoomSnapshotAfterSend()
       setHistoryRevision((revision) => revision + 1)
     } catch (sendError) {
       restorePendingSend(pending)
@@ -2181,6 +2193,7 @@ function App() {
         await AppService.EditMessage(roomID, text, editTarget.id)
       } else {
         await dispatchMessage({ roomID, text, replyTo: replyTarget, mentionUserIDs })
+        await refreshRoomSnapshotAfterSend()
       }
       const nextDraft = editTarget ? draftsRef.current.get(roomID) ?? '' : ''
       if (!editTarget) draftsRef.current.delete(roomID)
@@ -2721,7 +2734,6 @@ function App() {
       data-mobile-pane={mobilePane}
       data-compact={preferenceBoolean(preferences, 'appearance.compact')}
       data-message-animations={preferenceBoolean(preferences, 'appearance.message_animations', true)}
-      data-show-avatars={preferenceBoolean(preferences, 'appearance.show_avatars', true)}
       data-font-size={preferenceString(preferences, 'appearance.font_size', 'Medium').toLowerCase()}
       data-wallpaper={preferenceString(preferences, 'appearance.chat_wallpaper', 'None').toLowerCase()}
       data-room-previews={preferenceBoolean(preferences, 'sidebar.show_previews', true)}
@@ -2741,17 +2753,6 @@ function App() {
       } as React.CSSProperties}
     >
       <aside className={`sidebar ${preferenceBoolean(preferences, 'sidebar.transparent') ? 'is-transparent' : ''}`}>
-        <div className="sidebar-brand">
-          <span className="brand-glyph"><MessageCircleMore size={19} strokeWidth={2.1} /></span>
-          <span>Pinger</span>
-          <span className="brand-edition">DESKTOP</span>
-        </div>
-        <div className="room-list-heading">
-          <div>
-            <span className="eyebrow">WORKSPACE</span>
-            <h1>Messages</h1>
-          </div>
-        </div>
         <label className="room-search">
           <Search size={16} />
           <input ref={roomSearchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a room" aria-label="Find a room" />
@@ -2764,18 +2765,15 @@ function App() {
               {(snapshot?.accounts ?? []).map((account) => <option key={account.id} value={account.id}>{account.profile.displayName || account.profile.userId}</option>)}
             </select>
           )}
-          <div className="room-scope-filters" role="group" aria-label="Room type">
+          <div className="room-scope-filters" role="group" aria-label="Room visibility">
             <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-pressed={roomScope === 'all'} onClick={() => setRoomScope('all')}>All</button>
-            <button type="button" className={roomScope === 'direct' ? 'is-active' : ''} aria-pressed={roomScope === 'direct'} onClick={() => setRoomScope('direct')}>DMs</button>
-            <button type="button" className={roomScope === 'group' ? 'is-active' : ''} aria-pressed={roomScope === 'group'} onClick={() => setRoomScope('group')}>Groups</button>
-            <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} onClick={() => { setRoomScope('archived'); setRoomRefinements({ unread: false, unanswered: false, favorite: false }) }}><Archive size={13} /></button>
+            <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} onClick={() => { setRoomScope('archived'); setRoomRefinements({ unanswered: false, favorite: false }) }}><Archive size={13} /></button>
           </div>
           <div className="room-refinement-filters" role="group" aria-label="Room refinements">
-            <button type="button" className={roomRefinements.unread ? 'is-active' : ''} aria-label="Unread rooms" aria-pressed={roomRefinements.unread} title="Unread" onClick={() => setRoomRefinements((current) => ({ ...current, unread: !current.unread }))}><CircleDot size={14} /></button>
             <button type="button" className={roomRefinements.unanswered ? 'is-active' : ''} aria-label="Needs reply" aria-pressed={roomRefinements.unanswered} aria-keyshortcuts={answeredShortcut} title={`Needs reply (press ${answeredShortcut} to mark answered)`} onClick={() => setRoomRefinements((current) => ({ ...current, unanswered: !current.unanswered }))} onKeyDown={(event) => handleMarkAnsweredKeyDown(event, selectedRoomID)}>
               <Reply size={14} />{unansweredCount > 0 && <span>{unansweredCount}</span>}
             </button>
-            <button type="button" className={roomRefinements.favorite ? 'is-active' : ''} aria-label="Pinned rooms" aria-pressed={roomRefinements.favorite} title="Pinned" onClick={() => setRoomRefinements((current) => ({ ...current, favorite: !current.favorite }))}><Star size={14} /></button>
+            <button type="button" className={roomRefinements.favorite ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={roomRefinements.favorite} title="Favorites" onClick={() => setRoomRefinements((current) => ({ ...current, favorite: !current.favorite }))}><Star size={14} /></button>
           </div>
         </div>
         <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : 'ROOMS'}</span><span className="room-section-actions">{roomScope !== 'archived' && <button className="room-archive-all" type="button" aria-label="Archive all read rooms" title="Archive all read rooms" disabled={readRoomCount === 0} onClick={() => void archiveAllReadRooms()}><Archive size={13} /></button>}{filteredRooms.length.toString().padStart(2, '0')}</span></div>
@@ -2816,6 +2814,14 @@ function App() {
             {preferenceBoolean(preferences, archivedPreferenceKey(roomContextMenu.roomID)) ? <ArchiveRestore size={15} /> : <Archive size={15} />}
             <span>{preferenceBoolean(preferences, archivedPreferenceKey(roomContextMenu.roomID)) ? 'Restore room' : 'Archive room'}</span>
           </button>
+          {(() => {
+            const room = rooms.find((candidate) => candidate.id === roomContextMenu.roomID)
+            if (!room) return null
+            return <button type="button" role="menuitem" onClick={() => void setPreference(`room.favorite.${room.id}`, !room.favorite)}>
+              <Star size={15} fill={room.favorite ? 'currentColor' : 'none'} />
+              <span>{room.favorite ? 'Remove from Favorites' : 'Add to Favorites'}</span>
+            </button>
+          })()}
         </div>}
         <div className="sidebar-profile">
           <button className="account-switcher-trigger" type="button" aria-label="Manage Matrix accounts" title="Manage Matrix accounts" onClick={() => { setAccountError(''); setAddingAccount(false); setAccountManagerOpen(true) }}>
@@ -2843,7 +2849,7 @@ function App() {
               <Avatar uri={selectedRoomAvatar} label={selectedRoom.name || selectedRoom.id} className="conversation-room-avatar" />
               <div className="conversation-title">
                 <h2>{selectedRoom.name || selectedRoom.id}</h2>
-                <span>{selectedRoom.direct ? 'Direct message' : selectedRoom.topic || selectedRoom.id}</span>
+                {(selectedRoom.direct || selectedRoom.topic) && <span>{selectedRoom.direct ? 'Direct message' : selectedRoom.topic}</span>}
               </div>
               <div className="conversation-actions">
                 <button className="icon-button scheduled-jobs-button" type="button" aria-label="Scheduled messages and reminders" title="Scheduled messages and reminders" onClick={openScheduledJobs}>
@@ -2856,9 +2862,9 @@ function App() {
                 <button
                   className={`icon-button ${selectedRoom.favorite ? 'is-selected' : ''}`}
                   type="button"
-                  aria-label={selectedRoom.favorite ? 'Unpin room' : 'Pin room'}
+                  aria-label={selectedRoom.favorite ? 'Remove from Favorites' : 'Add to Favorites'}
                   aria-pressed={selectedRoom.favorite}
-                  title={selectedRoom.favorite ? 'Unpin room' : 'Pin room'}
+                  title={selectedRoom.favorite ? 'Remove from Favorites' : 'Add to Favorites'}
                   onClick={() => void setPreference(`room.favorite.${selectedRoom.id}`, !selectedRoom.favorite)}
                 >
                   <Star size={16} fill={selectedRoom.favorite ? 'currentColor' : 'none'} />
@@ -2984,14 +2990,18 @@ function App() {
             </button>
           )}
           {visibleMessages.map((message, index) => {
+            const ownMessage = message.own || Boolean(message.sender && message.sender === snapshot?.profile.userId)
             const previous = index > 0 ? visibleMessages[index - 1] : null
             const grouped = Boolean(previous && !previous.redacted && previous.sender === message.sender && message.timestamp - previous.timestamp < 5 * 60_000 && isSameDay(previous.timestamp, message.timestamp))
+            const next = index + 1 < visibleMessages.length ? visibleMessages[index + 1] : null
+            const nextIsGrouped = Boolean(next && !message.redacted && !next.redacted && next.sender === message.sender && next.timestamp - message.timestamp < 5 * 60_000 && isSameDay(message.timestamp, next.timestamp))
+            const lastInGroup = !nextIsGrouped
             const showDayDivider = !previous || !isSameDay(previous?.timestamp ?? 0, message.timestamp)
             const displayBody = displayMessageBody(message)
             return (
               <Fragment key={message.id || message.transactionId}>
                 {showDayDivider && message.timestamp > 0 && <div className="day-divider" aria-label={formatDayLabel(message.timestamp)}><span>{formatDayLabel(message.timestamp)}</span></div>}
-                <article className={`message-row ${message.own ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'}`} data-event-id={message.id || message.transactionId} tabIndex={message.id || message.transactionId ? -1 : undefined} style={{ '--message-index': Math.min(index, 12) } as React.CSSProperties} onDoubleClick={() => handleMessageDoubleClick(message)} onContextMenu={(event) => {
+                <article className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''}`} data-event-id={message.id || message.transactionId} tabIndex={message.id || message.transactionId ? -1 : undefined} style={{ '--message-index': Math.min(index, 12) } as React.CSSProperties} onDoubleClick={() => handleMessageDoubleClick(message)} onContextMenu={(event) => {
                   if (!selectedRoomID) return
                   event.preventDefault()
                   openMessageContextMenu(message, event.clientX, event.clientY)
@@ -3003,13 +3013,11 @@ function App() {
                   const bounds = event.currentTarget.getBoundingClientRect()
                   openMessageContextMenu(message, bounds.left + 8, bounds.bottom)
                 }}>
-                  <Avatar uri={grouped ? '' : message.avatar} label={message.senderName || message.sender} className="message-avatar" style={grouped ? undefined : avatarStyle(message.senderName || message.sender)} aria-hidden={grouped} />
                   <div className="message-body-wrap">
                     {!grouped && <div className="message-meta">
                       <strong>{message.senderName || message.sender}</strong>
                       {message.timestamp > 0 && preferenceBoolean(preferences, 'appearance.show_timestamps', true) && <time>{formatTimelineTime(message.timestamp, preferences)}</time>}
                       {message.edited && <span className="edited-mark" title={message.editHistory?.length ? message.editHistory.join('\n') : 'Edited message'}>edited{(message.editHistory?.length ?? 0) > 0 && ` (${message.editHistory?.length} prior)`}</span>}
-                      {message.encrypted && <span title="Encrypted message"><LockKeyhole size={11} /></span>}
                     </div>}
                     {message.replyToPreview && <button className="reply-preview" type="button" disabled={!message.replyToEventId} title="Jump to quoted message" onClick={() => focusTimelineMessage(message.replyToEventId)}>
                       <span className="reply-preview-sender">{message.replyToSender || 'Reply'}</span>
@@ -4165,7 +4173,6 @@ function SettingsDialog({
                   </button>)}
                 </div>
               </div>
-              <PreferenceToggle label="Show message avatars" checked={preferenceBoolean(preferences, 'appearance.show_avatars', true)} onChange={(value) => onPreferenceChange('appearance.show_avatars', value)} />
               <PreferenceToggle label="Use pointer cursor on clickable controls" checked={preferenceBoolean(preferences, 'appearance.pointer_cursor', true)} onChange={(value) => onPreferenceChange('appearance.pointer_cursor', value)} />
               <PreferenceToggle label="Compact message layout" checked={preferenceBoolean(preferences, 'appearance.compact')} onChange={(value) => onPreferenceChange('appearance.compact', value)} />
               <PreferenceToggle label="Show room previews" checked={preferenceBoolean(preferences, 'sidebar.show_previews', true)} onChange={(value) => onPreferenceChange('sidebar.show_previews', value)} />
@@ -4173,8 +4180,8 @@ function SettingsDialog({
               <PreferenceToggle label="Compact chat list" checked={preferenceBoolean(preferences, 'sidebar.compact_chat_list')} onChange={(value) => onPreferenceChange('sidebar.compact_chat_list', value)} />
               <PreferenceToggle label="Transparent sidebar" checked={preferenceBoolean(preferences, 'sidebar.transparent')} onChange={(value) => onPreferenceChange('sidebar.transparent', value)} />
               <PreferenceToggle label="Show network labels in the chat list" checked={preferenceBoolean(preferences, 'sidebar.network_icons')} onChange={(value) => onPreferenceChange('sidebar.network_icons', value)} />
-              <label className="setting-row"><span><strong>Pinned chats</strong><small>List pinned rooms first, or only mark them with a star.</small></span>
-                <select aria-label="Pinned chats" value={preferenceString(preferences, 'sidebar.pinned_style', 'Top of list')} onChange={(event) => onPreferenceChange('sidebar.pinned_style', event.target.value)}>
+              <label className="setting-row"><span><strong>Favorite chats</strong><small>List favorite rooms first, or only mark them with a star.</small></span>
+                <select aria-label="Favorite chats" value={preferenceString(preferences, 'sidebar.pinned_style', 'Top of list')} onChange={(event) => onPreferenceChange('sidebar.pinned_style', event.target.value)}>
                   {['Top of list', 'Star only'].map((value) => <option key={value}>{value}</option>)}
                 </select>
               </label>

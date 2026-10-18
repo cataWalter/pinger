@@ -118,6 +118,7 @@ jobs:
             <key>CFBundleExecutable</key><string>pinger</string>
             <key>CFBundleIdentifier</key><string>fi.mau.pinger</string>
             <key>CFBundleName</key><string>Pinger</string>
+            <key>CFBundleDisplayName</key><string>Pinger</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleIconFile</key><string>AppIcon</string>
             <key>CFBundleShortVersionString</key><string>${VERSION}</string>

@@ -112,6 +112,15 @@ go run -tags "sqlite_fts5 goolm" .
 - Rebuild the frontend when its source or dependencies change — assets stay embedded in the binary. Regenerate bindings after Go service method changes; `wails3 task dev` does both.
 - Matrix sync events are handled off the UI thread and delivered to the React interface through Wails runtime events.
 
+`go build` creates a plain executable and cannot carry macOS bundle metadata. To build the named app with its Finder, Dock, tray, and Notification Center identity, use:
+
+```sh
+sh scripts/build-macos-app.sh
+open bin/Pinger.app
+```
+
+This runs the Go build, creates `bin/Pinger.app`, installs the Pinger icon and bundle name, and ad-hoc signs the bundle so macOS associates notifications with Pinger. The equivalent Task command is `task package:go`.
+
 ### Terminal interface
 
 Without the desktop frontend:

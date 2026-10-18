@@ -35,6 +35,7 @@ const harness = vi.hoisted(() => ({
     SendMessage: vi.fn(),
     SendReply: vi.fn(),
     SendMessageWithMentions: vi.fn(),
+    DownloadAvatar: vi.fn(),
     React: vi.fn(),
     AIComplete: vi.fn(),
     TestAIEndpoint: vi.fn(),
@@ -167,6 +168,7 @@ describe('settings storage, integrations, help, and about', () => {
     harness.service.SetTyping.mockResolvedValue(undefined)
     harness.service.MarkRead.mockResolvedValue(undefined)
     harness.service.RoomMembers.mockResolvedValue([])
+    harness.service.DownloadAvatar.mockResolvedValue('')
     harness.service.NativeNotificationsSupported.mockResolvedValue(false)
     harness.service.NotificationPermission.mockResolvedValue('default')
     harness.service.SetBooleanPreference.mockResolvedValue(undefined)
@@ -339,6 +341,16 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Summarize recent messages' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Ask AI about the composer text' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('does not show a room ID beneath a room name when there is no topic', async () => {
+    const roomWithoutTopic = { ...room, id: '!group:example.org', name: 'Actual room name', direct: false }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [roomWithoutTopic] })
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Actual room name' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Conversation' }).querySelector('.conversation-title')?.textContent).toBe('Actual room name')
   })
 
   it('sends an Ask AI question to the local endpoint and only drafts the reply', async () => {
@@ -756,35 +768,57 @@ describe('room history updates', () => {
     expect(harness.service.History).toHaveBeenLastCalledWith(room.id, 50)
   })
 
-  it('composes room type, unread, needs reply, pinned, and search filters', async () => {
+  it('returns to the latest messages when reopening the active room', async () => {
     const user = userEvent.setup()
-    const pinnedDirect = { ...secondRoom, name: 'Pinned direct', unread: 2, favorite: true }
-    const pinnedGroup: Room = { ...room, id: '!group:example.org', name: 'Pinned project', direct: false, favorite: true, unread: 1, unanswered: true }
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const timeline = screen.getByRole('region', { name: 'Message timeline' })
+    Object.defineProperty(timeline, 'scrollHeight', { configurable: true, value: 400 })
+    timeline.scrollTop = 12
+
+    await user.click(screen.getByRole('button', { name: /Test room/ }))
+
+    await waitFor(() => expect(timeline.scrollTop).toBe(400))
+    expect(container.querySelector('.room-button.is-active')).toBeTruthy()
+  })
+
+  it('composes room, needs reply, favorites, and search filters', async () => {
+    const user = userEvent.setup()
+    const favoriteDirect = { ...secondRoom, name: 'Favorite direct', unread: 2, favorite: true }
+    const favoriteGroup: Room = { ...room, id: '!group:example.org', name: 'Favorite project', direct: false, favorite: true, unread: 1, unanswered: true }
     const unreadDirect: Room = { ...room, id: '!unread:example.org', name: 'Unread direct', unread: 1 }
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, pinnedDirect, pinnedGroup, unreadDirect] })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, favoriteDirect, favoriteGroup, unreadDirect] })
     render(<App />)
 
     await screen.findByText('latest message')
     const roomList = screen.getByRole('navigation', { name: 'Rooms' })
-    const groupsFilter = screen.getByRole('button', { name: /^Groups$/ })
-    await user.click(groupsFilter)
-    expect(groupsFilter.getAttribute('aria-pressed')).toBe('true')
-    expect(within(roomList).getByRole('button', { name: /Pinned project/ })).toBeTruthy()
-    expect(within(roomList).queryByRole('button', { name: /Pinned direct/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Unread rooms' })).toBeNull()
+    expect(within(roomList).getByRole('button', { name: /Favorite direct/ })).toBeTruthy()
+    expect(within(roomList).getByRole('button', { name: /Favorite project/ })).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: 'Unread rooms' }))
     await user.click(screen.getByRole('button', { name: 'Needs reply' }))
-    await user.click(screen.getByRole('button', { name: 'Pinned rooms' }))
-    await user.type(screen.getByRole('textbox', { name: 'Find a room' }), 'Pinned')
-    expect(within(roomList).getByRole('button', { name: /Pinned project/ })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Favorite rooms' }))
+    await user.type(screen.getByRole('textbox', { name: 'Find a room' }), 'Favorite')
+    expect(within(roomList).getByRole('button', { name: /Favorite project/ })).toBeTruthy()
     expect(within(roomList).queryByRole('button', { name: /Unread direct/ })).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: /^DMs$/ }))
-    expect(within(roomList).getByRole('button', { name: /Pinned direct/ })).toBeTruthy()
-    expect(within(roomList).queryByRole('button', { name: /Pinned project/ })).toBeNull()
-    await user.click(screen.getByRole('button', { name: /^All$/ }))
-    expect(within(roomList).getByRole('button', { name: /Pinned direct/ })).toBeTruthy()
-    expect(within(roomList).getByRole('button', { name: /Pinned project/ })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
+    await user.click(screen.getByRole('button', { name: 'Favorite rooms' }))
+    await user.clear(screen.getByRole('textbox', { name: 'Find a room' }))
+    expect(within(roomList).getByRole('button', { name: /Favorite direct/ })).toBeTruthy()
+    expect(within(roomList).getByRole('button', { name: /Favorite project/ })).toBeTruthy()
+  })
+
+  it('adds a chat to Favorites from the room menu', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    fireEvent.contextMenu(container.querySelector('.room-list .room-button')!, { clientX: 48, clientY: 48 })
+    await user.click(screen.getByRole('menuitem', { name: 'Add to Favorites' }))
+
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(`room.favorite.${room.id}`, true))
+    expect(screen.getByRole('button', { name: 'Remove from Favorites' })).toBeTruthy()
   })
 
   it('explains when active inbox filters hide every room', async () => {
@@ -792,7 +826,7 @@ describe('room history updates', () => {
     render(<App />)
     await screen.findByText('latest message')
 
-    await user.click(screen.getByRole('button', { name: 'Unread rooms' }))
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
 
     expect(screen.getByText('No rooms match these filters')).toBeTruthy()
   })
@@ -1101,6 +1135,7 @@ describe('room history updates', () => {
 
     await user.click(screen.getByRole('button', { name: /Test room/ }))
     expect(appShell.getAttribute('data-mobile-pane')).toBe('conversation')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Message' })))
     await user.click(screen.getByRole('button', { name: 'Back to rooms' }))
     expect(appShell.getAttribute('data-mobile-pane')).toBe('rooms')
 
@@ -1449,6 +1484,69 @@ describe('room history updates', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('puts the tail on the final message in an outgoing group', async () => {
+    const ownMessages = [100, 200, 300].map((timestamp, index) => ({
+      ...message(`$own-${index}`, `sent ${index + 1}`, timestamp),
+      sender: snapshot.profile.userId,
+      senderName: snapshot.profile.displayName,
+      own: true,
+    }))
+    harness.service.History.mockResolvedValueOnce({ messages: ownMessages, before: 0, hasMore: false })
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('sent 1')).toBeTruthy()
+    const rows = [...container.querySelectorAll<HTMLElement>('.message-row')]
+    expect(rows).toHaveLength(3)
+    expect(rows[0].classList.contains('is-first')).toBe(true)
+    expect(rows[0].classList.contains('is-tail')).toBe(false)
+    expect(rows[1].classList.contains('is-grouped')).toBe(true)
+    expect(rows[2].classList.contains('is-last')).toBe(true)
+    expect(rows[2].classList.contains('is-tail')).toBe(true)
+  })
+
+  it('hides the avatar and encryption lock on incoming and outgoing messages', async () => {
+    const incomingMessage = {
+      ...message('$incoming', 'hello from alice', 100),
+      avatar: 'mxc://example.org/alice-avatar',
+      encrypted: true,
+    }
+    const outgoingMessage = {
+      ...message('$outgoing', 'sent by me', 200),
+      sender: snapshot.profile.userId,
+      senderName: snapshot.profile.displayName,
+      own: true,
+      avatar: 'mxc://example.org/me-avatar',
+      encrypted: true,
+    }
+    harness.service.History.mockResolvedValueOnce({ messages: [incomingMessage, outgoingMessage], before: 0, hasMore: false })
+    harness.service.DownloadAvatar.mockResolvedValue('data:image/png;base64,avatar')
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('hello from alice')).toBeTruthy()
+    expect(screen.getByText('sent by me')).toBeTruthy()
+    expect(container.querySelectorAll('.message-row')).toHaveLength(2)
+    expect(container.querySelector('.message-row .message-avatar')).toBeNull()
+    expect(container.querySelector('.message-row img')).toBeNull()
+    expect(screen.queryByTitle('Encrypted message')).toBeNull()
+    expect(harness.service.DownloadAvatar).not.toHaveBeenCalledWith('mxc://example.org/me-avatar')
+  })
+
+  it('refreshes the room preview after sending a message', async () => {
+    const updatedRoom = { ...room, preview: 'sent from the composer', lastEventSender: snapshot.profile.userId, lastEventAt: 400 }
+    harness.service.Snapshot
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce({ ...snapshot, rooms: [updatedRoom] })
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'sent from the composer')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, 'sent from the composer'))
+    await waitFor(() => expect(container.querySelector('.room-preview')?.textContent).toBe('You: sent from the composer'))
   })
 
   it('uses the configured time suggestions in the schedule dialog', async () => {
