@@ -1075,6 +1075,9 @@ func mapMessages(messages []matrix.Message) []Message {
 func mapUpdate(update matrix.Update, preferences map[string]any) Update {
 	notifications := make([]Notification, 0, len(update.Notifications))
 	for _, notification := range update.Notifications {
+		if !sharedpreferences.NotificationAllowed(preferences, notification.RoomID, notification.Category) {
+			continue
+		}
 		notifications = append(notifications, Notification{
 			RoomID:  notification.RoomID,
 			Room:    notification.Room,

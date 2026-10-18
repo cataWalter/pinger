@@ -103,6 +103,30 @@ func TestStorePublishesChangesAcrossOpenStores(t *testing.T) {
 	}
 }
 
+func TestNotificationAllowedUsesCategoryAndRoomPreferences(t *testing.T) {
+	values := map[string]any{
+		"notifications.direct":          true,
+		"notifications.mentions":        false,
+		"notifications.group":           true,
+		"room.muted.!muted:example.org": true,
+	}
+	if !NotificationAllowed(values, "!direct:example.org", NotificationCategoryDirect) {
+		t.Fatal("direct notification was unexpectedly blocked")
+	}
+	if NotificationAllowed(values, "!mention:example.org", NotificationCategoryMention) {
+		t.Fatal("mention notification was unexpectedly allowed")
+	}
+	if !NotificationAllowed(values, "!group:example.org", NotificationCategoryGroup) {
+		t.Fatal("group notification was unexpectedly blocked")
+	}
+	if NotificationAllowed(values, "!muted:example.org", NotificationCategoryDirect) {
+		t.Fatal("muted-room notification was unexpectedly allowed")
+	}
+	if NotificationAllowed(nil, "!group:example.org", NotificationCategoryGroup) {
+		t.Fatal("group notification should default to disabled")
+	}
+}
+
 func TestImportLegacyPreferencesCreatesBackup(t *testing.T) {
 	directory := t.TempDir()
 	legacyPath := filepath.Join(directory, "preferences.json")

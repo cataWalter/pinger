@@ -408,6 +408,39 @@ func IsAccountKey(key string) bool {
 	return strings.HasPrefix(key, "room.")
 }
 
+const (
+	NotificationCategoryDirect  = "direct"
+	NotificationCategoryMention = "mention"
+	NotificationCategoryGroup   = "group"
+)
+
+func NotificationAllowed(values map[string]any, roomID, category string) bool {
+	if enabled, ok := values["notifications.enabled"].(bool); ok && !enabled {
+		return false
+	}
+	if muted, ok := values["room.muted."+roomID].(bool); ok && muted {
+		return false
+	}
+	switch category {
+	case NotificationCategoryDirect:
+		return preferenceEnabled(values, "notifications.direct", true)
+	case NotificationCategoryMention:
+		return preferenceEnabled(values, "notifications.mentions", true)
+	case NotificationCategoryGroup:
+		return preferenceEnabled(values, "notifications.group", false)
+	default:
+		return true
+	}
+}
+
+func preferenceEnabled(values map[string]any, key string, fallback bool) bool {
+	value, ok := values[key].(bool)
+	if !ok {
+		return fallback
+	}
+	return value
+}
+
 func Validate(key string, value any) error {
 	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted."} {
 		if strings.HasPrefix(key, prefix) {

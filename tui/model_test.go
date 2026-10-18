@@ -105,6 +105,48 @@ func TestSharedRoomPreferencesApplyAndToggle(t *testing.T) {
 	}
 }
 
+func TestArchivedRoomsFilterAndToggle(t *testing.T) {
+	store, err := sharedpreferences.Open(filepath.Join(t.TempDir(), "preferences.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.SetAccount("primary", "room.archived.!archived:example.org", true); err != nil {
+		t.Fatal(err)
+	}
+
+	model := *newModel(nil, store)
+	model.loginActive = false
+	updated, _ := model.Update(MatrixUpdateMsg{Update: matrix.Update{Rooms: []matrix.Room{
+		{ID: "!active:example.org", Name: "Active"},
+		{ID: "!archived:example.org", Name: "Archived"},
+	}}})
+	model = updated.(Model)
+	if visible := model.rooms.filteredRooms(); len(visible) != 1 || visible[0].ID != "!active:example.org" {
+		t.Fatalf("default rooms = %+v, want only active room", visible)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}})
+	model = updated.(Model)
+	if visible := model.rooms.filteredRooms(); len(visible) != 1 || visible[0].ID != "!archived:example.org" {
+		t.Fatalf("archived rooms = %+v, want archived room", visible)
+	}
+
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
+	if command == nil {
+		t.Fatal("archive toggle did not return a command")
+	}
+	updated, _ = updated.(Model).Update(command())
+	model = updated.(Model)
+	values, err := store.Snapshot("primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["room.archived.!archived:example.org"] != false {
+		t.Fatalf("archived preference = %#v, want false", values["room.archived.!archived:example.org"])
+	}
+}
+
 func TestMatrixUpdateSendsNativeNotificationsOutsideMutedAndCurrentRooms(t *testing.T) {
 	model := NewModel(nil)
 	notifier := &tuiNotifier{permission: "default"}
@@ -147,6 +189,30 @@ func TestUnreadFilterShortcutSelectsMatchingRoom(t *testing.T) {
 	}
 	if result.currentRoom == nil || result.currentRoom.ID != "!beta:example.org" {
 		t.Fatalf("selected room = %+v, want beta", result.currentRoom)
+	}
+}
+
+func TestRoomFilterKeepsActiveConversationAndAllowsFilteredNavigation(t *testing.T) {
+	model := NewModel(nil)
+	model.loginActive = false
+	model.updateRooms([]matrix.Room{
+		{ID: "!alpha:example.org", Name: "alpha", Favorite: true},
+		{ID: "!beta:example.org", Name: "beta"},
+		{ID: "!gamma:example.org", Name: "gamma", Favorite: true},
+	})
+	model.setRoomFilter(FilterFavorite)
+	model.selectRoom(matrix.Room{ID: "!beta:example.org", Name: "beta"})
+	model.updateRoomsPreservingActive(model.rooms.rooms)
+	if model.currentRoom == nil || model.currentRoom.ID != "!beta:example.org" {
+		t.Fatalf("active room after live refresh = %+v, want beta", model.currentRoom)
+	}
+	if selected := model.rooms.selectedRoom(); selected == nil || selected.ID != "!alpha:example.org" {
+		t.Fatalf("visible selection after live refresh = %+v, want alpha", selected)
+	}
+
+	model.moveRoom(1)
+	if model.currentRoom == nil || model.currentRoom.ID != "!gamma:example.org" {
+		t.Fatalf("active room after filtered navigation = %+v, want gamma", model.currentRoom)
 	}
 }
 

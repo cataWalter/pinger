@@ -94,6 +94,7 @@ type Room struct {
 	Direct          bool
 	Favorite        bool
 	Muted           bool
+	Archived        bool
 	Unread          int
 	MarkedUnread    bool
 	Mentions        int

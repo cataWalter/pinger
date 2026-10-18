@@ -15,8 +15,10 @@ type keyMap struct {
 	FilterUnread     key.Binding
 	FilterFavorite   key.Binding
 	FilterNeeds      key.Binding
+	FilterArchived   key.Binding
 	ToggleFavorite   key.Binding
 	ToggleMuted      key.Binding
+	ToggleArchived   key.Binding
 	Reply            key.Binding
 	Edit             key.Binding
 	MarkRead         key.Binding
@@ -41,8 +43,8 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Quit, k.Help},
 		{k.FocusRooms, k.FocusTimeline, k.FocusComposer},
-		{k.FilterAll, k.FilterUnread, k.FilterFavorite, k.FilterNeeds},
-		{k.NextRoom, k.PrevRoom, k.ToggleFavorite, k.ToggleMuted, k.Reply, k.Edit, k.MarkRead, k.OpenMedia, k.PlayAudio, k.RecordVoice, k.SelectMicrophone, k.ViewImage, k.Retry, k.Delete},
+		{k.FilterAll, k.FilterUnread, k.FilterFavorite, k.FilterNeeds, k.FilterArchived},
+		{k.NextRoom, k.PrevRoom, k.ToggleFavorite, k.ToggleMuted, k.ToggleArchived, k.Reply, k.Edit, k.MarkRead, k.OpenMedia, k.PlayAudio, k.RecordVoice, k.SelectMicrophone, k.ViewImage, k.Retry, k.Delete},
 	}
 }
 
@@ -83,6 +85,10 @@ var keys = keyMap{
 		key.WithKeys("n"),
 		key.WithHelp("n", "rooms needing reply"),
 	),
+	FilterArchived: key.NewBinding(
+		key.WithKeys("z"),
+		key.WithHelp("z", "archived rooms"),
+	),
 	ToggleFavorite: key.NewBinding(
 		key.WithKeys("F"),
 		key.WithHelp("F", "toggle favorite"),
@@ -90,6 +96,10 @@ var keys = keyMap{
 	ToggleMuted: key.NewBinding(
 		key.WithKeys("M"),
 		key.WithHelp("M", "toggle mute"),
+	),
+	ToggleArchived: key.NewBinding(
+		key.WithKeys("A"),
+		key.WithHelp("A", "archive/restore room"),
 	),
 	Reply: key.NewBinding(
 		key.WithKeys("r"),

@@ -17,6 +17,7 @@ const (
 	FilterUnread
 	FilterFavorite
 	FilterNeedsReply
+	FilterArchived
 )
 
 type roomsModel struct {
@@ -40,6 +41,13 @@ func newRoomsModel() roomsModel {
 func (m roomsModel) filteredRooms() []matrix.Room {
 	var result []matrix.Room
 	for _, r := range m.rooms {
+		if m.filter == FilterArchived {
+			if !r.Archived {
+				continue
+			}
+		} else if r.Archived {
+			continue
+		}
 		switch m.filter {
 		case FilterUnread:
 			if r.Unread > 0 || r.Mentions > 0 {
@@ -53,6 +61,8 @@ func (m roomsModel) filteredRooms() []matrix.Room {
 			if r.Unanswered {
 				result = append(result, r)
 			}
+		case FilterArchived:
+			result = append(result, r)
 		default:
 			result = append(result, r)
 		}

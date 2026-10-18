@@ -62,6 +62,24 @@ func TestMapRoomsWithPreferences(t *testing.T) {
 	}
 }
 
+func TestMapUpdateFiltersNotificationsByPreferences(t *testing.T) {
+	update := matrix.Update{Notifications: []matrix.Notification{
+		{RoomID: "!group:example.org", Category: matrix.NotificationCategoryGroup},
+		{RoomID: "!mention:example.org", Category: matrix.NotificationCategoryMention},
+		{RoomID: "!muted:example.org", Category: matrix.NotificationCategoryDirect},
+	}}
+	preferences := map[string]any{
+		"notifications.group":           true,
+		"notifications.mentions":        false,
+		"room.muted.!muted:example.org": true,
+	}
+
+	mapped := mapUpdate(update, preferences)
+	if len(mapped.Notifications) != 1 || mapped.Notifications[0].RoomID != "!group:example.org" {
+		t.Fatalf("mapped notifications = %+v, want only enabled group notification", mapped.Notifications)
+	}
+}
+
 func TestReadDroppedAttachment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shared image.png")
 	want := []byte("image data")

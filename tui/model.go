@@ -106,7 +106,7 @@ func (m *Model) applyPreferences() {
 		m.roomsList[index] = m.applyRoomPreferences(m.roomsList[index])
 	}
 	if m.roomsList != nil {
-		m.updateRooms(m.roomsList)
+		m.updateRoomsPreservingActive(m.roomsList)
 	}
 }
 
@@ -116,6 +116,9 @@ func (m Model) applyRoomPreferences(room matrix.Room) matrix.Room {
 	}
 	if muted, ok := m.preferenceValues["room.muted."+room.ID].(bool); ok {
 		room.Muted = muted
+	}
+	if archived, ok := m.preferenceValues["room.archived."+room.ID].(bool); ok {
+		room.Archived = archived
 	}
 	return room
 }
@@ -271,7 +274,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.timeline.moveSelection(-1)
 				return m, nil
 			}
-		case "a", "u", "f", "n":
+		case "a", "u", "f", "n", "z":
 			if m.focus == FocusRooms {
 				switch msg.String() {
 				case "a":
@@ -282,6 +285,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.setRoomFilter(FilterFavorite)
 				case "n":
 					m.setRoomFilter(FilterNeedsReply)
+				case "z":
+					m.setRoomFilter(FilterArchived)
 				}
 				return m, nil
 			}
@@ -292,15 +297,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return ActionResultMsg{Err: err}
 				}
 			}
-		case "F", "M":
+		case "A", "F", "M":
 			if m.currentRoom != nil && m.preferenceStore != nil && m.focus != FocusComposer {
 				key := "room.favorite."
 				if msg.String() == "M" {
 					key = "room.muted."
+				} else if msg.String() == "A" {
+					key = "room.archived."
 				}
 				current := m.currentRoom.Favorite
 				if msg.String() == "M" {
 					current = m.currentRoom.Muted
+				} else if msg.String() == "A" {
+					current = m.currentRoom.Archived
 				}
 				return m, m.setRoomPreference(key, !current)
 			}
@@ -562,7 +571,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for index, room := range update.Rooms {
 				m.roomsList[index] = m.applyRoomPreferences(room)
 			}
-			m.updateRooms(m.roomsList)
+			m.updateRoomsPreservingActive(m.roomsList)
 		}
 		if update.ConnectionState != "" {
 			m.connection = update.ConnectionState
@@ -618,7 +627,7 @@ func (m Model) notificationCmd(incoming []matrix.Notification) tea.Cmd {
 	}
 	var pending []pendingNotification
 	for _, notification := range incoming {
-		if notification.RoomID == "" || notification.Category == matrix.NotificationCategoryGroup || (m.currentRoom != nil && notification.RoomID == m.currentRoom.ID) {
+		if notification.RoomID == "" || !sharedpreferences.NotificationAllowed(m.preferenceValues, notification.RoomID, notification.Category) || (m.currentRoom != nil && notification.RoomID == m.currentRoom.ID) {
 			continue
 		}
 		roomName := notification.Room
@@ -835,6 +844,14 @@ func clampInt(value, minimum, maximum int) int {
 }
 
 func (m *Model) updateRooms(rooms []matrix.Room) {
+	m.updateRoomsWithOptions(rooms, false)
+}
+
+func (m *Model) updateRoomsPreservingActive(rooms []matrix.Room) {
+	m.updateRoomsWithOptions(rooms, true)
+}
+
+func (m *Model) updateRoomsWithOptions(rooms []matrix.Room, preserveHiddenActive bool) {
 	selectedID := ""
 	if m.currentRoom != nil {
 		selectedID = m.currentRoom.ID
@@ -857,6 +874,15 @@ func (m *Model) updateRooms(rooms []matrix.Room) {
 		}
 	}
 	if selected < 0 {
+		if preserveHiddenActive && selectedID != "" {
+			for _, room := range m.rooms.rooms {
+				if room.ID == selectedID {
+					m.rooms.selected = clampInt(m.rooms.selected, 0, len(filtered)-1)
+					m.rooms.ensureVisible()
+					return
+				}
+			}
+		}
 		selected = clampInt(m.rooms.selected, 0, len(filtered)-1)
 	}
 	m.rooms.selected = selected
@@ -875,7 +901,8 @@ func (m *Model) moveRoom(delta int) {
 		return
 	}
 	selected := clampInt(m.rooms.selected+delta, 0, len(filtered)-1)
-	if selected == m.rooms.selected && m.currentRoom != nil {
+	selectedRoom := m.rooms.selectedRoom()
+	if selected == m.rooms.selected && m.currentRoom != nil && selectedRoom != nil && selectedRoom.ID == m.currentRoom.ID {
 		return
 	}
 	m.rooms.selected = selected
@@ -922,8 +949,10 @@ func (m Model) statusText() string {
 		filter = "favorites"
 	case FilterNeedsReply:
 		filter = "needs-reply"
+	case FilterArchived:
+		filter = "archived"
 	}
-	return fmt.Sprintf("%s (%d) | a all  u unread  f favorites  n needs reply | 1 rooms  2 timeline  3 compose  ? help", filter, len(m.rooms.filteredRooms()))
+	return fmt.Sprintf("%s (%d) | a all  u unread  f favorites  n needs reply  z archived | 1 rooms  2 timeline  3 compose  ? help", filter, len(m.rooms.filteredRooms()))
 }
 
 type olderPageMsg struct {
