@@ -164,6 +164,7 @@ describe('settings storage, integrations, help, and about', () => {
     harness.service.History.mockResolvedValue({ messages: [], before: 0, hasMore: false })
     harness.service.ScheduledJobs.mockResolvedValue([])
     harness.service.SetActiveRoom.mockResolvedValue(undefined)
+    harness.service.SetTyping.mockResolvedValue(undefined)
     harness.service.MarkRead.mockResolvedValue(undefined)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.NativeNotificationsSupported.mockResolvedValue(false)
