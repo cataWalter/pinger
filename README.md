@@ -93,7 +93,7 @@ Targets macOS 12+, Windows x64 (WebView2 Runtime), and Linux x64.
   `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30`
 - macOS: Xcode Command Line Tools (`xcode-select --install`)
 - Windows: [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
-- Linux: GTK3 and WebKit2GTK development libraries (required by Wails on Linux)
+- Linux: GTK4 and WebKitGTK 6 development libraries (required by Wails on Linux)
 
 Two Go build tags are used throughout: `sqlite_fts5` is required (SQLite full-text search), and `goolm` selects mautrix-go's pure-Go Olm implementation (no libolm needed).
 
