@@ -8,6 +8,18 @@ import (
 	"time"
 )
 
+func TestValidateHideImagesAndVideosPreference(t *testing.T) {
+	const key = "appearance.hide_images_and_videos"
+	for _, value := range []bool{true, false} {
+		if err := Validate(key, value); err != nil {
+			t.Errorf("Validate(%q, %t) error = %v", key, value, err)
+		}
+	}
+	if err := Validate(key, "true"); err == nil {
+		t.Fatal("Validate() accepted a non-boolean value")
+	}
+}
+
 func TestValidateRoomAIAgents(t *testing.T) {
 	key := "room.ai_agents.!room:example.org"
 	validAgent := struct {

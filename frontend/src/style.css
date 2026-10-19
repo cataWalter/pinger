@@ -2519,7 +2519,7 @@ textarea:focus-visible {
 
 .settings-dialog {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   width: min(720px, 100%);
   max-height: min(660px, 100%);
   overflow: hidden;
@@ -2572,6 +2572,118 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
+.settings-tabs button.has-matches {
+  color: var(--forest);
+}
+
+.settings-tab-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  color: var(--forest);
+  background: rgba(47, 118, 83, 0.14);
+  border-radius: 8px;
+  font-size: 9px;
+  line-height: 1.5;
+  vertical-align: 1px;
+}
+
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  margin: 12px 22px 0;
+  padding: 0 8px 0 10px;
+  color: var(--muted);
+  background: #f6f9f7;
+  border: 1px solid #dfe6e1;
+  border-radius: 5px;
+}
+
+.settings-search:focus-within {
+  background: #fbfcfb;
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(47, 118, 83, 0.12);
+}
+
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: none;
+  font-size: 11px;
+}
+
+.settings-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.settings-search .icon-button {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+}
+
+.settings-content.is-searching>.settings-section {
+  display: none;
+}
+
+.settings-search-results {
+  display: grid;
+  gap: 16px;
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+.settings-search-group h3 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-search-list {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-search-result {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.settings-search-result:hover,
+.settings-search-result:focus-visible {
+  background: #f2f7f3;
+  border-color: #e2ebe3;
+}
+
+.settings-search-result strong {
+  color: #35443b;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.settings-search-result small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
 .settings-content {
   min-height: 0;
   overflow: auto;
@@ -2590,6 +2702,21 @@ textarea:focus-visible {
   color: var(--ink);
   font-size: 14px;
   font-weight: 600;
+}
+
+.setting-row,
+.setting-toggle,
+.help-item,
+.security-field,
+.ai-settings-form label,
+.keyboard-shortcut-list {
+  transition: background-color 600ms ease, box-shadow 600ms ease;
+}
+
+.is-search-hit {
+  background-color: rgba(47, 118, 83, 0.16);
+  box-shadow: 0 0 0 4px rgba(47, 118, 83, 0.16);
+  border-radius: 4px;
 }
 
 .setting-row,
@@ -3203,12 +3330,18 @@ textarea:focus-visible {
 }
 
 .app-shell[data-theme='dark'] .conversation,
-.app-shell[data-theme='oled-black'] .conversation {
+.app-shell[data-theme='oled-black'] .conversation,
+.app-shell[data-theme='dracula'] .conversation,
+.app-shell[data-theme='midnight'] .conversation,
+.app-shell[data-theme='slate'] .conversation {
   background: var(--paper);
 }
 
 .app-shell[data-theme='dark'] .conversation-header,
-.app-shell[data-theme='oled-black'] .conversation-header {
+.app-shell[data-theme='oled-black'] .conversation-header,
+.app-shell[data-theme='dracula'] .conversation-header,
+.app-shell[data-theme='midnight'] .conversation-header,
+.app-shell[data-theme='slate'] .conversation-header {
   background: rgba(32, 42, 36, 0.96);
   border-color: var(--line);
 }
@@ -3218,26 +3351,38 @@ textarea:focus-visible {
 }
 
 .app-shell[data-theme='dark'] .conversation-title h2,
-.app-shell[data-theme='oled-black'] .conversation-title h2 {
+.app-shell[data-theme='oled-black'] .conversation-title h2,
+.app-shell[data-theme='dracula'] .conversation-title h2,
+.app-shell[data-theme='midnight'] .conversation-title h2,
+.app-shell[data-theme='slate'] .conversation-title h2 {
   color: var(--ink);
 }
 
 .app-shell[data-theme='dark'] .message-body,
-.app-shell[data-theme='oled-black'] .message-body {
+.app-shell[data-theme='oled-black'] .message-body,
+.app-shell[data-theme='dracula'] .message-body,
+.app-shell[data-theme='midnight'] .message-body,
+.app-shell[data-theme='slate'] .message-body {
   color: #dce5df;
   background: #2a352e;
   border-color: #34423a;
 }
 
 .app-shell[data-theme='dark'] .message-row.is-own .message-body,
-.app-shell[data-theme='oled-black'] .message-row.is-own .message-body {
+.app-shell[data-theme='oled-black'] .message-row.is-own .message-body,
+.app-shell[data-theme='dracula'] .message-row.is-own .message-body,
+.app-shell[data-theme='midnight'] .message-row.is-own .message-body,
+.app-shell[data-theme='slate'] .message-row.is-own .message-body {
   color: #f3f8f4;
   background: var(--own-bubble, #2d6551);
   border-color: var(--own-bubble, #2d6551);
 }
 
 .app-shell[data-theme='dark'] .message-body,
-.app-shell[data-theme='oled-black'] .message-body {
+.app-shell[data-theme='oled-black'] .message-body,
+.app-shell[data-theme='dracula'] .message-body,
+.app-shell[data-theme='midnight'] .message-body,
+.app-shell[data-theme='slate'] .message-body {
   color: var(--ink);
   background: #202a24;
   border-color: var(--line);
@@ -3250,7 +3395,13 @@ textarea:focus-visible {
 .app-shell[data-theme='dark'] .media-load,
 .app-shell[data-theme='dark'] .media-download,
 .app-shell[data-theme='oled-black'] .media-load,
-.app-shell[data-theme='oled-black'] .media-download {
+.app-shell[data-theme='dracula'] .media-load,
+.app-shell[data-theme='midnight'] .media-load,
+.app-shell[data-theme='slate'] .media-load,
+.app-shell[data-theme='oled-black'] .media-download,
+.app-shell[data-theme='dracula'] .media-download,
+.app-shell[data-theme='midnight'] .media-download,
+.app-shell[data-theme='slate'] .media-download {
   color: var(--ink);
   background: #202a24;
   border-color: var(--line);
@@ -3259,132 +3410,228 @@ textarea:focus-visible {
 .app-shell[data-theme='dark'] .media-load:hover:not(:disabled),
 .app-shell[data-theme='dark'] .media-download:hover,
 .app-shell[data-theme='oled-black'] .media-load:hover:not(:disabled),
-.app-shell[data-theme='oled-black'] .media-download:hover {
+.app-shell[data-theme='dracula'] .media-load:hover:not(:disabled),
+.app-shell[data-theme='midnight'] .media-load:hover:not(:disabled),
+.app-shell[data-theme='slate'] .media-load:hover:not(:disabled),
+.app-shell[data-theme='oled-black'] .media-download:hover,
+.app-shell[data-theme='dracula'] .media-download:hover,
+.app-shell[data-theme='midnight'] .media-download:hover,
+.app-shell[data-theme='slate'] .media-download:hover {
   background: #2a352e;
 }
 
 .app-shell[data-theme='dark'] .media-preview-button,
-.app-shell[data-theme='oled-black'] .media-preview-button {
+.app-shell[data-theme='oled-black'] .media-preview-button,
+.app-shell[data-theme='dracula'] .media-preview-button,
+.app-shell[data-theme='midnight'] .media-preview-button,
+.app-shell[data-theme='slate'] .media-preview-button {
   background: #101713;
   border-color: var(--line);
 }
 
 .app-shell[data-theme='dark'] .media-viewer,
-.app-shell[data-theme='oled-black'] .media-viewer {
+.app-shell[data-theme='oled-black'] .media-viewer,
+.app-shell[data-theme='dracula'] .media-viewer,
+.app-shell[data-theme='midnight'] .media-viewer,
+.app-shell[data-theme='slate'] .media-viewer {
   border-color: var(--line);
 }
 
 .app-shell[data-theme='dark'] .reaction-chip,
 .app-shell[data-theme='dark'] .reaction-picker button,
 .app-shell[data-theme='oled-black'] .reaction-chip,
-.app-shell[data-theme='oled-black'] .reaction-picker button {
+.app-shell[data-theme='dracula'] .reaction-chip,
+.app-shell[data-theme='midnight'] .reaction-chip,
+.app-shell[data-theme='slate'] .reaction-chip,
+.app-shell[data-theme='oled-black'] .reaction-picker button,
+.app-shell[data-theme='dracula'] .reaction-picker button,
+.app-shell[data-theme='midnight'] .reaction-picker button,
+.app-shell[data-theme='slate'] .reaction-picker button {
   color: var(--ink);
   background: #202a24;
   border-color: var(--line);
 }
 
 .app-shell[data-theme='dark'] .reaction-chip.is-reacted,
-.app-shell[data-theme='oled-black'] .reaction-chip.is-reacted {
+.app-shell[data-theme='oled-black'] .reaction-chip.is-reacted,
+.app-shell[data-theme='dracula'] .reaction-chip.is-reacted,
+.app-shell[data-theme='midnight'] .reaction-chip.is-reacted,
+.app-shell[data-theme='slate'] .reaction-chip.is-reacted {
   color: #b8e3cf;
   background: #24382e;
   border-color: #416850;
 }
 
 .app-shell[data-theme='dark'] .composer-context,
-.app-shell[data-theme='oled-black'] .composer-context {
+.app-shell[data-theme='oled-black'] .composer-context,
+.app-shell[data-theme='dracula'] .composer-context,
+.app-shell[data-theme='midnight'] .composer-context,
+.app-shell[data-theme='slate'] .composer-context {
   background: #202a24;
 }
 
 .app-shell[data-theme='dark'] .composer-context strong,
-.app-shell[data-theme='oled-black'] .composer-context strong {
+.app-shell[data-theme='oled-black'] .composer-context strong,
+.app-shell[data-theme='dracula'] .composer-context strong,
+.app-shell[data-theme='midnight'] .composer-context strong,
+.app-shell[data-theme='slate'] .composer-context strong {
   color: var(--ink);
 }
 
 .app-shell[data-theme='dark'] .mention-option strong,
-.app-shell[data-theme='oled-black'] .mention-option strong {
+.app-shell[data-theme='oled-black'] .mention-option strong,
+.app-shell[data-theme='dracula'] .mention-option strong,
+.app-shell[data-theme='midnight'] .mention-option strong,
+.app-shell[data-theme='slate'] .mention-option strong {
   color: var(--ink);
 }
 
 .app-shell[data-theme='dark'] .mention-option:hover,
 .app-shell[data-theme='dark'] .mention-option.is-active,
 .app-shell[data-theme='oled-black'] .mention-option:hover,
-.app-shell[data-theme='oled-black'] .mention-option.is-active {
+.app-shell[data-theme='dracula'] .mention-option:hover,
+.app-shell[data-theme='midnight'] .mention-option:hover,
+.app-shell[data-theme='slate'] .mention-option:hover,
+.app-shell[data-theme='oled-black'] .mention-option.is-active,
+.app-shell[data-theme='dracula'] .mention-option.is-active,
+.app-shell[data-theme='midnight'] .mention-option.is-active,
+.app-shell[data-theme='slate'] .mention-option.is-active {
   background: #2a352e;
 }
 
 .app-shell[data-theme='dark'] .message-action:hover:not(:disabled),
-.app-shell[data-theme='oled-black'] .message-action:hover:not(:disabled) {
+.app-shell[data-theme='oled-black'] .message-action:hover:not(:disabled),
+.app-shell[data-theme='dracula'] .message-action:hover:not(:disabled),
+.app-shell[data-theme='midnight'] .message-action:hover:not(:disabled),
+.app-shell[data-theme='slate'] .message-action:hover:not(:disabled) {
   color: var(--ink);
   background: #2a352e;
 }
 
 .app-shell[data-theme='dark'] .confirm-dialog button,
-.app-shell[data-theme='oled-black'] .confirm-dialog button {
+.app-shell[data-theme='oled-black'] .confirm-dialog button,
+.app-shell[data-theme='dracula'] .confirm-dialog button,
+.app-shell[data-theme='midnight'] .confirm-dialog button,
+.app-shell[data-theme='slate'] .confirm-dialog button {
   color: var(--ink);
   background: #202a24;
   border-color: var(--line);
 }
 
 .app-shell[data-theme='dark'] .confirm-dialog button.is-danger,
-.app-shell[data-theme='oled-black'] .confirm-dialog button.is-danger {
+.app-shell[data-theme='oled-black'] .confirm-dialog button.is-danger,
+.app-shell[data-theme='dracula'] .confirm-dialog button.is-danger,
+.app-shell[data-theme='midnight'] .confirm-dialog button.is-danger,
+.app-shell[data-theme='slate'] .confirm-dialog button.is-danger {
   color: #efaa98;
   background: #382b27;
   border-color: #5c3d34;
 }
 
 .app-shell[data-theme='dark'] .room-info-dialog,
-.app-shell[data-theme='oled-black'] .room-info-dialog {
+.app-shell[data-theme='oled-black'] .room-info-dialog,
+.app-shell[data-theme='dracula'] .room-info-dialog,
+.app-shell[data-theme='midnight'] .room-info-dialog,
+.app-shell[data-theme='slate'] .room-info-dialog {
   border-color: var(--line);
 }
 
 .app-shell[data-theme='dark'] .room-info-header,
 .app-shell[data-theme='oled-black'] .room-info-header,
+.app-shell[data-theme='dracula'] .room-info-header,
+.app-shell[data-theme='midnight'] .room-info-header,
+.app-shell[data-theme='slate'] .room-info-header,
 .app-shell[data-theme='dark'] .room-info-footer,
 .app-shell[data-theme='oled-black'] .room-info-footer,
+.app-shell[data-theme='dracula'] .room-info-footer,
+.app-shell[data-theme='midnight'] .room-info-footer,
+.app-shell[data-theme='slate'] .room-info-footer,
 .app-shell[data-theme='dark'] .room-member-row,
 .app-shell[data-theme='oled-black'] .room-member-row,
+.app-shell[data-theme='dracula'] .room-member-row,
+.app-shell[data-theme='midnight'] .room-member-row,
+.app-shell[data-theme='slate'] .room-member-row,
 .app-shell[data-theme='dark'] .room-info-fact,
-.app-shell[data-theme='oled-black'] .room-info-fact {
+.app-shell[data-theme='oled-black'] .room-info-fact,
+.app-shell[data-theme='dracula'] .room-info-fact,
+.app-shell[data-theme='midnight'] .room-info-fact,
+.app-shell[data-theme='slate'] .room-info-fact {
   border-color: var(--line);
 }
 
 .app-shell[data-theme='dark'] .room-member-row strong,
-.app-shell[data-theme='oled-black'] .room-member-row strong {
+.app-shell[data-theme='oled-black'] .room-member-row strong,
+.app-shell[data-theme='dracula'] .room-member-row strong,
+.app-shell[data-theme='midnight'] .room-member-row strong,
+.app-shell[data-theme='slate'] .room-member-row strong {
   color: var(--ink);
 }
 
 .app-shell[data-theme='dark'] .room-member-avatar,
-.app-shell[data-theme='oled-black'] .room-member-avatar {
+.app-shell[data-theme='oled-black'] .room-member-avatar,
+.app-shell[data-theme='dracula'] .room-member-avatar,
+.app-shell[data-theme='midnight'] .room-member-avatar,
+.app-shell[data-theme='slate'] .room-member-avatar {
   color: #c4d9cb;
   background: #2a352e;
 }
 
 .app-shell[data-theme='dark'] .settings-dialog,
-.app-shell[data-theme='oled-black'] .settings-dialog {
+.app-shell[data-theme='oled-black'] .settings-dialog,
+.app-shell[data-theme='dracula'] .settings-dialog,
+.app-shell[data-theme='midnight'] .settings-dialog,
+.app-shell[data-theme='slate'] .settings-dialog {
   border-color: var(--line);
 }
 
 .app-shell[data-theme='dark'] .setting-row strong,
 .app-shell[data-theme='oled-black'] .setting-row strong,
+.app-shell[data-theme='dracula'] .setting-row strong,
+.app-shell[data-theme='midnight'] .setting-row strong,
+.app-shell[data-theme='slate'] .setting-row strong,
 .app-shell[data-theme='dark'] .setting-toggle,
 .app-shell[data-theme='oled-black'] .setting-toggle,
+.app-shell[data-theme='dracula'] .setting-toggle,
+.app-shell[data-theme='midnight'] .setting-toggle,
+.app-shell[data-theme='slate'] .setting-toggle,
 .app-shell[data-theme='dark'] .account-summary strong,
 .app-shell[data-theme='oled-black'] .account-summary strong,
+.app-shell[data-theme='dracula'] .account-summary strong,
+.app-shell[data-theme='midnight'] .account-summary strong,
+.app-shell[data-theme='slate'] .account-summary strong,
 .app-shell[data-theme='dark'] .account-details strong,
 .app-shell[data-theme='oled-black'] .account-details strong,
+.app-shell[data-theme='dracula'] .account-details strong,
+.app-shell[data-theme='midnight'] .account-details strong,
+.app-shell[data-theme='slate'] .account-details strong,
 .app-shell[data-theme='dark'] .device-row strong,
 .app-shell[data-theme='oled-black'] .device-row strong,
+.app-shell[data-theme='dracula'] .device-row strong,
+.app-shell[data-theme='midnight'] .device-row strong,
+.app-shell[data-theme='slate'] .device-row strong,
 .app-shell[data-theme='dark'] .storage-summary strong,
-.app-shell[data-theme='oled-black'] .storage-summary strong {
+.app-shell[data-theme='oled-black'] .storage-summary strong,
+.app-shell[data-theme='dracula'] .storage-summary strong,
+.app-shell[data-theme='midnight'] .storage-summary strong,
+.app-shell[data-theme='slate'] .storage-summary strong {
   color: var(--ink);
 }
 
 .app-shell[data-theme='dark'] .setting-row,
 .app-shell[data-theme='oled-black'] .setting-row,
+.app-shell[data-theme='dracula'] .setting-row,
+.app-shell[data-theme='midnight'] .setting-row,
+.app-shell[data-theme='slate'] .setting-row,
 .app-shell[data-theme='dark'] .device-row,
 .app-shell[data-theme='oled-black'] .device-row,
+.app-shell[data-theme='dracula'] .device-row,
+.app-shell[data-theme='midnight'] .device-row,
+.app-shell[data-theme='slate'] .device-row,
 .app-shell[data-theme='dark'] .storage-summary>div,
-.app-shell[data-theme='oled-black'] .storage-summary>div {
+.app-shell[data-theme='oled-black'] .storage-summary>div,
+.app-shell[data-theme='dracula'] .storage-summary>div,
+.app-shell[data-theme='midnight'] .storage-summary>div,
+.app-shell[data-theme='slate'] .storage-summary>div {
   border-color: var(--line);
 }
 
@@ -3392,8 +3639,17 @@ textarea:focus-visible {
 .app-shell[data-theme='dark'] .shortcut-input,
 .app-shell[data-theme='dark'] .security-field input,
 .app-shell[data-theme='oled-black'] .setting-row select,
+.app-shell[data-theme='dracula'] .setting-row select,
+.app-shell[data-theme='midnight'] .setting-row select,
+.app-shell[data-theme='slate'] .setting-row select,
 .app-shell[data-theme='oled-black'] .shortcut-input,
-.app-shell[data-theme='oled-black'] .security-field input {
+.app-shell[data-theme='dracula'] .shortcut-input,
+.app-shell[data-theme='midnight'] .shortcut-input,
+.app-shell[data-theme='slate'] .shortcut-input,
+.app-shell[data-theme='oled-black'] .security-field input,
+.app-shell[data-theme='dracula'] .security-field input,
+.app-shell[data-theme='midnight'] .security-field input,
+.app-shell[data-theme='slate'] .security-field input {
   color: var(--ink);
   background: #151c18;
   border-color: var(--line);
@@ -3406,14 +3662,20 @@ textarea:focus-visible {
 }
 
 .app-shell[data-theme='dark'] .settings-command,
-.app-shell[data-theme='oled-black'] .settings-command {
+.app-shell[data-theme='oled-black'] .settings-command,
+.app-shell[data-theme='dracula'] .settings-command,
+.app-shell[data-theme='midnight'] .settings-command,
+.app-shell[data-theme='slate'] .settings-command {
   color: var(--ink);
   background: #2a352e;
   border-color: var(--line);
 }
 
 .app-shell[data-theme='dark'] .settings-command.is-danger,
-.app-shell[data-theme='oled-black'] .settings-command.is-danger {
+.app-shell[data-theme='oled-black'] .settings-command.is-danger,
+.app-shell[data-theme='dracula'] .settings-command.is-danger,
+.app-shell[data-theme='midnight'] .settings-command.is-danger,
+.app-shell[data-theme='slate'] .settings-command.is-danger {
   color: #efaa98;
   background: #382b27;
   border-color: #5c3d34;
@@ -5656,53 +5918,258 @@ day-divider::after,
   --sidebar-muted: #d6b8c1;
 }
 
+.app-shell[data-theme='dracula'] {
+  color-scheme: dark;
+  --ink: #f8f8f2;
+  --ink-soft: #c8cad8;
+  --muted: #9498bd;
+  --faint: #6f749c;
+  --line: #3a3d51;
+  --line-soft: #31344a;
+  --paper: #2f3244;
+  --canvas: #282a36;
+  --canvas-warm: #343749;
+  --accent: #bd93f9;
+  --accent-bright: #d3acff;
+  --signal: #f1fa8c;
+  --signal-soft: #3f4030;
+  --danger: #ff5555;
+  --forest: #bd93f9;
+  --forest-deep: #21222c;
+  --forest-bright: #d3acff;
+  --green: #50fa7b;
+  --green-soft: rgba(80, 250, 123, 0.14);
+  --mint: #8be9fd;
+  --mint-soft: #2c3a44;
+  --sidebar-bg: #21222c;
+  --sidebar-border: #34364a;
+  --sidebar-panel: #282a36;
+  --sidebar-active: #34374c;
+  --sidebar-hover: #2c2f42;
+  --sidebar-ink: #f8f8f2;
+  --sidebar-muted: #9498bd;
+}
+
+.app-shell[data-theme='midnight'] {
+  color-scheme: dark;
+  --ink: #e3e9f3;
+  --ink-soft: #b6c2d6;
+  --muted: #8896ad;
+  --faint: #64748c;
+  --line: #27364d;
+  --line-soft: #1e2c40;
+  --paper: #14243a;
+  --canvas: #0c1728;
+  --canvas-warm: #172942;
+  --accent: #5b8def;
+  --accent-bright: #7aa5f5;
+  --signal: #e8b339;
+  --signal-soft: #3a3320;
+  --danger: #e8615f;
+  --forest: #5b8def;
+  --forest-deep: #0a1322;
+  --forest-bright: #7aa5f5;
+  --green: #58c4a0;
+  --green-soft: rgba(88, 196, 160, 0.15);
+  --mint: #58c4dd;
+  --mint-soft: #1d3547;
+  --sidebar-bg: #0a1322;
+  --sidebar-border: #1e2f4a;
+  --sidebar-panel: #122036;
+  --sidebar-active: #1b2f4d;
+  --sidebar-hover: #16273f;
+  --sidebar-ink: #e3e9f3;
+  --sidebar-muted: #8896ad;
+}
+
+.app-shell[data-theme='slate'] {
+  color-scheme: dark;
+  --ink: #e6e8ec;
+  --ink-soft: #bcc2cc;
+  --muted: #939aa6;
+  --faint: #6d7480;
+  --line: #333944;
+  --line-soft: #282e38;
+  --paper: #1f242c;
+  --canvas: #171b22;
+  --canvas-warm: #232833;
+  --accent: #7c95b8;
+  --accent-bright: #9ab0cf;
+  --signal: #d9b45c;
+  --signal-soft: #383323;
+  --danger: #dc6c6c;
+  --forest: #7c95b8;
+  --forest-deep: #10141a;
+  --forest-bright: #9ab0cf;
+  --green: #7c95b8;
+  --green-soft: rgba(124, 149, 184, 0.16);
+  --mint: #8fb8b0;
+  --mint-soft: #22322f;
+  --sidebar-bg: #10141a;
+  --sidebar-border: #262c36;
+  --sidebar-panel: #181d25;
+  --sidebar-active: #232a36;
+  --sidebar-hover: #1d232c;
+  --sidebar-ink: #e6e8ec;
+  --sidebar-muted: #939aa6;
+}
+
+.app-shell[data-theme='solarized'] {
+  color-scheme: light;
+  --ink: #586e75;
+  --ink-soft: #657b83;
+  --muted: #839496;
+  --faint: #93a1a1;
+  --line: #e0d9c3;
+  --line-soft: #ece5d2;
+  --paper: #fdf6e3;
+  --canvas: #eee8d5;
+  --canvas-warm: #f6efd9;
+  --accent: #268bd2;
+  --accent-bright: #3f9dde;
+  --signal: #b58900;
+  --signal-soft: #f6e8c9;
+  --danger: #dc322f;
+  --forest: #268bd2;
+  --forest-deep: #073642;
+  --forest-bright: #3f9dde;
+  --green: #2aa198;
+  --green-soft: rgba(42, 161, 152, 0.13);
+  --mint: #2aa198;
+  --mint-soft: #dcf0ec;
+  --sidebar-bg: #073642;
+  --sidebar-border: #1d4f5e;
+  --sidebar-panel: #0b4453;
+  --sidebar-active: #14505f;
+  --sidebar-hover: #0f4756;
+  --sidebar-ink: #eee8d5;
+  --sidebar-muted: #93a1a1;
+}
+
+.app-shell[data-theme='sepia'] {
+  color-scheme: light;
+  --ink: #4b3a2a;
+  --ink-soft: #6f5c45;
+  --muted: #94816a;
+  --faint: #b3a48e;
+  --line: #e6dcc8;
+  --line-soft: #f1e9da;
+  --paper: #fbf6ec;
+  --canvas: #f2e9d8;
+  --canvas-warm: #f8f1e3;
+  --accent: #8a5a2b;
+  --accent-bright: #a9743c;
+  --signal: #c4922f;
+  --signal-soft: #f4e8cd;
+  --danger: #b04a3a;
+  --forest: #8a5a2b;
+  --forest-deep: #453322;
+  --forest-bright: #a9743c;
+  --green: #7c8f5e;
+  --green-soft: rgba(124, 143, 94, 0.13);
+  --mint: #7c8f5e;
+  --mint-soft: #eaedda;
+  --sidebar-bg: #453322;
+  --sidebar-border: #5d4630;
+  --sidebar-panel: #523d28;
+  --sidebar-active: #634a31;
+  --sidebar-hover: #574029;
+  --sidebar-ink: #f7efe0;
+  --sidebar-muted: #cbb99d;
+}
+
 .app-shell[data-theme='bosco'] .sidebar,
-.app-shell[data-theme='rosa'] .sidebar {
+.app-shell[data-theme='rosa'] .sidebar,
+.app-shell[data-theme='solarized'] .sidebar,
+.app-shell[data-theme='sepia'] .sidebar,
+.app-shell[data-theme='dracula'] .sidebar,
+.app-shell[data-theme='midnight'] .sidebar,
+.app-shell[data-theme='slate'] .sidebar {
   color: var(--sidebar-ink);
   background: var(--sidebar-bg);
   border-right-color: var(--sidebar-border);
 }
 
 .app-shell[data-theme='bosco'] .room-section-label,
-.app-shell[data-theme='rosa'] .room-section-label {
+.app-shell[data-theme='rosa'] .room-section-label,
+.app-shell[data-theme='solarized'] .room-section-label,
+.app-shell[data-theme='sepia'] .room-section-label,
+.app-shell[data-theme='dracula'] .room-section-label,
+.app-shell[data-theme='midnight'] .room-section-label,
+.app-shell[data-theme='slate'] .room-section-label {
   color: var(--sidebar-muted);
 }
 
 .app-shell[data-theme='bosco'] .profile-copy strong,
-.app-shell[data-theme='rosa'] .profile-copy strong {
+.app-shell[data-theme='rosa'] .profile-copy strong,
+.app-shell[data-theme='solarized'] .profile-copy strong,
+.app-shell[data-theme='sepia'] .profile-copy strong,
+.app-shell[data-theme='dracula'] .profile-copy strong,
+.app-shell[data-theme='midnight'] .profile-copy strong,
+.app-shell[data-theme='slate'] .profile-copy strong {
   color: var(--sidebar-ink);
 }
 
 .app-shell[data-theme='bosco'] .room-search,
-.app-shell[data-theme='rosa'] .room-search {
+.app-shell[data-theme='rosa'] .room-search,
+.app-shell[data-theme='solarized'] .room-search,
+.app-shell[data-theme='sepia'] .room-search,
+.app-shell[data-theme='dracula'] .room-search,
+.app-shell[data-theme='midnight'] .room-search,
+.app-shell[data-theme='slate'] .room-search {
   color: var(--sidebar-muted);
   background: var(--sidebar-panel);
   border-color: var(--sidebar-border);
 }
 
 .app-shell[data-theme='bosco'] .room-search input,
-.app-shell[data-theme='rosa'] .room-search input {
+.app-shell[data-theme='rosa'] .room-search input,
+.app-shell[data-theme='solarized'] .room-search input,
+.app-shell[data-theme='sepia'] .room-search input,
+.app-shell[data-theme='dracula'] .room-search input,
+.app-shell[data-theme='midnight'] .room-search input,
+.app-shell[data-theme='slate'] .room-search input {
   color: var(--sidebar-ink);
 }
 
 .app-shell[data-theme='bosco'] .room-search input::placeholder,
-.app-shell[data-theme='rosa'] .room-search input::placeholder {
+.app-shell[data-theme='rosa'] .room-search input::placeholder,
+.app-shell[data-theme='solarized'] .room-search input::placeholder,
+.app-shell[data-theme='sepia'] .room-search input::placeholder,
+.app-shell[data-theme='dracula'] .room-search input::placeholder,
+.app-shell[data-theme='midnight'] .room-search input::placeholder,
+.app-shell[data-theme='slate'] .room-search input::placeholder {
   color: var(--sidebar-muted);
 }
 
 .app-shell[data-theme='bosco'] .room-filters,
-.app-shell[data-theme='rosa'] .room-filters {
+.app-shell[data-theme='rosa'] .room-filters,
+.app-shell[data-theme='solarized'] .room-filters,
+.app-shell[data-theme='sepia'] .room-filters,
+.app-shell[data-theme='dracula'] .room-filters,
+.app-shell[data-theme='midnight'] .room-filters,
+.app-shell[data-theme='slate'] .room-filters {
   background: var(--sidebar-panel);
   border-color: var(--sidebar-border);
 }
 
 .app-shell[data-theme='bosco'] .room-filters button,
-.app-shell[data-theme='rosa'] .room-filters button {
+.app-shell[data-theme='rosa'] .room-filters button,
+.app-shell[data-theme='solarized'] .room-filters button,
+.app-shell[data-theme='sepia'] .room-filters button,
+.app-shell[data-theme='dracula'] .room-filters button,
+.app-shell[data-theme='midnight'] .room-filters button,
+.app-shell[data-theme='slate'] .room-filters button {
   color: var(--sidebar-muted);
 }
 
 .app-shell[data-theme='bosco'] .room-filters button.is-active,
-.app-shell[data-theme='rosa'] .room-filters button.is-active {
+.app-shell[data-theme='rosa'] .room-filters button.is-active,
+.app-shell[data-theme='solarized'] .room-filters button.is-active,
+.app-shell[data-theme='sepia'] .room-filters button.is-active,
+.app-shell[data-theme='dracula'] .room-filters button.is-active,
+.app-shell[data-theme='midnight'] .room-filters button.is-active,
+.app-shell[data-theme='slate'] .room-filters button.is-active {
   color: var(--sidebar-bg);
   background: var(--signal);
   border-color: var(--signal);
@@ -5710,19 +6177,39 @@ day-divider::after,
 
 .app-shell[data-theme='bosco'] .room-filters button .filter-count,
 .app-shell[data-theme='rosa'] .room-filters button .filter-count,
+.app-shell[data-theme='solarized'] .room-filters button .filter-count,
+.app-shell[data-theme='sepia'] .room-filters button .filter-count,
+.app-shell[data-theme='dracula'] .room-filters button .filter-count,
+.app-shell[data-theme='midnight'] .room-filters button .filter-count,
+.app-shell[data-theme='slate'] .room-filters button .filter-count,
 .app-shell[data-theme='bosco'] .unread-count,
-.app-shell[data-theme='rosa'] .unread-count {
+.app-shell[data-theme='rosa'] .unread-count,
+.app-shell[data-theme='solarized'] .unread-count,
+.app-shell[data-theme='sepia'] .unread-count,
+.app-shell[data-theme='dracula'] .unread-count,
+.app-shell[data-theme='midnight'] .unread-count,
+.app-shell[data-theme='slate'] .unread-count {
   color: var(--sidebar-bg);
   background: var(--signal);
 }
 
 .app-shell[data-theme='bosco'] .room-button:hover,
-.app-shell[data-theme='rosa'] .room-button:hover {
+.app-shell[data-theme='rosa'] .room-button:hover,
+.app-shell[data-theme='solarized'] .room-button:hover,
+.app-shell[data-theme='sepia'] .room-button:hover,
+.app-shell[data-theme='dracula'] .room-button:hover,
+.app-shell[data-theme='midnight'] .room-button:hover,
+.app-shell[data-theme='slate'] .room-button:hover {
   background: var(--sidebar-hover);
 }
 
 .app-shell[data-theme='bosco'] .room-button.is-active,
-.app-shell[data-theme='rosa'] .room-button.is-active {
+.app-shell[data-theme='rosa'] .room-button.is-active,
+.app-shell[data-theme='solarized'] .room-button.is-active,
+.app-shell[data-theme='sepia'] .room-button.is-active,
+.app-shell[data-theme='dracula'] .room-button.is-active,
+.app-shell[data-theme='midnight'] .room-button.is-active,
+.app-shell[data-theme='slate'] .room-button.is-active {
   color: var(--sidebar-ink);
   background: var(--sidebar-active);
   border-color: var(--sidebar-border);
@@ -5731,56 +6218,111 @@ day-divider::after,
 
 .app-shell[data-theme='bosco'] .room-preview,
 .app-shell[data-theme='rosa'] .room-preview,
+.app-shell[data-theme='solarized'] .room-preview,
+.app-shell[data-theme='sepia'] .room-preview,
+.app-shell[data-theme='dracula'] .room-preview,
+.app-shell[data-theme='midnight'] .room-preview,
+.app-shell[data-theme='slate'] .room-preview,
 .app-shell[data-theme='bosco'] .room-button.is-active .room-preview,
-.app-shell[data-theme='rosa'] .room-button.is-active .room-preview {
+.app-shell[data-theme='rosa'] .room-button.is-active .room-preview,
+.app-shell[data-theme='solarized'] .room-button.is-active .room-preview,
+.app-shell[data-theme='sepia'] .room-button.is-active .room-preview,
+.app-shell[data-theme='dracula'] .room-button.is-active .room-preview,
+.app-shell[data-theme='midnight'] .room-button.is-active .room-preview,
+.app-shell[data-theme='slate'] .room-button.is-active .room-preview {
   color: var(--sidebar-muted);
 }
 
 .app-shell[data-theme='bosco'] .sidebar-profile,
-.app-shell[data-theme='rosa'] .sidebar-profile {
+.app-shell[data-theme='rosa'] .sidebar-profile,
+.app-shell[data-theme='solarized'] .sidebar-profile,
+.app-shell[data-theme='sepia'] .sidebar-profile,
+.app-shell[data-theme='dracula'] .sidebar-profile,
+.app-shell[data-theme='midnight'] .sidebar-profile,
+.app-shell[data-theme='slate'] .sidebar-profile {
   background: var(--sidebar-panel);
   border-top-color: var(--sidebar-border);
 }
 
 .app-shell[data-theme='bosco'] .profile-copy span,
-.app-shell[data-theme='rosa'] .profile-copy span {
+.app-shell[data-theme='rosa'] .profile-copy span,
+.app-shell[data-theme='solarized'] .profile-copy span,
+.app-shell[data-theme='sepia'] .profile-copy span,
+.app-shell[data-theme='dracula'] .profile-copy span,
+.app-shell[data-theme='midnight'] .profile-copy span,
+.app-shell[data-theme='slate'] .profile-copy span {
   color: var(--sidebar-muted);
 }
 
 .app-shell[data-theme='bosco'] .sidebar-icon,
-.app-shell[data-theme='rosa'] .sidebar-icon {
+.app-shell[data-theme='rosa'] .sidebar-icon,
+.app-shell[data-theme='solarized'] .sidebar-icon,
+.app-shell[data-theme='sepia'] .sidebar-icon,
+.app-shell[data-theme='dracula'] .sidebar-icon,
+.app-shell[data-theme='midnight'] .sidebar-icon,
+.app-shell[data-theme='slate'] .sidebar-icon {
   color: var(--sidebar-muted);
   border-color: var(--sidebar-border);
 }
 
 .app-shell[data-theme='bosco'] .sidebar-icon:hover,
-.app-shell[data-theme='rosa'] .sidebar-icon:hover {
+.app-shell[data-theme='rosa'] .sidebar-icon:hover,
+.app-shell[data-theme='solarized'] .sidebar-icon:hover,
+.app-shell[data-theme='sepia'] .sidebar-icon:hover,
+.app-shell[data-theme='dracula'] .sidebar-icon:hover,
+.app-shell[data-theme='midnight'] .sidebar-icon:hover,
+.app-shell[data-theme='slate'] .sidebar-icon:hover {
   color: var(--signal);
   background: var(--sidebar-hover);
 }
 
 .app-shell[data-theme='bosco'] .conversation,
-.app-shell[data-theme='rosa'] .conversation {
+.app-shell[data-theme='rosa'] .conversation,
+.app-shell[data-theme='solarized'] .conversation,
+.app-shell[data-theme='sepia'] .conversation,
+.app-shell[data-theme='dracula'] .conversation,
+.app-shell[data-theme='midnight'] .conversation,
+.app-shell[data-theme='slate'] .conversation {
   background: var(--canvas);
 }
 
 .app-shell[data-theme='bosco'] .conversation-header,
 .app-shell[data-theme='rosa'] .conversation-header,
+.app-shell[data-theme='solarized'] .conversation-header,
+.app-shell[data-theme='sepia'] .conversation-header,
+.app-shell[data-theme='dracula'] .conversation-header,
+.app-shell[data-theme='midnight'] .conversation-header,
+.app-shell[data-theme='slate'] .conversation-header,
 .app-shell[data-theme='bosco'] .composer,
-.app-shell[data-theme='rosa'] .composer {
+.app-shell[data-theme='rosa'] .composer,
+.app-shell[data-theme='solarized'] .composer,
+.app-shell[data-theme='sepia'] .composer,
+.app-shell[data-theme='dracula'] .composer,
+.app-shell[data-theme='midnight'] .composer,
+.app-shell[data-theme='slate'] .composer {
   background: var(--paper);
   border-color: var(--line);
 }
 
 .app-shell[data-theme='bosco'] .message-body,
-.app-shell[data-theme='rosa'] .message-body {
+.app-shell[data-theme='rosa'] .message-body,
+.app-shell[data-theme='solarized'] .message-body,
+.app-shell[data-theme='sepia'] .message-body,
+.app-shell[data-theme='dracula'] .message-body,
+.app-shell[data-theme='midnight'] .message-body,
+.app-shell[data-theme='slate'] .message-body {
   color: var(--ink);
   background: var(--paper);
   border-color: var(--line);
 }
 
 .app-shell[data-theme='bosco'] .message-row.is-own .message-body,
-.app-shell[data-theme='rosa'] .message-row.is-own .message-body {
+.app-shell[data-theme='rosa'] .message-row.is-own .message-body,
+.app-shell[data-theme='solarized'] .message-row.is-own .message-body,
+.app-shell[data-theme='sepia'] .message-row.is-own .message-body,
+.app-shell[data-theme='dracula'] .message-row.is-own .message-body,
+.app-shell[data-theme='midnight'] .message-row.is-own .message-body,
+.app-shell[data-theme='slate'] .message-row.is-own .message-body {
   color: #fff;
   background: var(--own-bubble, var(--accent));
   border-color: var(--own-bubble, var(--accent));
@@ -5788,38 +6330,88 @@ day-divider::after,
 
 .app-shell[data-theme='bosco'] .message-actions,
 .app-shell[data-theme='rosa'] .message-actions,
+.app-shell[data-theme='solarized'] .message-actions,
+.app-shell[data-theme='sepia'] .message-actions,
+.app-shell[data-theme='dracula'] .message-actions,
+.app-shell[data-theme='midnight'] .message-actions,
+.app-shell[data-theme='slate'] .message-actions,
 .app-shell[data-theme='bosco'] .reaction-chip,
 .app-shell[data-theme='rosa'] .reaction-chip,
+.app-shell[data-theme='solarized'] .reaction-chip,
+.app-shell[data-theme='sepia'] .reaction-chip,
+.app-shell[data-theme='dracula'] .reaction-chip,
+.app-shell[data-theme='midnight'] .reaction-chip,
+.app-shell[data-theme='slate'] .reaction-chip,
 .app-shell[data-theme='bosco'] .reaction-picker button,
-.app-shell[data-theme='rosa'] .reaction-picker button {
+.app-shell[data-theme='rosa'] .reaction-picker button,
+.app-shell[data-theme='solarized'] .reaction-picker button,
+.app-shell[data-theme='sepia'] .reaction-picker button,
+.app-shell[data-theme='dracula'] .reaction-picker button,
+.app-shell[data-theme='midnight'] .reaction-picker button,
+.app-shell[data-theme='slate'] .reaction-picker button {
   color: var(--ink-soft);
   background: var(--paper);
   border-color: var(--line);
 }
 
 .app-shell[data-theme='bosco'] .day-divider span,
-.app-shell[data-theme='rosa'] .day-divider span {
+.app-shell[data-theme='rosa'] .day-divider span,
+.app-shell[data-theme='solarized'] .day-divider span,
+.app-shell[data-theme='sepia'] .day-divider span,
+.app-shell[data-theme='dracula'] .day-divider span,
+.app-shell[data-theme='midnight'] .day-divider span,
+.app-shell[data-theme='slate'] .day-divider span {
   color: var(--ink-soft);
   background: var(--canvas);
   border-color: var(--line);
 }
 
 .app-shell[data-theme='bosco'] .composer-context,
-.app-shell[data-theme='rosa'] .composer-context {
+.app-shell[data-theme='rosa'] .composer-context,
+.app-shell[data-theme='solarized'] .composer-context,
+.app-shell[data-theme='sepia'] .composer-context,
+.app-shell[data-theme='dracula'] .composer-context,
+.app-shell[data-theme='midnight'] .composer-context,
+.app-shell[data-theme='slate'] .composer-context {
   background: var(--canvas-warm);
   border-color: var(--line);
 }
 
 .app-shell[data-theme='bosco'] .settings-dialog,
 .app-shell[data-theme='rosa'] .settings-dialog,
+.app-shell[data-theme='solarized'] .settings-dialog,
+.app-shell[data-theme='sepia'] .settings-dialog,
+.app-shell[data-theme='dracula'] .settings-dialog,
+.app-shell[data-theme='midnight'] .settings-dialog,
+.app-shell[data-theme='slate'] .settings-dialog,
 .app-shell[data-theme='bosco'] .room-info-dialog,
 .app-shell[data-theme='rosa'] .room-info-dialog,
+.app-shell[data-theme='solarized'] .room-info-dialog,
+.app-shell[data-theme='sepia'] .room-info-dialog,
+.app-shell[data-theme='dracula'] .room-info-dialog,
+.app-shell[data-theme='midnight'] .room-info-dialog,
+.app-shell[data-theme='slate'] .room-info-dialog,
 .app-shell[data-theme='bosco'] .message-search-panel,
 .app-shell[data-theme='rosa'] .message-search-panel,
+.app-shell[data-theme='solarized'] .message-search-panel,
+.app-shell[data-theme='sepia'] .message-search-panel,
+.app-shell[data-theme='dracula'] .message-search-panel,
+.app-shell[data-theme='midnight'] .message-search-panel,
+.app-shell[data-theme='slate'] .message-search-panel,
 .app-shell[data-theme='bosco'] .confirm-dialog,
 .app-shell[data-theme='rosa'] .confirm-dialog,
+.app-shell[data-theme='solarized'] .confirm-dialog,
+.app-shell[data-theme='sepia'] .confirm-dialog,
+.app-shell[data-theme='dracula'] .confirm-dialog,
+.app-shell[data-theme='midnight'] .confirm-dialog,
+.app-shell[data-theme='slate'] .confirm-dialog,
 .app-shell[data-theme='bosco'] .quick-switcher,
-.app-shell[data-theme='rosa'] .quick-switcher {
+.app-shell[data-theme='rosa'] .quick-switcher,
+.app-shell[data-theme='solarized'] .quick-switcher,
+.app-shell[data-theme='sepia'] .quick-switcher,
+.app-shell[data-theme='dracula'] .quick-switcher,
+.app-shell[data-theme='midnight'] .quick-switcher,
+.app-shell[data-theme='slate'] .quick-switcher {
   color: var(--ink);
   background: var(--paper);
   border-color: var(--line);
@@ -5827,30 +6419,75 @@ day-divider::after,
 
 .app-shell[data-theme='bosco'] .settings-header,
 .app-shell[data-theme='rosa'] .settings-header,
+.app-shell[data-theme='solarized'] .settings-header,
+.app-shell[data-theme='sepia'] .settings-header,
+.app-shell[data-theme='dracula'] .settings-header,
+.app-shell[data-theme='midnight'] .settings-header,
+.app-shell[data-theme='slate'] .settings-header,
 .app-shell[data-theme='bosco'] .settings-tabs,
 .app-shell[data-theme='rosa'] .settings-tabs,
+.app-shell[data-theme='solarized'] .settings-tabs,
+.app-shell[data-theme='sepia'] .settings-tabs,
+.app-shell[data-theme='dracula'] .settings-tabs,
+.app-shell[data-theme='midnight'] .settings-tabs,
+.app-shell[data-theme='slate'] .settings-tabs,
 .app-shell[data-theme='bosco'] .room-info-header,
 .app-shell[data-theme='rosa'] .room-info-header,
+.app-shell[data-theme='solarized'] .room-info-header,
+.app-shell[data-theme='sepia'] .room-info-header,
+.app-shell[data-theme='dracula'] .room-info-header,
+.app-shell[data-theme='midnight'] .room-info-header,
+.app-shell[data-theme='slate'] .room-info-header,
 .app-shell[data-theme='bosco'] .room-info-footer,
-.app-shell[data-theme='rosa'] .room-info-footer {
+.app-shell[data-theme='rosa'] .room-info-footer,
+.app-shell[data-theme='solarized'] .room-info-footer,
+.app-shell[data-theme='sepia'] .room-info-footer,
+.app-shell[data-theme='dracula'] .room-info-footer,
+.app-shell[data-theme='midnight'] .room-info-footer,
+.app-shell[data-theme='slate'] .room-info-footer {
   background: var(--paper);
   border-color: var(--line);
 }
 
 .app-shell[data-theme='bosco'] .settings-tabs button.is-active,
-.app-shell[data-theme='rosa'] .settings-tabs button.is-active {
+.app-shell[data-theme='rosa'] .settings-tabs button.is-active,
+.app-shell[data-theme='solarized'] .settings-tabs button.is-active,
+.app-shell[data-theme='sepia'] .settings-tabs button.is-active,
+.app-shell[data-theme='dracula'] .settings-tabs button.is-active,
+.app-shell[data-theme='midnight'] .settings-tabs button.is-active,
+.app-shell[data-theme='slate'] .settings-tabs button.is-active {
   color: var(--accent);
   background: var(--signal-soft);
 }
 
 .app-shell[data-theme='bosco'] .settings-command,
 .app-shell[data-theme='rosa'] .settings-command,
+.app-shell[data-theme='solarized'] .settings-command,
+.app-shell[data-theme='sepia'] .settings-command,
+.app-shell[data-theme='dracula'] .settings-command,
+.app-shell[data-theme='midnight'] .settings-command,
+.app-shell[data-theme='slate'] .settings-command,
 .app-shell[data-theme='bosco'] .setting-row select,
 .app-shell[data-theme='rosa'] .setting-row select,
+.app-shell[data-theme='solarized'] .setting-row select,
+.app-shell[data-theme='sepia'] .setting-row select,
+.app-shell[data-theme='dracula'] .setting-row select,
+.app-shell[data-theme='midnight'] .setting-row select,
+.app-shell[data-theme='slate'] .setting-row select,
 .app-shell[data-theme='bosco'] .shortcut-input,
 .app-shell[data-theme='rosa'] .shortcut-input,
+.app-shell[data-theme='solarized'] .shortcut-input,
+.app-shell[data-theme='sepia'] .shortcut-input,
+.app-shell[data-theme='dracula'] .shortcut-input,
+.app-shell[data-theme='midnight'] .shortcut-input,
+.app-shell[data-theme='slate'] .shortcut-input,
 .app-shell[data-theme='bosco'] .security-field input,
-.app-shell[data-theme='rosa'] .security-field input {
+.app-shell[data-theme='rosa'] .security-field input,
+.app-shell[data-theme='solarized'] .security-field input,
+.app-shell[data-theme='sepia'] .security-field input,
+.app-shell[data-theme='dracula'] .security-field input,
+.app-shell[data-theme='midnight'] .security-field input,
+.app-shell[data-theme='slate'] .security-field input {
   color: var(--ink);
   background: var(--canvas-warm);
   border-color: var(--line);
@@ -5858,10 +6495,25 @@ day-divider::after,
 
 .app-shell[data-theme='bosco'] .primary-button,
 .app-shell[data-theme='rosa'] .primary-button,
+.app-shell[data-theme='solarized'] .primary-button,
+.app-shell[data-theme='sepia'] .primary-button,
+.app-shell[data-theme='dracula'] .primary-button,
+.app-shell[data-theme='midnight'] .primary-button,
+.app-shell[data-theme='slate'] .primary-button,
 .app-shell[data-theme='bosco'] .send-button,
 .app-shell[data-theme='rosa'] .send-button,
+.app-shell[data-theme='solarized'] .send-button,
+.app-shell[data-theme='sepia'] .send-button,
+.app-shell[data-theme='dracula'] .send-button,
+.app-shell[data-theme='midnight'] .send-button,
+.app-shell[data-theme='slate'] .send-button,
 .app-shell[data-theme='bosco'] .search-submit,
-.app-shell[data-theme='rosa'] .search-submit {
+.app-shell[data-theme='rosa'] .search-submit,
+.app-shell[data-theme='solarized'] .search-submit,
+.app-shell[data-theme='sepia'] .search-submit,
+.app-shell[data-theme='dracula'] .search-submit,
+.app-shell[data-theme='midnight'] .search-submit,
+.app-shell[data-theme='slate'] .search-submit {
   color: #fff;
   background: var(--accent);
   border-color: var(--accent);
@@ -5869,15 +6521,30 @@ day-divider::after,
 
 .app-shell[data-theme='bosco'] .icon-button:hover:not(:disabled),
 .app-shell[data-theme='rosa'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='solarized'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='sepia'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='dracula'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='midnight'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='slate'] .icon-button:hover:not(:disabled),
 .app-shell[data-theme='bosco'] .settings-command:hover:not(:disabled),
-.app-shell[data-theme='rosa'] .settings-command:hover:not(:disabled) {
+.app-shell[data-theme='rosa'] .settings-command:hover:not(:disabled),
+.app-shell[data-theme='solarized'] .settings-command:hover:not(:disabled),
+.app-shell[data-theme='sepia'] .settings-command:hover:not(:disabled),
+.app-shell[data-theme='dracula'] .settings-command:hover:not(:disabled),
+.app-shell[data-theme='midnight'] .settings-command:hover:not(:disabled),
+.app-shell[data-theme='slate'] .settings-command:hover:not(:disabled) {
   color: var(--accent);
   background: var(--signal-soft);
   border-color: var(--line);
 }
 
 .app-shell[data-theme='bosco'] .reaction-chip.is-reacted,
-.app-shell[data-theme='rosa'] .reaction-chip.is-reacted {
+.app-shell[data-theme='rosa'] .reaction-chip.is-reacted,
+.app-shell[data-theme='solarized'] .reaction-chip.is-reacted,
+.app-shell[data-theme='sepia'] .reaction-chip.is-reacted,
+.app-shell[data-theme='dracula'] .reaction-chip.is-reacted,
+.app-shell[data-theme='midnight'] .reaction-chip.is-reacted,
+.app-shell[data-theme='slate'] .reaction-chip.is-reacted {
   color: var(--accent);
   background: var(--signal-soft);
   border-color: var(--signal);
@@ -5885,14 +6552,39 @@ day-divider::after,
 
 .app-shell[data-theme='bosco'] .room-info-fact,
 .app-shell[data-theme='rosa'] .room-info-fact,
+.app-shell[data-theme='solarized'] .room-info-fact,
+.app-shell[data-theme='sepia'] .room-info-fact,
+.app-shell[data-theme='dracula'] .room-info-fact,
+.app-shell[data-theme='midnight'] .room-info-fact,
+.app-shell[data-theme='slate'] .room-info-fact,
 .app-shell[data-theme='bosco'] .room-member-row,
 .app-shell[data-theme='rosa'] .room-member-row,
+.app-shell[data-theme='solarized'] .room-member-row,
+.app-shell[data-theme='sepia'] .room-member-row,
+.app-shell[data-theme='dracula'] .room-member-row,
+.app-shell[data-theme='midnight'] .room-member-row,
+.app-shell[data-theme='slate'] .room-member-row,
 .app-shell[data-theme='bosco'] .setting-row,
 .app-shell[data-theme='rosa'] .setting-row,
+.app-shell[data-theme='solarized'] .setting-row,
+.app-shell[data-theme='sepia'] .setting-row,
+.app-shell[data-theme='dracula'] .setting-row,
+.app-shell[data-theme='midnight'] .setting-row,
+.app-shell[data-theme='slate'] .setting-row,
 .app-shell[data-theme='bosco'] .device-row,
 .app-shell[data-theme='rosa'] .device-row,
+.app-shell[data-theme='solarized'] .device-row,
+.app-shell[data-theme='sepia'] .device-row,
+.app-shell[data-theme='dracula'] .device-row,
+.app-shell[data-theme='midnight'] .device-row,
+.app-shell[data-theme='slate'] .device-row,
 .app-shell[data-theme='bosco'] .storage-summary>div,
-.app-shell[data-theme='rosa'] .storage-summary>div {
+.app-shell[data-theme='rosa'] .storage-summary>div,
+.app-shell[data-theme='solarized'] .storage-summary>div,
+.app-shell[data-theme='sepia'] .storage-summary>div,
+.app-shell[data-theme='dracula'] .storage-summary>div,
+.app-shell[data-theme='midnight'] .storage-summary>div,
+.app-shell[data-theme='slate'] .storage-summary>div {
   border-color: var(--line);
 }
 
@@ -6482,6 +7174,28 @@ day-divider::after,
 
 .app-shell[data-compact-chat-list='true'] .room-copy {
   gap: 1px;
+}
+
+.room-list.is-virtualized {
+  display: block;
+  gap: 0;
+}
+
+.room-list-virtual-content {
+  position: relative;
+  width: 100%;
+}
+
+.room-list-virtual-row {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: var(--room-row-height);
+}
+
+.room-list-virtual-row .room-button {
+  height: calc(100% - 4px);
+  min-height: 0;
 }
 
 .app-shell[data-pointer-cursor='false'] button,

@@ -301,6 +301,72 @@ describe('settings storage, integrations, help, and about', () => {
     await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('shortcuts.single_keys', false))
     expect(await screen.findByText(/Single-key shortcuts are off/)).toBeTruthy()
   })
+
+  it('searches settings across tabs and jumps to the matching setting', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+
+    const search = screen.getByLabelText('Search settings')
+    await user.type(search, 'unread')
+
+    const results = screen.getByRole('region', { name: 'Settings search results' })
+    expect(within(results).getByRole('button', { name: /Show unread counts/ })).toBeTruthy()
+    expect(within(results).getByRole('button', { name: /room's read state/ })).toBeTruthy()
+    expect(within(results).getByRole('heading', { name: 'Appearance' })).toBeTruthy()
+    expect(within(results).getByRole('heading', { name: 'General' })).toBeTruthy()
+
+    await user.click(within(results).getByRole('button', { name: /Show unread counts/ }))
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Appearance' }).getAttribute('aria-selected')).toBe('true'))
+    expect(screen.getByRole('checkbox', { name: 'Show unread counts' })).toBeTruthy()
+    await waitFor(() => expect(document.querySelector('.setting-toggle.is-search-hit')).toBeTruthy())
+  })
+
+  it('reports when no setting matches the search', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+
+    await user.type(screen.getByLabelText('Search settings'), 'zzzzz')
+    expect(await screen.findByText(/No settings match/)).toBeTruthy()
+  })
+
+  it('opens a tab from the search results and clears the search', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.type(screen.getByLabelText('Search settings'), 'unread')
+
+    await user.click(screen.getByRole('tab', { name: 'Appearance' }))
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Appearance' }).getAttribute('aria-selected')).toBe('true'))
+    expect(screen.getByRole('checkbox', { name: 'Show unread counts' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Settings search results' })).toBeNull()
+  })
+
+  it('opens a tab without matches and clears the search', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.type(screen.getByLabelText('Search settings'), 'unread')
+
+    await user.click(screen.getByRole('tab', { name: 'About' }))
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'About' }).getAttribute('aria-selected')).toBe('true'))
+    expect(screen.queryByRole('region', { name: 'Settings search results' })).toBeNull()
+  })
+
+  it('clears the settings search with the escape key without closing the dialog', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+
+    const search = screen.getByLabelText('Search settings')
+    await user.type(search, 'theme')
+    expect(await screen.findByRole('region', { name: 'Settings search results' })).toBeTruthy()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Settings search results' })).toBeNull())
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy()
+  })
 })
 
 describe('room history updates', () => {
@@ -1234,6 +1300,34 @@ describe('room history updates', () => {
     expect(container.querySelector('[data-event-id="$photo"] .media-preview')).toBeNull()
   })
 
+  it('hides images and videos from chat when enabled in Appearance settings', async () => {
+    const user = userEvent.setup()
+    const imageMessage = { ...message('$photo-hidden', 'Photo attachment', 300), mediaUri: 'mxc://example.org/photo-hidden', mediaMime: 'image/png', mediaSize: 12 }
+    const videoMessage = { ...message('$video-hidden', 'Video attachment', 400), mediaUri: 'mxc://example.org/video-hidden', mediaMime: 'video/mp4', mediaSize: 24 }
+    const audioMessage = { ...message('$audio-visible', 'Voice message.ogg', 500), mediaUri: 'mxc://example.org/audio-visible', mediaMime: 'audio/ogg', mediaSize: 12 }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'appearance.hide_images_and_videos': true } })
+    harness.service.History.mockResolvedValueOnce({ messages: [imageMessage, videoMessage, audioMessage], before: 0, hasMore: false })
+    stubImageIntersectionObserver()
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('Photo attachment')).toBeTruthy()
+    expect(container.querySelector('[data-event-id="$photo-hidden"] .message-attachment')).toBeNull()
+    expect(container.querySelector('[data-event-id="$video-hidden"] .message-attachment')).toBeNull()
+    expect(container.querySelector('[data-event-id="$audio-visible"] .audio-attachment')).toBeTruthy()
+    expect(harness.service.DownloadMedia).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('tab', { name: 'Appearance' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Hide images and videos' }))
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-event-id="$photo-hidden"] .media-load')).toBeTruthy()
+      expect(container.querySelector('[data-event-id="$video-hidden"] .media-load')).toBeTruthy()
+      expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('appearance.hide_images_and_videos', false)
+    })
+    expect(harness.service.DownloadMedia).not.toHaveBeenCalled()
+  })
+
   it('does not create an image object URL when media finishes downloading after unmount', async () => {
     const imageMessage = { ...message('$late-photo', 'Attachment', 300), mediaUri: 'mxc://example.org/late-photo', mediaMime: 'image/png', mediaSize: 12 }
     harness.service.History.mockResolvedValueOnce({ messages: [imageMessage], before: 0, hasMore: false })
@@ -1735,21 +1829,24 @@ describe('room history updates', () => {
     expect(previews[1].querySelector('.room-preview-text')?.classList.contains('is-received')).toBe(true)
   })
 
-  it('shows only the time for rooms active within 24 hours and the date for older rooms', async () => {
-    const recent = Date.now() - 5 * 60_000
-    const old = Date.now() - 2 * 24 * 60 * 60_000
+  it('shows the time for rooms active today and the date for rooms active on earlier days', async () => {
+    const today = new Date()
+    today.setHours(12, 0, 0, 0)
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+    yesterday.setHours(23, 59, 0, 0)
     harness.service.Snapshot.mockResolvedValue({
       ...snapshot,
       rooms: [
-        { ...room, id: '!recent:example.org', name: 'Recent room', lastEventAt: recent },
-        { ...room, id: '!old:example.org', name: 'Old room', lastEventAt: old },
+        { ...room, id: '!today:example.org', name: 'Today room', lastEventAt: today.getTime() },
+        { ...room, id: '!yesterday:example.org', name: 'Yesterday room', lastEventAt: yesterday.getTime() },
       ],
     })
     const { container } = render(<App />)
-    await waitFor(() => expect(container.querySelector('.room-button[title="Old room"]')).toBeTruthy())
+    await waitFor(() => expect(container.querySelector('.room-button[title="Yesterday room"]')).toBeTruthy())
 
-    expect(container.querySelector('.room-button[title="Recent room"] .room-meta time')?.textContent).toBe(new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(recent)))
-    expect(container.querySelector('.room-button[title="Old room"] .room-meta time')?.textContent).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(old)))
+    expect(container.querySelector('.room-button[title="Today room"] .room-meta time')?.textContent).toBe(new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).format(today))
+    expect(container.querySelector('.room-button[title="Yesterday room"] .room-meta time')?.textContent).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(yesterday))
   })
 
   it('leaves the preview empty instead of showing the room ID', async () => {
@@ -1780,10 +1877,16 @@ describe('room history updates', () => {
   })
 
   it('sorts chats by activity date while keeping favorites pinned', async () => {
-    const oldest = { ...room, id: '!oldest:example.org', name: 'Oldest', lastEventAt: 100 }
-    const middle = { ...room, id: '!middle:example.org', name: 'Middle', lastEventAt: 0, lastSeen: 300 }
-    const newest = { ...room, id: '!newest:example.org', name: 'Newest', lastEventAt: 500 }
-    const favorite = { ...room, id: '!favorite:example.org', name: 'Favorite', favorite: true, lastEventAt: 50 }
+    const dayAt = (daysAgo: number) => {
+      const date = new Date()
+      date.setHours(12, 0, 0, 0)
+      date.setDate(date.getDate() - daysAgo)
+      return date.getTime()
+    }
+    const oldest = { ...room, id: '!oldest:example.org', name: 'Oldest', lastEventAt: dayAt(3) }
+    const middle = { ...room, id: '!middle:example.org', name: 'Middle', lastEventAt: 0, lastSeen: dayAt(2) }
+    const newest = { ...room, id: '!newest:example.org', name: 'Newest', lastEventAt: dayAt(1) }
+    const favorite = { ...room, id: '!favorite:example.org', name: 'Favorite', favorite: true, lastEventAt: dayAt(4) }
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [oldest, middle, newest, favorite] })
 
     const { container } = render(<App />)
@@ -1791,6 +1894,96 @@ describe('room history updates', () => {
 
     const names = Array.from(container.querySelectorAll('.room-list .room-name-text'), (element) => element.textContent)
     expect(names).toEqual(['Favorite', 'Newest', 'Middle', 'Oldest'])
+  })
+
+  it('sorts rooms from today by time and older rooms by date', async () => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const timestampAt = (daysAgo: number, hour: number) => {
+      const date = new Date(today)
+      date.setDate(date.getDate() - daysAgo)
+      date.setHours(hour, 0, 0, 0)
+      return date.getTime()
+    }
+    const todayEarlier = { ...room, id: '!today-earlier:example.org', name: 'Today earlier', lastEventAt: timestampAt(0, 10) }
+    const yesterday = { ...room, id: '!yesterday:example.org', name: 'Yesterday', lastEventAt: timestampAt(1, 18) }
+    const todayLater = { ...room, id: '!today-later:example.org', name: 'Today later', lastEventAt: timestampAt(0, 15) }
+    const twoDaysAgo = { ...room, id: '!two-days-ago:example.org', name: 'Two days ago', lastEventAt: timestampAt(2, 20) }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [todayEarlier, yesterday, todayLater, twoDaysAgo] })
+
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    const names = Array.from(container.querySelectorAll('.room-list .room-name-text'), (element) => element.textContent)
+    expect(names).toEqual(['Today later', 'Today earlier', 'Yesterday', 'Two days ago'])
+  })
+
+  it('uses the latest event timestamp when it differs from the room sorting timestamp', async () => {
+    const activityAt = (daysAgo: number) => {
+      const date = new Date()
+      date.setHours(12, 0, 0, 0)
+      date.setDate(date.getDate() - daysAgo)
+      return date.getTime()
+    }
+    const mostRecent = {
+      ...room,
+      id: '!most-recent:example.org',
+      name: 'Most recent activity',
+      lastSeen: activityAt(0),
+      lastEventAt: activityAt(1),
+    }
+    const older = {
+      ...room,
+      id: '!older:example.org',
+      name: 'Older activity',
+      lastSeen: activityAt(1),
+      lastEventAt: activityAt(3),
+    }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [older, mostRecent] })
+
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('.room-list .room-button'))
+    expect(buttons.map((button) => button.querySelector('.room-name-text')?.textContent)).toEqual(['Most recent activity', 'Older activity'])
+    expect(buttons.map((button) => button.querySelector('.room-meta time')?.textContent)).toEqual([
+      new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(mostRecent.lastEventAt)),
+      new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(older.lastEventAt)),
+    ])
+  })
+
+  it('mounts only a window of rooms when the inbox contains many chats', async () => {
+    const rooms = Array.from({ length: 1_000 }, (_, index) => ({
+      ...room,
+      id: `!room-${index}:example.org`,
+      name: `Room ${index}`,
+    }))
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms })
+
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    expect(container.querySelectorAll('.room-list .room-button').length).toBeLessThan(40)
+    expect(container.querySelector('.room-section-label')?.textContent).toContain('1000')
+  })
+
+  it('moves keyboard focus into off-screen rooms in a large inbox', async () => {
+    const rooms = Array.from({ length: 1_000 }, (_, index) => ({
+      ...room,
+      id: `!room-${index}:example.org`,
+      name: `Room ${index}`,
+    }))
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms })
+
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const buttons = container.querySelectorAll<HTMLButtonElement>('.room-list .room-button')
+    const lastVisibleButton = buttons[buttons.length - 1]
+    const nextIndex = Number(lastVisibleButton.dataset.roomIndex) + 1
+
+    fireEvent.keyDown(lastVisibleButton, { key: 'ArrowDown' })
+
+    await waitFor(() => expect(container.querySelector(`.room-button[data-room-index="${nextIndex}"]`)).toBeTruthy())
+    expect(container.querySelectorAll('.room-list .room-button').length).toBeLessThan(40)
   })
 
   it('dismisses the answered notification after 10 seconds', async () => {
@@ -1883,6 +2076,19 @@ describe('room history updates', () => {
     await user.click(screen.getByRole('button', { name: 'Settings' }))
     await user.click(screen.getByRole('tab', { name: 'Appearance' }))
     const themeSelect = container.querySelector<HTMLSelectElement>('.settings-content select')!
+    expect(Array.from(themeSelect.options).map((option) => option.textContent)).toEqual([
+      'System default',
+      'Light (light)',
+      'Dark (dark)',
+      'OLED black (dark)',
+      'Bosco (light)',
+      'Rosa (light)',
+      'Dracula (dark)',
+      'Midnight (dark)',
+      'Slate (dark)',
+      'Solarized (light)',
+      'Sepia (light)',
+    ])
 
     await user.selectOptions(themeSelect, 'Bosco')
     expect(container.querySelector('.app-shell')?.getAttribute('data-theme')).toBe('bosco')
@@ -1891,6 +2097,16 @@ describe('room history updates', () => {
     await user.selectOptions(themeSelect, 'Rosa')
     expect(container.querySelector('.app-shell')?.getAttribute('data-theme')).toBe('rosa')
     await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('appearance.theme', 'Rosa'))
+
+    await user.selectOptions(themeSelect, 'Dracula')
+    expect(container.querySelector('.app-shell')?.getAttribute('data-theme')).toBe('dracula')
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('appearance.theme', 'Dracula'))
+    expect(screen.getByText(/Dracula is a dark theme\./)).toBeTruthy()
+
+    await user.selectOptions(themeSelect, 'Sepia')
+    expect(container.querySelector('.app-shell')?.getAttribute('data-theme')).toBe('sepia')
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('appearance.theme', 'Sepia'))
+    expect(screen.getByText(/Sepia is a light theme\./)).toBeTruthy()
   })
 
   it('applies a theme accent independently from the outgoing message color', async () => {

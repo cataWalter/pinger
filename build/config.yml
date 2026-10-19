@@ -36,7 +36,9 @@ dev_mode:
       - "*.ts" # The frontend directory will be excluded entirely by the setting above.
     git_ignore: true
   executes:
-    - cmd: wails3 build -tags sqlite_fts5,goolm DEV=true
+    - cmd: wails3 task common:build:frontend DEV=true
+      type: blocking
+    - cmd: go build -tags "sqlite_fts5 goolm" -o bin/pinger .
       type: blocking
     - cmd: wails3 task common:dev:frontend
       type: background
@@ -47,7 +49,7 @@ dev_mode:
       #   http: "http://localhost:5173/"
       #   timeout: "60s"
       #   interval: "200ms"
-    - cmd: wails3 task run
+    - cmd: ./bin/pinger
       type: primary
       exit_policy: shutdown
 

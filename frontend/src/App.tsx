@@ -1,4 +1,4 @@
-import { Fragment, lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactElement } from 'react'
+import { Fragment, lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Events } from '@wailsio/runtime'
 import {
@@ -48,6 +48,9 @@ import {
 import { AppService } from '../bindings/mychat/desktop'
 import type { AIMessage, Device, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, UpdateStatus } from '../bindings/mychat/desktop/models.js'
 import { emojiQueryAt, insertEmoji, replaceEmoticons, suggestEmoji, wrapSelection, type EmojiQuery } from './composerText'
+import { fuzzyScore } from './fuzzy'
+import { SYSTEM_THEME_NAME, defaultBubbleColorForTheme, findThemeByName, themeIdForPreference, themes as appearanceThemes } from './themes'
+import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
 import { EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, boundedTranscript, buildAgentPrompt, buildExplainPrompt, buildReplyPrompt, buildRewritePrompt, buildTopicInsightsPrompt, parseChatAgents, serializeChatAgents, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage } from './aiPrompts'
 const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
 
@@ -76,7 +79,6 @@ type RoomScope = 'all' | 'archived'
 type RoomRefinements = { unanswered: boolean; favorite: boolean }
 type PendingSend = { roomID: string; text: string; replyTo: Message | null; mentionUserIDs: string[]; mentionBindings: { token: string; userID: string }[]; timer: number }
 type MessageMenuItem = { key: string; label: string; ariaLabel: string; icon: ReactElement; danger?: boolean; disabled?: boolean; run: () => void }
-type SettingsTab = 'General' | 'Appearance' | 'Notifications' | 'Keyboard' | 'History' | 'Account' | 'Devices' | 'Storage' | 'Security' | 'Help' | 'About' | 'Integrations'
 type AIAcceptAction = { kind: 'none' } | { kind: 'draft' | 'rewrite' } | { kind: 'reply'; target: Message }
 type AIPanel = { title: string; busy: boolean; result: string; error: string; acceptAction: AIAcceptAction }
 type ScheduledDraft =
@@ -97,6 +99,43 @@ type RoomButtonActions = {
 
 const IN_APP_NOTICE_TIMEOUT_MS = 10_000
 const EMPTY_ROOMS: Room[] = []
+const MAX_CACHED_AVATARS = 128
+const MAX_MISSING_AVATARS = 512
+const ROOM_LIST_VIRTUALIZATION_THRESHOLD = 100
+
+function cachedAvatarSource(uri: string) {
+  const cached = avatarSources.get(uri)
+  if (cached) {
+    avatarSources.delete(uri)
+    avatarSources.set(uri, cached)
+  }
+  return cached
+}
+
+function cacheMissingAvatar(uri: string) {
+  missingAvatarSources.delete(uri)
+  missingAvatarSources.add(uri)
+  if (missingAvatarSources.size > MAX_MISSING_AVATARS) {
+    const oldest = missingAvatarSources.values().next().value
+    if (oldest) missingAvatarSources.delete(oldest)
+  }
+}
+
+function newestPersistentMessage(messages: Message[]) {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.id && !message.id.startsWith('~')) return message
+  }
+  return null
+}
+
+function newestOtherAvatar(messages: Message[]) {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (!message.own && message.avatar) return message.avatar
+  }
+  return ''
+}
 
 function describeError(error: unknown) {
   return error instanceof Error ? error.message : String(error)
@@ -168,7 +207,7 @@ function observeMediaVisibility(element: Element, callback: (isNearViewport: boo
 }
 
 function loadAvatarSource(uri: string) {
-  const cached = avatarSources.get(uri)
+  const cached = cachedAvatarSource(uri)
   if (cached) return Promise.resolve(cached)
   if (missingAvatarSources.has(uri)) return Promise.resolve(null)
 
@@ -177,10 +216,15 @@ function loadAvatarSource(uri: string) {
     request = AppService.DownloadAvatar(uri)
       .then((source) => {
         if (source?.startsWith('data:image/')) {
+          avatarSources.delete(uri)
           avatarSources.set(uri, source)
+          if (avatarSources.size > MAX_CACHED_AVATARS) {
+            const oldest = avatarSources.keys().next().value
+            if (oldest) avatarSources.delete(oldest)
+          }
           return source
         }
-        missingAvatarSources.add(uri)
+        cacheMissingAvatar(uri)
         return null
       })
       .catch(() => null)
@@ -198,7 +242,7 @@ function Avatar({ uri, label, className, style, deferLoad = false }: {
   deferLoad?: boolean
 }) {
   const avatarRef = useRef<HTMLDivElement>(null)
-  const [source, setSource] = useState(() => uri ? avatarSources.get(uri) ?? null : null)
+  const [source, setSource] = useState(() => uri ? cachedAvatarSource(uri) ?? null : null)
   const [nearViewport, setNearViewport] = useState(!deferLoad)
 
   useEffect(() => {
@@ -221,7 +265,7 @@ function Avatar({ uri, label, className, style, deferLoad = false }: {
 
   useEffect(() => {
     let active = true
-    const cached = uri ? avatarSources.get(uri) : undefined
+    const cached = uri ? cachedAvatarSource(uri) : undefined
     if (!uri || cached) {
       setSource(cached ?? null)
       return () => { active = false }
@@ -352,6 +396,8 @@ const TimelineMessageList = memo(function TimelineMessageList({
     {visibleMessages.map((message, index) => {
       const ownMessage = message.own || Boolean(message.sender && message.sender === currentUserID)
       const isAudioAttachment = Boolean(message.mediaUri && (message.mediaMime.startsWith('audio/') || message.mediaType === 'm.audio'))
+      const isImageOrVideoAttachment = message.mediaMime.startsWith('image/') || message.mediaMime.startsWith('video/') || message.mediaType === 'm.image' || message.mediaType === 'm.video'
+      const hideImagesAndVideos = preferenceBoolean(preferences, 'appearance.hide_images_and_videos')
       const previous = index > 0 ? visibleMessages[index - 1] : null
       const grouped = Boolean(previous && !previous.redacted && previous.sender === message.sender && message.timestamp - previous.timestamp < 5 * 60_000 && isSameDay(previous.timestamp, message.timestamp))
       const next = index + 1 < visibleMessages.length ? visibleMessages[index + 1] : null
@@ -384,7 +430,7 @@ const TimelineMessageList = memo(function TimelineMessageList({
               {!isAudioAttachment && <Suspense fallback={<div className="message-body">{displayBody}</div>}>
                 <MarkdownMessage body={displayBody} />
               </Suspense>}
-              {message.mediaUri && !message.redacted && !message.decryptionError && (
+              {message.mediaUri && !message.redacted && !message.decryptionError && !(hideImagesAndVideos && isImageOrVideoAttachment) && (
                 <MessageMedia
                   message={message}
                   autoPlayNext={autoPlayNextMessageId === message.id}
@@ -513,6 +559,19 @@ function roomActivityAt(room: Room) {
   return room.lastEventAt > 0 ? room.lastEventAt : room.lastSeen
 }
 
+function compareRoomActivity(left: Room, right: Room, today: number) {
+  const leftActivity = roomActivityAt(left)
+  const rightActivity = roomActivityAt(right)
+  const leftDate = new Date(leftActivity)
+  const rightDate = new Date(rightActivity)
+  leftDate.setHours(0, 0, 0, 0)
+  rightDate.setHours(0, 0, 0, 0)
+  const dateOrder = rightDate.getTime() - leftDate.getTime()
+  if (dateOrder !== 0) return dateOrder
+  if (leftActivity > 0 && isSameDay(leftActivity, today)) return rightActivity - leftActivity
+  return 0
+}
+
 function formatTimelineTime(timestamp: number, preferences: PreferenceValues) {
   if (preferenceBoolean(preferences, 'appearance.relative_timestamps') && isWithinDay(timestamp)) {
     const minutes = Math.round((timestamp - Date.now()) / 60_000)
@@ -528,26 +587,6 @@ function formatBytes(bytes: number) {
   const units = ['KB', 'MB', 'GB', 'TB']
   const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)) - 1, units.length - 1)
   return `${(bytes / 1024 ** (unitIndex + 1)).toFixed(1)} ${units[unitIndex]}`
-}
-
-function fuzzyScore(query: string, target: string) {
-  const queryCharacters = [...query.toLowerCase()]
-  const targetCharacters = [...target.toLowerCase()]
-  if (queryCharacters.length === 0) return 0
-  let queryIndex = 0
-  let score = 0
-  let lastIndex = -2
-  for (let index = 0; index < targetCharacters.length; index++) {
-    const character = targetCharacters[index]
-    if (character !== queryCharacters[queryIndex]) continue
-    score += 10
-    if (index === 0 || [' ', ':', '_', '-'].includes(targetCharacters[index - 1])) score += 8
-    if (index === lastIndex + 1) score += 5
-    lastIndex = index
-    queryIndex++
-    if (queryIndex === queryCharacters.length) return score - targetCharacters.length + queryCharacters.length
-  }
-  return null
 }
 
 function rankQuickSwitcherRooms(rooms: Room[], query: string) {
@@ -792,6 +831,7 @@ function App() {
   const lastObservedHistoryRevisionRef = useRef(0)
   const [error, setError] = useState('')
   const selectedRoomRef = useRef('')
+  const roomListRef = useRef<HTMLElement | null>(null)
   const historyRoomIDRef = useRef('')
   const pendingHistoryRefreshRoomIDRef = useRef('')
   const editTargetRef = useRef<Message | null>(null)
@@ -862,7 +902,7 @@ function App() {
   const selectedRoom = useMemo(() => rooms.find((room) => room.id === selectedRoomID), [rooms, selectedRoomID])
   const selectedRoomAvatar = useMemo(() => selectedRoom?.avatar || (
     historyRoomIDRef.current === selectedRoomID
-      ? [...messages].reverse().find((message) => !message.own && message.avatar)?.avatar ?? ''
+      ? newestOtherAvatar(messages)
       : ''
   ), [messages, selectedRoom?.avatar, selectedRoomID, historyRoomIDRef.current])
   const preferences = snapshot?.preferences ?? {}
@@ -888,23 +928,6 @@ function App() {
   useEffect(() => {
     setSelectedAudioInputDeviceId(preferenceString(preferences, 'audio.input_device', ''))
   }, [preferences['audio.input_device']])
-
-  useEffect(() => {
-    let active = true
-    async function enumerate() {
-      try {
-        if (!navigator.mediaDevices?.enumerateDevices) return
-        const devices = await navigator.mediaDevices.enumerateDevices()
-        if (active) {
-          setAudioInputDevices(devices.filter((device) => device.kind === 'audioinput'))
-        }
-      } catch {
-        // ignore
-      }
-    }
-    void enumerate()
-    return () => { active = false }
-  }, [])
 
   useEffect(() => {
     let active = true
@@ -951,6 +974,7 @@ function App() {
     [rooms, crossAccountRooms, effectiveAccountScope, activeAccountID])
   const filteredRooms = useMemo(() => {
     const query = search.trim().toLowerCase()
+    const today = Date.now()
     return scopedRooms.filter((room) => {
       const matchesQuery = !query || `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query)
       const archived = preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
@@ -962,9 +986,10 @@ function App() {
       const favoriteOrder = preferenceString(preferences, 'sidebar.pinned_style', 'Top of list') === 'Top of list'
         ? Number(right.favorite) - Number(left.favorite)
         : 0
-      return favoriteOrder || roomActivityAt(right) - roomActivityAt(left)
+      return favoriteOrder || compareRoomActivity(left, right, today)
     })
   }, [scopedRooms, search, preferences, roomScope, roomRefinements])
+  const selectedRoomListIndex = filteredRooms.findIndex((room) => room.id === selectedRoomID && isActiveAccountRoom(room))
   const quickSwitcherRooms = useMemo(() => rankQuickSwitcherRooms(rooms, quickSwitcherQuery), [rooms, quickSwitcherQuery])
   const unansweredCount = useMemo(() => scopedRooms.filter((room) => room.unanswered && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences])
   const readRoomCount = useMemo(() => rooms.filter((room) => room.unread === 0 && !room.markedUnread && !preferenceBoolean(preferences, archivedPreferenceKey(room.id))).length, [rooms, preferences])
@@ -1013,9 +1038,9 @@ function App() {
     const query = mentionQuery.toLowerCase()
     return `${member.displayName} ${member.id}`.toLowerCase().includes(query)
   }).slice(0, 8)
-  const themePreference = preferenceString(preferences, 'appearance.theme', 'System default').toLowerCase().replace(/ /g, '-')
-  const themeChoice = themePreference === 'system-default' ? systemPrefersDark ? 'dark' : 'light' : themePreference
-  const defaultBubbleColor = themeChoice === 'bosco' ? '#276d4b' : themeChoice === 'rosa' ? '#ad3f60' : '#236b52'
+  const themePreference = preferenceString(preferences, 'appearance.theme', SYSTEM_THEME_NAME)
+  const themeChoice = themeIdForPreference(themePreference, systemPrefersDark)
+  const defaultBubbleColor = defaultBubbleColorForTheme(themeChoice)
   const bubbleColor = preferenceString(preferences, 'appearance.bubble_color', defaultBubbleColor)
   const safeBubbleColor = /^#[0-9a-fA-F]{6}$/.test(bubbleColor) ? bubbleColor : defaultBubbleColor
   const accentPalette = accentPalettes.find((palette) => palette.name === preferenceString(preferences, 'appearance.accent_color', 'Forest')) ?? accentPalettes[0]
@@ -1375,7 +1400,7 @@ function App() {
         setHistoryRevision((revision) => revision + 1)
       } else if (selectedID) {
         const selected = (update.rooms ?? []).find((room) => room.id === selectedID)
-        const newestLoaded = [...messagesRef.current].reverse().find((message) => message.id && !message.id.startsWith('~'))
+        const newestLoaded = newestPersistentMessage(messagesRef.current)
         if (selected && newestLoaded && selected.lastEventId && selected.lastEventId !== newestLoaded.id) {
           const newestTimestamp = newestLoaded.timestamp ?? 0
           if (selected.lastSeen > newestTimestamp || (selected.lastSeen === newestTimestamp && selected.lastEventAt >= newestTimestamp)) {
@@ -1574,7 +1599,7 @@ function App() {
 
   useEffect(() => {
     if (!selectedRoomID || loadingHistory || historyRoomIDRef.current !== selectedRoomID || preferenceBoolean(preferences, 'privacy.incognito')) return
-    const newestEvent = [...messages].reverse().find((message) => message.id && !message.id.startsWith('~'))
+    const newestEvent = newestPersistentMessage(messages)
     if (!newestEvent || lastReadEventByRoom.current.get(selectedRoomID) === newestEvent.id) return
     lastReadEventByRoom.current.set(selectedRoomID, newestEvent.id)
     void AppService.MarkRead(selectedRoomID, newestEvent.id).catch((readError: unknown) => {
@@ -2262,10 +2287,19 @@ function App() {
     const direction = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
     const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? filteredRooms.length - 1 : index + direction
     if (direction === 0 && event.key !== 'Home' && event.key !== 'End') return
-    const nextButton = document.querySelectorAll<HTMLButtonElement>('.room-list .room-button')[nextIndex]
+    const list = roomListRef.current
+    const nextButton = list?.querySelector<HTMLButtonElement>(`.room-button[data-room-index="${nextIndex}"]`)
     if (nextButton) {
       event.preventDefault()
       nextButton.focus()
+    } else if (list && nextIndex >= 0 && nextIndex < filteredRooms.length) {
+      event.preventDefault()
+      const rowHeight = preferenceBoolean(preferences, 'sidebar.compact_chat_list') ? 46 : 62
+      list.scrollTop = nextIndex * rowHeight
+      list.dispatchEvent(new Event('scroll'))
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        list.querySelector<HTMLButtonElement>(`.room-button[data-room-index="${nextIndex}"]`)?.focus()
+      }))
     }
   }
 
@@ -3301,8 +3335,12 @@ function App() {
           </div>
         </div>
         <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : 'ROOMS'}</span><span className="room-section-actions">{roomScope !== 'archived' && <button className="room-archive-all" type="button" aria-label="Archive all read rooms" title="Archive all read rooms" disabled={readRoomCount === 0} onClick={() => void archiveAllReadRooms()}><Archive size={13} /></button>}{filteredRooms.length.toString().padStart(2, '0')}</span></div>
-        <nav className="room-list" aria-label="Rooms">
-          {filteredRooms.map((room, index) => (
+        <VirtualRoomList
+          listRef={roomListRef}
+          rooms={filteredRooms}
+          selectedRoomIndex={selectedRoomListIndex}
+          rowHeight={preferenceBoolean(preferences, 'sidebar.compact_chat_list') ? 46 : 62}
+          renderRoom={(room, index) => (
             <RoomButton
               key={`${room.accountId}:${room.id}`}
               room={room}
@@ -3314,11 +3352,11 @@ function App() {
               showNetwork={preferenceBoolean(preferences, 'sidebar.network_icons')}
               actionsRef={roomButtonActionsRef}
             />
-          ))}
-          {filteredRooms.length === 0 && (
+          )}
+          emptyContent={filteredRooms.length === 0 && (
             <div className="room-empty">{scopedRooms.length === 0 ? 'No rooms yet' : search ? 'No matching rooms' : roomScope === 'archived' ? 'No archived rooms' : 'No rooms match these filters'}</div>
           )}
-        </nav>
+        />
         {roomContextMenu && <div className="room-context-menu" role="menu" style={{ left: roomContextMenu.x, top: roomContextMenu.y }}>
           {contextMenuIsBulk && <div className="room-context-menu-count">{contextMenuRooms.length} chats selected</div>}
           {contextMenuRooms.some((room) => room.unanswered) && <button type="button" role="menuitem" aria-keyshortcuts={answeredShortcut} onClick={() => contextMenuIsBulk ? void applyBulkRoomAction('answered', contextMenuRooms) : void markRoomAnswered(roomContextMenu.roomID)} onKeyDown={(event) => {
@@ -4089,7 +4127,7 @@ const RoomButton = memo(function RoomButton({ room, index, active, multiSelected
   // Rooms without a message time show their sorting time, which the sidebar is already ordered by.
   const activityAt = roomActivityAt(room)
   return (
-    <button className={`room-button ${active ? 'is-active' : ''} ${multiSelected ? 'is-multiselected' : ''} ${room.muted ? 'is-muted' : ''} ${hasUnread ? 'has-unread' : ''}`} onClick={(event) => actionsRef.current.onSelect(room, index, event)} onKeyDown={(event) => actionsRef.current.onKeyDown(room, index, event)} onContextMenu={(event) => actionsRef.current.onContextMenu(room, event)} aria-current={active ? 'page' : undefined} title={room.name || room.id}>
+    <button data-room-index={index} className={`room-button ${active ? 'is-active' : ''} ${multiSelected ? 'is-multiselected' : ''} ${room.muted ? 'is-muted' : ''} ${hasUnread ? 'has-unread' : ''}`} onClick={(event) => actionsRef.current.onSelect(room, index, event)} onKeyDown={(event) => actionsRef.current.onKeyDown(room, index, event)} onContextMenu={(event) => actionsRef.current.onContextMenu(room, event)} aria-current={active ? 'page' : undefined} title={room.name || room.id}>
       <Avatar uri={room.avatar} label={room.name || room.id} className="room-avatar" style={avatarStyle(room.name || room.id)} deferLoad />
       <span className="room-copy">
         <span className="room-name">{room.favorite && <Star size={10} fill="currentColor" aria-label="Favorite" />}<span className="room-name-text">{room.name || room.id}</span>{room.muted && <span className="room-muted-mark" title="Muted">· muted</span>}{showNetwork && room.bridge && <span className="room-network" style={{ '--network-hue': networkHue(room.bridge) } as React.CSSProperties}>{room.bridge}</span>}</span>
@@ -4105,6 +4143,94 @@ const RoomButton = memo(function RoomButton({ room, index, active, multiSelected
     </button>
   )
 })
+
+function VirtualRoomList({ listRef, rooms, selectedRoomIndex, rowHeight, renderRoom, emptyContent }: {
+  listRef: { current: HTMLElement | null }
+  rooms: Room[]
+  selectedRoomIndex: number
+  rowHeight: number
+  renderRoom: (room: Room, index: number) => ReactNode
+  emptyContent: ReactNode
+}) {
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(600)
+  const pendingScrollTop = useRef(0)
+  const scrollFrame = useRef(0)
+  const virtualized = rooms.length > ROOM_LIST_VIRTUALIZATION_THRESHOLD
+
+  useEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    const updateSize = () => {
+      setViewportHeight(list.clientHeight || 600)
+      pendingScrollTop.current = list.scrollTop
+      setScrollTop(list.scrollTop)
+    }
+    updateSize()
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateSize)
+      return () => window.removeEventListener('resize', updateSize)
+    }
+    const observer = new ResizeObserver(updateSize)
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [listRef])
+
+  useEffect(() => () => {
+    if (scrollFrame.current) window.cancelAnimationFrame(scrollFrame.current)
+  }, [])
+
+  useEffect(() => {
+    const list = listRef.current
+    if (!virtualized || !list || selectedRoomIndex < 0) return
+    const top = selectedRoomIndex * rowHeight
+    if (top < list.scrollTop || top + rowHeight > list.scrollTop + viewportHeight) {
+      list.scrollTop = top
+      pendingScrollTop.current = top
+      setScrollTop(top)
+    }
+  }, [listRef, rowHeight, selectedRoomIndex, virtualized, viewportHeight])
+
+  function handleScroll(event: React.UIEvent<HTMLElement>) {
+    pendingScrollTop.current = event.currentTarget.scrollTop
+    if (scrollFrame.current) return
+    scrollFrame.current = window.requestAnimationFrame(() => {
+      scrollFrame.current = 0
+      setScrollTop(pendingScrollTop.current)
+    })
+  }
+
+  let content: ReactNode
+  if (rooms.length === 0) {
+    content = emptyContent
+  } else if (!virtualized) {
+    content = rooms.map((room, index) => renderRoom(room, index))
+  } else {
+    const overscan = 8
+    const first = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)
+    const last = Math.min(rooms.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan)
+    content = (
+      <div className="room-list-virtual-content" style={{ height: rooms.length * rowHeight }}>
+        {rooms.slice(first, last).map((room, offset) => {
+          const index = first + offset
+          return <div className="room-list-virtual-row" key={`${room.accountId}:${room.id}`} style={{ top: index * rowHeight }}>{renderRoom(room, index)}</div>
+        })}
+      </div>
+    )
+  }
+
+  return (
+    <nav
+      ref={(element) => { listRef.current = element }}
+      className={`room-list ${virtualized ? 'is-virtualized' : ''}`}
+      aria-label="Rooms"
+      onScroll={virtualized ? handleScroll : undefined}
+      style={virtualized ? { '--room-row-height': `${rowHeight}px` } as React.CSSProperties : undefined}
+    >
+      {content}
+    </nav>
+  )
+}
 
 const storageMediaOptions: Array<{ value: string; label: string }> = [
   { value: '', label: 'All media' },
@@ -4340,6 +4466,31 @@ function LocalAISettings({ endpoint, model, translateLanguage, onSave }: {
   )
 }
 
+const SETTING_TARGET_SELECTORS = [
+  '.setting-row strong',
+  '.setting-toggle > span',
+  '.help-item h4',
+  '.security-field > span',
+  '.ai-settings-form label > span',
+  'button.settings-command',
+  'a.settings-link',
+]
+
+function findSettingTarget(panel: HTMLElement, entry: SettingsEntry) {
+  if (entry.anchor) {
+    const anchored = panel.querySelector<HTMLElement>(entry.anchor)
+    if (anchored) return anchored
+  }
+  const title = entry.title.trim().toLowerCase()
+  for (const selector of SETTING_TARGET_SELECTORS) {
+    for (const candidate of Array.from(panel.querySelectorAll<HTMLElement>(selector))) {
+      if ((candidate.textContent ?? '').trim().toLowerCase() !== title) continue
+      return candidate.closest<HTMLElement>('.setting-row, .setting-toggle, .help-item, .security-field, label, button, a') ?? candidate
+    }
+  }
+  return null
+}
+
 function SettingsDialog({
   tab,
   profile,
@@ -4365,8 +4516,14 @@ function SettingsDialog({
   onLogout: () => Promise<void>
   onPreferenceChange: (key: string, value: boolean | string) => Promise<boolean>
 }) {
-  const tabs: SettingsTab[] = ['General', 'Account', 'Appearance', 'Notifications', 'Keyboard', 'History', 'Devices', 'Storage', 'Security', 'Help', 'About', 'Integrations']
-  const theme = preferenceString(preferences, 'appearance.theme', 'System default')
+  const tabs = SETTINGS_TABS
+  const theme = preferenceString(preferences, 'appearance.theme', SYSTEM_THEME_NAME)
+  const activeTheme = findThemeByName(theme)
+  const themeDescription = activeTheme
+    ? `${activeTheme.name} is a ${activeTheme.mode} theme.`
+    : theme === SYSTEM_THEME_NAME
+      ? 'System default follows your OS preference.'
+      : ''
   const fontSize = preferenceString(preferences, 'appearance.font_size', 'Medium')
   const bubbleColor = preferenceString(preferences, 'appearance.bubble_color', '#236b52')
   const activeAccentPalette = accentPalettes.find((palette) => palette.name === preferenceString(preferences, 'appearance.accent_color', 'Forest')) ?? accentPalettes[0]
@@ -4405,6 +4562,37 @@ function SettingsDialog({
   const [logoutConfirm, setLogoutConfirm] = useState(false)
   const [logoutBusy, setLogoutBusy] = useState(false)
   const [notificationPermission, setNotificationPermission] = useState(() => typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchTarget, setSearchTarget] = useState<{ entry: SettingsEntry; nonce: number } | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const settingsPanelRef = useRef<HTMLDivElement>(null)
+  const searchNonceRef = useRef(0)
+
+  const searchResults = useMemo(() => searchSettings(searchQuery), [searchQuery])
+  const searchResultsByTab = useMemo(() => groupSettingsByTab(searchResults), [searchResults])
+  const searchActive = searchQuery.trim().length > 0
+
+  function revealSetting(entry: SettingsEntry) {
+    searchNonceRef.current += 1
+    setSearchQuery('')
+    setSearchTarget({ entry, nonce: searchNonceRef.current })
+    onTabChange(entry.tab)
+  }
+
+  useEffect(() => {
+    if (!searchTarget) return
+    const panel = settingsPanelRef.current
+    if (!panel) return
+    const target = findSettingTarget(panel, searchTarget.entry)
+    if (!target) return
+    if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'center' })
+    target.classList.add('is-search-hit')
+    const timer = window.setTimeout(() => target.classList.remove('is-search-hit'), 1800)
+    return () => {
+      window.clearTimeout(timer)
+      target.classList.remove('is-search-hit')
+    }
+  }, [searchTarget])
 
   function saveScheduleDefaultDelay(key: string, draft: string, setDraft: (value: string) => void, setError: (value: string) => void) {
     const minutes = Number(draft)
@@ -4579,34 +4767,87 @@ function SettingsDialog({
           <div><span className="eyebrow">PINGER</span><h2 id="settings-title">Settings</h2></div>
           <button className="icon-button" type="button" aria-label="Close settings" title="Close settings" onClick={onClose}><X size={17} /></button>
         </header>
+        <div className="settings-search">
+          <Search size={15} />
+          <input
+            ref={searchInputRef}
+            type="search"
+            value={searchQuery}
+            placeholder="Search settings"
+            aria-label="Search settings"
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return
+              event.preventDefault()
+              event.stopPropagation()
+              setSearchQuery('')
+            }}
+          />
+          {searchQuery && (
+            <button type="button" className="icon-button" aria-label="Clear settings search" title="Clear search" onClick={() => { setSearchQuery(''); searchInputRef.current?.focus() }}><X size={14} /></button>
+          )}
+        </div>
         <nav className="settings-tabs" role="tablist" aria-label="Settings sections">
-          {tabs.map((item) => (
-            <button
-              key={item}
-              id={`settings-tab-${item.toLowerCase().replace(/\s+/g, '-')}`}
-              type="button"
-              role="tab"
-              aria-selected={tab === item}
-              aria-controls="settings-panel"
-              tabIndex={tab === item ? 0 : -1}
-              className={tab === item ? 'is-active' : ''}
-              onClick={() => onTabChange(item)}
-              onKeyDown={(event) => {
-                const currentIndex = tabs.indexOf(item)
-                let nextIndex = currentIndex
-                if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % tabs.length
-                else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
-                else if (event.key === 'Home') nextIndex = 0
-                else if (event.key === 'End') nextIndex = tabs.length - 1
-                else return
-                event.preventDefault()
-                onTabChange(tabs[nextIndex])
-                event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus()
-              }}
-            >{item}</button>
-          ))}
+          {tabs.map((item) => {
+            const matches = searchResultsByTab.get(item)?.length ?? 0
+            return (
+              <button
+                key={item}
+                id={`settings-tab-${item.toLowerCase().replace(/\s+/g, '-')}`}
+                type="button"
+                role="tab"
+                aria-selected={tab === item}
+                aria-controls="settings-panel"
+                tabIndex={tab === item ? 0 : -1}
+                className={`${tab === item ? 'is-active' : ''} ${searchActive && matches > 0 ? 'has-matches' : ''}`}
+                onClick={() => {
+                  const firstMatch = searchResultsByTab.get(item)?.[0]
+                  if (searchActive && firstMatch) {
+                    revealSetting(firstMatch)
+                    return
+                  }
+                  if (searchActive) setSearchQuery('')
+                  onTabChange(item)
+                }}
+                onKeyDown={(event) => {
+                  const currentIndex = tabs.indexOf(item)
+                  let nextIndex = currentIndex
+                  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % tabs.length
+                  else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+                  else if (event.key === 'Home') nextIndex = 0
+                  else if (event.key === 'End') nextIndex = tabs.length - 1
+                  else return
+                  event.preventDefault()
+                  onTabChange(tabs[nextIndex])
+                  event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus()
+                }}
+              >{item}{searchActive && matches > 0 && <span className="settings-tab-count" aria-hidden="true">{matches}</span>}</button>
+            )
+          })}
         </nav>
-        <div id="settings-panel" className="settings-content" role="tabpanel" aria-labelledby={`settings-tab-${tab.toLowerCase().replace(/\s+/g, '-')}`} tabIndex={0}>
+        <div id="settings-panel" className={`settings-content ${searchActive ? 'is-searching' : ''}`} role="tabpanel" aria-labelledby={`settings-tab-${tab.toLowerCase().replace(/\s+/g, '-')}`} tabIndex={0} ref={settingsPanelRef}>
+          {searchActive && (
+            <div className="settings-search-results" role="region" aria-label="Settings search results">
+              <p className="settings-note" role="status">
+                {searchResults.length === 0
+                  ? `No settings match “${searchQuery.trim()}”.`
+                  : `${searchResults.length} ${searchResults.length === 1 ? 'setting matches' : 'settings match'} “${searchQuery.trim()}”.`}
+              </p>
+              {Array.from(searchResultsByTab.entries()).map(([group, entries]) => (
+                <section className="settings-search-group" key={group}>
+                  <h3>{group}</h3>
+                  <div className="settings-search-list">
+                    {entries.map((entry) => (
+                      <button key={entry.id} type="button" className="settings-search-result" onClick={() => revealSetting(entry)}>
+                        <strong>{entry.title}</strong>
+                        <small>{entry.description}</small>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
           {tab === 'General' && (
             <div className="settings-section">
               <h3>General</h3>
@@ -4700,9 +4941,10 @@ function SettingsDialog({
           {tab === 'Appearance' && (
             <div className="settings-section">
               <h3>Appearance</h3>
-              <label className="setting-row"><span><strong>Theme</strong><small>Choose the conversation surface.</small></span>
+              <label className="setting-row"><span><strong>Theme</strong><small>Choose the conversation surface. {themeDescription}</small></span>
                 <select value={theme} onChange={(event) => onPreferenceChange('appearance.theme', event.target.value)}>
-                  {['System default', 'Light', 'Dark', 'OLED black', 'Bosco', 'Rosa'].map((value) => <option key={value}>{value}</option>)}
+                  <option value={SYSTEM_THEME_NAME}>{SYSTEM_THEME_NAME}</option>
+                  {appearanceThemes.map((entry) => <option key={entry.id} value={entry.name}>{entry.name} ({entry.mode})</option>)}
                 </select>
               </label>
               <label className="setting-row"><span><strong>Font size</strong><small>Adjust room and message text.</small></span>
@@ -4744,6 +4986,7 @@ function SettingsDialog({
               </label>
               <PreferenceToggle label="Animate new messages" checked={preferenceBoolean(preferences, 'appearance.message_animations', true)} onChange={(value) => onPreferenceChange('appearance.message_animations', value)} />
               <PreferenceToggle label="Show message timestamps" checked={preferenceBoolean(preferences, 'appearance.show_timestamps', true)} onChange={(value) => onPreferenceChange('appearance.show_timestamps', value)} />
+              <PreferenceToggle label="Hide images and videos" checked={preferenceBoolean(preferences, 'appearance.hide_images_and_videos')} onChange={(value) => onPreferenceChange('appearance.hide_images_and_videos', value)} />
               <PreferenceToggle label="Hide deleted messages" checked={preferenceBoolean(preferences, 'appearance.hide_deleted_messages')} onChange={(value) => onPreferenceChange('appearance.hide_deleted_messages', value)} />
               <PreferenceToggle label="Balance message line wrapping" checked={preferenceBoolean(preferences, 'appearance.balanced_text')} onChange={(value) => onPreferenceChange('appearance.balanced_text', value)} />
               <PreferenceToggle label="Use a 24-hour clock" checked={preferenceBoolean(preferences, 'appearance.time_24_hour')} onChange={(value) => onPreferenceChange('appearance.time_24_hour', value)} />
