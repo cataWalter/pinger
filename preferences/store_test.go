@@ -1,11 +1,68 @@
 package preferences
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestValidateRoomAIAgents(t *testing.T) {
+	key := "room.ai_agents.!room:example.org"
+	validAgent := struct {
+		ID           string `json:"id"`
+		Name         string `json:"name"`
+		Instructions string `json:"instructions"`
+	}{ID: "tutor", Name: "Language tutor", Instructions: "Teach Spanish with gentle corrections."}
+	valid := struct {
+		Agents         []any  `json:"agents"`
+		DefaultAgentID string `json:"defaultAgentId"`
+	}{Agents: []any{validAgent}, DefaultAgentID: "tutor"}
+	validJSON, err := json.Marshal(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(key, string(validJSON)); err != nil {
+		t.Fatalf("Validate(valid agents) error = %v", err)
+	}
+
+	tooMany := valid
+	tooMany.Agents = make([]any, 9)
+	for index := range tooMany.Agents {
+		tooMany.Agents[index] = validAgent
+	}
+	tooManyJSON, err := json.Marshal(tooMany)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknownDefault, err := json.Marshal(struct {
+		Agents         []any  `json:"agents"`
+		DefaultAgentID string `json:"defaultAgentId"`
+	}{Agents: []any{validAgent}, DefaultAgentID: "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidCases := []struct {
+		name  string
+		key   string
+		value any
+	}{
+		{name: "missing room", key: "room.ai_agents.", value: string(validJSON)},
+		{name: "wrong type", key: key, value: true},
+		{name: "malformed JSON", key: key, value: "{"},
+		{name: "too many profiles", key: key, value: string(tooManyJSON)},
+		{name: "unknown default", key: key, value: string(unknownDefault)},
+		{name: "missing instructions", key: key, value: `{"agents":[{"id":"tutor","name":"Tutor","instructions":" "}],"defaultAgentId":""}`},
+	}
+	for _, test := range invalidCases {
+		t.Run(test.name, func(t *testing.T) {
+			if err := Validate(test.key, test.value); err == nil {
+				t.Fatal("Validate() unexpectedly succeeded")
+			}
+		})
+	}
+}
 
 func TestStorePersistsAndScopesValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "preferences.db")

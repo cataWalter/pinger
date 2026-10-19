@@ -6,6 +6,7 @@ import App from './App'
 
 const harness = vi.hoisted(() => ({
   eventHandlers: new Map<string, (event: { data: any }) => void>(),
+  markdownRenderCount: 0,
   service: {
     Snapshot: vi.fn(),
     AddAccount: vi.fn(),
@@ -23,6 +24,7 @@ const harness = vi.hoisted(() => ({
     DismissScheduledJob: vi.fn(),
     RoomMembers: vi.fn(),
     SetActiveRoom: vi.fn(),
+    SetRoomUnanswered: vi.fn(),
     SetTyping: vi.fn(),
     MarkRead: vi.fn(),
     MarkUnread: vi.fn(),
@@ -36,6 +38,7 @@ const harness = vi.hoisted(() => ({
     SendReply: vi.fn(),
     SendMessageWithMentions: vi.fn(),
     DownloadAvatar: vi.fn(),
+    DownloadMedia: vi.fn(),
     React: vi.fn(),
     AIComplete: vi.fn(),
     TestAIEndpoint: vi.fn(),
@@ -62,7 +65,10 @@ vi.mock('@wailsio/runtime', () => ({
 vi.mock('../bindings/mychat/desktop', () => ({ AppService: harness.service }))
 
 vi.mock('./MarkdownMessage', () => ({
-  default: ({ body }: { body: string }) => <div className="message-body">{body}</div>,
+  default: ({ body }: { body: string }) => {
+    harness.markdownRenderCount++
+    return <div className="message-body">{body}</div>
+  },
 }))
 
 const room: Room = {
@@ -165,6 +171,8 @@ describe('settings storage, integrations, help, and about', () => {
     harness.service.History.mockResolvedValue({ messages: [], before: 0, hasMore: false })
     harness.service.ScheduledJobs.mockResolvedValue([])
     harness.service.SetActiveRoom.mockResolvedValue(undefined)
+    harness.service.SetRoomUnanswered.mockResolvedValue(undefined)
+    harness.service.DownloadMedia.mockResolvedValue('aW1hZ2U=')
     harness.service.SetTyping.mockResolvedValue(undefined)
     harness.service.MarkRead.mockResolvedValue(undefined)
     harness.service.RoomMembers.mockResolvedValue([])
@@ -188,6 +196,23 @@ describe('settings storage, integrations, help, and about', () => {
     await user.click(screen.getByRole('tab', { name }))
     return user
   }
+
+  it('opens About and Settings from native application menu events', async () => {
+    render(<App />)
+    await screen.findByRole('button', { name: 'Settings' })
+
+    await act(async () => {
+      harness.eventHandlers.get('application-menu:about')?.({ data: undefined })
+    })
+    const settingsDialog = await screen.findByRole('dialog', { name: 'Settings' })
+    expect(within(settingsDialog).getByRole('tab', { name: 'About' }).getAttribute('aria-selected')).toBe('true')
+    expect(within(settingsDialog).getByRole('button', { name: 'Check for updates' })).toBeTruthy()
+
+    await act(async () => {
+      harness.eventHandlers.get('application-menu:settings')?.({ data: undefined })
+    })
+    expect(within(settingsDialog).getByRole('tab', { name: 'General' }).getAttribute('aria-selected')).toBe('true')
+  })
 
   it('shows chat networks detected from bridged rooms instead of placeholder statuses', async () => {
     harness.service.Snapshot.mockResolvedValue({
@@ -279,12 +304,16 @@ describe('settings storage, integrations, help, and about', () => {
 })
 
 describe('room history updates', () => {
+  const geometrySpies: Array<{ mockRestore: () => void }> = []
+
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    for (const spy of geometrySpies.splice(0)) spy.mockRestore()
   })
 
   beforeEach(() => {
+    harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
     harness.service.AccountRooms.mockResolvedValue([])
@@ -294,13 +323,15 @@ describe('room history updates', () => {
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
     harness.service.ScheduleMessage.mockResolvedValue({})
-      harness.service.ScheduleReply.mockResolvedValue({})
+    harness.service.ScheduleReply.mockResolvedValue({})
     harness.service.ScheduleReminder.mockResolvedValue({})
     harness.service.UpdateScheduledJob.mockResolvedValue(undefined)
     harness.service.CancelScheduledJob.mockResolvedValue(undefined)
     harness.service.RetryScheduledMessage.mockResolvedValue(undefined)
     harness.service.DismissScheduledJob.mockResolvedValue(undefined)
     harness.service.SetActiveRoom.mockResolvedValue(undefined)
+    harness.service.SetRoomUnanswered.mockResolvedValue(undefined)
+    harness.service.DownloadMedia.mockResolvedValue('aW1hZ2U=')
     harness.service.SetTyping.mockResolvedValue(undefined)
     harness.service.MarkRead.mockResolvedValue(undefined)
     harness.service.SetBooleanPreference.mockResolvedValue(undefined)
@@ -343,6 +374,44 @@ describe('room history updates', () => {
     expect((screen.getByRole('button', { name: 'Ask AI about the composer text' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it('shows hover descriptions for message and composer controls', async () => {
+    harness.service.History.mockResolvedValue({
+      messages: [{ ...message('$latest', 'latest message', 300), reactions: { '👍': 1 } }],
+      before: 0,
+      hasMore: false,
+    })
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).title).toBe('Send message')
+    expect((screen.getByRole('button', { name: 'Add 👍 reaction' }) as HTMLButtonElement).title).toBe('Add 👍 reaction')
+    openMessageMenu(container)
+    expect((screen.getByRole('menuitem', { name: 'Copy message' }) as HTMLButtonElement).title).toBe('Copy message')
+  })
+
+  it('does not rerender timeline messages while typing in the composer', async () => {
+    const user = userEvent.setup()
+    const typingRooms = [room, ...Array.from({ length: 24 }, (_, index) => ({
+      ...room,
+      id: `!typing-${index}:example.org`,
+      name: `Typing room ${index}`,
+    }))]
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: typingRooms })
+    harness.service.History.mockResolvedValue({
+      messages: [message('$one', 'one', 100), message('$two', 'two', 200), message('$three', 'three', 300)],
+      before: 0,
+      hasMore: false,
+    })
+    render(<App />)
+    expect(await screen.findByText('three')).toBeTruthy()
+    await waitFor(() => expect(harness.markdownRenderCount).toBe(3))
+    const initialRenderCount = harness.markdownRenderCount
+
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'typing')
+
+    expect(harness.markdownRenderCount).toBe(initialRenderCount)
+  })
+
   it('does not show a room ID beneath a room name when there is no topic', async () => {
     const roomWithoutTopic = { ...room, id: '!group:example.org', name: 'Actual room name', direct: false }
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [roomWithoutTopic] })
@@ -351,6 +420,16 @@ describe('room history updates', () => {
 
     expect(await screen.findByRole('heading', { name: 'Actual room name' })).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Conversation' }).querySelector('.conversation-title')?.textContent).toBe('Actual room name')
+  })
+
+  it('shows only the contact name in a direct-message header', async () => {
+    const directRoom = { ...room, name: 'Lory', direct: true, topic: '' }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [directRoom] })
+
+    render(<App />)
+
+    const title = await screen.findByRole('heading', { name: 'Lory' })
+    expect(title.parentElement?.textContent).toBe('Lory')
   })
 
   it('sends an Ask AI question to the local endpoint and only drafts the reply', async () => {
@@ -402,6 +481,157 @@ describe('room history updates', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Use as draft' }))
     expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Hola')
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('drafts a reply from nearby context and keeps the selected message as the reply target', async () => {
+    const user = userEvent.setup()
+    harness.service.AIComplete.mockResolvedValue('A suggested reply')
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    harness.service.History.mockResolvedValue({ messages: [message('$previous', 'earlier context', 200), message('$latest', 'selected message', 300)], before: 0, hasMore: false })
+    const { container } = render(<App />)
+    expect(await screen.findByText('selected message')).toBeTruthy()
+
+    openMessageMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: 'Draft reply with local AI' }))
+
+    const request = await waitFor(() => {
+      expect(harness.service.AIComplete).toHaveBeenCalledTimes(1)
+      return harness.service.AIComplete.mock.calls[0][0]
+    })
+    expect(request[1].content).toContain('earlier context')
+    expect(request[1].content).toContain('selected message')
+    const dialog = await screen.findByRole('dialog', { name: 'Draft reply' })
+    await user.click(within(dialog).getByRole('button', { name: 'Use as reply draft' }))
+
+    expect(screen.getByText('Replying to Alice')).toBeTruthy()
+    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('A suggested reply')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    expect(harness.service.SendReply).not.toHaveBeenCalled()
+  })
+
+  it('explains only the selected message and keeps the result read-only', async () => {
+    const user = userEvent.setup()
+    harness.service.AIComplete.mockResolvedValue('This is an explanation.')
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    harness.service.History.mockResolvedValue({ messages: [message('$previous', 'unrelated earlier context', 200), message('$latest', 'selected message', 300)], before: 0, hasMore: false })
+    const { container } = render(<App />)
+    expect(await screen.findByText('selected message')).toBeTruthy()
+
+    openMessageMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: 'Explain message with local AI' }))
+    await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalledTimes(1))
+    expect(harness.service.AIComplete.mock.calls[0][0]).toHaveLength(2)
+    expect(harness.service.AIComplete.mock.calls[0][0][1].content).toContain('selected message')
+    expect(harness.service.AIComplete.mock.calls[0][0][1].content).not.toContain('unrelated earlier context')
+
+    const dialog = await screen.findByRole('dialog', { name: 'Explain message' })
+    await within(dialog).findByText('This is an explanation.')
+    expect(within(dialog).queryByRole('button', { name: 'Use as draft' })).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('requires acceptance for rewrites and keeps topic analysis read-only', async () => {
+    const user = userEvent.setup()
+    harness.service.AIComplete.mockResolvedValueOnce('A clearer version').mockResolvedValueOnce('A shorter version').mockResolvedValueOnce('Main topic: planning')
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.type(composer, 'Original draft')
+
+    await user.click(screen.getByRole('button', { name: 'Rewrite composer draft' }))
+    await screen.findByRole('dialog', { name: 'Rewrite draft' })
+    expect(composer.value).toBe('Original draft')
+    await user.click(screen.getByRole('button', { name: 'Replace draft' }))
+    expect(composer.value).toBe('A clearer version')
+
+    await user.click(screen.getByRole('button', { name: 'Shorten composer draft' }))
+    await screen.findByRole('dialog', { name: 'Shorten draft' })
+    expect(harness.service.AIComplete.mock.calls[1][0][1].content).toBe('A clearer version')
+    await user.click(screen.getByRole('button', { name: 'Replace draft' }))
+    expect(composer.value).toBe('A shorter version')
+
+    await user.click(screen.getByRole('button', { name: 'Analyze chat topics' }))
+    const topics = await screen.findByRole('dialog', { name: 'Chat topics and themes' })
+    await within(topics).findByText('Main topic: planning')
+    expect(within(topics).queryByRole('button', { name: 'Replace draft' })).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('saves per-room agent profiles and runs the selected profile without sending a message', async () => {
+    const user = userEvent.setup()
+    harness.service.AIComplete.mockResolvedValue('A language-learning suggestion')
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Room details' }))
+    const roomDialog = await screen.findByRole('dialog', { name: 'Test room' })
+    await user.click(within(roomDialog).getByRole('button', { name: 'Add agent' }))
+    await user.type(within(roomDialog).getByLabelText('Name'), 'Language coach')
+    await user.type(within(roomDialog).getByLabelText('Instructions'), 'Explain idioms and suggest a natural alternative.')
+    await user.click(within(roomDialog).getByRole('button', { name: 'Save agent' }))
+
+    const key = `room.ai_agents.${room.id}`
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith(key, expect.any(String)))
+    const savedCollection = JSON.parse(harness.service.SetStringPreference.mock.calls[harness.service.SetStringPreference.mock.calls.length - 1]?.[1] as string)
+    expect(savedCollection.agents[0]).toMatchObject({ name: 'Language coach', instructions: 'Explain idioms and suggest a natural alternative.' })
+    await user.selectOptions(within(roomDialog).getByRole('combobox', { name: 'Default chat agent' }), savedCollection.agents[0].id)
+    await waitFor(() => expect(JSON.parse(harness.service.SetStringPreference.mock.calls[harness.service.SetStringPreference.mock.calls.length - 1]?.[1] as string).defaultAgentId).toBe(savedCollection.agents[0].id))
+    await user.click(within(roomDialog).getByRole('button', { name: 'Close room details' }))
+
+    await user.click(screen.getByRole('button', { name: 'Run a chat agent' }))
+    const picker = await screen.findByRole('dialog', { name: 'Run an agent' })
+    expect((within(picker).getByRole('combobox', { name: 'Chat agent profile' }) as HTMLSelectElement).value).toBe(savedCollection.agents[0].id)
+    await user.type(within(picker).getByRole('textbox', { name: 'Request (optional)' }), 'Help me practice this phrase')
+    await user.click(within(picker).getByRole('button', { name: 'Run agent' }))
+
+    await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalledTimes(1))
+    const request = harness.service.AIComplete.mock.calls[0][0]
+    expect(request[0].content).toContain('Explain idioms and suggest a natural alternative.')
+    expect(request[1].content).toContain('Help me practice this phrase')
+    const result = await screen.findByRole('dialog', { name: 'Agent: Language coach' })
+    await within(result).findByText('A language-learning suggestion')
+    expect(within(result).queryByRole('button', { name: /draft/i })).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    expect(harness.service.SendReply).not.toHaveBeenCalled()
+  })
+
+  it('loads chat agent preferences from the active account when room IDs overlap', async () => {
+    const user = userEvent.setup()
+    const secondProfile = {
+      userId: '@two:example.net',
+      displayName: 'Two',
+      homeserver: 'https://example.net',
+      deviceId: 'DEVICE_TWO',
+      avatarUri: '',
+      verified: true,
+    }
+    const secondAccount: AccountSummary = { id: 'second', profile: secondProfile }
+    const preferenceKey = `room.ai_agents.${room.id}`
+    const agentValue = (id: string, name: string) => JSON.stringify({ agents: [{ id, name, instructions: 'Offer a suggestion.' }], defaultAgentId: id })
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      accounts: [{ id: 'primary', profile: snapshot.profile }, secondAccount],
+      preferences: { [preferenceKey]: agentValue('primary-agent', 'Primary profile') },
+    })
+    harness.service.SwitchAccount.mockResolvedValue({
+      ...snapshot,
+      activeAccountId: secondAccount.id,
+      profile: secondProfile,
+      rooms: [{ ...room, accountId: 'second' }],
+      preferences: { [preferenceKey]: agentValue('second-agent', 'Second profile') },
+    })
+    render(<App />)
+    await screen.findByText('latest message')
+    await user.click(screen.getByRole('button', { name: 'Manage Matrix accounts' }))
+    await user.click(screen.getByRole('button', { name: /@two:example\.net/ }))
+    await waitFor(() => expect(harness.service.SwitchAccount).toHaveBeenCalledWith('second'))
+    await user.click(await screen.findByRole('button', { name: 'Room details' }))
+
+    const roomDialog = await screen.findByRole('dialog', { name: 'Test room' })
+    expect(within(roomDialog).getByRole('option', { name: 'Second profile' })).toBeTruthy()
+    expect(within(roomDialog).queryByRole('option', { name: 'Primary profile' })).toBeNull()
   })
 
   it('summarizes recent messages in a read-only panel', async () => {
@@ -779,6 +1009,8 @@ describe('room history updates', () => {
     await user.click(screen.getByRole('button', { name: /Test room/ }))
 
     await waitFor(() => expect(timeline.scrollTop).toBe(400))
+    expect(await screen.findByText('new live message')).toBeTruthy()
+    expect(harness.service.History).toHaveBeenLastCalledWith(room.id, 0)
     expect(container.querySelector('.room-button.is-active')).toBeTruthy()
   })
 
@@ -807,6 +1039,18 @@ describe('room history updates', () => {
     await user.clear(screen.getByRole('textbox', { name: 'Find a room' }))
     expect(within(roomList).getByRole('button', { name: /Favorite direct/ })).toBeTruthy()
     expect(within(roomList).getByRole('button', { name: /Favorite project/ })).toBeTruthy()
+  })
+
+  it('labels each room filter with an icon', async () => {
+    render(<App />)
+    await screen.findByText('latest message')
+
+    const filters = screen.getByRole('group', { name: 'Filter rooms' })
+    expect(within(filters).getByText('All')).toBeTruthy()
+    expect(within(filters).getByText('Archive')).toBeTruthy()
+    expect(within(filters).getByText('Needs reply')).toBeTruthy()
+    expect(within(filters).getByText('Favorites')).toBeTruthy()
+    expect(filters.querySelectorAll('button svg')).toHaveLength(4)
   })
 
   it('adds a chat to Favorites from the room menu', async () => {
@@ -922,12 +1166,304 @@ describe('room history updates', () => {
     expect(screen.queryByText('Message removed')).toBeNull()
   })
 
+  function stubImageIntersectionObserver() {
+    const callbacks = new Map<Element, IntersectionObserverCallback>()
+    vi.stubGlobal('IntersectionObserver', class {
+      private callback: IntersectionObserverCallback
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback
+      }
+      observe(target: Element) {
+        callbacks.set(target, this.callback)
+      }
+      unobserve(target: Element) {
+        callbacks.delete(target)
+      }
+      disconnect() {
+        callbacks.clear()
+      }
+    })
+    return {
+      setIntersecting(target: Element, isIntersecting: boolean) {
+        const callback = callbacks.get(target)
+        if (!callback) throw new Error('Element is not observed')
+        const entry = {
+          target,
+          isIntersecting,
+          intersectionRatio: isIntersecting ? 1 : 0,
+          boundingClientRect: target.getBoundingClientRect(),
+          intersectionRect: target.getBoundingClientRect(),
+          rootBounds: null,
+          time: performance.now(),
+        } as IntersectionObserverEntry
+        act(() => callback([entry], {} as IntersectionObserver))
+      },
+    }
+  }
+
+  it('automatically previews image attachments without a click', async () => {
+    const mediaURL = 'mxc://example.org/photo'
+    const imageMessage = { ...message('$photo', 'Attachment', 300), mediaUri: mediaURL, mediaMime: 'image/png', mediaSize: 12 }
+    harness.service.History.mockResolvedValueOnce({ messages: [imageMessage], before: 0, hasMore: false })
+    const intersection = stubImageIntersectionObserver()
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:photo-preview'),
+      revokeObjectURL: vi.fn(),
+    })
+
+    const { container } = render(<App />)
+    const attachment = await waitFor(() => {
+      const element = container.querySelector('[data-event-id="$photo"] .message-attachment')
+      expect(element).toBeTruthy()
+      return element
+    })
+    expect(harness.service.DownloadMedia).not.toHaveBeenCalled()
+    intersection.setIntersecting(attachment!, true)
+
+    const preview = await waitFor(() => {
+      const image = container.querySelector<HTMLImageElement>('[data-event-id="$photo"] .media-preview')
+      expect(image).toBeTruthy()
+      return image
+    })
+    expect(preview?.getAttribute('src')).toBe('blob:photo-preview')
+    expect(harness.service.DownloadMedia).toHaveBeenCalledWith(mediaURL)
+    expect(container.querySelector('[data-event-id="$photo"] .media-load')).toBeNull()
+
+    intersection.setIntersecting(attachment!, false)
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:photo-preview'))
+    expect(container.querySelector('[data-event-id="$photo"] .media-preview')).toBeNull()
+  })
+
+  it('does not create an image object URL when media finishes downloading after unmount', async () => {
+    const imageMessage = { ...message('$late-photo', 'Attachment', 300), mediaUri: 'mxc://example.org/late-photo', mediaMime: 'image/png', mediaSize: 12 }
+    harness.service.History.mockResolvedValueOnce({ messages: [imageMessage], before: 0, hasMore: false })
+    let resolveMedia!: (value: string) => void
+    harness.service.DownloadMedia.mockReturnValueOnce(new Promise<string>((resolve) => { resolveMedia = resolve }))
+    const intersection = stubImageIntersectionObserver()
+    const createObjectURL = vi.fn(() => 'blob:late-photo')
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: vi.fn() })
+
+    const rendered = render(<App />)
+    const attachment = await waitFor(() => {
+      const element = rendered.container.querySelector('[data-event-id="$late-photo"] .message-attachment')
+      expect(element).toBeTruthy()
+      return element
+    })
+    intersection.setIntersecting(attachment!, true)
+    await waitFor(() => expect(harness.service.DownloadMedia).toHaveBeenCalledWith(imageMessage.mediaUri))
+
+    rendered.unmount()
+    await act(async () => {
+      resolveMedia('aW1hZ2U=')
+      await Promise.resolve()
+    })
+
+    expect(createObjectURL).not.toHaveBeenCalled()
+  })
+
+  it('revokes a loaded image object URL when its message unmounts', async () => {
+    const imageMessage = { ...message('$unmount-photo', 'Attachment', 300), mediaUri: 'mxc://example.org/unmount-photo', mediaMime: 'image/png', mediaSize: 12 }
+    harness.service.History.mockResolvedValueOnce({ messages: [imageMessage], before: 0, hasMore: false })
+    const intersection = stubImageIntersectionObserver()
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:unmount-photo'),
+      revokeObjectURL,
+    })
+
+    const rendered = render(<App />)
+    const attachment = await waitFor(() => {
+      const element = rendered.container.querySelector('[data-event-id="$unmount-photo"] .message-attachment')
+      expect(element).toBeTruthy()
+      return element
+    })
+    intersection.setIntersecting(attachment!, true)
+    await waitFor(() => expect(rendered.container.querySelector('[data-event-id="$unmount-photo"] .media-preview')).toBeTruthy())
+
+    rendered.unmount()
+
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:unmount-photo')
+  })
+
+  it('renders an audio attachment as one player card', async () => {
+    const audioMessage = { ...message('$audio', 'Voice message.ogg', 300), mediaUri: 'mxc://example.org/audio', mediaMime: 'audio/ogg', mediaSize: 12 }
+    harness.service.History.mockResolvedValueOnce({ messages: [audioMessage], before: 0, hasMore: false })
+    harness.service.DownloadMedia.mockResolvedValueOnce('YXVkaW8=')
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:audio-preview'),
+      revokeObjectURL: vi.fn(),
+    })
+
+    const { container } = render(<App />)
+    const card = await waitFor(() => {
+      const audioCard = container.querySelector('[data-event-id="$audio"] .audio-attachment')
+      expect(audioCard).toBeTruthy()
+      return audioCard
+    })
+
+    const row = container.querySelector('[data-event-id="$audio"]')
+    expect(card?.querySelector('.audio-filename')?.textContent).toBe('Voice message.ogg')
+    fireEvent.click(card?.querySelector('.media-load') as HTMLButtonElement)
+    await waitFor(() => expect(card?.querySelector('audio')).toBeTruthy())
+    expect(card?.querySelector('audio')).toBeTruthy()
+    expect(row?.querySelector('.message-body')).toBeNull()
+    expect(row?.querySelector('.media-download')).toBeNull()
+  })
+
+  function stubTimelineGeometry(contentHeight: number) {
+    let height = contentHeight
+    const resizeCallbacks: ResizeObserverCallback[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback)
+      }
+      observe() { }
+      unobserve() { }
+      disconnect() { }
+    })
+    geometrySpies.push(
+      vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(() => height),
+      vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(300),
+    )
+    return {
+      setContentHeight(next: number) {
+        height = next
+      },
+      notifyResize() {
+        act(() => {
+          for (const callback of resizeCallbacks) callback([], {} as ResizeObserver)
+        })
+      },
+    }
+  }
+
+  // Opens a room whose newest message is an auto-previewed image. The image loads after the
+  // timeline has been pinned to the bottom, which is the order that leaves the view above the newest message.
+  async function renderRoomWithImageAtBottom() {
+    const image = { ...message('$photo', 'Attachment', 300), mediaUri: 'mxc://example.org/photo', mediaMime: 'image/png', mediaSize: 12 }
+    harness.service.History.mockResolvedValueOnce({ messages: [message('$older', 'older history', 100), image], before: 0, hasMore: false })
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:photo-preview'),
+      revokeObjectURL: vi.fn(),
+    })
+    const geometry = stubTimelineGeometry(700)
+    const { container } = render(<App />)
+    await waitFor(() => expect(container.querySelector('[data-event-id="$photo"] .media-preview')).toBeTruthy())
+    const timeline = screen.getByRole('region', { name: 'Message timeline' })
+    expect(timeline.scrollTop).toBe(700)
+    return { geometry, timeline }
+  }
+
+  it('keeps the newest message in view when media loads after the room opens', async () => {
+    const { geometry, timeline } = await renderRoomWithImageAtBottom()
+
+    geometry.setContentHeight(1000)
+    geometry.notifyResize()
+
+    expect(timeline.scrollTop).toBe(1000)
+  })
+
+  it('stops following new content after the reader scrolls up', async () => {
+    const { geometry, timeline } = await renderRoomWithImageAtBottom()
+
+    timeline.scrollTop = 150
+    fireEvent.scroll(timeline)
+    geometry.setContentHeight(1000)
+    geometry.notifyResize()
+
+    expect(timeline.scrollTop).toBe(150)
+  })
+
+  it('keeps following when the scroll event from an earlier pin arrives after media grew', async () => {
+    const { geometry, timeline } = await renderRoomWithImageAtBottom()
+
+    geometry.setContentHeight(1500)
+    fireEvent.scroll(timeline)
+    geometry.notifyResize()
+
+    expect(timeline.scrollTop).toBe(1500)
+  })
+
   it('hides message timestamps when configured', async () => {
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'appearance.show_timestamps': false } })
     const { container } = render(<App />)
 
     expect(await screen.findByText('latest message')).toBeTruthy()
     expect(container.querySelector('[data-event-id="$latest"] .message-meta time')).toBeNull()
+  })
+
+  it('shows only the time in message headers, or the date for messages older than 24 hours', async () => {
+    const recent = Date.now() - 5 * 60_000
+    const old = Date.now() - 2 * 24 * 60 * 60_000
+    harness.service.History.mockResolvedValue({
+      messages: [message('$old', 'older message', old), message('$latest', 'latest message', recent)],
+      before: 50,
+      hasMore: false,
+    })
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const oldMeta = container.querySelector('[data-event-id="$old"] .message-meta')
+    const latestMeta = container.querySelector('[data-event-id="$latest"] .message-meta')
+    expect(oldMeta?.querySelector('strong')).toBeNull()
+    expect(oldMeta?.textContent).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(old)))
+    expect(latestMeta?.querySelector('strong')).toBeNull()
+    expect(latestMeta?.textContent).toBe(new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(recent)))
+  })
+
+  it('clears the previous timeline while the selected chat history loads', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, secondRoom] })
+    let resolveSecondPage: ((page: { messages: Message[]; before: number; hasMore: boolean }) => void) | undefined
+    const secondPage = new Promise<{ messages: Message[]; before: number; hasMore: boolean }>((resolve) => {
+      resolveSecondPage = resolve
+    })
+    harness.service.History.mockImplementation(async (roomID: string) => {
+      if (roomID === room.id) return { messages: [message('$first-room', 'First room message', 100)], before: 0, hasMore: false }
+      return secondPage
+    })
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('First room message')).toBeTruthy()
+    await user.click(container.querySelector('.room-button[title="Second room"]')!)
+    expect(await screen.findByText('Loading messages')).toBeTruthy()
+    expect(screen.queryByText('First room message')).toBeNull()
+    const timeline = screen.getByRole('region', { name: 'Message timeline' })
+    Object.defineProperty(timeline, 'scrollHeight', { configurable: true, value: 500 })
+
+    await act(async () => {
+      resolveSecondPage?.({ messages: [message('$second-latest', 'Second room latest', 200)], before: 0, hasMore: false })
+      await secondPage
+    })
+    expect(await screen.findByText('Second room latest')).toBeTruthy()
+    expect(timeline.scrollTop).toBe(500)
+  })
+
+  it('uses the same calendar date for yesterday messages in the sidebar and timeline', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date(2026, 0, 2, 12))
+      const yesterday = new Date(2026, 0, 1, 13).getTime()
+      harness.service.Snapshot.mockResolvedValue({
+        ...snapshot,
+        rooms: [{ ...room, preview: 'message from yesterday', lastEventAt: yesterday }],
+      })
+      harness.service.History.mockResolvedValue({
+        messages: [message('$yesterday', 'message from yesterday', yesterday)],
+        before: 0,
+        hasMore: false,
+      })
+      const { container } = render(<App />)
+      const timeline = await screen.findByRole('region', { name: 'Message timeline' })
+      await within(timeline).findByText('message from yesterday')
+
+      const expectedDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(yesterday))
+      expect(container.querySelector('.room-button[title="Test room"] .room-meta time')?.textContent).toBe(expectedDate)
+      expect(timeline.querySelector('[data-event-id="$yesterday"] .message-meta time')?.textContent).toBe(expectedDate)
+      expect(timeline.querySelector('.day-divider')?.textContent).toBe('Yesterday')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('disables message entrance animations when configured', async () => {
@@ -1006,6 +1542,32 @@ describe('room history updates', () => {
 
     fireEvent.keyDown(container.querySelector('.app-shell')!, { key: '1', ctrlKey: true })
     await waitFor(() => expect(harness.service.SetActiveRoom).toHaveBeenLastCalledWith(room.id))
+  })
+
+  it('shift-selects a room range and applies context-menu actions to all selected rooms', async () => {
+    const user = userEvent.setup()
+    const thirdRoom = { ...room, id: '!third:example.org', name: 'Third room' }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, secondRoom, thirdRoom] })
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    let roomButtons = container.querySelectorAll<HTMLButtonElement>('.room-list .room-button')
+    fireEvent.click(roomButtons[0])
+    roomButtons = container.querySelectorAll<HTMLButtonElement>('.room-list .room-button')
+    fireEvent.click(roomButtons[2], { shiftKey: true })
+    expect(container.querySelectorAll('.room-button.is-multiselected')).toHaveLength(3)
+
+    roomButtons = container.querySelectorAll<HTMLButtonElement>('.room-list .room-button')
+    fireEvent.contextMenu(roomButtons[2], { clientX: 48, clientY: 48 })
+    expect(await screen.findByText('3 chats selected')).toBeTruthy()
+    await user.click(screen.getByRole('menuitem', { name: 'Add 3 to Favorites' }))
+
+    await waitFor(() => {
+      expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(`room.favorite.${room.id}`, true)
+      expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(`room.favorite.${secondRoom.id}`, true)
+      expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(`room.favorite.${thirdRoom.id}`, true)
+    })
+    expect(container.querySelectorAll('.room-button.is-multiselected')).toHaveLength(0)
   })
 
   it('archives unread rooms after marking them read and restores them from Archived', async () => {
@@ -1145,7 +1707,7 @@ describe('room history updates', () => {
     expect(appShell.getAttribute('data-mobile-pane')).toBe('conversation')
   })
 
-  it('marks the preview when the latest message was sent by the current user', async () => {
+  it('shows room previews without sender names', async () => {
     const ownMessageRoom: Room = {
       ...room,
       id: '!own-message:example.org',
@@ -1165,8 +1727,116 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     const previews = container.querySelectorAll('.room-preview')
-    expect(previews[0].textContent).toBe('You: My latest message')
+    expect(previews[0].textContent).toBe('My latest message')
     expect(previews[1].textContent).toBe('Their latest message')
+    expect(previews[0].querySelector('.room-preview-sent')).toBeTruthy()
+    expect(previews[1].querySelector('.room-preview-sent')).toBeNull()
+    expect(previews[0].querySelector('.room-preview-text')?.classList.contains('is-received')).toBe(false)
+    expect(previews[1].querySelector('.room-preview-text')?.classList.contains('is-received')).toBe(true)
+  })
+
+  it('shows only the time for rooms active within 24 hours and the date for older rooms', async () => {
+    const recent = Date.now() - 5 * 60_000
+    const old = Date.now() - 2 * 24 * 60 * 60_000
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [
+        { ...room, id: '!recent:example.org', name: 'Recent room', lastEventAt: recent },
+        { ...room, id: '!old:example.org', name: 'Old room', lastEventAt: old },
+      ],
+    })
+    const { container } = render(<App />)
+    await waitFor(() => expect(container.querySelector('.room-button[title="Old room"]')).toBeTruthy())
+
+    expect(container.querySelector('.room-button[title="Recent room"] .room-meta time')?.textContent).toBe(new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(recent)))
+    expect(container.querySelector('.room-button[title="Old room"] .room-meta time')?.textContent).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(old)))
+  })
+
+  it('leaves the preview empty instead of showing the room ID', async () => {
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [{ ...room, id: '!quiet:example.org', name: 'Quiet room', preview: '', topic: '' }],
+    })
+    const { container } = render(<App />)
+    await waitFor(() => expect(container.querySelector('.room-button[title="Quiet room"]')).toBeTruthy())
+
+    expect(container.querySelector('.room-button[title="Quiet room"] .room-preview')?.textContent).toBe('')
+  })
+
+  it('dates rooms without a message time by their last activity', async () => {
+    const activity = Date.now() - 2 * 24 * 60 * 60_000
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [
+        { ...room, id: '!backfilled:example.org', name: 'Backfilled room', lastEventAt: 0, lastSeen: activity },
+        { ...room, id: '!silent:example.org', name: 'Silent room', lastEventAt: 0, lastSeen: 0 },
+      ],
+    })
+    const { container } = render(<App />)
+    await waitFor(() => expect(container.querySelector('.room-button[title="Silent room"]')).toBeTruthy())
+
+    expect(container.querySelector('.room-button[title="Backfilled room"] .room-meta time')?.textContent).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(activity)))
+    expect(container.querySelector('.room-button[title="Silent room"] .room-meta time')).toBeNull()
+  })
+
+  it('sorts chats by activity date while keeping favorites pinned', async () => {
+    const oldest = { ...room, id: '!oldest:example.org', name: 'Oldest', lastEventAt: 100 }
+    const middle = { ...room, id: '!middle:example.org', name: 'Middle', lastEventAt: 0, lastSeen: 300 }
+    const newest = { ...room, id: '!newest:example.org', name: 'Newest', lastEventAt: 500 }
+    const favorite = { ...room, id: '!favorite:example.org', name: 'Favorite', favorite: true, lastEventAt: 50 }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [oldest, middle, newest, favorite] })
+
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    const names = Array.from(container.querySelectorAll('.room-list .room-name-text'), (element) => element.textContent)
+    expect(names).toEqual(['Favorite', 'Newest', 'Middle', 'Oldest'])
+  })
+
+  it('dismisses the answered notification after 10 seconds', async () => {
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [{ ...room, unanswered: true }] })
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    fireEvent.contextMenu(container.querySelector('.room-list .room-button')!, { clientX: 48, clientY: 48 })
+    const answerAction = screen.getByRole('menuitem', { name: /Remove from Needs reply/ })
+
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        fireEvent.click(answerAction)
+        await Promise.resolve()
+      })
+      expect(screen.getByText('Marked Test room answered')).toBeTruthy()
+
+      act(() => vi.advanceTimersByTime(9_999))
+      expect(screen.getByText('Marked Test room answered')).toBeTruthy()
+      act(() => vi.advanceTimersByTime(1))
+      expect(screen.queryByText('Marked Test room answered')).toBeNull()
+    } finally {
+      cleanup()
+      vi.useRealTimers()
+    }
+  })
+
+  it('dismisses scheduled reminder notices after 10 seconds', async () => {
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        harness.eventHandlers.get('scheduler:reminder')?.({ data: { roomId: room.id, text: 'Take a break' } })
+        await Promise.resolve()
+      })
+      expect(screen.getByText('Test room: Take a break')).toBeTruthy()
+
+      act(() => vi.advanceTimersByTime(9_999))
+      expect(screen.getByText('Test room: Take a break')).toBeTruthy()
+      act(() => vi.advanceTimersByTime(1))
+      expect(screen.queryByText('Test room: Take a break')).toBeNull()
+    } finally {
+      cleanup()
+      vi.useRealTimers()
+    }
   })
 
   it('waits for initial sync before showing a recovery key form', async () => {
@@ -1546,7 +2216,7 @@ describe('room history updates', () => {
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, 'sent from the composer'))
-    await waitFor(() => expect(container.querySelector('.room-preview')?.textContent).toBe('You: sent from the composer'))
+    await waitFor(() => expect(container.querySelector('.room-preview')?.textContent).toBe('sent from the composer'))
   })
 
   it('uses the configured time suggestions in the schedule dialog', async () => {
@@ -1643,6 +2313,23 @@ describe('room history updates', () => {
     await user.click(notifyWhileFocused)
 
     await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('notifications.only_when_unfocused', false))
+  })
+
+  it('requests native system authorization when notifications are enabled', async () => {
+    const user = userEvent.setup()
+    harness.service.NativeNotificationsSupported.mockResolvedValue(true)
+    harness.service.NotificationPermission.mockResolvedValue('default')
+    harness.service.RequestNotificationPermission.mockResolvedValue('granted')
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'notifications.enabled': false } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('tab', { name: 'Notifications' }))
+
+    await user.click(screen.getByRole('checkbox', { name: 'Enable notifications' }))
+
+    await waitFor(() => expect(harness.service.RequestNotificationPermission).toHaveBeenCalledTimes(1))
+    expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('notifications.enabled', true)
   })
 
   it('schedules a reminder for a specific Matrix message', async () => {

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -442,6 +443,17 @@ func preferenceEnabled(values map[string]any, key string, fallback bool) bool {
 }
 
 func Validate(key string, value any) error {
+	const roomAIAgentsPrefix = "room.ai_agents."
+	if strings.HasPrefix(key, roomAIAgentsPrefix) {
+		if strings.TrimPrefix(key, roomAIAgentsPrefix) == "" {
+			return errors.New("room AI-agent preference requires a room ID")
+		}
+		serialized, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("preference %q must be a JSON string", key)
+		}
+		return validateRoomAIAgents(serialized)
+	}
 	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted."} {
 		if strings.HasPrefix(key, prefix) {
 			if strings.TrimPrefix(key, prefix) == "" {
@@ -587,6 +599,58 @@ func Validate(key string, value any) error {
 		}
 	default:
 		return fmt.Errorf("unknown preference %q", key)
+	}
+	return nil
+}
+
+func validateRoomAIAgents(serialized string) error {
+	const (
+		maxBytes        = 32_768
+		maxAgents       = 8
+		maxIDRunes      = 64
+		maxNameRunes    = 48
+		maxPromptRunes  = 2_000
+	)
+	if len(serialized) > maxBytes {
+		return errors.New("room AI-agent data exceeds the size limit")
+	}
+	var collection struct {
+		Agents []struct {
+			ID           string `json:"id"`
+			Name         string `json:"name"`
+			Instructions string `json:"instructions"`
+		} `json:"agents"`
+		DefaultAgentID *string `json:"defaultAgentId"`
+	}
+	if err := json.Unmarshal([]byte(serialized), &collection); err != nil {
+		return fmt.Errorf("invalid room AI-agent JSON: %w", err)
+	}
+	if collection.Agents == nil || collection.DefaultAgentID == nil {
+		return errors.New("room AI-agent data must include agents and defaultAgentId")
+	}
+	if len(collection.Agents) > maxAgents {
+		return fmt.Errorf("room AI-agent data may contain at most %d profiles", maxAgents)
+	}
+	ids := make(map[string]struct{}, len(collection.Agents))
+	for _, agent := range collection.Agents {
+		if agent.ID == "" || utf8.RuneCountInString(agent.ID) > maxIDRunes {
+			return errors.New("room AI-agent IDs must contain 1 to 64 characters")
+		}
+		if _, duplicate := ids[agent.ID]; duplicate {
+			return errors.New("room AI-agent IDs must be unique")
+		}
+		ids[agent.ID] = struct{}{}
+		if strings.TrimSpace(agent.Name) == "" || utf8.RuneCountInString(agent.Name) > maxNameRunes {
+			return errors.New("room AI-agent names must contain 1 to 48 characters")
+		}
+		if strings.TrimSpace(agent.Instructions) == "" || utf8.RuneCountInString(agent.Instructions) > maxPromptRunes {
+			return errors.New("room AI-agent instructions must contain 1 to 2000 characters")
+		}
+	}
+	if defaultID := *collection.DefaultAgentID; defaultID != "" {
+		if _, exists := ids[defaultID]; !exists {
+			return errors.New("default room AI-agent must match a saved profile")
+		}
 	}
 	return nil
 }

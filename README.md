@@ -35,6 +35,12 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - Reply and quick-reaction controls stay visible; replying opens a threaded quote composer; reactions show as chips. The **More** menu offers Set reminder, edit, delete, retry, preview, and copy.
 - The composer accepts pasted images and files dropped onto the window.
 
+**AI assistance**
+
+- Configure an OpenAI-compatible endpoint in Settings → Integrations to draft replies, explain or translate a selected message, rewrite or shorten composer text, summarize a room, or identify chat topics and themes.
+- Create up to eight named instruction profiles per room, with an optional default. Profiles are stored in the active account's local preferences and are not synced through Matrix.
+- AI actions return suggestions only. Nothing is sent as a Matrix message unless you review and send it yourself. The selected text, included chat context, and custom profile instructions are sent to the configured endpoint, which may be remote.
+
 **Room details & media**
 
 - The header toggles the sidebar; **Details** opens a panel with the room topic and members.
@@ -104,22 +110,16 @@ From the repository root:
 ```sh
 wails3 generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
 npm --prefix frontend ci
-npm --prefix frontend run build
-go run -tags "sqlite_fts5 goolm" .
-```
-
-- The Go command stays attached to the terminal — quit with `Cmd+Q` or `Ctrl+C`. On later launches, run only the Go command (rebuild the frontend first if it changed).
-- Rebuild the frontend when its source or dependencies change — assets stay embedded in the binary. Regenerate bindings after Go service method changes; `wails3 task dev` does both.
-- Matrix sync events are handled off the UI thread and delivered to the React interface through Wails runtime events.
-
-`go build` creates a plain executable and cannot carry macOS bundle metadata. To build the named app with its Finder, Dock, tray, and Notification Center identity, use:
-
-```sh
 sh scripts/build-macos-app.sh
 open bin/Pinger.app
 ```
 
-This runs the Go build, creates `bin/Pinger.app`, installs the Pinger icon and bundle name, and ad-hoc signs the bundle so macOS associates notifications with Pinger. The equivalent Task command is `task package:go`.
+- The script builds the frontend and executable, packages `Pinger.app`, and ad-hoc signs it so macOS can register native notifications. Quit with `Cmd+Q`.
+- A plain `go run -tags "sqlite_fts5 goolm" .` launches an unbundled executable, so macOS native notifications are unavailable in that mode.
+- The equivalent Task command is `task package:go`.
+- Matrix sync events are handled off the UI thread and delivered to the React interface through Wails runtime events.
+
+`go build` creates a plain executable and cannot carry the macOS bundle metadata needed for a stable Finder, Dock, tray, and Notification Center identity. Use the signed app bundle for native notifications.
 
 ### Terminal interface
 
@@ -166,8 +166,8 @@ Build the frontend before compiling Go. The same checks run in CI on every push 
 npm --prefix frontend ci
 npm --prefix frontend test
 npm --prefix frontend run build
-go test -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./tui
-go vet -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./tui
+go test -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences ./tui
+go vet -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences ./tui
 go build -tags "sqlite_fts5 goolm" .
 go build -tags "sqlite_fts5 goolm" ./cmd/gomuks-tui
 ```

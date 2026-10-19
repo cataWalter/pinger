@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -16,12 +17,15 @@ import (
 )
 
 const (
-	updateEventName            = "matrix:update"
-	hostErrorEventName         = "matrix:host-error"
-	attachmentSentEventName    = "matrix:attachment-sent"
-	preferencesUpdateEventName = "preferences:update"
-	scheduledReminderEventName = "scheduler:reminder"
-	notificationOpenRoomName   = "notification:open-room"
+	updateEventName             = "matrix:update"
+	hostErrorEventName          = "matrix:host-error"
+	attachmentSentEventName     = "matrix:attachment-sent"
+	preferencesUpdateEventName  = "preferences:update"
+	scheduledReminderEventName  = "scheduler:reminder"
+	notificationOpenRoomName    = "notification:open-room"
+	applicationMenuAboutName    = "application-menu:about"
+	applicationMenuSettingsName = "application-menu:settings"
+	applicationMenuSearchName   = "application-menu:search"
 )
 
 func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCacheDir string) error {
@@ -111,6 +115,7 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 		Title:              "Pinger",
 		Width:              1100,
 		Height:             720,
+		AlwaysOnTop:        false,
 		MinWidth:           760,
 		MinHeight:          520,
 		URL:                "/",
@@ -118,6 +123,9 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 		EnableFileDrop:     true,
 		UseApplicationMenu: true,
 		Hidden:             startMinimized && menuBarIconEnabled(),
+		Mac: application.MacWindow{
+			WindowLevel: application.MacWindowLevelNormal,
+		},
 	})
 
 	normalIcon, unreadIcon := trayIcons()
@@ -135,19 +143,58 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 	menu.Add("Open").OnClick(func(_ *application.Context) {
 		tray.ShowWindow()
 	})
-	menu.Add("Mark All as Read").OnClick(func(_ *application.Context) {
+	markAllRoomsRead := func() {
 		go func() {
 			if markErr := service.markAllRead(); markErr != nil && service.ctx.Err() == nil {
 				log.Printf("mark all rooms as read: %v", markErr)
 				app.Event.Emit(hostErrorEventName, map[string]string{"error": markErr.Error()})
 			}
 		}()
+	}
+	menu.Add("Mark All as Read").OnClick(func(_ *application.Context) {
+		markAllRoomsRead()
 	})
 	menu.AddSeparator()
 	menu.Add("Quit").OnClick(func(_ *application.Context) {
 		app.Quit()
 	})
 	tray.SetMenu(menu)
+	if runtime.GOOS == "darwin" {
+		applicationMenu := application.NewMenu()
+		appMenu := applicationMenu.AddSubmenu("Pinger")
+		appMenu.Add("About Pinger").OnClick(func(_ *application.Context) {
+			tray.ShowWindow()
+			app.Event.Emit(applicationMenuAboutName)
+		})
+		appMenu.AddSeparator()
+		appMenu.Add("Settings...").SetAccelerator("CmdOrCtrl+,").OnClick(func(_ *application.Context) {
+			tray.ShowWindow()
+			app.Event.Emit(applicationMenuSettingsName)
+		})
+		appMenu.AddSeparator()
+		appMenu.AddRole(application.ServicesMenu)
+		appMenu.AddSeparator()
+		appMenu.AddRole(application.Hide)
+		appMenu.AddRole(application.HideOthers)
+		appMenu.AddRole(application.UnHide)
+		appMenu.AddSeparator()
+		appMenu.AddRole(application.Quit)
+
+		applicationMenu.AddRole(application.FileMenu)
+		applicationMenu.AddRole(application.EditMenu)
+		messagesMenu := applicationMenu.AddSubmenu("Messages")
+		messagesMenu.Add("Search Messages").SetAccelerator("CmdOrCtrl+f").OnClick(func(_ *application.Context) {
+			tray.ShowWindow()
+			app.Event.Emit(applicationMenuSearchName)
+		})
+		messagesMenu.Add("Mark All as Read").OnClick(func(_ *application.Context) {
+			markAllRoomsRead()
+		})
+		applicationMenu.AddRole(application.ViewMenu)
+		applicationMenu.AddRole(application.WindowMenu)
+		applicationMenu.AddRole(application.HelpMenu)
+		app.Menu.SetApplicationMenu(applicationMenu)
+	}
 	// Tray Show and Hide are no-ops until the native tray exists, so the initial state is applied after launch.
 	if !menuBarIconEnabled() {
 		app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(_ *application.ApplicationEvent) {

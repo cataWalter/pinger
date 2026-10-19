@@ -43,10 +43,10 @@ jobs:
           npm run build
 
       - name: Test
-        run: go test -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./tui
+        run: go test -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences ./tui
 
       - name: Vet
-        run: go vet -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./tui
+        run: go vet -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences ./tui
 
       - name: Build
         run: |

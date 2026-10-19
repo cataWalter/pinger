@@ -1,5 +1,5 @@
 import { Clipboard } from '@wailsio/runtime'
-import { isValidElement, useEffect, useRef, useState, type ReactNode } from 'react'
+import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, Copy } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
@@ -61,4 +61,4 @@ function MarkdownMessage({ body }: { body: string }) {
   )
 }
 
-export default MarkdownMessage
+export default memo(MarkdownMessage)

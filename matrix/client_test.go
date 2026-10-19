@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"go.mau.fi/gomuks/pkg/hicli"
 	"go.mau.fi/gomuks/pkg/hicli/database"
 	"go.mau.fi/gomuks/pkg/hicli/jsoncmd"
 	"go.mau.fi/util/jsontime"
@@ -50,9 +51,9 @@ func TestTimelineMessagePrefixCountsVisibleMessages(t *testing.T) {
 		{ID: "$second", Type: event.EventMessage.Type, Content: json.RawMessage(`{"body":"second"}`)},
 	}
 
-	prefix, count := timelineMessagePrefix(events, 1)
-	if prefix != 2 || count != 1 {
-		t.Fatalf("timeline prefix = %d with %d messages, want 2 with 1 message", prefix, count)
+	prefix, messages := timelineMessagePrefix(events, 1, nil)
+	if prefix != 2 || len(messages) != 1 || messages[0].Body != "first" {
+		t.Fatalf("timeline prefix = %d with messages %+v, want 2 with the first message", prefix, messages)
 	}
 }
 
@@ -98,6 +99,342 @@ func TestHistoryPageReportsServerBackfill(t *testing.T) {
 	}
 	if !page.HasMore {
 		t.Fatal("initial history page should expose server-side older messages")
+	}
+}
+
+func BenchmarkHistoryPageWithLimit(b *testing.B) {
+	for _, messageCount := range []int{100, 250} {
+		b.Run(fmt.Sprintf("messages-%d", messageCount), func(b *testing.B) {
+			client, err := New(filepath.Join(b.TempDir(), "profile", "matrix.db"))
+			if err != nil {
+				b.Fatalf("create client: %v", err)
+			}
+			defer client.Close()
+
+			ctx := context.Background()
+			roomID := id.RoomID("!history-benchmark:example.org")
+			if err = client.engine.DB.Room.CreateRow(ctx, roomID); err != nil {
+				b.Fatalf("create room row: %v", err)
+			}
+			rowIDs := make([]database.EventRowID, 0, messageCount)
+			base := time.Date(2026, time.October, 19, 12, 0, 0, 0, time.UTC)
+			for i := 0; i < messageCount; i++ {
+				content := json.RawMessage(fmt.Sprintf(`{"msgtype":"m.text","body":"benchmark message %d"}`, i))
+				rowID, insertErr := client.engine.DB.Event.Insert(ctx, &database.Event{
+					RoomID:    roomID,
+					ID:        id.EventID(fmt.Sprintf("$history-benchmark-%d", i)),
+					Sender:    id.UserID("@alice:example.org"),
+					Type:      event.EventMessage.Type,
+					Timestamp: jsontime.UM(base.Add(time.Duration(i) * time.Second)),
+					Content:   content,
+					Unsigned:  json.RawMessage(`{}`),
+				})
+				if insertErr != nil {
+					b.Fatalf("insert benchmark event %d: %v", i, insertErr)
+				}
+				rowIDs = append(rowIDs, rowID)
+			}
+			if _, err = client.engine.DB.Timeline.Append(ctx, roomID, rowIDs); err != nil {
+				b.Fatalf("append benchmark timeline: %v", err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				page, historyErr := client.HistoryPageWithLimit(ctx, roomID.String(), 0, messageCount)
+				if historyErr != nil {
+					b.Fatalf("load benchmark history: %v", historyErr)
+				}
+				if len(page.Messages) != messageCount {
+					b.Fatalf("loaded %d messages, want %d", len(page.Messages), messageCount)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkApplySync(b *testing.B) {
+	for _, eventCount := range []int{100, 250} {
+		b.Run(fmt.Sprintf("events-%d", eventCount), func(b *testing.B) {
+			roomID := id.RoomID("!sync-benchmark:example.org")
+			syncRoom := &jsoncmd.SyncRoom{
+				Timeline: make([]database.TimelineRowTuple, 0, eventCount),
+				Events:   make([]*database.Event, 0, eventCount),
+			}
+			base := time.Date(2026, time.October, 19, 12, 0, 0, 0, time.UTC)
+			for i := 0; i < eventCount; i++ {
+				rowID := database.EventRowID(i + 1)
+				syncRoom.Timeline = append(syncRoom.Timeline, database.TimelineRowTuple{
+					Timeline: database.TimelineRowID(i + 1),
+					Event:    rowID,
+				})
+				syncRoom.Events = append(syncRoom.Events, &database.Event{
+					RowID:     rowID,
+					ID:        id.EventID(fmt.Sprintf("$sync-benchmark-%d", i)),
+					Sender:    id.UserID("@alice:example.org"),
+					Type:      event.EventMessage.Type,
+					Timestamp: jsontime.UM(base.Add(time.Duration(i) * time.Second)),
+					Content:   json.RawMessage(`{"msgtype":"m.text","body":"benchmark sync event"}`),
+				})
+			}
+			syncEvent := &jsoncmd.SyncComplete{Rooms: map[id.RoomID]*jsoncmd.SyncRoom{roomID: syncRoom}}
+			client := &Client{done: make(chan struct{}), rooms: make(map[string]Room)}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				client.applySync(syncEvent, false)
+			}
+		})
+	}
+}
+
+// insertStoredMessage stores a message the way an earlier sync or history page would.
+func insertStoredMessage(t *testing.T, client *Client, roomID id.RoomID, eventID id.EventID, body string, timestamp time.Time) {
+	t.Helper()
+	content, err := json.Marshal(map[string]string{"msgtype": "m.text", "body": body})
+	if err != nil {
+		t.Fatalf("marshal message content: %v", err)
+	}
+	evt := &database.Event{
+		RoomID:    roomID,
+		ID:        eventID,
+		Sender:    id.UserID("@alice:example.org"),
+		Type:      event.EventMessage.Type,
+		Timestamp: jsontime.UM(timestamp),
+		Content:   content,
+		Unsigned:  json.RawMessage(`{}`),
+	}
+	if _, err = client.engine.DB.Event.Insert(context.Background(), evt); err != nil {
+		t.Fatalf("insert message %s: %v", eventID, err)
+	}
+}
+
+// insertStoredTopic stores a state event, which is never used as a preview.
+func insertStoredTopic(t *testing.T, client *Client, roomID id.RoomID, eventID id.EventID, timestamp time.Time) {
+	t.Helper()
+	evt := &database.Event{
+		RoomID:    roomID,
+		ID:        eventID,
+		Sender:    id.UserID("@alice:example.org"),
+		Type:      event.StateTopic.Type,
+		StateKey:  stringPointer(""),
+		Timestamp: jsontime.UM(timestamp),
+		Content:   json.RawMessage(`{"topic":"state only"}`),
+		Unsigned:  json.RawMessage(`{}`),
+	}
+	if _, err := client.engine.DB.Event.Insert(context.Background(), evt); err != nil {
+		t.Fatalf("insert topic state %s: %v", eventID, err)
+	}
+}
+
+func TestStoredRoomPreviewReturnsNewestStoredMessage(t *testing.T) {
+	client, err := New(filepath.Join(t.TempDir(), "profile", "matrix.db"))
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	roomID := id.RoomID("!stored-preview:example.org")
+	if err = client.engine.DB.Room.CreateRow(ctx, roomID); err != nil {
+		t.Fatalf("create room row: %v", err)
+	}
+	base := time.Date(2024, time.March, 1, 12, 0, 0, 0, time.UTC)
+	insertStoredMessage(t, client, roomID, "$older", "older text", base)
+	insertStoredMessage(t, client, roomID, "$newer", "newer text", base.Add(time.Hour))
+	insertStoredTopic(t, client, roomID, "$topic", base.Add(2*time.Hour))
+	edit := &database.Event{
+		RoomID:       roomID,
+		ID:           id.EventID("$edit"),
+		Sender:       id.UserID("@alice:example.org"),
+		Type:         event.EventMessage.Type,
+		Timestamp:    jsontime.UM(base.Add(3 * time.Hour)),
+		Content:      json.RawMessage(`{"msgtype":"m.text","body":"edited text"}`),
+		Unsigned:     json.RawMessage(`{}`),
+		RelatesTo:    id.EventID("$newer"),
+		RelationType: event.RelReplace,
+	}
+	if _, err = client.engine.DB.Event.Insert(ctx, edit); err != nil {
+		t.Fatalf("insert edit: %v", err)
+	}
+
+	message, ok, err := client.storedRoomPreview(ctx, roomID)
+	if err != nil {
+		t.Fatalf("load stored preview: %v", err)
+	}
+	if !ok || message.ID != "$newer" || message.Body != "newer text" {
+		t.Fatalf("stored preview = %+v (found %t), want the newest original message", message, ok)
+	}
+
+	stateOnlyRoomID := id.RoomID("!state-only-preview:example.org")
+	if err = client.engine.DB.Room.CreateRow(ctx, stateOnlyRoomID); err != nil {
+		t.Fatalf("create room row: %v", err)
+	}
+	insertStoredTopic(t, client, stateOnlyRoomID, "$topic-only", base)
+	if _, ok, err = client.storedRoomPreview(ctx, stateOnlyRoomID); err != nil || ok {
+		t.Fatalf("state-only room found=%t err=%v, want no preview", ok, err)
+	}
+}
+
+func TestPreviewFromHistoryReadsOnlyWithinBudget(t *testing.T) {
+	client, err := New(filepath.Join(t.TempDir(), "profile", "matrix.db"))
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	base := time.Date(2024, time.March, 1, 12, 0, 0, 0, time.UTC)
+	newRoom := func(t *testing.T, name, prevBatch string) id.RoomID {
+		t.Helper()
+		roomID := id.RoomID("!" + name + ":example.org")
+		if err := client.engine.DB.Room.CreateRow(ctx, roomID); err != nil {
+			t.Fatalf("create room row: %v", err)
+		}
+		if prevBatch != "" {
+			if err := client.engine.DB.Room.SetPrevBatch(ctx, roomID, prevBatch); err != nil {
+				t.Fatalf("set room pagination token: %v", err)
+			}
+		}
+		return roomID
+	}
+	emptyPages := func(calls *int, hasMore bool) previewPageFunc {
+		return func(context.Context, id.RoomID, int, bool) (*jsoncmd.PaginationResponse, error) {
+			*calls++
+			return &jsoncmd.PaginationResponse{HasMore: hasMore}, nil
+		}
+	}
+
+	t.Run("stops at the first page that yields a message", func(t *testing.T) {
+		roomID := newRoom(t, "found-on-first-page", "opaque-token")
+		calls := 0
+		page := func(_ context.Context, pageRoomID id.RoomID, _ int, _ bool) (*jsoncmd.PaginationResponse, error) {
+			calls++
+			insertStoredMessage(t, client, pageRoomID, "$history", "from history", base)
+			return &jsoncmd.PaginationResponse{HasMore: true}, nil
+		}
+		message, ok, err := client.previewFromHistory(ctx, roomID, page)
+		if err != nil || !ok || message.Body != "from history" || calls != 1 {
+			t.Fatalf("preview = %+v found=%t err=%v calls=%d, want one call and the history message", message, ok, err, calls)
+		}
+	})
+
+	t.Run("uses the page budget when no page yields a message", func(t *testing.T) {
+		roomID := newRoom(t, "budget-only", "opaque-token")
+		calls := 0
+		_, ok, err := client.previewFromHistory(ctx, roomID, emptyPages(&calls, true))
+		if err != nil || ok || calls != previewHistoryMaxPages {
+			t.Fatalf("found=%t err=%v calls=%d, want no preview after %d pages", ok, err, calls, previewHistoryMaxPages)
+		}
+	})
+
+	t.Run("stops when server history is complete", func(t *testing.T) {
+		roomID := newRoom(t, "complete-after-one-page", "opaque-token")
+		calls := 0
+		_, ok, err := client.previewFromHistory(ctx, roomID, emptyPages(&calls, false))
+		if err != nil || ok || calls != 1 {
+			t.Fatalf("found=%t err=%v calls=%d, want one call and no preview", ok, err, calls)
+		}
+	})
+
+	t.Run("makes no request without server history left", func(t *testing.T) {
+		calls := 0
+		for _, roomID := range []id.RoomID{
+			newRoom(t, "no-token", ""),
+			newRoom(t, "already-complete", database.PrevBatchPaginationComplete),
+		} {
+			if _, ok, err := client.previewFromHistory(ctx, roomID, emptyPages(&calls, true)); err != nil || ok {
+				t.Fatalf("room %s found=%t err=%v, want no preview", roomID, ok, err)
+			}
+		}
+		if calls != 0 {
+			t.Fatalf("pagination calls = %d, want none", calls)
+		}
+	})
+
+	t.Run("leaves rooms that are already paginating", func(t *testing.T) {
+		roomID := newRoom(t, "already-paging", "opaque-token")
+		calls := 0
+		page := func(context.Context, id.RoomID, int, bool) (*jsoncmd.PaginationResponse, error) {
+			calls++
+			return nil, hicli.ErrPaginationAlreadyInProgress
+		}
+		_, ok, err := client.previewFromHistory(ctx, roomID, page)
+		if err != nil || ok || calls != 1 {
+			t.Fatalf("found=%t err=%v calls=%d, want one call and no error", ok, err, calls)
+		}
+	})
+}
+
+func TestApplyRoomPreviewKeepsSortingAndReplyState(t *testing.T) {
+	sortedAt := time.Date(2026, time.October, 12, 9, 0, 0, 0, time.UTC)
+	historyAt := time.Date(2024, time.March, 1, 12, 0, 0, 0, time.UTC)
+	client := &Client{
+		rooms: map[string]Room{
+			"!no-event:example.org":  {ID: "!no-event:example.org", LastSeen: sortedAt},
+			"!has-event:example.org": {ID: "!has-event:example.org", LastSeen: sortedAt, LastEventAt: sortedAt, LastEventID: "$live"},
+			"!set:example.org":       {ID: "!set:example.org", Preview: "kept", LastSeen: sortedAt},
+		},
+		dismissedEvents: map[string]string{},
+	}
+	history := Message{ID: "$history", Body: "old text", Sender: "@friend:example.org", Timestamp: historyAt}
+
+	if !client.applyRoomPreview("!no-event:example.org", history) {
+		t.Fatal("empty preview was not filled")
+	}
+	if !client.applyRoomPreview("!has-event:example.org", history) {
+		t.Fatal("empty preview in a room with a newer event was not filled")
+	}
+	if client.applyRoomPreview("!set:example.org", Message{ID: "$other", Body: "replacement", Timestamp: historyAt}) {
+		t.Fatal("existing preview was replaced")
+	}
+
+	noEvent := client.rooms["!no-event:example.org"]
+	if noEvent.Preview != "old text" || noEvent.LastEventID != "$history" || !noEvent.LastEventAt.Equal(historyAt) {
+		t.Fatalf("room without an event time = %+v, want the history message as its last event", noEvent)
+	}
+	hasEvent := client.rooms["!has-event:example.org"]
+	if hasEvent.Preview != "old text" || hasEvent.LastEventID != "$live" || !hasEvent.LastEventAt.Equal(sortedAt) {
+		t.Fatalf("room with a newer event = %+v, want its last event kept", hasEvent)
+	}
+	for _, room := range []Room{noEvent, hasEvent} {
+		if !room.LastSeen.Equal(sortedAt) || room.LastEventSender != "" || room.Unanswered {
+			t.Fatalf("sorting or reply state changed: %+v", room)
+		}
+	}
+	if kept := client.rooms["!set:example.org"]; kept.Preview != "kept" {
+		t.Fatalf("existing preview = %q, want kept", kept.Preview)
+	}
+}
+
+func TestFillMissingPreviewsRestoresStoredMessagesWithoutNetwork(t *testing.T) {
+	client, err := New(filepath.Join(t.TempDir(), "profile", "matrix.db"))
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	roomID := id.RoomID("!restored:example.org")
+	if err = client.engine.DB.Room.CreateRow(ctx, roomID); err != nil {
+		t.Fatalf("create room row: %v", err)
+	}
+	base := time.Date(2024, time.March, 1, 12, 0, 0, 0, time.UTC)
+	sortedAt := base.Add(24 * time.Hour)
+	insertStoredMessage(t, client, roomID, "$stored", "stored text", base)
+	client.mu.Lock()
+	client.rooms[roomID.String()] = Room{ID: roomID.String(), LastSeen: sortedAt}
+	client.mu.Unlock()
+
+	client.fillMissingPreviews(ctx, false)
+
+	rooms := client.Rooms()
+	if len(rooms) != 1 || rooms[0].Preview != "stored text" || !rooms[0].LastEventAt.Equal(base) {
+		t.Fatalf("rooms = %+v, want the stored message as preview", rooms)
+	}
+	if !rooms[0].LastSeen.Equal(sortedAt) {
+		t.Fatalf("LastSeen = %v, want sorting time unchanged", rooms[0].LastSeen)
 	}
 }
 
