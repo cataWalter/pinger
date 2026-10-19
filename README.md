@@ -7,7 +7,7 @@
 [![License: AGPL-3.0+](https://img.shields.io/badge/license-AGPL--3.0%2B-blue.svg)](#license)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#run-locally)
 
-Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with SQLite caching, media storage, and a terminal interface. Pinger embeds gomuks' `pkg/hicli` engine in a [Wails v3](https://wails.io) (Go) host with a React + TypeScript interface, and also ships the gomuks terminal client.
+Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with SQLite caching and media storage. Pinger embeds gomuks' `pkg/hicli` engine in a [Wails v3](https://wails.io) (Go) host with a React + TypeScript interface.
 
 > **License note:** This application embeds `gomuks`' `pkg/hicli` engine. Review the AGPL-3.0-or-later license obligations before distributing.
 
@@ -48,7 +48,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 
 **System tray & notifications**
 
-- On macOS, desktop and TUI alerts use native Notification Center under the Pinger app identity and icon when launched from the bundled app. The TUI requests notification permission when its first eligible message arrives; desktop settings control permission, focus, muted rooms, sound, and privacy.
+- On macOS, alerts use native Notification Center under the Pinger app identity and icon when launched from the bundled app. Desktop settings control permission, focus, muted rooms, sound, and privacy.
 - Reopen the window, mark rooms read, or quit; the tray icon reflects unread activity. Closing the window can minimize to tray; the startup preference registers the app with the OS. Clicking a notification focuses the app and opens the relevant room.
 
 **Settings** (`Ctrl+,` / `⌘,`)
@@ -121,20 +121,6 @@ open bin/Pinger.app
 
 `go build` creates a plain executable and cannot carry the macOS bundle metadata needed for a stable Finder, Dock, tray, and Notification Center identity. Use the signed app bundle for native notifications.
 
-### Terminal interface
-
-Without the desktop frontend:
-
-```sh
-go run -tags "sqlite_fts5 goolm" ./cmd/gomuks-tui
-```
-
-The desktop binary also embeds the terminal client behind a `tui` subcommand:
-
-```sh
-go run -tags "sqlite_fts5 goolm" . tui
-```
-
 ### Live development
 
 ```sh
@@ -147,13 +133,11 @@ Hot-reloads the frontend via Vite and rebuilds the Go app on change.
 
 | Path | Purpose |
 | --- | --- |
-| `main.go` | Entry point — embeds the frontend, migrates legacy data, starts the desktop app or TUI |
+| `main.go` | Entry point — embeds the frontend, migrates legacy data, and starts the desktop app |
 | `desktop/` | Wails application: services, preferences, system tray, scheduled reminders, attachments |
 | `frontend/` | React + TypeScript UI (Vite build, vitest tests) |
 | `matrix/` | Matrix client wrapper around gomuks' `hicli` engine |
 | `migration/` | First-run migration from the legacy Fyne app |
-| `tui/` | Terminal interface (bubbletea) |
-| `cmd/gomuks-tui/` | Standalone TUI binary |
 | `build/` | Wails build configuration and platform assets |
 | `assets/` | Application icons |
 | `.github/workflows/` | CI and release pipelines |
@@ -166,10 +150,9 @@ Build the frontend before compiling Go. The same checks run in CI on every push 
 npm --prefix frontend ci
 npm --prefix frontend test
 npm --prefix frontend run build
-go test -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences ./tui
-go vet -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences ./tui
+go test -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences
+go vet -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences
 go build -tags "sqlite_fts5 goolm" .
-go build -tags "sqlite_fts5 goolm" ./cmd/gomuks-tui
 ```
 
 ## Releases
@@ -179,9 +162,7 @@ Pushing a `v*` tag runs the release workflow, which builds universal (arm64 + am
 | Artifact | Contents |
 | --- | --- |
 | `Pinger-<version>-macos-universal.dmg` | Signed app + `/Applications` symlink |
-| `Pinger-TUI-<version>-macos-universal.dmg` | `gomuks-tui` binary + `bin` symlink to `/usr/local/bin` |
 | `Pinger-<version>-windows-amd64.zip` | `pinger.exe` with embedded icon and manifest |
-| `Pinger-TUI-<version>-windows-amd64.zip` | `gomuks-tui.exe` |
 | `Pinger-<version>-linux-amd64.deb` | Debian package for Linux x64 |
 | `Pinger-<version>-linux-amd64.AppImage` | Portable AppImage for Linux x64 |
 | `checksums.txt` | SHA-256 manifest for all packages |

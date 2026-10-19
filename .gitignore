@@ -1,7 +1,6 @@
 /bin/
 /.task/
 /mychat
-/gomuks-tui
 /dist/
 /frontend/node_modules/
 /frontend/bindings/
