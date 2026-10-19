@@ -1943,12 +1943,13 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 				continue
 			}
 			c.removeLocalMessageLocked(key, evt)
-			if !evt.Timestamp.Time.Before(room.LastEventAt) {
+			message, isMessage := messageFromEvent(evt)
+			if isMessage && !evt.Timestamp.Time.Before(room.LastEventAt) {
 				room.LastEventAt = evt.Timestamp.Time
 				room.LastEventID = evt.ID.String()
 			}
 			inTimeline := isTimelineEvent(syncRoom.Timeline, evt.RowID)
-			if message, ok := messageFromEvent(evt); ok && !previewResolved && evt.CanUseForPreview() {
+			if isMessage && !previewResolved && evt.CanUseForPreview() {
 				// Timeline membership keeps stale rows resent in `events` from
 				// moving the preview backwards, but a freshly sent own message
 				// may not have a timeline row yet, so let it seed an empty

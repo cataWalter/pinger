@@ -789,6 +789,7 @@ func TestApplySyncKeepsPreviewSenderOnMessageEvent(t *testing.T) {
 				Events: []*database.Event{
 					{
 						RowID:     5,
+						ID:        "$latest-message",
 						Type:      event.EventMessage.Type,
 						Sender:    id.UserID("@me:example.org"),
 						Content:   json.RawMessage(`{"body":"my latest message"}`),
@@ -808,6 +809,10 @@ func TestApplySyncKeepsPreviewSenderOnMessageEvent(t *testing.T) {
 	rooms := client.Rooms()
 	if len(rooms) != 1 || rooms[0].Preview != "my latest message" || rooms[0].LastEventSender != "@me:example.org" {
 		t.Fatalf("preview sender = %+v, want own message sender", rooms)
+	}
+	if !rooms[0].LastEventAt.Equal(latest) || rooms[0].LastEventID != "$latest-message" {
+		t.Fatalf("latest event = (%v, %q), want message timestamp %v and event ID %q",
+			rooms[0].LastEventAt, rooms[0].LastEventID, latest, "$latest-message")
 	}
 }
 
