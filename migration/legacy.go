@@ -2,19 +2,15 @@ package migration
 
 import (
 	"bytes"
-	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
-	"time"
 
-	sqlite3 "github.com/mattn/go-sqlite3"
+	"mychat/sqliteutil"
 )
 
 const (
@@ -69,6 +65,17 @@ func PathsFor(goos, homeDir, configDir string) Paths {
 		PreferencesFile:       filepath.Join(dataDir, preferencesFileName),
 		LegacyPreferencesFile: filepath.Join(fyneConfigDir, legacyFyneAppID, preferencesFileName),
 	}
+}
+
+// WithDataDir returns the paths that use the given data directory, so the application
+// can keep its data in a folder the user picked.
+func (p Paths) WithDataDir(dataDir string) Paths {
+	if dataDir == "" {
+		return p
+	}
+	p.DataDir = dataDir
+	p.PreferencesFile = filepath.Join(dataDir, preferencesFileName)
+	return p
 }
 
 func MigrateLegacy(paths Paths) (Report, error) {
@@ -180,7 +187,7 @@ func migrateSQLiteDatabase(source, destination string) (bool, error) {
 		return false, fmt.Errorf("close temporary database: %w", err)
 	}
 
-	if err := backupSQLite(source, temporaryPath); err != nil {
+	if err := sqliteutil.BackupReadOnly(source, temporaryPath); err != nil {
 		return false, err
 	}
 	if err := os.Chmod(temporaryPath, 0o600); err != nil {
@@ -201,101 +208,6 @@ func migrateSQLiteDatabase(source, destination string) (bool, error) {
 		return true, fmt.Errorf("sync destination data directory: %w", err)
 	}
 	return true, nil
-}
-
-func backupSQLite(sourcePath, destinationPath string) (err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	sourceURI := (&url.URL{Scheme: "file", Path: filepath.ToSlash(sourcePath)}).String()
-	sourceDB, err := sql.Open("sqlite3", sourceURI+"?mode=ro&_busy_timeout=5000")
-	if err != nil {
-		return fmt.Errorf("open legacy database: %w", err)
-	}
-	defer func() {
-		if closeErr := sourceDB.Close(); err == nil && closeErr != nil {
-			err = closeErr
-		}
-	}()
-	sourceDB.SetMaxOpenConns(1)
-	if err = sourceDB.PingContext(ctx); err != nil {
-		return fmt.Errorf("read legacy database: %w", err)
-	}
-
-	destinationDB, err := sql.Open("sqlite3", destinationPath)
-	if err != nil {
-		return fmt.Errorf("open temporary database: %w", err)
-	}
-	defer func() {
-		if closeErr := destinationDB.Close(); err == nil && closeErr != nil {
-			err = closeErr
-		}
-	}()
-	destinationDB.SetMaxOpenConns(1)
-	if err = destinationDB.PingContext(ctx); err != nil {
-		return fmt.Errorf("initialize temporary database: %w", err)
-	}
-
-	sourceConn, err := sourceDB.Conn(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire legacy database connection: %w", err)
-	}
-	defer func() {
-		if closeErr := sourceConn.Close(); err == nil && closeErr != nil {
-			err = closeErr
-		}
-	}()
-	destinationConn, err := destinationDB.Conn(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire temporary database connection: %w", err)
-	}
-	defer func() {
-		if closeErr := destinationConn.Close(); err == nil && closeErr != nil {
-			err = closeErr
-		}
-	}()
-
-	err = destinationConn.Raw(func(destinationDriverConn any) error {
-		destinationSQLite, ok := destinationDriverConn.(*sqlite3.SQLiteConn)
-		if !ok {
-			return fmt.Errorf("unexpected destination SQLite connection type %T", destinationDriverConn)
-		}
-		return sourceConn.Raw(func(sourceDriverConn any) error {
-			sourceSQLite, ok := sourceDriverConn.(*sqlite3.SQLiteConn)
-			if !ok {
-				return fmt.Errorf("unexpected source SQLite connection type %T", sourceDriverConn)
-			}
-			return runSQLiteBackup(destinationSQLite, sourceSQLite)
-		})
-	})
-	return err
-}
-
-func runSQLiteBackup(destination, source *sqlite3.SQLiteConn) (err error) {
-	backup, err := destination.Backup("main", source, "main")
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if finishErr := backup.Finish(); err == nil && finishErr != nil {
-			err = finishErr
-		}
-	}()
-
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		done, stepErr := backup.Step(-1)
-		if stepErr != nil {
-			return stepErr
-		}
-		if done {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return errors.New("SQLite online backup timed out")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 }
 
 func migratePreferences(source, destination string) (bool, error) {
@@ -416,7 +328,8 @@ func pathExists(path string) (bool, error) {
 }
 
 func syncFile(path string) error {
-	file, err := os.Open(path)
+	// The file is opened for writing, because Windows refuses to flush a read-only handle.
+	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}

@@ -1,13 +1,13 @@
-import { Fragment, lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactElement, type ReactNode } from 'react'
+import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Events } from '@wailsio/runtime'
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import {
   ArrowDown,
   ArrowLeft,
   ArrowUpRight,
   Archive,
   ArchiveRestore,
-  ChevronDown,
   Bell,
   BellOff,
   BellRing,
@@ -48,7 +48,7 @@ import {
   ZoomOut,
 } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
-import type { AIMessage, Device, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, UpdateStatus } from '../bindings/mychat/desktop/models.js'
+import type { AIMessage, DataLocation, Device, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, UpdateStatus } from '../bindings/mychat/desktop/models.js'
 import { emojiQueryAt, insertEmoji, replaceEmoticons, suggestEmoji, wrapSelection, type EmojiQuery } from './composerText'
 import { fuzzyScore } from './fuzzy'
 import { SYSTEM_THEME_NAME, defaultBubbleColorForTheme, findThemeByName, themeIdForPreference, themes as appearanceThemes } from './themes'
@@ -94,6 +94,7 @@ type TimelineMessageActions = {
   onUseTranscript: (text: string) => void
   onSendReaction: (message: Message, emoji: string) => void
 }
+type TimelineListContext = { header: ReactNode; footer: ReactNode }
 type RoomButtonActions = {
   onSelect: (room: Room, index: number, event: React.MouseEvent<HTMLButtonElement>) => void
   onKeyDown: (room: Room, index: number, event: KeyboardEvent<HTMLButtonElement>) => void
@@ -320,6 +321,14 @@ function formatScheduledTime(timestamp: number) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(timestamp))
 }
 
+function formatWeeklySchedule(timestamp: number) {
+  if (!Number.isFinite(timestamp)) return 'Select a send date and time'
+  const date = new Date(timestamp)
+  const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(date)
+  const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date)
+  return `Repeats every ${weekday} at ${time}`
+}
+
 function preferenceBoolean(preferences: PreferenceValues, key: string, fallback = false) {
   const value = preferences[key]
   return typeof value === 'boolean' ? value : fallback
@@ -422,6 +431,14 @@ const TimelineMessageList = memo(function TimelineMessageList({
   autoPlayNextMessageId,
   canUseTranscriptAsDraft,
   actionsRef,
+  listRef,
+  firstItemIndex,
+  isFollowing,
+  onAtBottomChange,
+  onStartReached,
+  header,
+  footer,
+  scrollRef,
 }: {
   messages: Message[]
   hideDeleted: boolean
@@ -433,29 +450,70 @@ const TimelineMessageList = memo(function TimelineMessageList({
   autoPlayNextMessageId: string | null
   canUseTranscriptAsDraft: boolean
   actionsRef: { current: TimelineMessageActions }
+  listRef: { current: VirtuosoHandle | null }
+  firstItemIndex: number
+  isFollowing: () => boolean
+  onAtBottomChange: (atBottom: boolean) => void
+  onStartReached: () => void
+  header: ReactNode
+  footer: ReactNode
+  scrollRef: { current: HTMLElement | null }
 }) {
   const visibleMessages = hideDeleted ? messages.filter((message) => !message.redacted) : messages
 
-  return <>
-    {visibleMessages.map((message, index) => {
+  return <Virtuoso
+    ref={listRef}
+    className="timeline-virtualizer"
+    style={{ height: '100%', width: '100%' }}
+    data={visibleMessages}
+    firstItemIndex={firstItemIndex}
+    initialTopMostItemIndex={visibleMessages.length - 1}
+    initialItemCount={30}
+    defaultItemHeight={88}
+    increaseViewportBy={{ top: 500, bottom: 500 }}
+    atBottomThreshold={96}
+    atBottomStateChange={onAtBottomChange}
+    followOutput={() => isFollowing() ? 'auto' : false}
+    totalListHeightChanged={() => {
+      if (isFollowing() && visibleMessages.length > 0) {
+        listRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' })
+      }
+    }}
+    startReached={onStartReached}
+    computeItemKey={(_index, message) => message.id || message.transactionId}
+    context={{ header, footer } satisfies TimelineListContext}
+    components={{
+      Header: ({ context }: { context?: TimelineListContext }) => <>{context?.header}</>,
+      Footer: ({ context }: { context?: TimelineListContext }) => <>{context?.footer}</>,
+    }}
+    scrollerRef={(element) => {
+      if (element instanceof HTMLElement) {
+        element.classList.add('timeline-virtual-scroller')
+        scrollRef.current = element
+      } else {
+        scrollRef.current = null
+      }
+    }}
+    itemContent={(index, message) => {
+      const messageIndex = index - firstItemIndex
       const ownMessage = message.own || Boolean(message.sender && message.sender === currentUserID)
       const isAudioAttachment = Boolean(message.mediaUri && (message.mediaMime.startsWith('audio/') || message.mediaType === 'm.audio'))
       const isImageOrVideoAttachment = !isAudioAttachment && (
         message.mediaMime.startsWith('image/') || message.mediaMime.startsWith('video/') || message.mediaType === 'm.image' || message.mediaType === 'm.video'
       )
       const hideImagesAndVideos = preferenceBoolean(preferences, 'appearance.hide_images_and_videos')
-      const previous = index > 0 ? visibleMessages[index - 1] : null
+      const previous = messageIndex > 0 ? visibleMessages[messageIndex - 1] : null
       const grouped = Boolean(previous && !previous.redacted && previous.sender === message.sender && message.timestamp - previous.timestamp < 5 * 60_000 && isSameDay(previous.timestamp, message.timestamp))
-      const next = index + 1 < visibleMessages.length ? visibleMessages[index + 1] : null
+      const next = messageIndex + 1 < visibleMessages.length ? visibleMessages[messageIndex + 1] : null
       const nextIsGrouped = Boolean(next && !message.redacted && !next.redacted && next.sender === message.sender && next.timestamp - message.timestamp < 5 * 60_000 && isSameDay(message.timestamp, next.timestamp))
       const lastInGroup = !nextIsGrouped
       const showDayDivider = !previous || !isSameDay(previous.timestamp, message.timestamp)
       const displayBody = displayMessageBody(message)
       const isContextTarget = (message.id || message.transactionId) === contextMessageID
       return (
-        <Fragment key={message.id || message.transactionId}>
+        <div className="timeline-virtual-item" key={message.id || message.transactionId}>
           {showDayDivider && message.timestamp > 0 && <div className="day-divider" aria-label={formatDayLabel(message.timestamp)}><span>{formatDayLabel(message.timestamp)}</span></div>}
-          <article className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''} ${isContextTarget ? 'is-context-target' : ''}`} data-event-id={message.id || message.transactionId} tabIndex={message.id || message.transactionId ? -1 : undefined} style={{ '--message-index': Math.min(index, 12) } as React.CSSProperties} onDoubleClick={() => actionsRef.current.onDoubleClick(message)} onContextMenu={(event) => {
+          <article className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''} ${isContextTarget ? 'is-context-target' : ''}`} data-event-id={message.id || message.transactionId} tabIndex={message.id || message.transactionId ? -1 : undefined} style={{ '--message-index': Math.min(messageIndex, 12) } as React.CSSProperties} onDoubleClick={() => actionsRef.current.onDoubleClick(message)} onContextMenu={(event) => {
             if (!selectedRoomID) return
             event.preventDefault()
             actionsRef.current.onOpenContextMenu(message, event.clientX, event.clientY)
@@ -502,10 +560,10 @@ const TimelineMessageList = memo(function TimelineMessageList({
               </div>}
             </div>
           </article>
-        </Fragment>
+        </div>
       )
-    })}
-  </>
+    }}
+  />
 })
 
 const accentPalettes = [
@@ -753,6 +811,42 @@ function createMediaObjectURL(encoded: string, mimeType: string) {
   return URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: mimeType || 'application/octet-stream' }))
 }
 
+const MAX_CACHED_IMAGE_DATA_CHARACTERS = 8 * 1024 * 1024
+const cachedImageData = new Map<string, string>()
+const imageDataRequests = new Map<string, ReturnType<typeof AppService.DownloadMedia>>()
+let cachedImageDataCharacters = 0
+
+function loadImageData(uri: string) {
+  const cached = cachedImageData.get(uri)
+  if (cached) {
+    cachedImageData.delete(uri)
+    cachedImageData.set(uri, cached)
+    return Promise.resolve(cached)
+  }
+  const pending = imageDataRequests.get(uri)
+  if (pending) return pending
+
+  const request = AppService.DownloadMedia(uri).then((encoded) => {
+    if (!encoded) return encoded
+    if (encoded.length <= MAX_CACHED_IMAGE_DATA_CHARACTERS) {
+      const existing = cachedImageData.get(uri)
+      if (existing) cachedImageDataCharacters -= existing.length
+      cachedImageData.delete(uri)
+      while (cachedImageDataCharacters + encoded.length > MAX_CACHED_IMAGE_DATA_CHARACTERS) {
+        const oldest = cachedImageData.keys().next().value
+        if (!oldest) break
+        cachedImageDataCharacters -= cachedImageData.get(oldest)?.length ?? 0
+        cachedImageData.delete(oldest)
+      }
+      cachedImageData.set(uri, encoded)
+      cachedImageDataCharacters += encoded.length
+    }
+    return encoded
+  }).finally(() => imageDataRequests.delete(uri))
+  imageDataRequests.set(uri, request)
+  return request
+}
+
 function encodeVoiceNoteWav(audio: AudioBuffer) {
   const dataLength = audio.length * 2
   if (dataLength + 44 > 50 * 1024 * 1024) throw new Error('Voice note cannot exceed 50 MiB.')
@@ -794,17 +888,16 @@ function App() {
   const [search, setSearch] = useState('')
   const [roomScope, setRoomScope] = useState<RoomScope>('all')
   const [roomRefinements, setRoomRefinements] = useState<RoomRefinements>({ unanswered: false, favorite: false })
-  const [inboxAccountScope, setInboxAccountScope] = useState('all')
-  const [otherAccountRooms, setOtherAccountRooms] = useState<Room[]>([])
   const [messages, setMessages] = useState<Message[]>([])
+  const [timelineFirstItemIndex, setTimelineFirstItemIndex] = useState(100_000)
   const [olderCursor, setOlderCursor] = useState(0)
   const [hasOlder, setHasOlder] = useState(false)
   const hasOlderRef = useRef(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
-  // Scroll events fire far faster than state updates commit, so a scroll
-  // handler calling loadOlderMessages() could start several fetches before
-  // `loadingOlder` re-renders. This ref closes that window.
+  // The virtualizer can signal its start repeatedly before `loadingOlder`
+  // re-renders, so this ref prevents overlapping history requests.
   const loadingOlderRef = useRef(false)
+  const archiveInactiveRoomsRef = useRef<() => Promise<void>>(async () => { })
   const [composeText, setComposeText] = useState('')
   const [mentionBindings, setMentionBindings] = useState<{ token: string; userID: string }[]>([])
   const [mentionStart, setMentionStart] = useState(-1)
@@ -844,6 +937,7 @@ function App() {
   const [scheduledJobsOpen, setScheduledJobsOpen] = useState(false)
   const [scheduledDraft, setScheduledDraft] = useState<ScheduledDraft | null>(null)
   const [scheduledDueAt, setScheduledDueAt] = useState('')
+  const [scheduledRepeatWeekly, setScheduledRepeatWeekly] = useState(false)
   const [scheduledTimes, setScheduledTimes] = useState<Record<string, string>>({})
   const [scheduledLoading, setScheduledLoading] = useState(false)
   const [scheduledSaving, setScheduledSaving] = useState(false)
@@ -853,12 +947,6 @@ function App() {
   const [scheduledNotice, setScheduledNotice] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('General')
-  const [accountManagerOpen, setAccountManagerOpen] = useState(false)
-  const [addingAccount, setAddingAccount] = useState(false)
-  const [accountHomeserver, setAccountHomeserver] = useState('https://matrix.org')
-  const [accountUsername, setAccountUsername] = useState('')
-  const [accountPassword, setAccountPassword] = useState('')
-  const [accountError, setAccountError] = useState('')
   const [undoRoomID, setUndoRoomID] = useState('')
   const undoToastTimerRef = useRef<number | null>(null)
   const scheduledNoticeTimerRef = useRef<number | null>(null)
@@ -874,7 +962,7 @@ function App() {
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false)
   const [quickSwitcherQuery, setQuickSwitcherQuery] = useState('')
   const [quickSwitcherIndex, setQuickSwitcherIndex] = useState(0)
-  const [homeserver, setHomeserver] = useState('https://matrix.org')
+  const [homeserver, setHomeserver] = useState('https://matrix.beeper.com')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [recoveryKey, setRecoveryKey] = useState('')
@@ -904,15 +992,27 @@ function App() {
   const lastReadEventByRoom = useRef(new Map<string, string>())
   const draftsRef = useRef(new Map<string, string>())
   const triageBusyRef = useRef(false)
+  const archiveInactiveRunningRef = useRef(false)
   const dragDepthRef = useRef(0)
   const timelineRef = useRef<HTMLDivElement>(null)
-  const timelineHeightBeforePrepend = useRef<number | null>(null)
+  const timelineScrollRef = useRef<HTMLElement | null>(null)
+  const timelineVirtuosoRef = useRef<VirtuosoHandle>(null)
   const stickToBottomRef = useRef(true)
-  const roomSwitchRef = useRef(false)
-  // scrollTop after the last pin to the newest message. A scroll event at this position comes from
-  // that pin, or from content growing below it, so it must not count as the reader scrolling away.
-  const pinnedScrollTopRef = useRef<number | null>(null)
-  const timelineResizeObserverRef = useRef<ResizeObserver | null>(null)
+  const lastTimelineScrollTopRef = useRef<number | null>(null)
+  const loadOlderMessagesRef = useRef<() => Promise<void>>(async () => { })
+  const isTimelineFollowing = useCallback(() => stickToBottomRef.current, [])
+  const onTimelineAtBottomChange = useCallback((atBottom: boolean) => {
+    const scrollTop = timelineScrollRef.current?.scrollTop
+    if (atBottom) {
+      stickToBottomRef.current = true
+    } else if (scrollTop !== undefined && lastTimelineScrollTopRef.current !== null && scrollTop !== lastTimelineScrollTopRef.current) {
+      stickToBottomRef.current = false
+    }
+    if (scrollTop !== undefined) lastTimelineScrollTopRef.current = scrollTop
+  }, [])
+  const onTimelineStartReached = useCallback(() => {
+    if (hasOlderRef.current && !loadingOlderRef.current) void loadOlderMessagesRef.current()
+  }, [])
   const timelineMessageActionsRef = useRef<TimelineMessageActions>({
     onDoubleClick: () => { },
     onOpenContextMenu: () => { },
@@ -1013,30 +1113,11 @@ function App() {
   }, [])
   hasOlderRef.current = hasOlder
   editTargetRef.current = editTarget
-  const inboxAccountCount = snapshot?.accounts?.length ?? 0
-  const activeAccountID = snapshot?.activeAccountId ?? ''
-  useEffect(() => {
-    if (inboxAccountCount < 2) return
-    let active = true
-    const refreshOtherAccountRooms = () => {
-      void AppService.AccountRooms().then((accountRooms) => {
-        if (active) setOtherAccountRooms((accountRooms ?? []).filter((room) => room.accountId !== activeAccountID))
-      }).catch(() => undefined)
-    }
-    refreshOtherAccountRooms()
-    const timer = window.setInterval(refreshOtherAccountRooms, 15000)
-    return () => {
-      active = false
-      window.clearInterval(timer)
-    }
-  }, [inboxAccountCount, activeAccountID])
-  // Rooms of signed-in accounts other than the active one are cached and refreshed on an interval.
-  const effectiveAccountScope = inboxAccountCount > 1 ? inboxAccountScope : 'all'
-  const crossAccountRooms = inboxAccountCount > 1 ? otherAccountRooms : EMPTY_ROOMS
-  const scopedRooms = useMemo(() => effectiveAccountScope === 'all'
-    ? (crossAccountRooms.length > 0 ? [...rooms, ...crossAccountRooms] : rooms)
-    : effectiveAccountScope === activeAccountID ? rooms : crossAccountRooms.filter((room) => room.accountId === effectiveAccountScope),
-    [rooms, crossAccountRooms, effectiveAccountScope, activeAccountID])
+  loadOlderMessagesRef.current = loadOlderMessages
+  const timelineOlderButton = useMemo(() => hasOlder && <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={() => { void loadOlderMessagesRef.current() }} disabled={loadingOlder}>
+    {loadingOlder ? <><span className="loading-mark" />Loading older messages</> : 'Load older messages'}
+  </button>, [hasOlder, loadingOlder])
+  const scopedRooms = rooms
   const filteredRooms = useMemo(() => {
     const query = search.trim().toLowerCase()
     const today = Date.now()
@@ -1098,7 +1179,7 @@ function App() {
   useEffect(() => {
     setSelectedRoomIDs([])
     roomSelectionAnchorRef.current = ''
-  }, [effectiveAccountScope, roomScope, roomRefinements.unanswered, roomRefinements.favorite, search])
+  }, [roomScope, roomRefinements.unanswered, roomRefinements.favorite, search])
   const mentionOptions = mentionStart < 0 ? [] : roomMembers.filter((member) => {
     const query = mentionQuery.toLowerCase()
     return `${member.displayName} ${member.id}`.toLowerCase().includes(query)
@@ -1152,6 +1233,7 @@ function App() {
       replyToPreview: replyTarget?.body,
     })
     setScheduledDueAt(localDateTimeInputValue(Date.now() + defaultScheduleDelayMinutes('schedule.default_send_minutes', 5) * 60_000))
+    setScheduledRepeatWeekly(false)
     setScheduledDialogError('')
   }
 
@@ -1159,6 +1241,7 @@ function App() {
     if (!selectedRoomID || !message.id || message.id.startsWith('~') || message.redacted) return
     setScheduledDraft({ kind: 'reminder', roomID: selectedRoomID, eventID: message.id, text: '', archiveAfter: false })
     setScheduledDueAt(localDateTimeInputValue(Date.now() + defaultScheduleDelayMinutes('schedule.default_reminder_minutes', 60) * 60_000))
+    setScheduledRepeatWeekly(false)
     setScheduledDialogError('')
   }
 
@@ -1232,24 +1315,13 @@ function App() {
     }
   }, [reactingMessageID])
 
-  function isNearBottom(element: HTMLElement, tolerance = 96) {
-    return element.scrollHeight - element.scrollTop - element.clientHeight <= tolerance
-  }
-
-  function isNearTop(element: HTMLElement, tolerance = 240) {
-    return element.scrollTop <= tolerance
-  }
-
-  function pinTimelineToBottom(timeline: HTMLElement) {
-    timeline.scrollTop = timeline.scrollHeight
-    pinnedScrollTopRef.current = timeline.scrollTop
-  }
-
-  function scrollTimelineToBottom(behavior: ScrollBehavior = 'auto') {
-    const timeline = timelineRef.current
-    if (!timeline) return
-    if (typeof timeline.scrollTo === 'function') timeline.scrollTo({ top: timeline.scrollHeight, behavior })
-    else timeline.scrollTop = timeline.scrollHeight
+  function scrollTimelineToBottom(behavior: 'auto' | 'smooth' = 'auto') {
+    if (visibleMessages.length === 0) return
+    timelineVirtuosoRef.current?.scrollToIndex({
+      index: visibleMessages.length - 1,
+      align: 'end',
+      behavior,
+    })
   }
 
   function jumpToLatest() {
@@ -1258,48 +1330,55 @@ function App() {
   }
 
   function focusTimelineMessage(eventID: string) {
-    const timeline = timelineRef.current
-    if (!timeline || !eventID) return
-    const target = Array.from(timeline.querySelectorAll<HTMLElement>('[data-event-id]'))
-      .find((element) => element.dataset.eventId === eventID)
-    if (!target) return
-    target.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
-    target.focus({ preventScroll: true })
+    const index = visibleMessages.findIndex((message) => message.id === eventID || message.transactionId === eventID)
+    if (index >= 0) focusTimelineItem(index)
   }
 
   function focusTimelineItem(index: number) {
-    const timeline = timelineRef.current
-    const items = timeline ? Array.from(timeline.querySelectorAll<HTMLElement>('[data-event-id]')) : []
-    const target = items[index]
-    if (!target) return
-    target.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
-    target.focus({ preventScroll: true })
+    const message = visibleMessages[index]
+    if (!message) return
+    const eventID = message.id || message.transactionId
+    timelineVirtuosoRef.current?.scrollToIndex({
+      index,
+      align: 'center',
+      behavior: 'smooth',
+    })
+    const focusTarget = () => {
+      const target = Array.from(timelineRef.current?.querySelectorAll<HTMLElement>('[data-event-id]') ?? [])
+        .find((element) => element.dataset.eventId === eventID)
+      target?.focus({ preventScroll: true })
+    }
+    if (Array.from(timelineRef.current?.querySelectorAll<HTMLElement>('[data-event-id]') ?? [])
+      .some((element) => element.dataset.eventId === eventID)) {
+      focusTarget()
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(focusTarget))
+    }
   }
 
   function moveTimelineFocus(direction: number, boundary?: 'first' | 'last') {
-    const timeline = timelineRef.current
-    if (!timeline) return
-    const items = Array.from(timeline.querySelectorAll<HTMLElement>('[data-event-id]'))
-    if (items.length === 0) return
+    if (visibleMessages.length === 0) return
     if (boundary) {
-      focusTimelineItem(boundary === 'first' ? 0 : items.length - 1)
+      focusTimelineItem(boundary === 'first' ? 0 : visibleMessages.length - 1)
       return
     }
     const activeItem = document.activeElement instanceof HTMLElement
       ? document.activeElement.closest<HTMLElement>('[data-event-id]')
       : null
-    const currentIndex = activeItem ? items.indexOf(activeItem) : -1
+    const currentIndex = activeItem
+      ? visibleMessages.findIndex((message) => message.id === activeItem.dataset.eventId || message.transactionId === activeItem.dataset.eventId)
+      : -1
     const nextIndex = currentIndex < 0
-      ? direction > 0 ? 0 : items.length - 1
+      ? direction > 0 ? 0 : visibleMessages.length - 1
       : currentIndex + direction
-    if (nextIndex >= 0 && nextIndex < items.length) focusTimelineItem(nextIndex)
+    if (nextIndex >= 0 && nextIndex < visibleMessages.length) focusTimelineItem(nextIndex)
   }
 
   function handleTimelineKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.metaKey || event.ctrlKey || event.altKey || isTextEntryTarget(event.target)) return
     const target = event.target instanceof HTMLElement ? event.target : null
     const row = target?.closest<HTMLElement>('[data-event-id]')
-    if (!row && target !== event.currentTarget) return
+    if (!row && target !== event.currentTarget && !target?.classList.contains('timeline-virtual-scroller')) return
 
     if (!singleKeyShortcuts && event.key.length === 1) return
 
@@ -1327,45 +1406,6 @@ function App() {
     }
   }
 
-  useLayoutEffect(() => {
-    const timeline = timelineRef.current
-    if (!timeline) return
-    const previousHeight = timelineHeightBeforePrepend.current
-    if (previousHeight !== null) {
-      timeline.scrollTop += timeline.scrollHeight - previousHeight
-      timelineHeightBeforePrepend.current = null
-      return
-    }
-    if (roomSwitchRef.current || stickToBottomRef.current) {
-      pinTimelineToBottom(timeline)
-      if (!roomSwitchRef.current || historyRoomIDRef.current === selectedRoomID) roomSwitchRef.current = false
-    }
-  }, [messages, selectedRoomID])
-
-  // Media, fonts, and composer or banner changes resize the timeline without changing `messages`.
-  // Re-pin to the newest message after each resize while the reader is following the conversation.
-  useLayoutEffect(() => {
-    const timeline = timelineRef.current
-    if (!timeline || typeof ResizeObserver === 'undefined') return
-    if (!timelineResizeObserverRef.current) {
-      timelineResizeObserverRef.current = new ResizeObserver(() => {
-        const current = timelineRef.current
-        if (current && stickToBottomRef.current) pinTimelineToBottom(current)
-      })
-    }
-    const observer = timelineResizeObserverRef.current
-    observer.disconnect()
-    observer.observe(timeline)
-    for (const child of Array.from(timeline.children)) observer.observe(child)
-  }, [messages, selectedRoomID])
-
-  useEffect(() => {
-    return () => {
-      timelineResizeObserverRef.current?.disconnect()
-      timelineResizeObserverRef.current = null
-    }
-  }, [])
-
   useEffect(() => {
     setSearchOpen(false)
     setMessageSearch('')
@@ -1382,7 +1422,8 @@ function App() {
     setTypingUsers([])
     setComposeText(draftsRef.current.get(selectedRoomID) ?? '')
     stickToBottomRef.current = true
-    pinnedScrollTopRef.current = null
+    lastTimelineScrollTopRef.current = null
+    setTimelineFirstItemIndex(100_000)
     setReplyTarget(null)
     setEditTarget(null)
   }, [selectedRoomID])
@@ -1591,9 +1632,9 @@ function App() {
     setOlderCursor(0)
     setHasOlder(false)
     setLoadingOlder(false)
-    timelineHeightBeforePrepend.current = null
-    roomSwitchRef.current = true
+    setTimelineFirstItemIndex(100_000)
     stickToBottomRef.current = true
+    if (searchJump) stickToBottomRef.current = false
     void (async () => {
       try {
         let page = await AppService.History(selectedRoomID, 0)
@@ -1689,44 +1730,46 @@ function App() {
   async function loadOlderMessages() {
     if (!selectedRoomID || !hasOlder || loadingOlder || loadingOlderRef.current) return
     const roomID = selectedRoomID
-    timelineHeightBeforePrepend.current = timelineRef.current?.scrollHeight ?? null
     loadingOlderRef.current = true
     setLoadingOlder(true)
     try {
       const page = await AppService.History(roomID, olderCursor)
       if (selectedRoomRef.current !== roomID) return
+      const currentKeys = new Set(messagesRef.current.map((message) => message.id || message.transactionId))
+      const olderMessages = (page.messages ?? []).filter((message) => !currentKeys.has(message.id || message.transactionId))
+      const olderVisibleCount = hideDeletedMessages
+        ? olderMessages.filter((message) => !message.redacted).length
+        : olderMessages.length
+      if (olderVisibleCount > 0) {
+        setTimelineFirstItemIndex((index) => Math.max(1, index - olderVisibleCount))
+      }
       setMessages((current) => {
-        const currentKeys = new Set(current.map((message) => message.id || message.transactionId))
-        const olderMessages = (page.messages ?? []).filter((message) => !currentKeys.has(message.id || message.transactionId))
-        // Nothing new arrived, so drop the saved height: the prepend-detecting
-        // layout effect only runs on a `messages` change and would otherwise
-        // apply this stale delta to the next unrelated update.
-        if (olderMessages.length === 0) timelineHeightBeforePrepend.current = null
         return [...olderMessages, ...current]
       })
       setOlderCursor(page.before)
       setHasOlder(page.hasMore && page.before !== olderCursor)
     } catch (historyError) {
       setError(describeError(historyError))
-      timelineHeightBeforePrepend.current = null
     } finally {
       loadingOlderRef.current = false
       setLoadingOlder(false)
     }
   }
 
-  // Keep the viewport filled. A room whose newest page is shorter than the
-  // timeline box can't be scrolled at all, so the scroll handler below would
-  // never fire and older history would stay stuck behind the button. This
-  // terminates: a page either grows the content (stopping the fill) or stops
-  // advancing the cursor, which makes loadOlderMessages clear `hasOlder`.
+  // Keep short timelines filled even when the initial page creates no scroll
+  // range for the virtualizer's start-reached callback.
   useEffect(() => {
-    const timeline = timelineRef.current
+    const timeline = timelineScrollRef.current
     if (!selectedRoomID || loadingHistory || loadingOlder || !hasOlder) return
     if (!timeline || timeline.clientHeight <= 0) return
     if (timeline.scrollHeight > timeline.clientHeight) return
     void loadOlderMessages()
   }, [selectedRoomID, loadingHistory, loadingOlder, hasOlder, messages])
+
+  useEffect(() => {
+    if (loadingHistory || !stickToBottomRef.current || visibleMessages.length === 0) return
+    timelineVirtuosoRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' })
+  }, [loadingHistory, messages, selectedRoomID, visibleMessages.length])
 
   function messageSearchRequest(nextBatch = ''): MessageSearchRequest | null {
     const query = messageSearch.trim()
@@ -1959,29 +2002,45 @@ function App() {
   }
 
   async function archiveInactiveRooms() {
-    const ageDays = Number(preferenceString(preferences, 'archive.older_than_days', '90'))
-    const cutoff = Date.now() - ageDays * 24 * 60 * 60 * 1000
-    const inactiveRooms = rooms.filter((room) => room.lastEventAt > 0
-      && room.lastEventAt < cutoff
-      && !preferenceBoolean(preferences, archivedPreferenceKey(room.id)))
-    const archivedRoomIDs = new Set<string>()
-    for (const room of inactiveRooms) {
-      if ((room.unread > 0 || room.markedUnread) && room.lastEventId) {
-        try {
-          await AppService.MarkRead(room.id, room.lastEventId)
-          setSnapshot((current) => current ? {
-            ...current,
-            rooms: (current.rooms ?? []).map((candidate) => candidate.id === room.id ? { ...candidate, unread: 0, markedUnread: false, mentions: 0 } : candidate),
-          } : current)
-        } catch (readError) {
-          setError(describeError(readError))
-          continue
+    if (archiveInactiveRunningRef.current) return
+    archiveInactiveRunningRef.current = true
+    try {
+      const ageDays = Number(preferenceString(preferences, 'archive.older_than_days', '90'))
+      const cutoff = Date.now() - ageDays * 24 * 60 * 60 * 1000
+      const inactiveRooms = rooms.filter((room) => room.lastEventAt > 0
+        && room.lastEventAt < cutoff
+        && !preferenceBoolean(preferences, archivedPreferenceKey(room.id)))
+      const archivedRoomIDs = new Set<string>()
+      for (const room of inactiveRooms) {
+        if ((room.unread > 0 || room.markedUnread) && room.lastEventId) {
+          try {
+            await AppService.MarkRead(room.id, room.lastEventId)
+            setSnapshot((current) => current ? {
+              ...current,
+              rooms: (current.rooms ?? []).map((candidate) => candidate.id === room.id ? { ...candidate, unread: 0, markedUnread: false, mentions: 0 } : candidate),
+            } : current)
+          } catch (readError) {
+            setError(describeError(readError))
+            continue
+          }
         }
+        if (await setPreference(archivedPreferenceKey(room.id), true)) archivedRoomIDs.add(room.id)
       }
-      if (await setPreference(archivedPreferenceKey(room.id), true)) archivedRoomIDs.add(room.id)
+      if (archivedRoomIDs.has(selectedRoomID)) showRoom(nextRoomAfterArchive(archivedRoomIDs))
+    } finally {
+      archiveInactiveRunningRef.current = false
     }
-    if (archivedRoomIDs.has(selectedRoomID)) showRoom(nextRoomAfterArchive(archivedRoomIDs))
   }
+
+  archiveInactiveRoomsRef.current = archiveInactiveRooms
+
+  useEffect(() => {
+    if (!preferenceBoolean(preferences, 'archive.automatic')) return
+    const archiveIfInactive = () => { void archiveInactiveRoomsRef.current() }
+    archiveIfInactive()
+    const timer = window.setInterval(archiveIfInactive, 24 * 60 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [rooms, selectedRoomID, preferences['archive.automatic'], preferences['archive.older_than_days']])
 
   function openRoomContextMenu(roomID: string, x: number, y: number) {
     const menuWidth = 232
@@ -2255,9 +2314,7 @@ function App() {
       setOlderCursor(0)
       setHasOlder(false)
       setLoadingOlder(false)
-      timelineHeightBeforePrepend.current = null
     }
-    roomSwitchRef.current = true
     stickToBottomRef.current = true
     setSelectedRoomID(roomID)
     setMobilePane(roomID ? 'conversation' : 'rooms')
@@ -2266,21 +2323,16 @@ function App() {
     })
   }
 
-  function isActiveAccountRoom(room: Room) {
-    return !room.accountId || room.accountId === snapshot?.activeAccountId
+  function isActiveAccountRoom(_room: Room) {
+    return true
   }
 
   function isLastMessageByCurrentUser(room: Room) {
-    const userID = isActiveAccountRoom(room)
-      ? snapshot?.profile.userId
-      : snapshot?.accounts?.find((account) => account.id === room.accountId)?.profile.userId
-    return Boolean(room.lastEventSender && userID === room.lastEventSender)
+    return Boolean(room.lastEventSender && snapshot?.profile.userId === room.lastEventSender)
   }
 
-  // Rooms from other accounts switch to their account before opening.
   function openInboxRoom(room: Room) {
-    if (isActiveAccountRoom(room)) showRoom(room.id)
-    else void switchAccount(room.accountId, room.id)
+    showRoom(room.id)
   }
 
   function selectRoomByOffset(direction: number, unansweredOnly = false) {
@@ -2304,15 +2356,6 @@ function App() {
 
     const key = event.key.toLowerCase()
     const hasPrimaryModifier = event.metaKey || event.ctrlKey
-    const accountShortcutNumber = event.code.match(/^Digit([1-9])$/)?.[1] ?? (/^[1-9]$/.test(event.key) ? event.key : '')
-    if (hasPrimaryModifier && event.altKey && accountShortcutNumber) {
-      const account = snapshot?.accounts?.[Number(accountShortcutNumber) - 1]
-      if (account) {
-        event.preventDefault()
-        void switchAccount(account.id)
-      }
-      return
-    }
     if (!hasPrimaryModifier && !event.altKey && event.key === '?') {
       event.preventDefault()
       setSettingsTab('Keyboard')
@@ -2451,63 +2494,12 @@ function App() {
     }
   }
 
-  function resetAccountWorkspace(state: Snapshot) {
-    setSnapshot(state)
-    setSelectedRoomID((state.rooms ?? [])[0]?.id ?? '')
-    setMobilePane('rooms')
-    setMessages([])
-    setComposeText('')
-    setMentionBindings([])
-    setReplyTarget(null)
-    setEditTarget(null)
-    setSearchOpen(false)
-    setSearchResults([])
-    setSearchNextBatch('')
-    setScheduledJobs([])
-    setScheduledTimes({})
-    draftsRef.current.clear()
-    lastReadEventByRoom.current.clear()
-    historyRoomIDRef.current = ''
-    pendingHistoryRefreshRoomIDRef.current = ''
-    void refreshScheduledJobs()
-  }
-
-  async function switchAccount(accountID: string, roomID = '') {
-    if (accountID === snapshot?.activeAccountId) {
-      setAccountManagerOpen(false)
-      if (roomID) showRoom(roomID)
-      return
-    }
-    setBusy(true)
-    setAccountError('')
+  async function openBeeperRegistration() {
+    setError('')
     try {
-      await flushPendingSend()
-      const state = await AppService.SwitchAccount(accountID)
-      resetAccountWorkspace(state)
-      if (roomID) showRoom(roomID)
-      setAccountManagerOpen(false)
-    } catch (switchError) {
-      setAccountError(describeError(switchError))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function submitAddAccount(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setBusy(true)
-    setAccountError('')
-    try {
-      const state = await AppService.AddAccount(accountHomeserver.trim(), accountUsername.trim(), accountPassword)
-      resetAccountWorkspace(state)
-      setAccountPassword('')
-      setAccountUsername('')
-      setAddingAccount(false)
-      setAccountManagerOpen(false)
-    } catch (addError) {
-      setAccountError(describeError(addError))
-    } finally {
-      setBusy(false)
+      await AppService.OpenExternalURL('https://www.beeper.com/')
+    } catch (registrationError) {
+      setError(`Could not open Beeper's website: ${describeError(registrationError)}`)
     }
   }
 
@@ -2538,7 +2530,9 @@ function App() {
     setScheduledDialogError('')
     try {
       if (scheduledDraft.kind === 'message') {
-        if (scheduledDraft.replyToEventID) {
+        if (scheduledRepeatWeekly) {
+          await AppService.ScheduleRecurringMessage(scheduledDraft.roomID, scheduledDraft.text, dueAt)
+        } else if (scheduledDraft.replyToEventID) {
           await AppService.ScheduleReply(scheduledDraft.roomID, scheduledDraft.text, scheduledDraft.replyToEventID, dueAt)
         } else {
           await AppService.ScheduleMessage(scheduledDraft.roomID, scheduledDraft.text, dueAt)
@@ -3433,7 +3427,7 @@ function App() {
           <div className="auth-heading">
             <span className="eyebrow">MATRIX ACCOUNT</span>
             <h1 id="auth-title">Sign in</h1>
-            <p>Use your homeserver credentials to continue.</p>
+            <p>Sign in with your Beeper Matrix account.</p>
           </div>
           <form className="auth-form" onSubmit={submitLogin}>
             <label>
@@ -3454,6 +3448,9 @@ function App() {
               {!busy && <ArrowDown className="button-arrow" size={17} />}
             </button>
           </form>
+          <button className="auth-register" type="button" onClick={() => void openBeeperRegistration()}>
+            Create a Beeper account
+          </button>
           <div className="auth-footnote"><LockKeyhole size={14} /><span>Session and encryption keys stay on this device.</span></div>
         </section>
         <div className="auth-side" aria-hidden="true">
@@ -3509,6 +3506,17 @@ function App() {
     )
   }
 
+  const timelineTranslationPanel = aiPanel?.placement === 'timeline' && aiPanel.roomID === selectedRoomID && <section className="chat-translation-result" role="region" aria-label="Chat translation" aria-live="polite" aria-busy={aiPanel.busy}>
+    <header className="chat-translation-header">
+      <div><span className="eyebrow">AI TRANSLATION</span><h3>Latest 50 messages in English</h3></div>
+      <button className="icon-button" type="button" aria-label="Close chat translation" title="Close chat translation" onClick={closeAIResult}><X size={16} /></button>
+    </header>
+    {aiPanel.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />{aiPanel.status || 'Waiting for the configured model…'}</p>}
+    {aiPanel.error && <p className="settings-error" role="alert">{aiPanel.error}</p>}
+    {aiPanel.result && <div className="ai-result-text">{aiPanel.result}</div>}
+    <p className="chat-translation-note">The translation is sent to the configured AI endpoint, which may be remote. No Matrix message is sent automatically.</p>
+  </section>
+
   return (
     <main
       className="app-shell"
@@ -3546,12 +3554,6 @@ function App() {
           {search && <button type="button" aria-label="Clear room search" onClick={() => setSearch('')}>×</button>}
         </label>
         <div className="room-filters" role="group" aria-label="Filter rooms">
-          {inboxAccountCount > 1 && (
-            <select className="room-account-filter" aria-label="Filter rooms by account" value={effectiveAccountScope} onChange={(event) => setInboxAccountScope(event.target.value)}>
-              <option value="all">All accounts</option>
-              {(snapshot?.accounts ?? []).map((account) => <option key={account.id} value={account.id}>{account.profile.displayName || account.profile.userId}</option>)}
-            </select>
-          )}
           <div className="room-scope-filters" role="group" aria-label="Room visibility">
             <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-pressed={roomScope === 'all'} onClick={() => setRoomScope('all')}><MessageCircleMore size={13} /><span className="filter-label">All</span></button>
             <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} onClick={() => { setRoomScope('archived'); setRoomRefinements({ unanswered: false, favorite: false }) }}><Archive size={13} /><span className="filter-label">Archive</span></button>
@@ -3626,13 +3628,12 @@ function App() {
           </button>}
         </div>}
         <div className="sidebar-profile">
-          <button className="account-switcher-trigger" type="button" aria-label="Manage Matrix accounts" title="Manage Matrix accounts" onClick={() => { setAccountError(''); setAddingAccount(false); setAccountManagerOpen(true) }}>
+          <button className="profile-settings-trigger" type="button" aria-label="Account settings" title="Account settings" onClick={() => { setSettingsTab('Account'); setSettingsOpen(true) }}>
             <Avatar uri={snapshot.profile.avatarUri} label={snapshot.profile.displayName || snapshot.profile.userId} className="profile-avatar" />
             <span className="profile-copy">
               <strong>{snapshot.profile.displayName || snapshot.profile.userId}</strong>
               <span>{snapshot.profile.userId}</span>
             </span>
-            <ChevronDown size={14} />
           </button>
           <button className="sidebar-icon" type="button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}>
             <Settings size={16} />
@@ -3783,28 +3784,12 @@ function App() {
 
         {error && <div className="inline-error" role="alert"><CircleAlert size={15} />{error}<button aria-label="Dismiss error" title="Dismiss error" onClick={() => setError('')}>×</button></div>}
 
-        <div className="timeline" key={selectedRoomID} ref={timelineRef} role="region" aria-label="Message timeline" tabIndex={0} onKeyDown={handleTimelineKeyDown} onScroll={(event) => {
-          const element = event.currentTarget
-          const atPinnedPosition = pinnedScrollTopRef.current !== null && Math.abs(element.scrollTop - pinnedScrollTopRef.current) < 1
-          // Only a scroll away from the bottom that is not our own pin stops following the newest message.
-          if (isNearBottom(element)) stickToBottomRef.current = true
-          else if (!atPinnedPosition) stickToBottomRef.current = false
-          // Infinite scroll: reaching the top of the loaded history fetches the
-          // next older page. The refs keep a burst of scroll events from
-          // starting several fetches before `loadingOlder` commits.
-          if (hasOlderRef.current && !loadingOlderRef.current && isNearTop(element)) {
-            void loadOlderMessages()
-          }
-        }}>
+        <div className="timeline" key={selectedRoomID} ref={timelineRef} role="region" aria-label="Message timeline" tabIndex={0} onKeyDown={handleTimelineKeyDown}>
           {!selectedRoom && <div className="timeline-empty"><MessageCircleMore size={25} /><span>Select a room</span></div>}
           {selectedRoom && loadingHistory && messages.length === 0 && <div className="timeline-empty"><span className="loading-mark" />Loading messages</div>}
           {selectedRoom && !loadingHistory && visibleMessages.length === 0 && <div className="timeline-empty"><MessageCircleMore size={25} /><span>{messages.length > 0 ? 'Deleted messages are hidden' : hasOlder ? 'No messages in the past 24 hours' : 'No messages yet'}</span></div>}
-          {selectedRoom && hasOlder && (
-            <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={loadOlderMessages} disabled={loadingOlder}>
-              {loadingOlder ? <><span className="loading-mark" />Loading older messages</> : 'Load older messages'}
-            </button>
-          )}
-          <TimelineMessageList
+          {selectedRoom && visibleMessages.length === 0 && timelineOlderButton}
+          {selectedRoom && visibleMessages.length > 0 && <TimelineMessageList
             messages={messages}
             hideDeleted={preferenceBoolean(preferences, 'appearance.hide_deleted_messages')}
             preferences={preferences}
@@ -3815,17 +3800,16 @@ function App() {
             autoPlayNextMessageId={autoPlayNextMessageId}
             canUseTranscriptAsDraft={!editTarget}
             actionsRef={timelineMessageActionsRef}
-          />
-          {aiPanel?.placement === 'timeline' && aiPanel.roomID === selectedRoomID && <section className="chat-translation-result" role="region" aria-label="Chat translation" aria-live="polite" aria-busy={aiPanel.busy}>
-            <header className="chat-translation-header">
-              <div><span className="eyebrow">AI TRANSLATION</span><h3>Latest 50 messages in English</h3></div>
-              <button className="icon-button" type="button" aria-label="Close chat translation" title="Close chat translation" onClick={closeAIResult}><X size={16} /></button>
-            </header>
-            {aiPanel.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />{aiPanel.status || 'Waiting for the configured model…'}</p>}
-            {aiPanel.error && <p className="settings-error" role="alert">{aiPanel.error}</p>}
-            {aiPanel.result && <div className="ai-result-text">{aiPanel.result}</div>}
-            <p className="chat-translation-note">The translation is sent to the configured AI endpoint, which may be remote. No Matrix message is sent automatically.</p>
-          </section>}
+            listRef={timelineVirtuosoRef}
+            firstItemIndex={timelineFirstItemIndex}
+            isFollowing={isTimelineFollowing}
+            onAtBottomChange={onTimelineAtBottomChange}
+            onStartReached={onTimelineStartReached}
+            header={timelineOlderButton}
+            footer={timelineTranslationPanel}
+            scrollRef={timelineScrollRef}
+          />}
+          {visibleMessages.length === 0 && timelineTranslationPanel}
         </div>
         {messageContextMenu && <div className="message-context-scrim" aria-hidden="true">
           <div className="message-context-scrim-panel message-context-scrim-top" style={{ height: messageContextMenu.targetBounds.top }} />
@@ -3983,37 +3967,6 @@ function App() {
           </footer>
         </DialogSurface>
       </div>}
-      {accountManagerOpen && <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setAccountManagerOpen(false) }}>
-        <DialogSurface className="room-info-dialog account-dialog" labelledBy="account-manager-title" onClose={() => { if (!busy) setAccountManagerOpen(false) }} onClick={(event) => event.stopPropagation()}>
-          <header className="room-info-header">
-            <div><span className="eyebrow">MATRIX</span><h2 id="account-manager-title">{addingAccount ? 'Add account' : 'Accounts'}</h2></div>
-            <button className="icon-button" type="button" aria-label="Close account manager" disabled={busy} onClick={() => setAccountManagerOpen(false)}><X size={16} /></button>
-          </header>
-          {accountError && <p className="account-manager-error" role="alert">{accountError}</p>}
-          {addingAccount ? <form className="account-add-form" onSubmit={submitAddAccount}>
-            <label><span>Homeserver</span><input type="url" value={accountHomeserver} onChange={(event) => setAccountHomeserver(event.target.value)} autoComplete="url" required /></label>
-            <label><span>Username</span><input value={accountUsername} onChange={(event) => setAccountUsername(event.target.value)} autoComplete="username" autoCapitalize="none" required /></label>
-            <label><span>Password</span><input type="password" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} autoComplete="new-password" required /></label>
-            <div className="account-manager-actions">
-              <button className="settings-command" type="button" disabled={busy} onClick={() => { setAddingAccount(false); setAccountError('') }}>Cancel</button>
-              <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Connecting…' : 'Add account'}{!busy && <Plus size={15} />}</button>
-            </div>
-          </form> : <div className="account-manager-content">
-            <div className="account-option-list" aria-label="Connected Matrix accounts">
-              {(snapshot.accounts ?? []).map((account) => {
-                const label = account.profile.displayName || account.profile.userId
-                const active = account.id === snapshot.activeAccountId
-                return <button key={account.id} className="account-option" type="button" aria-current={active ? 'true' : undefined} disabled={busy} onClick={() => void switchAccount(account.id)}>
-                  <Avatar uri={account.profile.avatarUri} label={label} className="profile-avatar" />
-                  <span className="account-option-copy"><strong>{label}</strong><span>{account.profile.userId}</span></span>
-                  {active ? <Check size={16} aria-label="Current account" /> : <span className="account-option-homeserver">{account.profile.homeserver}</span>}
-                </button>
-              })}
-            </div>
-            <button className="settings-command account-add-button" type="button" disabled={busy} onClick={() => { setAccountError(''); setAddingAccount(true) }}><Plus size={15} />Add account</button>
-          </div>}
-        </DialogSurface>
-      </div>}
       {settingsOpen && (
         <SettingsDialog
           tab={settingsTab}
@@ -4028,11 +3981,6 @@ function App() {
           onLogout={async () => {
             await AppService.Logout()
             setSettingsOpen(false)
-            try {
-              resetAccountWorkspace(await AppService.Snapshot())
-            } catch {
-              // The app is closing after logout from the final account.
-            }
           }}
           onPreferenceChange={(key, value) => setPreference(key, value)}
         />
@@ -4063,6 +4011,7 @@ function App() {
                 </div>
                 <span className="scheduled-job-room">{roomName}</span>
                 {job.replyToEventId && <span className="scheduled-job-room">Reply to {job.replyToEventId}</span>}
+                {job.repeatWeekly && <span className="scheduled-job-repeat">{formatWeeklySchedule(job.dueAt)} until cancelled</span>}
                 <p>{job.text || (job.kind === 'reminder' ? 'Reminder for a message' : '')}</p>
                 {editable && <label className="scheduled-job-time">New time
                   <input type="datetime-local" value={scheduledTimes[job.id] ?? localDateTimeInputValue(job.dueAt)} onChange={(event) => setScheduledTimes((current) => ({ ...current, [job.id]: event.target.value }))} />
@@ -4104,6 +4053,13 @@ function App() {
               <label>{scheduledDraft.kind === 'message' ? 'Send at' : 'Remind me at'}
                 <input type="datetime-local" required value={scheduledDueAt} onChange={(event) => setScheduledDueAt(event.target.value)} />
               </label>
+              {scheduledDraft.kind === 'message' && !scheduledDraft.replyToEventID && <>
+                <label className="scheduled-repeat-toggle">
+                  <input type="checkbox" aria-label="Repeat weekly" checked={scheduledRepeatWeekly} disabled={scheduledSaving} onChange={(event) => setScheduledRepeatWeekly(event.target.checked)} />
+                  <span><strong>Repeat weekly</strong><small>Sends every week on the selected day and time until cancelled.</small></span>
+                </label>
+                {scheduledRepeatWeekly && <p className="scheduled-repeat-description">{formatWeeklySchedule(new Date(scheduledDueAt).getTime())}</p>}
+              </>}
               <div className="scheduled-time-suggestions" role="group" aria-label="Time suggestions">
                 {scheduleTimeSuggestions.map((minutes) => <button key={minutes} className="settings-command" type="button" onClick={() => setScheduledDueAt(localDateTimeInputValue(Date.now() + minutes * 60_000))}>{formatTimeSuggestion(minutes)}</button>)}
               </div>
@@ -4323,7 +4279,7 @@ function MessageMedia({ message, onAudioEnded, autoPlayNext, aiEnabled, canUseDr
     setLoading(true)
     setError('')
     try {
-      const encoded = await AppService.DownloadMedia(message.mediaUri)
+      const encoded = isImage ? await loadImageData(message.mediaUri) : await AppService.DownloadMedia(message.mediaUri)
       if (!encoded) throw new Error('No media data returned.')
       if (!mountedRef.current || (isImage && !nearViewportRef.current)) return ''
       const objectURL = createMediaObjectURL(encoded, mimeType)
@@ -4950,16 +4906,24 @@ function SettingsDialog({
   const [devices, setDevices] = useState<Device[]>([])
   const [devicesLoading, setDevicesLoading] = useState(false)
   const [devicesError, setDevicesError] = useState('')
+  const [revokeTarget, setRevokeTarget] = useState<Device | null>(null)
+  const [revokePassword, setRevokePassword] = useState('')
+  const [revokeError, setRevokeError] = useState('')
+  const [revokeBusy, setRevokeBusy] = useState(false)
   const [scheduleSuggestionsDraft, setScheduleSuggestionsDraft] = useState(preferenceString(preferences, 'schedule.suggestions_minutes', '5,15,60'))
   const [scheduleSuggestionsError, setScheduleSuggestionsError] = useState('')
   const [scheduleSendDelayDraft, setScheduleSendDelayDraft] = useState(preferenceString(preferences, 'schedule.default_send_minutes', '5'))
   const [scheduleReminderDelayDraft, setScheduleReminderDelayDraft] = useState(preferenceString(preferences, 'schedule.default_reminder_minutes', '60'))
   const [scheduleSendDelayError, setScheduleSendDelayError] = useState('')
   const [scheduleReminderDelayError, setScheduleReminderDelayError] = useState('')
+  const [inactiveRoomAgeDraft, setInactiveRoomAgeDraft] = useState(preferenceString(preferences, 'archive.older_than_days', '90'))
+  const [inactiveRoomAgeError, setInactiveRoomAgeError] = useState('')
   const [storage, setStorage] = useState<{ database: StorageUsage; media: MediaCacheUsage } | null>(null)
   const [storageLoading, setStorageLoading] = useState(false)
   const [storageError, setStorageError] = useState('')
   const [storageAction, setStorageAction] = useState('')
+  const [dataLocation, setDataLocation] = useState<DataLocation | null>(null)
+  const [dataLocationError, setDataLocationError] = useState('')
   const [backupPassphrase, setBackupPassphrase] = useState('')
   const [backupConfirmation, setBackupConfirmation] = useState('')
   const [importPassphrase, setImportPassphrase] = useState('')
@@ -4973,6 +4937,11 @@ function SettingsDialog({
   const searchInputRef = useRef<HTMLInputElement>(null)
   const settingsPanelRef = useRef<HTMLDivElement>(null)
   const searchNonceRef = useRef(0)
+
+  useEffect(() => {
+    setInactiveRoomAgeDraft(preferenceString(preferences, 'archive.older_than_days', '90'))
+    setInactiveRoomAgeError('')
+  }, [preferences['archive.older_than_days']])
 
   const searchResults = useMemo(() => searchSettings(searchQuery), [searchQuery])
   const searchResultsByTab = useMemo(() => groupSettingsByTab(searchResults), [searchResults])
@@ -5010,6 +4979,18 @@ function SettingsDialog({
     setDraft(value)
     setError('')
     void onPreferenceChange(key, value)
+  }
+
+  function saveInactiveRoomAge() {
+    const days = Number(inactiveRoomAgeDraft)
+    if (!Number.isInteger(days) || days < 1 || days > 3650) {
+      setInactiveRoomAgeError('Enter a whole number from 1 to 3650 days.')
+      return
+    }
+    const value = String(days)
+    setInactiveRoomAgeDraft(value)
+    setInactiveRoomAgeError('')
+    void onPreferenceChange('archive.older_than_days', value)
   }
 
   useEffect(() => {
@@ -5084,13 +5065,66 @@ function SettingsDialog({
     return () => { active = false }
   }, [tab])
 
-  async function revokeDevice(device: Device) {
-    if (!window.confirm(`Revoke ${device.displayName || device.id}?`)) return
+  useEffect(() => {
+    if (tab !== 'Storage') return
+    let active = true
+    AppService.DataLocation()
+      .then((location) => { if (active) setDataLocation(location) })
+      .catch(() => { if (active) setDataLocation(null) })
+    return () => { active = false }
+  }, [tab])
+
+  async function chooseDataFolder() {
+    setDataLocationError('')
     try {
-      await AppService.RevokeDevice(device.id)
-      setDevices((current) => current.filter((item) => item.id !== device.id))
+      const folder = await AppService.ChooseDataFolder()
+      if (!folder) return
+      setDataLocation(await AppService.SetDataFolder(folder))
+    } catch (folderError) {
+      setDataLocationError(describeError(folderError))
+    }
+  }
+
+  async function useDefaultDataFolder() {
+    setDataLocationError('')
+    try {
+      setDataLocation(await AppService.UseDefaultDataFolder())
+    } catch (folderError) {
+      setDataLocationError(describeError(folderError))
+    }
+  }
+
+  async function restartApp() {
+    setDataLocationError('')
+    try {
+      await AppService.RestartApp()
+    } catch (restartError) {
+      setDataLocationError(describeError(restartError))
+    }
+  }
+
+  function closeRevokeDialog() {
+    if (revokeBusy) return
+    setRevokeTarget(null)
+    setRevokePassword('')
+    setRevokeError('')
+  }
+
+  async function revokeDevice(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!revokeTarget || !revokePassword.trim()) return
+    setRevokeBusy(true)
+    setRevokeError('')
+    try {
+      await AppService.RevokeDevice(revokeTarget.id, revokePassword)
+      setDevices((current) => current.filter((item) => item.id !== revokeTarget.id))
+      setRevokeTarget(null)
+      setRevokePassword('')
     } catch (revokeError) {
-      setDevicesError(describeError(revokeError))
+      setRevokeError(describeError(revokeError))
+    } finally {
+      setRevokeBusy(false)
+      setRevokePassword('')
     }
   }
 
@@ -5326,10 +5360,12 @@ function SettingsDialog({
                   <option value="none">Clear selection</option>
                 </select>
               </label>
-              <label className="setting-row"><span><strong>Inactive room age</strong><small>Archive rooms without activity for this long.</small></span>
-                <select aria-label="Inactive room age" value={preferenceString(preferences, 'archive.older_than_days', '90')} onChange={(event) => onPreferenceChange('archive.older_than_days', event.target.value)}>
-                  {['30', '60', '90', '180', '365'].map((days) => <option key={days} value={days}>{days} days</option>)}
-                </select>
+              <label className="setting-row"><span><strong>Inactive room age</strong><small>Archive rooms without activity for this many days (1–3650).</small></span>
+                <input className="inactive-room-age-input" type="number" min="1" max="3650" step="1" value={inactiveRoomAgeDraft} aria-label="Inactive room age in days" aria-invalid={Boolean(inactiveRoomAgeError)} onChange={(event) => { setInactiveRoomAgeDraft(event.target.value); setInactiveRoomAgeError('') }} onBlur={saveInactiveRoomAge} />
+              </label>
+              {inactiveRoomAgeError && <p className="form-error" role="alert">{inactiveRoomAgeError}</p>}
+              <label className="setting-toggle"><span><strong>Automatically archive inactive rooms</strong><small>Check daily while Pinger is open and whenever room activity updates.</small></span>
+                <input type="checkbox" checked={preferenceBoolean(preferences, 'archive.automatic')} onChange={(event) => onPreferenceChange('archive.automatic', event.target.checked)} />
               </label>
               <button className="settings-command" type="button" onClick={() => void onArchiveInactiveRooms()}><Archive size={15} />Archive inactive rooms</button>
               <label className="setting-row"><span><strong>Voice-note microphone</strong><small>Choose the input used for recording.</small></span>
@@ -5509,7 +5545,6 @@ function SettingsDialog({
                   ['Alt + ↑ / ↓', 'Switch rooms'],
                   ['Ctrl / ⌘ + Shift + ↑ / ↓', 'Switch needs-reply rooms'],
                   ['Ctrl / ⌘ + 1–9', 'Switch to a visible room'],
-                  ['Ctrl / ⌘ + Alt + 1–9', 'Switch Matrix accounts'],
                   ['Ctrl / ⌘ + + / -', 'Adjust app zoom'],
                   ['Ctrl / ⌘ + 0', 'Reset app zoom'],
                   ['Ctrl / ⌘ + Shift + A', 'Show all rooms'],
@@ -5575,13 +5610,25 @@ function SettingsDialog({
               {devices.map((device) => (
                 <article className="device-row" key={device.id}>
                   <div><strong>{device.displayName || '(unnamed device)'}</strong><span>{device.id}{device.current ? ' · this device' : ''}</span><small>{device.lastSeenAt > 0 ? `Last active ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(device.lastSeenAt))}` : device.lastSeenIp || 'Last active time unavailable'}</small></div>
-                  {!device.current && <button className="settings-command is-danger" type="button" onClick={() => void revokeDevice(device)}>Revoke</button>}
+                  {!device.current && <button className="settings-command is-danger" type="button" onClick={() => { setRevokeTarget(device); setRevokePassword(''); setRevokeError('') }}>Revoke</button>}
                 </article>
               ))}
             </div>
           )}
           {tab === 'Storage' && (
             <div className="settings-section">
+              <h3>Data folder</h3>
+              <div className="setting-row"><span><strong>Application data</strong><small>{dataLocation?.dataDir ?? 'Default folder'}</small></span>
+                <span>
+                  <button type="button" className="settings-command" onClick={() => void chooseDataFolder()}>Choose…</button>
+                  {dataLocation && dataLocation.dataDir !== dataLocation.defaultDir && <button type="button" className="settings-command" onClick={() => void useDefaultDataFolder()}>Use default</button>}
+                </span>
+              </div>
+              {dataLocation?.pendingDir && <div className="setting-row"><span><strong>Waiting for a restart</strong><small>Pinger moves its data to {dataLocation.pendingDir} the next time it starts.</small></span>
+                <span><button type="button" className="settings-command" onClick={() => void restartApp()}>Restart now</button></span>
+              </div>}
+              {dataLocationError && <p className="settings-error" role="alert">{dataLocationError}</p>}
+              <p className="settings-note">The database, encryption keys and preferences are stored in this folder. Downloaded media stays in the system cache.</p>
               <h3>Local storage</h3>
               {storageLoading && <p className="settings-note">Reading storage usage…</p>}
               {storageError && <p className="settings-error" role="alert">{storageError}</p>}
@@ -5649,6 +5696,17 @@ function SettingsDialog({
           )}
         </div>
       </DialogSurface>
+      {revokeTarget && <div className="confirm-scrim" role="presentation">
+        <DialogSurface className="confirm-dialog" role="alertdialog" labelledBy="revoke-device-title" onClose={closeRevokeDialog}>
+          <form onSubmit={(event) => void revokeDevice(event)}>
+            <h2 id="revoke-device-title">Revoke this device?</h2>
+            <p>Sign out {revokeTarget.displayName || revokeTarget.id}. Enter your Matrix account password to confirm this action.</p>
+            <label className="security-field"><span>Matrix password</span><input type="password" autoComplete="current-password" autoFocus value={revokePassword} onChange={(event) => setRevokePassword(event.target.value)} disabled={revokeBusy} required /></label>
+            {revokeError && <p className="settings-error" role="alert">{revokeError}</p>}
+            <div><button type="button" disabled={revokeBusy} onClick={closeRevokeDialog}>Cancel</button><button className="is-danger" type="submit" disabled={revokeBusy || !revokePassword.trim()}>{revokeBusy ? 'Revoking…' : 'Revoke device'}</button></div>
+          </form>
+        </DialogSurface>
+      </div>}
     </div>
   )
 }

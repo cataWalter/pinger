@@ -162,10 +162,18 @@ func TestPreferenceStoreAcceptsArchiveAgePreference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"30", "60", "90", "180", "365"} {
+	for _, value := range []string{"1", "7", "30", "90", "365", "3650"} {
 		if err = store.Set("archive.older_than_days", value); err != nil {
 			t.Errorf("Set(archive.older_than_days, %q) error = %v", value, err)
 		}
+	}
+	for _, value := range []string{"0", "-1", "1.5", "3651", "thirty"} {
+		if err = store.Set("archive.older_than_days", value); err == nil {
+			t.Errorf("Set(archive.older_than_days, %q) unexpectedly succeeded", value)
+		}
+	}
+	if err = store.Set("archive.automatic", true); err != nil {
+		t.Errorf("Set(archive.automatic, true) error = %v", err)
 	}
 }
 

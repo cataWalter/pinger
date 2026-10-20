@@ -97,7 +97,7 @@ func TestScheduledJobStoreKeepsLateSendVisibleUntilDismissed(t *testing.T) {
 	if _, err = store.claimDue(scheduledMessageKind, dueAt); err != nil {
 		t.Fatal(err)
 	}
-	if err = store.finishMessage(job.ID, nil, dueAt+11_000); err != nil {
+	if err = store.finishMessage(job.ID, nil, dueAt+11_000, dueAt+11_000); err != nil {
 		t.Fatalf("finish delayed message: %v", err)
 	}
 	jobs := store.list()
@@ -109,6 +109,82 @@ func TestScheduledJobStoreKeepsLateSendVisibleUntilDismissed(t *testing.T) {
 	}
 	if jobs = store.list(); len(jobs) != 0 {
 		t.Fatalf("dismissed late send remained in list: %+v", jobs)
+	}
+}
+
+func TestWeeklyScheduledMessageRepeatsAtSameLocalWeekdayAndTime(t *testing.T) {
+	store, err := newScheduledJobStore(filepath.Join(t.TempDir(), "scheduled-jobs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	due := time.Now().Add(2 * time.Hour).Truncate(time.Minute)
+	job, err := store.scheduleRecurringMessage(primaryAccountID, "!room:example.org", "weekly update", due.UnixMilli())
+	if err != nil {
+		t.Fatalf("schedule recurring message: %v", err)
+	}
+	if !job.RepeatWeekly || job.RepeatWeekday != int(due.In(time.Local).Weekday()) ||
+		job.RepeatHour != due.In(time.Local).Hour() || job.RepeatMinute != due.In(time.Local).Minute() {
+		t.Fatalf("recurrence fields = %+v, want weekly at %s", job, due.In(time.Local).Format("Monday 15:04"))
+	}
+
+	claimed, err := store.claimDueForAccount(scheduledMessageKind, job.DueAt, primaryAccountID)
+	if err != nil || len(claimed) != 1 || claimed[0].Status != scheduledSending {
+		t.Fatalf("claim recurring message = %+v, %v", claimed, err)
+	}
+	finishedAt := job.DueAt + 5_000
+	if err = store.finishMessage(job.ID, nil, job.DueAt, finishedAt); err != nil {
+		t.Fatalf("finish recurring message: %v", err)
+	}
+
+	jobs := store.listForAccount(primaryAccountID)
+	if len(jobs) != 1 {
+		t.Fatalf("recurring jobs after send = %+v, want series retained", jobs)
+	}
+	next := time.UnixMilli(jobs[0].DueAt).In(time.Local)
+	if jobs[0].Status != scheduledPending || !jobs[0].RepeatWeekly ||
+		next.Weekday() != time.Weekday(job.RepeatWeekday) ||
+		next.Hour() != job.RepeatHour || next.Minute() != job.RepeatMinute ||
+		!next.After(time.UnixMilli(finishedAt).In(time.Local)) {
+		t.Fatalf("next recurring job = %+v (%s), want next future matching weekday and time", jobs[0], next)
+	}
+
+	reopened, err := newScheduledJobStore(store.path)
+	if err != nil {
+		t.Fatalf("reopen recurring job store: %v", err)
+	}
+	persisted := reopened.list()
+	if len(persisted) != 1 || !persisted[0].RepeatWeekly || persisted[0].RepeatWeekday != job.RepeatWeekday ||
+		persisted[0].RepeatHour != job.RepeatHour || persisted[0].RepeatMinute != job.RepeatMinute {
+		t.Fatalf("persisted recurring job = %+v", persisted)
+	}
+}
+
+func TestWeeklyScheduledMessageFailurePausesUntilRetryOrCancel(t *testing.T) {
+	store, err := newScheduledJobStore(filepath.Join(t.TempDir(), "scheduled-jobs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dueAt := time.Now().Add(time.Hour).UnixMilli()
+	job, err := store.scheduleRecurringMessage(primaryAccountID, "!room:example.org", "weekly update", dueAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.claimDue(scheduledMessageKind, dueAt); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.finishMessage(job.ID, context.DeadlineExceeded, dueAt, dueAt+1_000); err != nil {
+		t.Fatal(err)
+	}
+	failed := store.list()
+	if len(failed) != 1 || failed[0].Status != scheduledFailed || !failed[0].RepeatWeekly || failed[0].DueAt != dueAt {
+		t.Fatalf("failed recurring job = %+v, want paused series", failed)
+	}
+	if err = store.cancel(job.ID); err != nil {
+		t.Fatalf("cancel failed recurring job: %v", err)
+	}
+	if jobs := store.list(); len(jobs) != 0 {
+		t.Fatalf("cancelled recurring series remained listed: %+v", jobs)
 	}
 }
 

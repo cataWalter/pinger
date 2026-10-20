@@ -15,7 +15,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
-	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -25,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
 	"go.mau.fi/gomuks/pkg/hicli"
 	"go.mau.fi/gomuks/pkg/hicli/database"
 	"go.mau.fi/gomuks/pkg/hicli/jsoncmd"
@@ -36,6 +34,7 @@ import (
 	"maunium.net/go/mautrix/crypto/attachment"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
+	"mychat/logging"
 )
 
 type SearchRequest struct {
@@ -228,6 +227,8 @@ type Client struct {
 
 	mu                   sync.RWMutex
 	rooms                map[string]Room
+	roomsSnapshot        []Room
+	roomsSnapshotValid   bool
 	local                map[string]map[string]Message
 	mediaEncrypted       map[string]*event.EncryptedFileInfo
 	typing               map[string][]string
@@ -308,7 +309,7 @@ func NewWithLogOutput(databasePath string, logOutput io.Writer) (*Client, error)
 		mediaCacheDir:        defaultMediaCacheDir(dataDir),
 	}
 	client.lifecycleCtx, client.lifecycleCancel = context.WithCancel(context.Background())
-	logger := zerolog.New(logOutput).With().Timestamp().Logger()
+	logger := logging.New(logOutput, "matrix-engine")
 	// hicli is gomuks' embeddable Matrix engine; its callback is invoked from
 	// sync and decryption goroutines, so it only publishes immutable snapshots.
 	client.engine = hicli.New(rawDB, nil, logger, pickleKey, client.handleBackendEvent)
@@ -407,7 +408,7 @@ func (c *Client) SetRoomUnanswered(ctx context.Context, roomID string, unanswere
 		delete(c.dismissedEvents, roomID)
 		if current, ok := c.rooms[roomID]; ok {
 			current.Unanswered = roomNeedsReply(current, c.currentUserID(), "")
-			c.rooms[roomID] = current
+			c.setRoomLocked(roomID, current)
 		}
 		c.mu.Unlock()
 	} else {
@@ -425,7 +426,7 @@ func (c *Client) SetRoomUnanswered(ctx context.Context, roomID string, unanswere
 		c.dismissedEvents[roomID] = eventID
 		if current, ok := c.rooms[roomID]; ok {
 			current.Unanswered = roomNeedsReply(current, c.currentUserID(), eventID)
-			c.rooms[roomID] = current
+			c.setRoomLocked(roomID, current)
 		}
 		c.mu.Unlock()
 	}
@@ -679,23 +680,37 @@ func (c *Client) ConnectionState() ConnectionState {
 }
 
 func (c *Client) Rooms() []Room {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	rooms := make([]Room, 0, len(c.rooms))
-	for _, room := range c.rooms {
-		rooms = append(rooms, room)
-	}
-	sort.Slice(rooms, func(i, j int) bool {
-		if rooms[i].LastSeen.Equal(rooms[j].LastSeen) {
-			left, right := strings.ToLower(rooms[i].Name), strings.ToLower(rooms[j].Name)
-			if left == right {
-				return rooms[i].ID < rooms[j].ID
-			}
-			return left < right
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.roomsSnapshotValid {
+		rooms := make([]Room, 0, len(c.rooms))
+		for _, room := range c.rooms {
+			rooms = append(rooms, room)
 		}
-		return rooms[i].LastSeen.After(rooms[j].LastSeen)
-	})
-	return rooms
+		sort.Slice(rooms, func(i, j int) bool {
+			if rooms[i].LastSeen.Equal(rooms[j].LastSeen) {
+				left, right := strings.ToLower(rooms[i].Name), strings.ToLower(rooms[j].Name)
+				if left == right {
+					return rooms[i].ID < rooms[j].ID
+				}
+				return left < right
+			}
+			return rooms[i].LastSeen.After(rooms[j].LastSeen)
+		})
+		c.roomsSnapshot = rooms
+		c.roomsSnapshotValid = true
+	}
+	return append([]Room(nil), c.roomsSnapshot...)
+}
+
+func (c *Client) setRoomLocked(roomID string, room Room) {
+	c.rooms[roomID] = room
+	c.roomsSnapshotValid = false
+}
+
+func (c *Client) deleteRoomLocked(roomID string) {
+	delete(c.rooms, roomID)
+	c.roomsSnapshotValid = false
 }
 
 func (c *Client) Messages(ctx context.Context, roomID string) ([]Message, error) {
@@ -835,7 +850,10 @@ func (c *Client) HistoryPageWithLimit(ctx context.Context, roomID string, before
 				skippedEventTypes[evt.GetType().Type]++
 			}
 		}
-		log.Printf("Matrix history page has no parsed timeline messages: rows=%d skipped_event_types=%v", len(events), skippedEventTypes)
+		logging.For("matrix").Warn().
+			Int("rows", len(events)).
+			Interface("skipped_event_types", skippedEventTypes).
+			Msg("history page contained no parsed timeline messages")
 	}
 	if before == 0 {
 		c.mu.Lock()
@@ -889,7 +907,7 @@ func (c *Client) enrichSeenMessage(ctx context.Context, roomID string, messages 
 	}
 	receipts, err := c.engine.GetReceipts(ctx, id.RoomID(roomID), eventIDs)
 	if err != nil {
-		log.Printf("read Matrix receipts for room %s: %v", roomID, err)
+		logging.For("matrix").Warn().Err(err).Msg("read Matrix receipts")
 		return
 	}
 	applyLatestReadReceipt(messages, receipts, c.engine.Account.UserID)
@@ -1026,22 +1044,71 @@ func (c *Client) Devices(ctx context.Context) ([]Device, error) {
 	return devices, nil
 }
 
-func (c *Client) RevokeDevice(ctx context.Context, deviceID string) error {
+func (c *Client) RevokeDevice(ctx context.Context, deviceID, password string) error {
 	if strings.TrimSpace(deviceID) == "" {
 		return errors.New("Matrix device ID is empty")
 	}
 	if deviceID == c.Profile().DeviceID {
 		return errors.New("cannot revoke the current device from this session")
 	}
+	if strings.TrimSpace(password) == "" {
+		return errors.New("Matrix password is required to revoke a device")
+	}
 	ctx, finish, err := c.beginOperation(ctx)
 	if err != nil {
 		return err
 	}
 	defer finish()
-	if err = c.engine.Client.DeleteDevice(ctx, id.DeviceID(deviceID), &mautrix.ReqDeleteDevice[any]{}); err != nil {
+	if err = revokeDeviceWithUIA(ctx, c.engine.Client, id.DeviceID(deviceID), id.UserID(c.Profile().UserID), password); err != nil {
 		return fmt.Errorf("revoke Matrix device %q: %w", deviceID, err)
 	}
 	return nil
+}
+
+func revokeDeviceWithUIA(ctx context.Context, client *mautrix.Client, deviceID id.DeviceID, userID id.UserID, password string) error {
+	url := client.BuildClientURL("v3", "devices", deviceID)
+	request := mautrix.FullRequest{
+		Method:           http.MethodDelete,
+		URL:              url,
+		RequestJSON:      &mautrix.ReqDeleteDevice[any]{},
+		SensitiveContent: true,
+	}
+	content, err := client.MakeFullRequest(ctx, request)
+	if err == nil {
+		return nil
+	}
+
+	var httpErr mautrix.HTTPError
+	if !errors.As(err, &httpErr) || !httpErr.IsStatus(http.StatusUnauthorized) {
+		return err
+	}
+	challengeErr := err
+	var challenge mautrix.RespUserInteractive
+	if err = json.Unmarshal(content, &challenge); err != nil {
+		return fmt.Errorf("decode Matrix authentication challenge: %w", err)
+	}
+	if len(challenge.Flows) == 0 {
+		return challengeErr
+	}
+	if !challenge.HasSingleStageFlow(mautrix.AuthTypePassword) {
+		return errors.New("the homeserver requires an authentication method that Pinger cannot use to revoke this device")
+	}
+	if challenge.Session == "" {
+		return errors.New("the homeserver returned an incomplete authentication challenge")
+	}
+
+	request.RequestJSON = &mautrix.ReqDeleteDevice[any]{
+		Auth: &mautrix.ReqUIAuthLogin{
+			BaseAuthData: mautrix.BaseAuthData{
+				Type:    mautrix.AuthTypePassword,
+				Session: challenge.Session,
+			},
+			User:     userID.String(),
+			Password: password,
+		},
+	}
+	_, err = client.MakeFullRequest(ctx, request)
+	return err
 }
 
 func (c *Client) Start(ctx context.Context) error {
@@ -1061,14 +1128,26 @@ func (c *Client) Start(ctx context.Context) error {
 // sync has started or when ctx is cancelled.
 func (c *Client) StartWithRetry(ctx context.Context) error {
 	for attempt := 1; ; attempt++ {
-		if err := c.Start(ctx); err == nil {
+		err := c.Start(ctx)
+		if err == nil {
 			return nil
-		} else if ctxErr := ctx.Err(); ctxErr != nil {
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
-		} else if attempt > 8 {
+		}
+		if attempt > 8 {
+			logging.For("matrix").Error().
+				Err(err).
+				Int("attempts", attempt-1).
+				Msg("could not start Matrix sync")
 			return fmt.Errorf("start Matrix sync after %d attempts: %w", attempt-1, err)
 		}
 		delay := reconnectDelay(attempt)
+		logging.For("matrix").Warn().
+			Err(err).
+			Int("attempt", attempt).
+			Dur("retry_in", delay).
+			Msg("Matrix sync start failed; retrying")
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -1102,6 +1181,7 @@ func (c *Client) startEngine(ctx context.Context) error {
 		return err
 	}
 	c.started = true
+	logging.For("matrix").Info().Msg("Matrix sync started")
 	c.publish(nil, "")
 	return nil
 }
@@ -1432,7 +1512,7 @@ func (c *Client) MarkRead(ctx context.Context, roomID, eventID string) error {
 		room.Unread = 0
 		room.MarkedUnread = false
 		room.Mentions = 0
-		c.rooms[roomID] = room
+		c.setRoomLocked(roomID, room)
 	}
 	c.mu.Unlock()
 	if ok {
@@ -1454,7 +1534,7 @@ func (c *Client) MarkUnread(ctx context.Context, roomID string) error {
 	room, ok := c.rooms[roomID]
 	if ok {
 		room.MarkedUnread = true
-		c.rooms[roomID] = room
+		c.setRoomLocked(roomID, room)
 	}
 	c.mu.Unlock()
 	if ok {
@@ -1565,7 +1645,7 @@ func (c *Client) RoomMembers(ctx context.Context, roomID string) ([]Member, erro
 		}
 		var profile event.MemberEventContent
 		if err = json.Unmarshal(evt.GetContent(), &profile); err != nil {
-			log.Printf("decode member profile in room %s: %v", roomID, err)
+			logging.For("matrix").Warn().Err(err).Msg("decode room member profile")
 			continue
 		}
 		if profile.Membership != event.MembershipJoin && profile.Membership != event.MembershipInvite {
@@ -1593,7 +1673,7 @@ func (c *Client) LeaveRoom(ctx context.Context, roomID string) error {
 		return fmt.Errorf("leave Matrix room: %w", err)
 	}
 	c.mu.Lock()
-	delete(c.rooms, roomID)
+	c.deleteRoomLocked(roomID)
 	delete(c.local, roomID)
 	c.mu.Unlock()
 	c.publishTimeline([]string{roomID}, "")
@@ -1747,30 +1827,30 @@ func (c *Client) writeCachedMedia(mxc string, data []byte, encrypted bool) {
 		return
 	}
 	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		log.Printf("create Matrix media cache: %v", err)
+		logging.For("matrix").Warn().Err(err).Msg("create media cache directory")
 		return
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".media-*")
 	if err != nil {
-		log.Printf("create Matrix media cache entry: %v", err)
+		logging.For("matrix").Warn().Err(err).Msg("create media cache entry")
 		return
 	}
 	tmpName := tmp.Name()
 	if _, err = tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
-		log.Printf("write Matrix media cache entry: %v", err)
+		logging.For("matrix").Warn().Err(err).Msg("write media cache entry")
 		return
 	}
 	if err = tmp.Close(); err != nil {
 		_ = os.Remove(tmpName)
-		log.Printf("close Matrix media cache entry: %v", err)
+		logging.For("matrix").Warn().Err(err).Msg("close media cache entry")
 		return
 	}
 	_ = os.Chmod(tmpName, 0o600)
 	if err = os.Rename(tmpName, path); err != nil {
 		_ = os.Remove(tmpName)
-		log.Printf("store Matrix media cache entry: %v", err)
+		logging.For("matrix").Warn().Err(err).Msg("store media cache entry")
 	}
 }
 
@@ -1805,6 +1885,10 @@ func (c *Client) beginOperation(parent context.Context) (context.Context, func()
 func (c *Client) handleBackendEvent(raw any) {
 	switch evt := raw.(type) {
 	case *jsoncmd.SyncComplete:
+		logging.For("matrix").Debug().
+			Int("rooms", len(evt.Rooms)).
+			Int("left_rooms", len(evt.LeftRooms)).
+			Msg("received Matrix sync batch")
 		c.applySync(evt, true)
 	case *jsoncmd.EventsDecrypted:
 		c.refreshRoomFromTimeline(evt.RoomID.String())
@@ -1857,7 +1941,7 @@ func (c *Client) handleBackendEvent(raw any) {
 							}
 							room.Unanswered = roomNeedsReply(room, c.currentUserID(), c.dismissedEvents[roomID])
 						}
-						c.rooms[roomID] = room
+						c.setRoomLocked(roomID, room)
 					}
 					c.mu.Unlock()
 				} else {
@@ -1869,14 +1953,21 @@ func (c *Client) handleBackendEvent(raw any) {
 			errorMessage := ""
 			if evt.Error != nil {
 				errorMessage = evt.Error.Error()
+				logging.For("matrix").Warn().Err(evt.Error).Msg("Matrix event send failed")
+			} else if evt.Event.SendError == "" || evt.Event.SendError == "not sent" {
+				logging.For("matrix").Info().Msg("Matrix event sent")
+			} else {
+				logging.For("matrix").Warn().Str("reason", evt.Event.SendError).Msg("Matrix event send failed")
 			}
 			c.publishTimeline([]string{evt.Event.RoomID.String()}, errorMessage)
 		} else if evt.Error != nil {
+			logging.For("matrix").Warn().Err(evt.Error).Msg("Matrix operation failed")
 			c.publish(nil, evt.Error.Error())
 		}
 	case *jsoncmd.SyncStatus:
 		message := ""
 		c.mu.Lock()
+		previousState := c.connectionState
 		switch evt.Type {
 		case jsoncmd.SyncStatusErroring, jsoncmd.SyncStatusFailed:
 			c.connectionState = StateOffline
@@ -1894,16 +1985,33 @@ func (c *Client) handleBackendEvent(raw any) {
 				c.connectionState = StateSyncing
 			}
 		}
+		currentState := c.connectionState
 		c.mu.Unlock()
+		if currentState != previousState {
+			entry := logging.For("matrix").Info().
+				Str("from", string(previousState)).
+				Str("to", string(currentState))
+			if message != "" {
+				entry.Str("detail", message)
+			}
+			entry.Msg("Matrix connection state changed")
+		}
 		c.publish(nil, message)
 		if evt.Type == jsoncmd.SyncStatusOK {
 			c.startPreviewBackfill()
 		}
 	case *jsoncmd.InitComplete:
 		c.mu.Lock()
+		previousState := c.connectionState
 		c.syncReady = true
 		c.connectionState = StateConnected
 		c.mu.Unlock()
+		if previousState != StateConnected {
+			logging.For("matrix").Info().
+				Str("from", string(previousState)).
+				Str("to", string(StateConnected)).
+				Msg("Matrix initial sync completed")
+		}
 		c.publish(nil, "")
 		c.startPreviewBackfill()
 	}
@@ -2029,12 +2137,12 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 			}
 		}
 		room.Unanswered = roomNeedsReply(room, c.currentUserID(), c.dismissedEvents[key])
-		c.rooms[key] = room
+		c.setRoomLocked(key, room)
 		changed = append(changed, key)
 	}
 	for _, roomID := range syncEvent.LeftRooms {
 		key := roomID.String()
-		delete(c.rooms, key)
+		c.deleteRoomLocked(key)
 		changed = append(changed, key)
 	}
 	c.mu.Unlock()
@@ -2078,7 +2186,7 @@ func (c *Client) directRoomAvatars(syncEvent *jsoncmd.SyncComplete) map[string]s
 
 	members, err := c.engine.DB.CurrentState.GetMany(ctx, keys)
 	if err != nil {
-		log.Printf("read Matrix direct-message avatars: %v", err)
+		logging.For("matrix").Warn().Err(err).Msg("read direct-message avatars")
 		return nil
 	}
 	avatars := make(map[string]string, len(roomIDs))
@@ -2091,7 +2199,7 @@ func (c *Client) directRoomAvatars(syncEvent *jsoncmd.SyncComplete) map[string]s
 		}
 		var profile event.MemberEventContent
 		if err = json.Unmarshal(member.GetContent(), &profile); err != nil {
-			log.Printf("decode Matrix member profile in room %s: %v", member.RoomID, err)
+			logging.For("matrix").Warn().Err(err).Msg("decode Matrix member profile")
 			continue
 		}
 		avatars[member.RoomID.String()] = string(profile.AvatarURL)
@@ -2136,7 +2244,7 @@ func (c *Client) populateMessageProfiles(ctx context.Context, roomID string, mes
 	}
 	members, err := c.engine.DB.CurrentState.GetMany(ctx, keys)
 	if err != nil {
-		log.Printf("read Matrix member profiles for room %s: %v", roomID, err)
+		logging.For("matrix").Warn().Err(err).Msg("read Matrix member profiles")
 		return
 	}
 	profiles := make(map[string]event.MemberEventContent, len(members))
@@ -2146,7 +2254,7 @@ func (c *Client) populateMessageProfiles(ctx context.Context, roomID string, mes
 		}
 		var profile event.MemberEventContent
 		if err = json.Unmarshal(member.GetContent(), &profile); err != nil {
-			log.Printf("decode Matrix member profile in room %s: %v", roomID, err)
+			logging.For("matrix").Warn().Err(err).Msg("decode Matrix member profile")
 			continue
 		}
 		profiles[*member.StateKey] = profile
@@ -2356,9 +2464,13 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 		mediaType == string(event.MsgFile) || mediaType == string(event.MsgBeeperGallery) ||
 		evtType == event.EventSticker.Type
 	if mediaMessage {
-		log.Printf("Matrix media mapped: msgtype=%q uri_present=%t mime=%q encrypted=%t inline_candidate=%t dimensions=%dx%d",
-			mediaType, mediaURI != "", mediaMIMEType, mediaEncrypted != nil,
-			mediaURI != "" && strings.HasPrefix(mediaMIMEType, "image/"), mediaWidth(mediaInfo), mediaHeight(mediaInfo))
+		logging.For("matrix").Debug().
+			Str("message_type", mediaType).
+			Bool("encrypted", mediaEncrypted != nil).
+			Str("mime_type", mediaMIMEType).
+			Int("width", mediaWidth(mediaInfo)).
+			Int("height", mediaHeight(mediaInfo)).
+			Msg("mapped Matrix media event")
 	}
 	replyTo := content.RelatesTo.EventID
 	if replyTo == "" {
@@ -2446,7 +2558,7 @@ func (c *Client) refreshRoomFromTimeline(roomID string) {
 		break
 	}
 	room.Unanswered = roomNeedsReply(room, c.currentUserID(), c.dismissedEvents[roomID])
-	c.rooms[roomID] = room
+	c.setRoomLocked(roomID, room)
 }
 
 const (
@@ -2508,7 +2620,7 @@ func (c *Client) fillMissingPreviews(ctx context.Context, allowNetwork bool) {
 		}
 		if err != nil {
 			if ctx.Err() == nil {
-				log.Printf("load preview for %s: %v", roomID, err)
+				logging.For("matrix").Warn().Err(err).Msg("load room preview")
 			}
 			continue
 		}
@@ -2590,7 +2702,7 @@ func (c *Client) applyRoomPreview(roomID string, message Message) bool {
 		room.LastEventID = message.ID
 	}
 	room.Unanswered = roomNeedsReply(room, c.currentUserID(), c.dismissedEvents[roomID])
-	c.rooms[roomID] = room
+	c.setRoomLocked(roomID, room)
 	return true
 }
 
@@ -2732,7 +2844,7 @@ func (c *Client) storeLocalMessage(roomID string, message Message) {
 			room.LastEventSender = message.Sender
 			room.Unanswered = roomNeedsReply(room, c.currentUserID(), c.dismissedEvents[roomID])
 		}
-		c.rooms[roomID] = room
+		c.setRoomLocked(roomID, room)
 	}
 	c.mu.Unlock()
 }

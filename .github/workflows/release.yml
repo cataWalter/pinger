@@ -336,12 +336,13 @@ jobs:
           cp dist/pinger "$stage/usr/bin/pinger"
           chmod 755 "$stage/usr/bin/pinger"
 
-          cat > "$stage/usr/share/applications/pinger.desktop" <<EOF
+          cat > "$stage/usr/share/applications/fi.mau.pinger.desktop" <<EOF
           [Desktop Entry]
           Name=Pinger
           Comment=Desktop client for gomuks -- a Matrix client
           Exec=pinger
           Icon=pinger
+          StartupWMClass=fi.mau.pinger
           Type=Application
           Categories=Network;InstantMessaging;
           Terminal=false
@@ -378,17 +379,18 @@ jobs:
           cp dist/pinger "$appdir/usr/bin/pinger"
           chmod 755 "$appdir/usr/bin/pinger"
 
-          cat > "$appdir/pinger.desktop" <<EOF
+          cat > "$appdir/fi.mau.pinger.desktop" <<EOF
           [Desktop Entry]
           Name=Pinger
           Comment=Desktop client for gomuks -- a Matrix client
           Exec=pinger
           Icon=pinger
+          StartupWMClass=fi.mau.pinger
           Type=Application
           Categories=Network;InstantMessaging;
           Terminal=false
           EOF
-          cp "$appdir/pinger.desktop" "$appdir/usr/share/applications/pinger.desktop"
+          cp "$appdir/fi.mau.pinger.desktop" "$appdir/usr/share/applications/fi.mau.pinger.desktop"
 
           for size in 16 32 48 64 128 256 512 1024; do
             dir="$appdir/usr/share/icons/hicolor/${size}x${size}/apps"
@@ -396,6 +398,7 @@ jobs:
             cp "dist/icons/${size}.png" "$dir/pinger.png"
           done
           cp dist/icons/1024.png "$appdir/usr/share/pixmaps/pinger.png"
+          cp dist/icons/1024.png "$appdir/pinger.png"
 
           wget -c "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" \
             -O dist/appimagetool

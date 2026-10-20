@@ -42,6 +42,10 @@ type ScheduledJob struct {
 	CreatedAt      int64  `json:"createdAt"`
 	Status         string `json:"status"`
 	Error          string `json:"error"`
+	RepeatWeekly   bool   `json:"repeatWeekly,omitempty"`
+	RepeatWeekday  int    `json:"repeatWeekday,omitempty"`
+	RepeatHour     int    `json:"repeatHour,omitempty"`
+	RepeatMinute   int    `json:"repeatMinute,omitempty"`
 }
 
 type scheduledJobStore struct {
@@ -87,11 +91,15 @@ func newScheduledJobStore(path string) (*scheduledJobStore, error) {
 }
 
 func (s *scheduledJobStore) scheduleMessage(accountID, roomID, text string, dueAt int64) (ScheduledJob, error) {
-	return s.create(scheduledMessageKind, accountID, roomID, strings.TrimSpace(text), "", "", dueAt)
+	return s.create(scheduledMessageKind, accountID, roomID, strings.TrimSpace(text), "", "", dueAt, false)
+}
+
+func (s *scheduledJobStore) scheduleRecurringMessage(accountID, roomID, text string, dueAt int64) (ScheduledJob, error) {
+	return s.create(scheduledMessageKind, accountID, roomID, strings.TrimSpace(text), "", "", dueAt, true)
 }
 
 func (s *scheduledJobStore) scheduleReminder(accountID, roomID, eventID, text string, dueAt int64) (ScheduledJob, error) {
-	return s.create(scheduledReminderKind, accountID, roomID, strings.TrimSpace(text), eventID, "", dueAt)
+	return s.create(scheduledReminderKind, accountID, roomID, strings.TrimSpace(text), eventID, "", dueAt, false)
 }
 
 func (s *scheduledJobStore) scheduleReply(accountID, roomID, text, replyToEventID string, dueAt int64) (ScheduledJob, error) {
@@ -99,10 +107,10 @@ func (s *scheduledJobStore) scheduleReply(accountID, roomID, text, replyToEventI
 	if replyToEventID == "" {
 		return ScheduledJob{}, errors.New("scheduled reply requires a target event ID")
 	}
-	return s.create(scheduledMessageKind, accountID, roomID, strings.TrimSpace(text), "", replyToEventID, dueAt)
+	return s.create(scheduledMessageKind, accountID, roomID, strings.TrimSpace(text), "", replyToEventID, dueAt, false)
 }
 
-func (s *scheduledJobStore) create(kind, accountID, roomID, text, eventID, replyToEventID string, dueAt int64) (ScheduledJob, error) {
+func (s *scheduledJobStore) create(kind, accountID, roomID, text, eventID, replyToEventID string, dueAt int64, repeatWeekly bool) (ScheduledJob, error) {
 	if kind != scheduledMessageKind && kind != scheduledReminderKind {
 		return ScheduledJob{}, errors.New("unsupported scheduled job kind")
 	}
@@ -133,6 +141,13 @@ func (s *scheduledJobStore) create(kind, accountID, roomID, text, eventID, reply
 		DueAt:          dueAt,
 		CreatedAt:      time.Now().UnixMilli(),
 		Status:         scheduledPending,
+		RepeatWeekly:   repeatWeekly,
+	}
+	if repeatWeekly {
+		scheduleAt := time.UnixMilli(dueAt).In(time.Local)
+		job.RepeatWeekday = int(scheduleAt.Weekday())
+		job.RepeatHour = scheduleAt.Hour()
+		job.RepeatMinute = scheduleAt.Minute()
 	}
 
 	s.mu.Lock()
@@ -199,7 +214,7 @@ func (s *scheduledJobStore) claimDueForAccount(kind string, now int64, accountID
 	return claimed, nil
 }
 
-func (s *scheduledJobStore) finishMessage(id string, sendErr error, startedAt int64) error {
+func (s *scheduledJobStore) finishMessage(id string, sendErr error, startedAt, finishedAt int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for index := range s.jobs {
@@ -217,6 +232,10 @@ func (s *scheduledJobStore) finishMessage(id string, sendErr error, startedAt in
 				job.Status = scheduledSentLate
 			}
 			job.Error = ""
+			if job.RepeatWeekly {
+				job.DueAt = nextWeeklyOccurrence(finishedAt, job.RepeatWeekday, job.RepeatHour, job.RepeatMinute)
+				job.Status = scheduledPending
+			}
 		}
 		if err := s.saveLocked(); err != nil {
 			*job = previous
@@ -225,6 +244,23 @@ func (s *scheduledJobStore) finishMessage(id string, sendErr error, startedAt in
 		return nil
 	}
 	return errors.New("scheduled message is no longer being sent")
+}
+
+func nextWeeklyOccurrence(after int64, weekday, hour, minute int) int64 {
+	now := time.UnixMilli(after).In(time.Local)
+	daysUntil := (weekday - int(now.Weekday()) + 7) % 7
+	for week := 0; week < 3; week++ {
+		candidate := time.Date(
+			now.Year(), now.Month(), now.Day()+daysUntil+week*7,
+			hour, minute, 0, 0, time.Local,
+		)
+		if candidate.Weekday() == time.Weekday(weekday) &&
+			candidate.Hour() == hour && candidate.Minute() == minute &&
+			candidate.After(now) {
+			return candidate.UnixMilli()
+		}
+	}
+	return now.AddDate(0, 0, 7).UnixMilli()
 }
 
 func (s *scheduledJobStore) update(id string, dueAt int64) error {
@@ -236,6 +272,12 @@ func (s *scheduledJobStore) update(id string, dueAt int64) error {
 			return errors.New("only pending or failed jobs can be rescheduled")
 		}
 		job.DueAt = dueAt
+		if job.RepeatWeekly {
+			scheduleAt := time.UnixMilli(dueAt).In(time.Local)
+			job.RepeatWeekday = int(scheduleAt.Weekday())
+			job.RepeatHour = scheduleAt.Hour()
+			job.RepeatMinute = scheduleAt.Minute()
+		}
 		job.Status = scheduledPending
 		job.Error = ""
 		return nil

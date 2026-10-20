@@ -1,7 +1,6 @@
 package desktop
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -10,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 
+	"mychat/logging"
 	"mychat/matrix"
 )
 
@@ -103,14 +102,6 @@ func (r *accountRegistry) SetActive(id string) error {
 	return r.saveOrRestore(previous)
 }
 
-func newAccountID() (string, error) {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("generate account ID: %w", err)
-	}
-	return hex.EncodeToString(bytes), nil
-}
-
 func accountDatabasePath(dataDir, accountID string) (string, error) {
 	if accountID == primaryAccountID {
 		return filepath.Join(dataDir, "matrix.db"), nil
@@ -128,63 +119,52 @@ func (s *AppService) initializeAccounts(dataDir, mediaCacheDir string) error {
 		return err
 	}
 	primary := s.client
-	clients := map[string]*matrix.Client{primaryAccountID: primary}
-	if primary.IsLoggedIn() {
-		if err = registry.Upsert(accountSummary(primaryAccountID, primary)); err != nil {
-			return err
-		}
+	clients := make(map[string]*matrix.Client, 1)
+	activeID := registry.ActiveID()
+	if activeID == "" {
+		activeID = primaryAccountID
 	}
-	for _, stored := range registry.All() {
-		if stored.ID == primaryAccountID {
-			continue
-		}
-		databasePath, pathErr := accountDatabasePath(dataDir, stored.ID)
+	activeClient := primary
+	if activeID != primaryAccountID {
+		databasePath, pathErr := accountDatabasePath(dataDir, activeID)
 		if pathErr != nil {
-			closeAccountClientMap(clients)
 			return pathErr
 		}
-		accountClient, openErr := matrix.New(databasePath)
-		if openErr != nil {
-			closeAccountClientMap(clients)
-			return fmt.Errorf("open account %s: %w", stored.ID, openErr)
+		activeClient, err = matrix.New(databasePath)
+		if err != nil {
+			return fmt.Errorf("open account %s: %w", activeID, err)
 		}
 		if mediaCacheDir != "" {
-			accountClient.SetMediaCacheDir(filepath.Join(mediaCacheDir, stored.ID))
+			activeClient.SetMediaCacheDir(filepath.Join(mediaCacheDir, activeID))
 		}
-		clients[stored.ID] = accountClient
-		if accountClient.IsLoggedIn() {
-			actual := accountSummary(stored.ID, accountClient)
-			if stored.Profile.UserID != "" && stored.Profile.UserID != actual.Profile.UserID {
-				closeAccountClientMap(clients)
-				return fmt.Errorf("account %s database belongs to %s, not %s", stored.ID, actual.Profile.UserID, stored.Profile.UserID)
-			}
-			if err = registry.Upsert(actual); err != nil {
-				closeAccountClientMap(clients)
-				return err
-			}
-		}
-	}
-
-	activeID := registry.ActiveID()
-	activeClient := clients[activeID]
-	if activeClient == nil || !activeClient.IsLoggedIn() {
-		activeID = primaryAccountID
-		activeClient = primary
-		if !activeClient.IsLoggedIn() {
+		if activeClient.IsLoggedIn() {
 			for _, stored := range registry.All() {
-				if accountClient := clients[stored.ID]; accountClient != nil && accountClient.IsLoggedIn() {
-					activeID = stored.ID
-					activeClient = accountClient
-					break
+				if stored.ID != activeID || stored.Profile.UserID == "" {
+					continue
 				}
+				actual := accountSummary(activeID, activeClient)
+				if stored.Profile.UserID != actual.Profile.UserID {
+					activeClient.Close()
+					return fmt.Errorf("account %s database belongs to %s, not %s", activeID, actual.Profile.UserID, stored.Profile.UserID)
+				}
+				break
 			}
 		}
 	}
+	clients[activeID] = activeClient
+
 	if activeClient.IsLoggedIn() {
+		if err = registry.Upsert(accountSummary(activeID, activeClient)); err != nil {
+			closeAccountClientMap(clients)
+			return err
+		}
 		if err = registry.SetActive(activeID); err != nil {
 			closeAccountClientMap(clients)
 			return err
 		}
+	}
+	if primary != activeClient {
+		primary.Close()
 	}
 
 	s.accountMu.Lock()
@@ -254,123 +234,6 @@ func (s *AppService) accountClientsSnapshot() map[string]*matrix.Client {
 	return clients
 }
 
-func (s *AppService) Accounts() []AccountSummary {
-	if s.accountRegistry == nil {
-		return nil
-	}
-	clients := s.accountClientsSnapshot()
-	accounts := make([]AccountSummary, 0, len(clients))
-	for _, stored := range s.accountRegistry.All() {
-		if client := clients[stored.ID]; client != nil && client.IsLoggedIn() {
-			accounts = append(accounts, accountSummary(stored.ID, client))
-		}
-	}
-	return accounts
-}
-
-// AccountRooms returns the rooms of every signed-in account, each tagged with its account ID.
-func (s *AppService) AccountRooms() []Room {
-	s.accountMu.RLock()
-	registry := s.accountRegistry
-	s.accountMu.RUnlock()
-	if registry == nil {
-		return nil
-	}
-	clients := s.accountClientsSnapshot()
-	var rooms []Room
-	for _, stored := range registry.All() {
-		client := clients[stored.ID]
-		if client == nil || !client.IsLoggedIn() {
-			continue
-		}
-		accountRooms := mapRoomsWithPreferences(client.Rooms(), s.preferenceValuesForAccount(stored.ID))
-		tagRooms(accountRooms, stored.ID)
-		rooms = append(rooms, accountRooms...)
-	}
-	return rooms
-}
-
-func (s *AppService) AddAccount(homeserver, username, password string) (Snapshot, error) {
-	s.accountMu.RLock()
-	registry, dataDir, mediaCacheDir := s.accountRegistry, s.accountDataDir, s.accountMediaCacheDir
-	s.accountMu.RUnlock()
-	if registry == nil {
-		return Snapshot{}, errors.New("account manager is unavailable")
-	}
-	accountID, err := newAccountID()
-	if err != nil {
-		return Snapshot{}, err
-	}
-	databasePath, err := accountDatabasePath(dataDir, accountID)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	accountClient, err := matrix.New(databasePath)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if mediaCacheDir != "" {
-		accountClient.SetMediaCacheDir(filepath.Join(mediaCacheDir, accountID))
-	}
-	if err = accountClient.Login(s.ctx, homeserver, username, password); err != nil {
-		accountClient.Close()
-		_ = os.RemoveAll(filepath.Dir(databasePath))
-		return Snapshot{}, err
-	}
-	account := accountSummary(accountID, accountClient)
-	if account.Profile.UserID == "" {
-		accountClient.Close()
-		_ = os.RemoveAll(filepath.Dir(databasePath))
-		return Snapshot{}, errors.New("homeserver login did not return an account profile")
-	}
-	for _, existing := range s.accountClientsSnapshot() {
-		profile := existing.Profile()
-		if profile.UserID == account.Profile.UserID && strings.EqualFold(profile.Homeserver, account.Profile.Homeserver) {
-			accountClient.Close()
-			_ = os.RemoveAll(filepath.Dir(databasePath))
-			return Snapshot{}, errors.New("this Matrix account is already connected")
-		}
-	}
-	if err = registry.Upsert(account); err != nil {
-		accountClient.Close()
-		_ = os.RemoveAll(filepath.Dir(databasePath))
-		return Snapshot{}, err
-	}
-	if err = registry.SetActive(accountID); err != nil {
-		accountClient.Close()
-		return Snapshot{}, err
-	}
-	s.accountMu.Lock()
-	s.accountClients[accountID] = accountClient
-	s.activeAccountID = accountID
-	s.accountMu.Unlock()
-	s.clientMu.Lock()
-	s.client = accountClient
-	s.clientMu.Unlock()
-	s.startAccountEventPump(accountID, accountClient)
-	return s.Snapshot()
-}
-
-func (s *AppService) SwitchAccount(accountID string) (Snapshot, error) {
-	s.accountMu.RLock()
-	client := s.accountClients[accountID]
-	registry := s.accountRegistry
-	s.accountMu.RUnlock()
-	if client == nil || !client.IsLoggedIn() || registry == nil {
-		return Snapshot{}, errors.New("account is not signed in")
-	}
-	if err := registry.SetActive(accountID); err != nil {
-		return Snapshot{}, err
-	}
-	s.accountMu.Lock()
-	s.activeAccountID = accountID
-	s.accountMu.Unlock()
-	s.clientMu.Lock()
-	s.client = client
-	s.clientMu.Unlock()
-	return s.Snapshot()
-}
-
 func (s *AppService) closeAccountClients() {
 	closeAccountClientMap(s.accountClientsSnapshot())
 }
@@ -398,6 +261,12 @@ func (s *AppService) startAccountEventPump(accountID string, client *matrix.Clie
 			case update, ok := <-client.Events():
 				if !ok || s.ctx.Err() != nil {
 					return
+				}
+				if update.Error != "" {
+					logging.For("service").Warn().
+						Str("connection_state", string(update.ConnectionState)).
+						Str("detail", update.Error).
+						Msg("Matrix update reported an error")
 				}
 				if s.currentAccountID() == accountID {
 					mapped := mapUpdate(update, s.preferenceValuesForAccount(accountID))

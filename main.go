@@ -2,11 +2,14 @@ package main
 
 import (
 	"embed"
-	"log"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
+	"mychat/datadir"
 	"mychat/desktop"
+	"mychat/logging"
 	"mychat/matrix"
 	"mychat/migration"
 )
@@ -20,35 +23,61 @@ var (
 //go:embed all:frontend/dist
 var frontendAssets embed.FS
 
+//go:embed build/appicon.png
+var applicationIcon []byte
+
 func main() {
+	if err := logging.Configure(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	logger := logging.For("startup")
+	logger.Info().
+		Str("version", Version).
+		Str("commit", Commit).
+		Str("platform", runtime.GOOS+"/"+runtime.GOARCH).
+		Msg("starting Pinger")
+
 	desktop.AppVersion = Version
+
+	// A previous instance may still hold the data files when Pinger is restarted.
+	desktop.WaitForPreviousInstance()
 
 	paths, err := migration.CurrentPaths()
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal().Err(err).Msg("resolve application data paths")
 	}
+	defaultDataDir := paths.DataDir
+	dataDir, err := datadir.ApplyPending(defaultDataDir)
+	if err != nil {
+		logger.Error().Err(err).Msg("could not apply the selected data folder; using the default")
+		dataDir = defaultDataDir
+	}
+	paths = paths.WithDataDir(dataDir)
 	migrationReport, err := migration.MigrateLegacy(paths)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal().Err(err).Msg("migrate legacy application data")
 	}
 	if migrationReport.DatabaseMigrated {
-		log.Printf("migrated Matrix data into %s", paths.DataDir)
+		logger.Info().Msg("migrated legacy Matrix database")
 	}
 	if migrationReport.PreferencesWarning != nil {
-		log.Printf("could not migrate legacy preferences: %v", migrationReport.PreferencesWarning)
+		logger.Warn().Err(migrationReport.PreferencesWarning).Msg("could not migrate legacy preferences")
 	}
 
-	client, err := matrix.New(filepath.Join(paths.DataDir, "matrix.db"))
+	client, err := matrix.New(filepath.Join(dataDir, "matrix.db"))
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal().Err(err).Msg("initialize Matrix client")
 	}
+	logger.Info().Msg("application data and Matrix database ready")
 	mediaCacheDir := ""
 	if cacheDir, cacheErr := os.UserCacheDir(); cacheErr == nil && cacheDir != "" {
 		mediaCacheDir = filepath.Join(cacheDir, "gomuks-desktop", "media")
 		client.SetMediaCacheDir(mediaCacheDir)
 	}
 
-	if err = desktop.Run(client, frontendAssets, paths.DataDir, paths.PreferencesFile, mediaCacheDir); err != nil {
-		log.Fatal(err)
+	if err = desktop.Run(client, frontendAssets, applicationIcon, dataDir, defaultDataDir, paths.PreferencesFile, mediaCacheDir); err != nil {
+		logger.Fatal().Err(err).Msg("run desktop application")
 	}
+	logger.Info().Msg("Pinger exited")
 }

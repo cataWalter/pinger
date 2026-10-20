@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +20,55 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
+
+func TestRevokeDeviceWithUIAUsesPasswordChallenge(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodDelete || r.URL.Path != "/_matrix/client/v3/devices/OLD_DEVICE" {
+			t.Errorf("request = %s %s, want DELETE /_matrix/client/v3/devices/OLD_DEVICE", r.Method, r.URL.Path)
+		}
+
+		var body struct {
+			Auth struct {
+				Type     string `json:"type"`
+				Session  string `json:"session"`
+				User     string `json:"user"`
+				Password string `json:"password"`
+			} `json:"auth"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		if requests == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"errcode":"M_UNAUTHORIZED","error":"Authentication required","flows":[{"stages":["m.login.password"]}],"session":"uia-session"}`))
+			return
+		}
+		if body.Auth.Type != "m.login.password" || body.Auth.Session != "uia-session" ||
+			body.Auth.User != "@alice:example.org" || body.Auth.Password != "secret" {
+			t.Errorf("unexpected UIA auth payload: %+v", body.Auth)
+			http.Error(w, `{"errcode":"M_FORBIDDEN","error":"Invalid auth"}`, http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	client, err := mautrix.NewClient(server.URL, "@alice:example.org", "access-token")
+	if err != nil {
+		t.Fatalf("create Matrix client: %v", err)
+	}
+	client.Client = server.Client()
+	if err = revokeDeviceWithUIA(context.Background(), client, id.DeviceID("OLD_DEVICE"), id.UserID("@alice:example.org"), "secret"); err != nil {
+		t.Fatalf("revoke device: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("request count = %d, want initial challenge and authenticated retry", requests)
+	}
+}
 
 func TestMessageFromEvent(t *testing.T) {
 	timestamp := time.Date(2026, time.October, 14, 17, 0, 0, 0, time.UTC)
@@ -145,7 +196,7 @@ func TestHistoryPageReportsServerBackfill(t *testing.T) {
 }
 
 func BenchmarkHistoryPageWithLimit(b *testing.B) {
-	for _, messageCount := range []int{100, 250} {
+	for _, messageCount := range []int{100, 250, 1_000, 5_000} {
 		b.Run(fmt.Sprintf("messages-%d", messageCount), func(b *testing.B) {
 			client, err := New(filepath.Join(b.TempDir(), "profile", "matrix.db"))
 			if err != nil {
@@ -196,7 +247,7 @@ func BenchmarkHistoryPageWithLimit(b *testing.B) {
 }
 
 func BenchmarkApplySync(b *testing.B) {
-	for _, eventCount := range []int{100, 250} {
+	for _, eventCount := range []int{100, 250, 1_000, 5_000} {
 		b.Run(fmt.Sprintf("events-%d", eventCount), func(b *testing.B) {
 			roomID := id.RoomID("!sync-benchmark:example.org")
 			syncRoom := &jsoncmd.SyncRoom{

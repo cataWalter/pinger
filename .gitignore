@@ -7,3 +7,5 @@
 /frontend/dist/
 /build/linux/appimage/build/
 .DS_Store
+/toolchain/
+/tools/msys64/

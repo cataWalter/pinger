@@ -276,6 +276,25 @@ textarea:focus-visible {
   margin-top: 5px;
 }
 
+.auth-register {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 10px;
+  color: var(--forest);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-register:hover,
+.auth-register:focus-visible {
+  background: var(--canvas-warm);
+  border-color: var(--forest-bright);
+}
+
 .button-arrow {
   transform: rotate(-45deg);
 }
@@ -868,9 +887,9 @@ textarea:focus-visible {
   border-top: 1px solid rgba(230, 244, 235, 0.13);
 }
 
-.account-switcher-trigger {
+.profile-settings-trigger {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 20px;
+  grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
   min-width: 0;
@@ -883,126 +902,10 @@ textarea:focus-visible {
   cursor: pointer;
 }
 
-.account-switcher-trigger:hover,
-.account-switcher-trigger:focus-visible {
+.profile-settings-trigger:hover,
+.profile-settings-trigger:focus-visible {
   color: #f4faf6;
   outline: none;
-}
-
-.account-manager-content {
-  display: grid;
-  align-content: start;
-  gap: 14px;
-  min-height: 0;
-  overflow: auto;
-  padding: 14px 20px 18px;
-}
-
-.account-option-list {
-  display: grid;
-  gap: 5px;
-}
-
-.account-option {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 9px;
-  color: var(--ink);
-  text-align: left;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.account-option:hover:not(:disabled),
-.account-option[aria-current='true'] {
-  background: var(--canvas-warm);
-  border-color: var(--green);
-}
-
-.account-option:disabled {
-  cursor: wait;
-}
-
-.account-option-copy {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.account-option-copy strong,
-.account-option-copy span,
-.account-option-homeserver {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-option-copy strong {
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.account-option-copy span,
-.account-option-homeserver {
-  color: var(--muted);
-  font-size: 9px;
-}
-
-.account-option>svg {
-  color: var(--green);
-}
-
-.account-add-button {
-  justify-self: start;
-}
-
-.account-add-form {
-  display: grid;
-  gap: 12px;
-  padding: 16px 20px 18px;
-}
-
-.account-add-form label {
-  display: grid;
-  gap: 5px;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.account-add-form input {
-  width: 100%;
-  min-width: 0;
-  padding: 9px 10px;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  font: inherit;
-  font-size: 11px;
-}
-
-.account-manager-error {
-  margin: 12px 20px 0;
-  color: #9d4938;
-  font-size: 10px;
-}
-
-.account-manager-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.account-manager-actions .primary-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
 }
 
 .accent-setting-row {
@@ -2627,6 +2530,12 @@ textarea:focus-visible {
   gap: 7px;
 }
 
+.confirm-dialog form>div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
 .confirm-dialog button {
   min-height: 32px;
   padding: 0 10px;
@@ -3156,6 +3065,22 @@ textarea:focus-visible {
   font-size: 10px;
 }
 
+.inactive-room-age-input {
+  width: min(210px, 44%);
+  min-width: 116px;
+  height: 34px;
+  padding: 0 8px;
+  color: var(--ink);
+  background: var(--canvas-warm);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 10px;
+}
+
+.inactive-room-age-input[aria-invalid='true'] {
+  border-color: var(--warning);
+}
+
 .setting-range {
   display: flex;
   align-items: center;
@@ -3192,6 +3117,22 @@ textarea:focus-visible {
   color: #35443b;
   font-size: 11px;
   cursor: pointer;
+}
+
+.setting-toggle > span:has(> strong) {
+  display: grid;
+  gap: 4px;
+}
+
+.setting-toggle strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.setting-toggle small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
 }
 
 .setting-toggle input {
@@ -5259,16 +5200,6 @@ day-divider::after,
   font-size: 10px;
 }
 
-.room-account-filter {
-  min-height: 30px;
-  padding: 0 8px;
-  color: var(--sidebar-muted, #aeb8c7);
-  font-size: 11px;
-  background: var(--sidebar-panel, #1c3a30);
-  border: 1px solid var(--sidebar-border, #345044);
-  border-radius: 6px;
-}
-
 .room-scope-filters button,
 .room-refinement-filters button {
   background: var(--sidebar-panel, #1c3a30);
@@ -7158,9 +7089,14 @@ day-divider::after,
 }
 
 .scheduled-job-heading time,
-.scheduled-job-room {
+.scheduled-job-room,
+.scheduled-job-repeat {
   color: var(--muted);
   font-size: 10px;
+}
+
+.scheduled-job-repeat {
+  display: block;
 }
 
 .scheduled-job-status {
@@ -7222,12 +7158,49 @@ day-divider::after,
   color: var(--ink);
 }
 
-.scheduled-editor-content .scheduled-archive-toggle input {
+.scheduled-editor-content .scheduled-archive-toggle input,
+.scheduled-editor-content .scheduled-repeat-toggle input {
   width: 16px;
   min-height: 16px;
   margin: 0;
   padding: 0;
   accent-color: var(--accent);
+}
+
+.scheduled-editor-content .scheduled-repeat-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  color: var(--ink);
+  background: var(--canvas-warm);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.scheduled-editor-content .scheduled-repeat-toggle>span {
+  display: grid;
+  gap: 3px;
+}
+
+.scheduled-repeat-toggle strong {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.scheduled-repeat-toggle small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.scheduled-repeat-description {
+  margin: -5px 0 0 35px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .scheduled-job-actions {
@@ -7904,4 +7877,34 @@ day-divider::after,
 
 .message-row.is-own.is-grouped.is-last .message-body {
   border-radius: 14px 4px 4px 14px;
+}
+
+.timeline {
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.timeline-virtualizer {
+  flex: 1 1 0%;
+  min-height: 0;
+}
+
+.timeline-virtual-scroller {
+  box-sizing: border-box;
+  padding: 22px clamp(20px, 4vw, 44px) 18px;
+  scrollbar-width: thin;
+}
+
+.timeline-virtual-scroller::-webkit-scrollbar-thumb {
+  background: #dbe2dc;
+  border-radius: 8px;
+}
+
+.timeline-virtual-item {
+  min-width: 0;
+}
+
+.timeline-virtualizer .message-row {
+  animation: none;
 }
