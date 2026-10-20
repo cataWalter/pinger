@@ -20,6 +20,42 @@ func TestValidateHideImagesAndVideosPreference(t *testing.T) {
 	}
 }
 
+func TestValidateMessageBookmarkPreference(t *testing.T) {
+	const key = "message.bookmark.%21room%3Aexample.org.%24event%3Aexample.org"
+	for _, value := range []bool{true, false} {
+		if err := Validate(key, value); err != nil {
+			t.Errorf("Validate(%q, %t) error = %v", key, value, err)
+		}
+	}
+	if err := Validate("message.bookmark.", true); err == nil {
+		t.Fatal("Validate() accepted a bookmark preference without a message ID")
+	}
+	if err := Validate(key, "true"); err == nil {
+		t.Fatal("Validate() accepted a non-boolean bookmark preference")
+	}
+}
+
+func TestValidateAppearanceThemePreference(t *testing.T) {
+	validThemes := []string{"System default", "Light", "Dark", "OLED black", "Bosco", "Rosa", "Dracula", "Midnight", "Slate", "Solarized", "Sepia"}
+	for _, theme := range validThemes {
+		if err := Validate("appearance.theme", theme); err != nil {
+			t.Errorf("Validate(appearance.theme, %q) error = %v", theme, err)
+		}
+	}
+	if err := Validate("appearance.theme", "Unknown theme"); err == nil {
+		t.Fatal("Validate() accepted an unsupported theme")
+	}
+}
+
+func TestValidateAITranscriptionModelPreference(t *testing.T) {
+	if err := Validate("ai.transcription_model", "whisper-1"); err != nil {
+		t.Fatalf("Validate(ai.transcription_model) error = %v", err)
+	}
+	if err := Validate("ai.transcription_model", true); err == nil {
+		t.Fatal("Validate() accepted a non-string transcription model")
+	}
+}
+
 func TestValidateRoomAIAgents(t *testing.T) {
 	key := "room.ai_agents.!room:example.org"
 	validAgent := struct {
@@ -138,6 +174,36 @@ func TestStorePublishesChanges(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for preference change")
+	}
+}
+
+func TestStoreSkipsUnchangedValue(t *testing.T) {
+	store, err := open(filepath.Join(t.TempDir(), "preferences.db"), 5*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	changes, unsubscribe := store.Subscribe(2)
+	defer unsubscribe()
+	if err := store.SetGlobal("notifications.enabled", false); err != nil {
+		t.Fatal(err)
+	}
+	firstChange := <-changes
+
+	if err := store.SetGlobal("notifications.enabled", false); err != nil {
+		t.Fatal(err)
+	}
+	revision, err := store.revision()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision != firstChange.Revision {
+		t.Fatalf("revision after unchanged value = %d, want %d", revision, firstChange.Revision)
+	}
+	select {
+	case change := <-changes:
+		t.Fatalf("unchanged value published a new revision: %d", change.Revision)
+	default:
 	}
 }
 

@@ -1,6 +1,7 @@
 package preferences
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -178,6 +179,14 @@ func (s *Store) Set(scope Scope, accountID, key string, value any) error {
 		return fmt.Errorf("begin preference update: %w", err)
 	}
 	defer tx.Rollback()
+	var existing []byte
+	err = tx.QueryRow("SELECT value_json FROM preferences WHERE scope = ? AND account_id = ? AND key = ?", scope, accountID, key).Scan(&existing)
+	if err == nil && bytes.Equal(existing, raw) {
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read preference %q: %w", key, err)
+	}
 	var revision int64
 	if err = tx.QueryRow("SELECT revision FROM preference_meta WHERE id = 1").Scan(&revision); err != nil {
 		return fmt.Errorf("read preference revision: %w", err)
@@ -444,6 +453,7 @@ func preferenceEnabled(values map[string]any, key string, fallback bool) bool {
 
 func Validate(key string, value any) error {
 	const roomAIAgentsPrefix = "room.ai_agents."
+	const messageBookmarkPrefix = "message.bookmark."
 	if strings.HasPrefix(key, roomAIAgentsPrefix) {
 		if strings.TrimPrefix(key, roomAIAgentsPrefix) == "" {
 			return errors.New("room AI-agent preference requires a room ID")
@@ -453,6 +463,15 @@ func Validate(key string, value any) error {
 			return fmt.Errorf("preference %q must be a JSON string", key)
 		}
 		return validateRoomAIAgents(serialized)
+	}
+	if strings.HasPrefix(key, messageBookmarkPrefix) {
+		if strings.TrimPrefix(key, messageBookmarkPrefix) == "" {
+			return errors.New("message bookmark preference requires a message ID")
+		}
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("preference %q must be a boolean", key)
+		}
+		return nil
 	}
 	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted."} {
 		if strings.HasPrefix(key, prefix) {
@@ -492,7 +511,7 @@ func Validate(key string, value any) error {
 				return errors.New("AI endpoint must be an HTTP or HTTPS URL")
 			}
 		}
-	case "ai.model", "appearance.bubble_color", "audio.input_device":
+	case "ai.model", "ai.transcription_model", "appearance.bubble_color", "audio.input_device":
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("preference %q must be a string", key)
 		}
@@ -541,7 +560,7 @@ func Validate(key string, value any) error {
 			return errors.New("sounds.effects has an unsupported value")
 		}
 	case "appearance.theme":
-		if !oneOf(value, "System default", "Light", "Dark", "OLED black", "Bosco", "Rosa") {
+		if !oneOf(value, "System default", "Light", "Dark", "OLED black", "Bosco", "Rosa", "Dracula", "Midnight", "Slate", "Solarized", "Sepia") {
 			return errors.New("appearance.theme has an unsupported value")
 		}
 	case "appearance.accent_color":
@@ -605,11 +624,11 @@ func Validate(key string, value any) error {
 
 func validateRoomAIAgents(serialized string) error {
 	const (
-		maxBytes        = 32_768
-		maxAgents       = 8
-		maxIDRunes      = 64
-		maxNameRunes    = 48
-		maxPromptRunes  = 2_000
+		maxBytes       = 32_768
+		maxAgents      = 8
+		maxIDRunes     = 64
+		maxNameRunes   = 48
+		maxPromptRunes = 2_000
 	)
 	if len(serialized) > maxBytes {
 		return errors.New("room AI-agent data exceeds the size limit")

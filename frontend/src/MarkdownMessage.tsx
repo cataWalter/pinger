@@ -1,4 +1,4 @@
-import { Clipboard } from '@wailsio/runtime'
+import { Call, Clipboard } from '@wailsio/runtime'
 import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, Copy } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -15,6 +15,7 @@ function markdownText(children: ReactNode): string {
 function MarkdownMessage({ body }: { body: string }) {
   const [copiedCode, setCopiedCode] = useState('')
   const [copyError, setCopyError] = useState('')
+  const [linkError, setLinkError] = useState('')
   const copyResetTimeout = useRef<number | null>(null)
 
   useEffect(() => () => {
@@ -33,13 +34,29 @@ function MarkdownMessage({ body }: { body: string }) {
     }
   }
 
+  async function openLink(href: string) {
+    setLinkError('')
+    try {
+      await Call.ByName('mychat/desktop.AppService.OpenExternalURL', href)
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error)
+      setLinkError(`Could not open link: ${detail}`)
+    }
+  }
+
   return (
     <div className="message-body markdown-message">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { detect: true }]]}
         components={{
-          a({ children, href }) { return <a href={href} target="_blank" rel="noreferrer">{children}</a> },
+          a({ children, href }) {
+            return <a href={href} target="_blank" rel="noreferrer" onClick={(event) => {
+              if (!href) return
+              event.preventDefault()
+              void openLink(href)
+            }}>{children}</a>
+          },
           pre({ children }) {
             const code = markdownText(children).replace(/\n$/, '')
             return <div className="markdown-code">
@@ -57,6 +74,7 @@ function MarkdownMessage({ body }: { body: string }) {
       >
         {body}
       </ReactMarkdown>
+      {linkError && <span className="message-link-error" role="status">{linkError}</span>}
     </div>
   )
 }

@@ -44,6 +44,48 @@ func TestMessageFromEvent(t *testing.T) {
 	}
 }
 
+func TestApplyLatestReadReceiptMarksLatestOwnMessage(t *testing.T) {
+	seenAt := time.Date(2026, time.October, 20, 16, 40, 0, 0, time.UTC)
+	ownUserID := id.UserID("@me:example.org")
+	messages := []Message{
+		{ID: "$first", Own: true},
+		{ID: "$older-receipt", Own: false},
+		{ID: "$latest-own", Own: true},
+		{ID: "$latest-receipt", Own: false},
+	}
+	receipts := map[id.EventID][]*database.Receipt{
+		"$older-receipt": {{
+			UserID:      "@friend:example.org",
+			ReceiptType: event.ReceiptTypeRead,
+			Timestamp:   jsontime.UM(seenAt.Add(-time.Minute)),
+		}},
+		"$latest-own": {{
+			UserID:      ownUserID,
+			ReceiptType: event.ReceiptTypeRead,
+			Timestamp:   jsontime.UM(seenAt.Add(time.Minute)),
+		}},
+		"$latest-receipt": {{
+			UserID:      "@friend:example.org",
+			ReceiptType: event.ReceiptTypeRead,
+			Timestamp:   jsontime.UM(seenAt),
+		}, {
+			UserID:      "@friend:example.org",
+			ReceiptType: event.ReceiptTypeRead,
+			ThreadID:    "$thread-root",
+			Timestamp:   jsontime.UM(seenAt.Add(time.Minute)),
+		}},
+	}
+
+	applyLatestReadReceipt(messages, receipts, ownUserID)
+
+	if !messages[2].SeenAt.Equal(seenAt) {
+		t.Fatalf("latest own message SeenAt = %v, want %v", messages[2].SeenAt, seenAt)
+	}
+	if !messages[0].SeenAt.IsZero() || !messages[1].SeenAt.IsZero() || !messages[3].SeenAt.IsZero() {
+		t.Fatalf("receipt should mark only the latest preceding own message: %+v", messages)
+	}
+}
+
 func TestTimelineMessagePrefixCountsVisibleMessages(t *testing.T) {
 	events := []*database.Event{
 		{Type: event.EventReaction.Type, RedactedBy: "$redaction"},
@@ -930,7 +972,7 @@ func TestApplySyncUpdatesRoomsAndRemovesLeftRooms(t *testing.T) {
 	if got.ID != roomID.String() || got.Name != name || got.Topic != topic || got.Avatar != avatar.String() || got.Preview != "latest" {
 		t.Fatalf("unexpected room snapshot: %+v", got)
 	}
-	if !got.Direct || got.Unread != 7 || got.Mentions != 1 {
+	if !got.Direct || got.Unread != 5 || got.Mentions != 1 {
 		t.Fatalf("room direct/unread metadata was not mapped: %+v", got)
 	}
 	if !got.LastSeen.Equal(latest) {
@@ -939,6 +981,32 @@ func TestApplySyncUpdatesRoomsAndRemovesLeftRooms(t *testing.T) {
 	update := <-client.Events()
 	if len(update.ChangedRoomID) != 2 {
 		t.Fatalf("changed rooms = %v, want update and removal", update.ChangedRoomID)
+	}
+}
+
+func TestUnreadMessageCountUsesNotificationFallbackWithoutDoubleCounting(t *testing.T) {
+	tests := []struct {
+		name   string
+		counts database.UnreadCounts
+		want   int
+	}{
+		{
+			name:   "notification matches overlap with unread messages",
+			counts: database.UnreadCounts{UnreadMessages: 2, UnreadNotifications: 2},
+			want:   2,
+		},
+		{
+			name:   "notification count is a fallback",
+			counts: database.UnreadCounts{UnreadNotifications: 2},
+			want:   2,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := unreadMessageCount(test.counts); got != test.want {
+				t.Fatalf("unreadMessageCount() = %d, want %d", got, test.want)
+			}
+		})
 	}
 }
 

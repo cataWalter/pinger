@@ -7,16 +7,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 )
 
 const (
-	aiCompletionTimeout = 60 * time.Second
-	aiHealthTimeout     = 10 * time.Second
-	aiMaxResponseBytes  = 4 << 20
+	aiCompletionTimeout    = 60 * time.Second
+	aiHealthTimeout        = 10 * time.Second
+	aiTranscriptionTimeout = 5 * time.Minute
+	aiMaxAudioBytes        = 50 << 20
+	aiMaxResponseBytes     = 4 << 20
 )
 
 // AIMessage is one chat turn sent to the local model.
@@ -37,6 +43,13 @@ type aiChatResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+type aiTranscriptionResponse struct {
+	Text  string `json:"text"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
@@ -95,6 +108,91 @@ func aiChatCompletion(ctx context.Context, client *http.Client, endpoint, model 
 	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
 }
 
+func aiAudioTranscription(ctx context.Context, client *http.Client, endpoint, model, filename, contentType string, audio []byte) (string, error) {
+	if err := validateAIEndpoint(endpoint); err != nil {
+		return "", err
+	}
+	if len(audio) == 0 {
+		return "", errors.New("audio file is empty")
+	}
+	if len(audio) > aiMaxAudioBytes {
+		return "", errors.New("audio file exceeds the 50 MiB limit")
+	}
+
+	filename = path.Base(strings.ReplaceAll(strings.TrimSpace(filename), "\\", "/"))
+	filename = strings.Map(func(char rune) rune {
+		if char == '\r' || char == '\n' || char == 0 {
+			return '_'
+		}
+		return char
+	}, filename)
+	if filename == "" || filename == "." || filename == "/" {
+		filename = "audio"
+	}
+	if parsedType, _, err := mime.ParseMediaType(contentType); err == nil && parsedType != "" {
+		contentType = parsedType
+	} else {
+		contentType = "application/octet-stream"
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if model != "" {
+		if err := writer.WriteField("model", model); err != nil {
+			return "", fmt.Errorf("encode transcription model: %w", err)
+		}
+	}
+	if err := writer.WriteField("response_format", "json"); err != nil {
+		return "", fmt.Errorf("encode transcription format: %w", err)
+	}
+	fileHeader := make(textproto.MIMEHeader)
+	fileHeader.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "file", "filename": filename}))
+	fileHeader.Set("Content-Type", contentType)
+	filePart, err := writer.CreatePart(fileHeader)
+	if err != nil {
+		return "", fmt.Errorf("encode audio file: %w", err)
+	}
+	if _, err := filePart.Write(audio); err != nil {
+		return "", fmt.Errorf("encode audio file: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("finish transcription request: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, aiTranscriptionTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+"/v1/audio/transcriptions", &body)
+	if err != nil {
+		return "", fmt.Errorf("create transcription request: %w", err)
+	}
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response, err := client.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("contact AI transcription endpoint: %w", err)
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, aiMaxResponseBytes))
+	if err != nil {
+		return "", fmt.Errorf("read AI transcription: %w", err)
+	}
+	var parsed aiTranscriptionResponse
+	decodeErr := json.Unmarshal(data, &parsed)
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		if decodeErr == nil && parsed.Error != nil && parsed.Error.Message != "" {
+			return "", fmt.Errorf("AI transcription endpoint returned %d: %s", response.StatusCode, parsed.Error.Message)
+		}
+		return "", fmt.Errorf("AI transcription endpoint returned %d; it must support /v1/audio/transcriptions", response.StatusCode)
+	}
+	if decodeErr != nil {
+		return "", fmt.Errorf("decode AI transcription: %w", decodeErr)
+	}
+	transcription := strings.TrimSpace(parsed.Text)
+	if transcription == "" {
+		return "", errors.New("AI endpoint returned an empty transcription")
+	}
+	return transcription, nil
+}
+
 // aiHealthCheck reports whether the server is up and the model has finished loading.
 func aiHealthCheck(ctx context.Context, client *http.Client, endpoint string) error {
 	if err := validateAIEndpoint(endpoint); err != nil {
@@ -146,6 +244,24 @@ func (s *AppService) AIComplete(messages []AIMessage) (string, error) {
 		return "", err
 	}
 	return aiChatCompletion(s.aiContext(), aiHTTPClient, endpoint, model, messages)
+}
+
+// AITranscribeMedia transcribes cached Matrix audio with the configured OpenAI-compatible endpoint.
+func (s *AppService) AITranscribeMedia(mxcURI, filename, contentType string) (string, error) {
+	endpoint, model, err := s.aiEndpointSettings()
+	if err != nil {
+		return "", err
+	}
+	preferences := s.preferenceValues()
+	transcriptionModel, _ := preferences["ai.transcription_model"].(string)
+	if transcriptionModel == "" {
+		transcriptionModel = model
+	}
+	audio, err := s.currentClient().CachedMediaBytes(s.aiContext(), mxcURI)
+	if err != nil {
+		return "", fmt.Errorf("load audio from Matrix: %w", err)
+	}
+	return aiAudioTranscription(s.aiContext(), aiHTTPClient, endpoint, transcriptionModel, filename, contentType, audio)
 }
 
 // TestAIEndpoint checks that the configured endpoint is reachable and its model is loaded.

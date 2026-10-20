@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"mychat/matrix"
 	"mychat/notifications"
 	sharedpreferences "mychat/preferences"
@@ -37,6 +38,7 @@ type AppService struct {
 	ctx                    context.Context
 	cancel                 context.CancelFunc
 	quit                   func()
+	openURL                func(string) error
 	setAutostart           func(bool) error
 	setMenuBarIcon         func(bool)
 	chooseSavePath         func(directory, filename string) (string, error)
@@ -48,6 +50,17 @@ type AppService struct {
 
 	emitUpdate   func(Update)
 	emitReminder func(ScheduledJob)
+}
+
+func (s *AppService) OpenExternalURL(rawURL string) error {
+	url, err := application.ValidateAndSanitizeURL(rawURL)
+	if err != nil {
+		return err
+	}
+	if s.openURL == nil {
+		return errors.New("external URL opener unavailable")
+	}
+	return s.openURL(url)
 }
 
 type Snapshot struct {
@@ -104,6 +117,7 @@ type Message struct {
 	ReplyToSender   string          `json:"replyToSender"`
 	ReplyToPreview  string          `json:"replyToPreview"`
 	Timestamp       int64           `json:"timestamp"`
+	SeenAt          int64           `json:"seenAt"`
 	TimelineCursor  int64           `json:"timelineCursor"`
 	Sending         bool            `json:"sending"`
 	SendError       string          `json:"sendError"`
@@ -826,6 +840,10 @@ func (s *AppService) RequestNotificationPermission() (string, error) {
 	return s.notifier.RequestPermission()
 }
 
+func (s *AppService) OpenNotificationSettings() error {
+	return notifications.OpenSystemSettings()
+}
+
 func (s *AppService) SendNotification(title, body, roomID string) (bool, error) {
 	if s.notifier == nil || !s.notifier.Supported() || s.notifier.Permission() != "granted" {
 		return false, nil
@@ -1037,6 +1055,10 @@ func mapRoomsWithPreferences(rooms []matrix.Room, preferences map[string]any) []
 func mapMessages(messages []matrix.Message) []Message {
 	mapped := make([]Message, 0, len(messages))
 	for _, message := range messages {
+		seenAt := int64(0)
+		if !message.SeenAt.IsZero() {
+			seenAt = message.SeenAt.UnixMilli()
+		}
 		mapped = append(mapped, Message{
 			ID:              message.ID,
 			TransactionID:   message.TransactionID,
@@ -1049,6 +1071,7 @@ func mapMessages(messages []matrix.Message) []Message {
 			ReplyToSender:   message.ReplyToSender,
 			ReplyToPreview:  message.ReplyToPreview,
 			Timestamp:       message.Timestamp.UnixMilli(),
+			SeenAt:          seenAt,
 			TimelineCursor:  message.TimelineCursor,
 			Sending:         message.Sending,
 			SendError:       message.SendError,

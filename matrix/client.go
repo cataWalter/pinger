@@ -117,6 +117,7 @@ type Message struct {
 	ReplyToSender   string
 	ReplyToPreview  string
 	Timestamp       time.Time
+	SeenAt          time.Time
 	TimelineCursor  int64
 	Sending         bool
 	SendError       string
@@ -286,7 +287,7 @@ func NewWithLogOutput(databasePath string, logOutput io.Writer) (*Client, error)
 			return nil, err
 		}
 	}
-	rawDB, err := dbutil.NewWithDialect(databasePath, "sqlite3-fk-wal")
+	rawDB, err := dbutil.NewWithDialect(databasePath+"?_txlock=immediate", "sqlite3-fk-wal")
 	if err != nil {
 		return nil, fmt.Errorf("open gomuks SQLite database: %w", err)
 	}
@@ -862,8 +863,68 @@ func (c *Client) HistoryPageWithLimit(ctx context.Context, roomID string, before
 		}
 		return messages[i].Timestamp.Before(messages[j].Timestamp)
 	})
+	c.enrichSeenMessage(ctx, roomID, messages)
 	page.Messages = messages
 	return page, nil
+}
+
+func (c *Client) enrichSeenMessage(ctx context.Context, roomID string, messages []Message) {
+	if len(messages) == 0 || c.engine == nil || c.engine.Account == nil {
+		return
+	}
+	c.mu.RLock()
+	room, exists := c.rooms[roomID]
+	c.mu.RUnlock()
+	if !exists || !room.Direct {
+		return
+	}
+	eventIDs := make([]id.EventID, 0, len(messages))
+	for _, message := range messages {
+		if message.ID != "" {
+			eventIDs = append(eventIDs, id.EventID(message.ID))
+		}
+	}
+	if len(eventIDs) == 0 {
+		return
+	}
+	receipts, err := c.engine.GetReceipts(ctx, id.RoomID(roomID), eventIDs)
+	if err != nil {
+		log.Printf("read Matrix receipts for room %s: %v", roomID, err)
+		return
+	}
+	applyLatestReadReceipt(messages, receipts, c.engine.Account.UserID)
+}
+
+func applyLatestReadReceipt(messages []Message, receipts map[id.EventID][]*database.Receipt, ownUserID id.UserID) {
+	messageIndexes := make(map[id.EventID]int, len(messages))
+	for index, message := range messages {
+		if message.ID != "" {
+			messageIndexes[id.EventID(message.ID)] = index
+		}
+	}
+	latestReceiptIndex := -1
+	var latestSeenAt time.Time
+	for eventID, eventReceipts := range receipts {
+		index, exists := messageIndexes[eventID]
+		if !exists {
+			continue
+		}
+		for _, receipt := range eventReceipts {
+			if receipt == nil || receipt.UserID == ownUserID || receipt.ReceiptType != event.ReceiptTypeRead || receipt.ThreadID != "" || receipt.Timestamp.Time.IsZero() {
+				continue
+			}
+			if index > latestReceiptIndex || (index == latestReceiptIndex && receipt.Timestamp.Time.After(latestSeenAt)) {
+				latestReceiptIndex = index
+				latestSeenAt = receipt.Timestamp.Time
+			}
+		}
+	}
+	for index := latestReceiptIndex; index >= 0; index-- {
+		if messages[index].Own && messages[index].ID != "" {
+			messages[index].SeenAt = latestSeenAt
+			return
+		}
+	}
 }
 
 func (c *Client) Login(ctx context.Context, homeserver, username, password string) error {
@@ -1873,7 +1934,7 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 				room.Avatar = avatar
 			}
 			room.Direct = isDirectRoom(meta)
-			room.Unread = meta.UnreadMessages + meta.UnreadNotifications
+			room.Unread = unreadMessageCount(meta.UnreadCounts)
 			room.MarkedUnread = meta.MarkedUnread != nil && *meta.MarkedUnread
 			room.Mentions = meta.UnreadHighlights
 			room.Bridge = bridgeLabel(meta)
@@ -1881,7 +1942,7 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 				room.LastSeen = meta.SortingTimestamp.Time
 			}
 		}
-		if notify && (syncRoom.Reset || len(syncRoom.Timeline) > 0) {
+		if notify && (syncRoom.Reset || len(syncRoom.Timeline) > 0 || len(syncRoom.Receipts) > 0) {
 			if c.pendingTimelineRooms == nil {
 				c.pendingTimelineRooms = make(map[string]struct{})
 			}
@@ -1980,6 +2041,10 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 	if notify && len(changed) > 0 {
 		c.publish(changed, "")
 	}
+}
+
+func unreadMessageCount(counts database.UnreadCounts) int {
+	return max(counts.UnreadMessages, counts.UnreadNotifications)
 }
 
 func (c *Client) directRoomAvatars(syncEvent *jsoncmd.SyncComplete) map[string]string {

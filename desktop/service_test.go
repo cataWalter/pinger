@@ -134,6 +134,37 @@ func TestSendAttachmentRejectsOversizedData(t *testing.T) {
 	}
 }
 
+func TestOpenExternalURLUsesValidatedOpener(t *testing.T) {
+	wantURL := "https://open.spotify.com/track/example?si=abc123"
+	var openedURL string
+	service := &AppService{openURL: func(url string) error {
+		openedURL = url
+		return nil
+	}}
+
+	if err := service.OpenExternalURL(wantURL); err != nil {
+		t.Fatal(err)
+	}
+	if openedURL != wantURL {
+		t.Fatalf("opened URL = %q, want %q", openedURL, wantURL)
+	}
+}
+
+func TestOpenExternalURLRejectsUnsafeScheme(t *testing.T) {
+	called := false
+	service := &AppService{openURL: func(string) error {
+		called = true
+		return nil
+	}}
+
+	if err := service.OpenExternalURL("javascript:alert(1)"); err == nil {
+		t.Fatal("unsafe URL was accepted")
+	}
+	if called {
+		t.Fatal("opener was called for an unsafe URL")
+	}
+}
+
 func TestAppServiceNotificationMethodsUseInjectedNotifier(t *testing.T) {
 	notifier := &recordingNotifier{}
 	service := &AppService{notifier: notifier}

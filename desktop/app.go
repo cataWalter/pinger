@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -80,10 +83,23 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 			Handler: application.AssetFileServerFS(frontend),
 		},
 		Mac: application.MacOptions{
-			ApplicationShouldTerminateAfterLastWindowClosed: true,
+			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 		OnShutdown: shutdown,
 	})
+	service.openURL = func(url string) error {
+		if runtime.GOOS != "darwin" {
+			return app.Browser.OpenURL(url)
+		}
+		output, openErr := exec.Command("open", url).CombinedOutput()
+		if openErr != nil {
+			if detail := strings.TrimSpace(string(output)); detail != "" {
+				return fmt.Errorf("open link: %w: %s", openErr, detail)
+			}
+			return fmt.Errorf("open link: %w", openErr)
+		}
+		return nil
+	}
 	if lifecycle, ok := notifier.(notifications.Lifecycle); ok {
 		if startErr := lifecycle.Start(ctx); startErr != nil {
 			log.Printf("native notifications unavailable: %v", startErr)
@@ -127,21 +143,55 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 			WindowLevel: application.MacWindowLevelNormal,
 		},
 	})
+	showMainWindow := func() {
+		window.Show().Focus()
+	}
 
-	normalIcon, unreadIcon := trayIcons()
+	icons := trayIcons()
 	tray := app.SystemTray.New()
-	tray.SetIcon(normalIcon)
+	var trayHasUnread atomic.Bool
+	var trayDarkMode atomic.Bool
+	trayDarkMode.Store(app.Env.IsDarkMode())
+	setTrayIcon := func() {
+		if trayDarkMode.Load() {
+			if trayHasUnread.Load() {
+				tray.SetIcon(icons.darkModeUnread)
+			} else {
+				tray.SetIcon(icons.darkMode)
+			}
+			return
+		}
+		if trayHasUnread.Load() {
+			tray.SetIcon(icons.unread)
+		} else {
+			tray.SetIcon(icons.normal)
+		}
+	}
+	setTrayIcon()
 	tray.SetTooltip("Pinger")
-	tray.AttachWindow(window)
+	app.Event.OnApplicationEvent(events.Common.ThemeChanged, func(event *application.ApplicationEvent) {
+		if event.Context() == nil {
+			return
+		}
+		trayDarkMode.Store(event.Context().IsDarkMode())
+		setTrayIcon()
+	})
+	tray.OnClick(func() {
+		if window.IsVisible() {
+			window.Hide()
+			return
+		}
+		showMainWindow()
+	})
 	if handler, ok := notifier.(notifications.ClickHandler); ok {
 		handler.SetClickHandler(func(roomID string) {
-			tray.ShowWindow()
+			showMainWindow()
 			app.Event.Emit(notificationOpenRoomName, roomID)
 		})
 	}
 	menu := application.NewMenu()
 	menu.Add("Open").OnClick(func(_ *application.Context) {
-		tray.ShowWindow()
+		showMainWindow()
 	})
 	markAllRoomsRead := func() {
 		go func() {
@@ -163,12 +213,12 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 		applicationMenu := application.NewMenu()
 		appMenu := applicationMenu.AddSubmenu("Pinger")
 		appMenu.Add("About Pinger").OnClick(func(_ *application.Context) {
-			tray.ShowWindow()
+			showMainWindow()
 			app.Event.Emit(applicationMenuAboutName)
 		})
 		appMenu.AddSeparator()
 		appMenu.Add("Settings...").SetAccelerator("CmdOrCtrl+,").OnClick(func(_ *application.Context) {
-			tray.ShowWindow()
+			showMainWindow()
 			app.Event.Emit(applicationMenuSettingsName)
 		})
 		appMenu.AddSeparator()
@@ -184,7 +234,7 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 		applicationMenu.AddRole(application.EditMenu)
 		messagesMenu := applicationMenu.AddSubmenu("Messages")
 		messagesMenu.Add("Search Messages").SetAccelerator("CmdOrCtrl+f").OnClick(func(_ *application.Context) {
-			tray.ShowWindow()
+			showMainWindow()
 			app.Event.Emit(applicationMenuSearchName)
 		})
 		messagesMenu.Add("Mark All as Read").OnClick(func(_ *application.Context) {
@@ -207,7 +257,7 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 			return
 		}
 		tray.Hide()
-		window.Show()
+		showMainWindow()
 	}
 	service.chooseSavePath = func(directory, filename string) (string, error) {
 		dialog := app.Dialog.SaveFile().SetFilename(filename).AttachToWindow(window)
@@ -259,11 +309,11 @@ func Run(client *matrix.Client, assets fs.FS, dataDir, preferencesPath, mediaCac
 			unread += room.Unread
 		}
 		if unread != lastUnread {
+			trayHasUnread.Store(unread > 0)
+			setTrayIcon()
 			if unread > 0 {
-				tray.SetIcon(unreadIcon)
 				tray.SetTooltip(fmt.Sprintf("Pinger (%d unread)", unread))
 			} else {
-				tray.SetIcon(normalIcon)
 				tray.SetTooltip("Pinger")
 			}
 			lastUnread = unread

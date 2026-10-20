@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { Profiler } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AccountSummary, Message, Room, Snapshot } from '../bindings/mychat/desktop/models.js'
 import App from './App'
@@ -33,6 +34,7 @@ const harness = vi.hoisted(() => ({
     NativeNotificationsSupported: vi.fn(),
     NotificationPermission: vi.fn(),
     RequestNotificationPermission: vi.fn(),
+    OpenNotificationSettings: vi.fn(),
     SendNotification: vi.fn(),
     SendMessage: vi.fn(),
     SendReply: vi.fn(),
@@ -41,6 +43,7 @@ const harness = vi.hoisted(() => ({
     DownloadMedia: vi.fn(),
     React: vi.fn(),
     AIComplete: vi.fn(),
+    AITranscribeMedia: vi.fn(),
     TestAIEndpoint: vi.fn(),
     StorageUsage: vi.fn(),
     MediaCacheUsage: vi.fn(),
@@ -107,6 +110,7 @@ function message(id: string, body: string, timestamp: number): Message {
     replyToSender: '',
     replyToPreview: '',
     timestamp,
+    seenAt: 0,
     timelineCursor: timestamp,
     sending: false,
     sendError: '',
@@ -162,6 +166,7 @@ describe('settings storage, integrations, help, and about', () => {
     confirmSpy?.mockRestore()
     confirmSpy = undefined
     cleanup()
+    vi.unstubAllGlobals()
   })
 
   beforeEach(() => {
@@ -179,6 +184,7 @@ describe('settings storage, integrations, help, and about', () => {
     harness.service.DownloadAvatar.mockResolvedValue('')
     harness.service.NativeNotificationsSupported.mockResolvedValue(false)
     harness.service.NotificationPermission.mockResolvedValue('default')
+    harness.service.OpenNotificationSettings.mockResolvedValue(undefined)
     harness.service.SetBooleanPreference.mockResolvedValue(undefined)
     harness.service.SetStringPreference.mockResolvedValue(undefined)
     harness.service.StorageUsage.mockResolvedValue({ databaseBytes: 2048, walBytes: 0 })
@@ -438,6 +444,61 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Summarize recent messages' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Ask AI about the composer text' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Analyze conversation' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('explains when Ask AI needs a question in the composer', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    const askAIButton = screen.getByRole('button', { name: 'Ask AI about the composer text' }) as HTMLButtonElement
+    await waitFor(() => expect(askAIButton.parentElement?.getAttribute('data-tooltip')).toBe('Write a question first'))
+    expect(askAIButton.disabled).toBe(true)
+
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'What happened earlier?')
+
+    await waitFor(() => {
+      expect(askAIButton.disabled).toBe(false)
+      expect(askAIButton.parentElement?.getAttribute('data-tooltip')).toBe('Ask AI about draft')
+    })
+  })
+
+  it('analyzes a direct conversation only on demand and keeps the result read-only', async () => {
+    const user = userEvent.setup()
+    harness.service.AIComplete.mockResolvedValue('Chat summary\n- Alice asked about the plan.\n\nHow they communicate\n- Alice asks direct questions and Bob responds with details.')
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    const analyzeButton = screen.getByRole('button', { name: 'Analyze conversation' })
+    expect((analyzeButton as HTMLButtonElement).disabled).toBe(false)
+    expect(harness.service.AIComplete).not.toHaveBeenCalled()
+    await user.click(analyzeButton)
+
+    await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalledTimes(1))
+    const request = harness.service.AIComplete.mock.calls[0][0]
+    expect(request[0].content).toContain('untrusted data')
+    expect(request[0].content).toContain('How they communicate')
+    expect(request[1].content).toContain('Alice: latest message')
+
+    const result = await screen.findByRole('dialog', { name: 'Conversation analysis' })
+    await within(result).findByText(/Alice asks direct questions/)
+    expect(within(result).queryByRole('button', { name: /draft/i })).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    expect(harness.service.SendReply).not.toHaveBeenCalled()
+  })
+
+  it('does not show conversation analysis in group rooms', async () => {
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [{ ...room, direct: false }],
+      preferences: { 'ai.endpoint': 'http://localhost:8080' },
+    })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Analyze conversation' })).toBeNull()
   })
 
   it('shows hover descriptions for message and composer controls', async () => {
@@ -449,10 +510,36 @@ describe('room history updates', () => {
     const { container } = render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
 
-    expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).title).toBe('Send message')
+    expect(screen.getByRole('button', { name: 'Send message' }).parentElement?.getAttribute('data-tooltip')).toBe('Send message')
+    expect(screen.getByRole('button', { name: 'Attach file' }).parentElement?.getAttribute('data-tooltip')).toBe('Attach file')
+    expect(screen.getByRole('button', { name: 'Scheduled messages and reminders' }).parentElement?.getAttribute('data-tooltip')).toBe('Scheduled messages')
+    expect(screen.getByRole('button', { name: 'Ask AI about the composer text' }).parentElement?.getAttribute('data-tooltip')).toBe('Ask AI · unavailable')
     expect((screen.getByRole('button', { name: 'Add 👍 reaction' }) as HTMLButtonElement).title).toBe('Add 👍 reaction')
     openMessageMenu(container)
     expect((screen.getByRole('menuitem', { name: 'Copy message' }) as HTMLButtonElement).title).toBe('Copy message')
+  })
+
+  it('shows when an outgoing direct message has been seen', async () => {
+    const seenAt = new Date(2026, 9, 20, 16, 40).getTime()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'appearance.time_24_hour': true },
+    })
+    harness.service.History.mockResolvedValue({
+      messages: [{
+        ...message('$seen', 'heyyyy', seenAt - 60_000),
+        sender: snapshot.profile.userId,
+        senderName: snapshot.profile.displayName,
+        own: true,
+        seenAt,
+      }],
+      before: 0,
+      hasMore: false,
+    })
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('Seen at 16:40')).toBeTruthy()
+    expect(container.querySelector('[data-event-id="$seen"] .message-seen-status')?.textContent).toContain('Seen at 16:40')
   })
 
   it('does not rerender timeline messages while typing in the composer', async () => {
@@ -476,6 +563,36 @@ describe('room history updates', () => {
     await user.type(screen.getByRole('textbox', { name: 'Message' }), 'typing')
 
     expect(harness.markdownRenderCount).toBe(initialRenderCount)
+  })
+
+  it('skips rerendering for unchanged Matrix room snapshots', async () => {
+    const onRender = vi.fn()
+    render(<Profiler id="App" onRender={onRender}><App /></Profiler>)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const emitUnchangedUpdate = async () => {
+      await act(async () => {
+        harness.eventHandlers.get('matrix:update')?.({
+          data: {
+            rooms: [room],
+            changedRoomId: [],
+            timelineChangedRoomId: [],
+            typingUsers: { [room.id]: [] },
+            notifications: [],
+            error: '',
+            initialSyncComplete: true,
+            needsVerification: false,
+            connectionState: 'connected',
+          },
+        })
+        await Promise.resolve()
+      })
+    }
+
+    await emitUnchangedUpdate()
+    const renderCount = onRender.mock.calls.length
+    await emitUnchangedUpdate()
+
+    expect(onRender).toHaveBeenCalledTimes(renderCount)
   })
 
   it('does not show a room ID beneath a room name when there is no topic', async () => {
@@ -549,6 +666,66 @@ describe('room history updates', () => {
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
+  it('translates the latest paginated chat messages inline without changing the timeline', async () => {
+    const user = userEvent.setup()
+    const recentMessages = [
+      message('$latest-english', 'Good morning', 300),
+      message('$latest-turkish', 'Günaydın', 400),
+    ]
+    const olderMessages = [
+      message('$older-turkish', 'Merhaba', 100),
+      { ...message('$redacted-turkish', 'Silinmiş mesaj', 200), redacted: true },
+    ]
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    harness.service.History.mockImplementation(async (_roomID: string, before: number) => before === 0
+      ? { messages: recentMessages, before: 80, hasMore: true }
+      : { messages: olderMessages, before: 40, hasMore: false })
+    harness.service.AIComplete.mockResolvedValue('[1] Alice: Hello\n[2] Alice: Good morning\n[3] Alice: Good morning')
+
+    const { container } = render(<App />)
+    expect(await screen.findByText('Günaydın')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Translate chat to English' }))
+
+    const result = await screen.findByRole('region', { name: 'Chat translation' })
+    await within(result).findByText(/Good morning/)
+    await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalledTimes(1))
+    expect(harness.service.History).toHaveBeenCalledWith(room.id, 80)
+    expect(screen.getByRole('region', { name: 'Message timeline' }).contains(result)).toBe(true)
+    expect(screen.queryByRole('dialog', { name: 'Translate chat to English' })).toBeNull()
+    const request = harness.service.AIComplete.mock.calls[0][0]
+    expect(request[0].content).toContain('Translate every message body into English')
+    expect(request[1].content).toContain('Merhaba')
+    expect(request[1].content).toContain('Günaydın')
+    expect(request[1].content).not.toContain('Silinmiş mesaj')
+    expect(container.querySelector('[data-event-id="$latest-turkish"] .message-body')?.textContent).toBe('Günaydın')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('translates only the newest 50 messages and stops loading older history', async () => {
+    const user = userEvent.setup()
+    const latestMessages = Array.from({ length: 50 }, (_, index) => message(`$recent-${index + 1}`, `recent message ${index + 1}`, index + 1))
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    harness.service.History.mockImplementation(async (_roomID: string, before: number) => before === 0
+      ? { messages: latestMessages, before: 50, hasMore: true }
+      : { messages: [message('$older-unrequested', 'older unrequested message', 0)], before: 0, hasMore: false })
+    harness.service.AIComplete.mockResolvedValue('Translated batch')
+
+    render(<App />)
+    expect(await screen.findByText('recent message 50')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Translate chat to English' }))
+    const translation = await screen.findByRole('region', { name: 'Chat translation' })
+    await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalled())
+
+    expect(harness.service.History.mock.calls.filter(([, before]) => before !== 0)).toHaveLength(0)
+    const submittedContent = harness.service.AIComplete.mock.calls
+      .flatMap(([request]) => request.map((item: { content: string }) => item.content))
+      .join('\n')
+    expect(submittedContent).toContain('recent message 1')
+    expect(submittedContent).toContain('recent message 50')
+    expect(submittedContent).not.toContain('older unrequested message')
+    expect(translation.textContent).toContain('Latest 50 messages in English')
+  })
+
   it('drafts a reply from nearby context and keeps the selected message as the reply target', async () => {
     const user = userEvent.setup()
     harness.service.AIComplete.mockResolvedValue('A suggested reply')
@@ -606,7 +783,9 @@ describe('room history updates', () => {
     await user.type(composer, 'Original draft')
 
     await user.click(screen.getByRole('button', { name: 'Rewrite composer draft' }))
-    await screen.findByRole('dialog', { name: 'Rewrite draft' })
+    const rewriteDialog = await screen.findByRole('dialog', { name: 'Rewrite draft' })
+    expect(rewriteDialog.querySelector('.ai-result-content')).toBeTruthy()
+    expect(rewriteDialog.querySelector('.ai-result-disclaimer')).toBeTruthy()
     expect(composer.value).toBe('Original draft')
     await user.click(screen.getByRole('button', { name: 'Replace draft' }))
     expect(composer.value).toBe('A clearer version')
@@ -646,6 +825,8 @@ describe('room history updates', () => {
     await waitFor(() => expect(JSON.parse(harness.service.SetStringPreference.mock.calls[harness.service.SetStringPreference.mock.calls.length - 1]?.[1] as string).defaultAgentId).toBe(savedCollection.agents[0].id))
     await user.click(within(roomDialog).getByRole('button', { name: 'Close room details' }))
 
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.type(composer, 'Can you help me reply more naturally?')
     await user.click(screen.getByRole('button', { name: 'Run a chat agent' }))
     const picker = await screen.findByRole('dialog', { name: 'Run an agent' })
     expect((within(picker).getByRole('combobox', { name: 'Chat agent profile' }) as HTMLSelectElement).value).toBe(savedCollection.agents[0].id)
@@ -656,11 +837,26 @@ describe('room history updates', () => {
     const request = harness.service.AIComplete.mock.calls[0][0]
     expect(request[0].content).toContain('Explain idioms and suggest a natural alternative.')
     expect(request[1].content).toContain('Help me practice this phrase')
+    expect(request[1].content).toContain('Current composer draft:\nCan you help me reply more naturally?')
     const result = await screen.findByRole('dialog', { name: 'Agent: Language coach' })
     await within(result).findByText('A language-learning suggestion')
-    expect(within(result).queryByRole('button', { name: /draft/i })).toBeNull()
+    await user.click(within(result).getByRole('button', { name: 'Use as draft' }))
+    expect(composer.value).toBe('A language-learning suggestion')
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
     expect(harness.service.SendReply).not.toHaveBeenCalled()
+  })
+
+  it('opens chat agent creation from the composer when a room has no agents', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Create a chat agent' }))
+
+    const roomDialog = await screen.findByRole('dialog', { name: 'Test room' })
+    expect(within(roomDialog).getByRole('heading', { name: 'Chat agents' })).toBeTruthy()
+    expect(within(roomDialog).getByRole('textbox', { name: 'Name' })).toBeTruthy()
+    expect(within(roomDialog).getByRole('textbox', { name: 'Instructions' })).toBeTruthy()
   })
 
   it('loads chat agent preferences from the active account when room IDs overlap', async () => {
@@ -736,9 +932,11 @@ describe('room history updates', () => {
     await user.clear(endpoint)
     await user.type(endpoint, 'http://localhost:9090')
     expect((screen.getByRole('button', { name: 'Test endpoint' }) as HTMLButtonElement).disabled).toBe(true)
+    await user.type(screen.getByLabelText('Transcription model (optional)'), 'whisper-test')
 
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('ai.endpoint', 'http://localhost:9090'))
+    expect(harness.service.SetStringPreference).toHaveBeenCalledWith('ai.transcription_model', 'whisper-test')
   })
 
   it('keeps loaded older messages when the selected room receives a live update', async () => {
@@ -1093,6 +1291,9 @@ describe('room history updates', () => {
     expect(screen.queryByRole('button', { name: 'Unread rooms' })).toBeNull()
     expect(within(roomList).getByRole('button', { name: /Favorite direct/ })).toBeTruthy()
     expect(within(roomList).getByRole('button', { name: /Favorite project/ })).toBeTruthy()
+    const unreadDirectButton = within(roomList).getByRole('button', { name: /Unread direct/ })
+    expect(unreadDirectButton.querySelector('.unread-count')?.textContent).toBe('1')
+    expect(unreadDirectButton.querySelector('.unread-dot')).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Needs reply' }))
     await user.click(screen.getByRole('button', { name: 'Favorite rooms' }))
@@ -1305,8 +1506,9 @@ describe('room history updates', () => {
     const imageMessage = { ...message('$photo-hidden', 'Photo attachment', 300), mediaUri: 'mxc://example.org/photo-hidden', mediaMime: 'image/png', mediaSize: 12 }
     const videoMessage = { ...message('$video-hidden', 'Video attachment', 400), mediaUri: 'mxc://example.org/video-hidden', mediaMime: 'video/mp4', mediaSize: 24 }
     const audioMessage = { ...message('$audio-visible', 'Voice message.ogg', 500), mediaUri: 'mxc://example.org/audio-visible', mediaMime: 'audio/ogg', mediaSize: 12 }
+    const audioWebMMessage = { ...message('$audio-webm-visible', 'Voice message.webm', 600), mediaUri: 'mxc://example.org/audio-webm-visible', mediaMime: 'video/webm', mediaType: 'm.audio', mediaSize: 18 }
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'appearance.hide_images_and_videos': true } })
-    harness.service.History.mockResolvedValueOnce({ messages: [imageMessage, videoMessage, audioMessage], before: 0, hasMore: false })
+    harness.service.History.mockResolvedValueOnce({ messages: [imageMessage, videoMessage, audioMessage, audioWebMMessage], before: 0, hasMore: false })
     stubImageIntersectionObserver()
     const { container } = render(<App />)
 
@@ -1314,6 +1516,7 @@ describe('room history updates', () => {
     expect(container.querySelector('[data-event-id="$photo-hidden"] .message-attachment')).toBeNull()
     expect(container.querySelector('[data-event-id="$video-hidden"] .message-attachment')).toBeNull()
     expect(container.querySelector('[data-event-id="$audio-visible"] .audio-attachment')).toBeTruthy()
+    expect(container.querySelector('[data-event-id="$audio-webm-visible"] .audio-attachment')).toBeTruthy()
     expect(harness.service.DownloadMedia).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
@@ -1397,11 +1600,57 @@ describe('room history updates', () => {
 
     const row = container.querySelector('[data-event-id="$audio"]')
     expect(card?.querySelector('.audio-filename')?.textContent).toBe('Voice message.ogg')
+    expect((within(card as HTMLElement).getByRole('button', { name: 'Transcribe with AI' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(card?.querySelector('.media-load') as HTMLButtonElement)
     await waitFor(() => expect(card?.querySelector('audio')).toBeTruthy())
     expect(card?.querySelector('audio')).toBeTruthy()
     expect(row?.querySelector('.message-body')).toBeNull()
     expect(row?.querySelector('.media-download')).toBeNull()
+  })
+
+  it('renders Matrix audio with a video MIME as one compact audio bar', async () => {
+    const user = userEvent.setup()
+    const audioMessage = { ...message('$audio-webm', 'Voice message.mp4', 300), mediaUri: 'mxc://example.org/audio-webm', mediaMime: 'video/mp4', mediaType: 'm.audio', mediaDurationMs: 19_840 }
+    harness.service.History.mockResolvedValueOnce({ messages: [audioMessage], before: 0, hasMore: false })
+    harness.service.DownloadMedia.mockResolvedValueOnce('YXVkaW8=')
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:audio-webm-preview'),
+      revokeObjectURL: vi.fn(),
+    })
+
+    const { container } = render(<App />)
+    const card = await waitFor(() => {
+      const audioCard = container.querySelector('[data-event-id="$audio-webm"] .audio-attachment')
+      expect(audioCard).toBeTruthy()
+      return audioCard
+    })
+    await user.click(within(card as HTMLElement).getByRole('button', { name: 'Load audio' }))
+
+    expect(await within(card as HTMLElement).findByRole('button', { name: 'Play audio' })).toBeTruthy()
+    expect(card?.querySelector('.audio-player-bar')).toBeTruthy()
+    expect(card?.querySelector('video')).toBeNull()
+    expect(card?.querySelector('audio')?.hasAttribute('controls')).toBe(false)
+    expect(card?.querySelector('.audio-duration')?.textContent).toBe('0:19')
+  })
+
+  it('transcribes audio and only puts the result in the composer when accepted', async () => {
+    const user = userEvent.setup()
+    const audioMessage = { ...message('$audio-transcription', 'Voice message.ogg', 300), mediaUri: 'mxc://example.org/audio-transcription', mediaMime: 'audio/ogg', mediaSize: 12 }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    harness.service.History.mockResolvedValueOnce({ messages: [audioMessage], before: 0, hasMore: false })
+    harness.service.AITranscribeMedia.mockResolvedValueOnce('Please meet at noon.')
+
+    const { container } = render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Transcribe with AI' }))
+
+    expect(await screen.findByText('Please meet at noon.')).toBeTruthy()
+    expect(harness.service.AITranscribeMedia).toHaveBeenCalledWith(audioMessage.mediaUri, audioMessage.body, audioMessage.mediaMime)
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Use as draft' }))
+    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Please meet at noon.')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-event-id="$audio-transcription"] .audio-transcript')).toBeTruthy()
   })
 
   function stubTimelineGeometry(contentHeight: number) {
@@ -2174,12 +2423,20 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Settings' }))
     await user.click(screen.getByRole('tab', { name: 'Appearance' }))
-    fireEvent.change(screen.getByRole('slider', { name: 'App zoom' }), { target: { value: '110' } })
+    const slider = screen.getByRole('slider', { name: 'App zoom' })
+    fireEvent.change(slider, { target: { value: '105' } })
+    fireEvent.change(slider, { target: { value: '110' } })
+
+    expect(screen.getByText('110%')).toBeTruthy()
+    expect(harness.service.SetStringPreference).not.toHaveBeenCalledWith('appearance.zoom', expect.any(String))
+
+    fireEvent.pointerUp(slider)
 
     await waitFor(() => {
       expect(container.querySelector('.app-shell')?.getAttribute('style')).toContain('--app-zoom: 110%')
       expect(harness.service.SetStringPreference).toHaveBeenCalledWith('appearance.zoom', '110')
     })
+    expect(harness.service.SetStringPreference).not.toHaveBeenCalledWith('appearance.zoom', '105')
   })
 
   it('adjusts and resets app zoom with primary-modifier shortcuts', async () => {
@@ -2548,6 +2805,79 @@ describe('room history updates', () => {
     expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('notifications.enabled', true)
   })
 
+  it('opens macOS notification settings after native authorization is denied', async () => {
+    const user = userEvent.setup()
+    harness.service.NativeNotificationsSupported.mockResolvedValue(true)
+    harness.service.NotificationPermission.mockResolvedValue('default')
+    harness.service.RequestNotificationPermission.mockResolvedValue('denied')
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('tab', { name: 'Notifications' }))
+
+    await user.click(screen.getByRole('button', { name: 'Enable' }))
+
+    await waitFor(() => expect(harness.service.RequestNotificationPermission).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(harness.service.OpenNotificationSettings).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('button', { name: 'Open Settings' })).toBeTruthy()
+  })
+
+  it('does not use browser permission as native notification permission', async () => {
+    vi.stubGlobal('Notification', { permission: 'denied', requestPermission: vi.fn() })
+    try {
+      const user = userEvent.setup()
+      render(<App />)
+      expect(await screen.findByText('latest message')).toBeTruthy()
+      await user.click(screen.getByRole('button', { name: 'Settings' }))
+      await user.click(screen.getByRole('tab', { name: 'Notifications' }))
+
+      expect(await screen.findByText('Native notifications are unavailable. On macOS, launch the bundled Pinger.app; on Linux or Windows, use a desktop session with notifications enabled.')).toBeTruthy()
+      expect(screen.queryByText('Blocked by the system')).toBeNull()
+      expect((screen.getByRole('button', { name: 'Unavailable' }) as HTMLButtonElement).disabled).toBe(true)
+      expect(harness.service.RequestNotificationPermission).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('previews the selected notification tone at the configured volume', async () => {
+    const oscillator = {
+      type: 'sine',
+      frequency: { setValueAtTime: vi.fn() },
+      connect: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+      onended: null as (() => void) | null,
+    }
+    const gain = {
+      gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
+      connect: vi.fn(),
+    }
+    class MockAudioContext {
+      currentTime = 1
+      destination = {}
+      createOscillator = vi.fn(() => oscillator)
+      createGain = vi.fn(() => gain)
+      resume = vi.fn().mockResolvedValue(undefined)
+      close = vi.fn().mockResolvedValue(undefined)
+    }
+    vi.stubGlobal('AudioContext', MockAudioContext)
+    try {
+      const user = userEvent.setup()
+      render(<App />)
+      expect(await screen.findByText('latest message')).toBeTruthy()
+      await user.click(screen.getByRole('button', { name: 'Settings' }))
+      await user.click(screen.getByRole('tab', { name: 'Notifications' }))
+      await user.selectOptions(screen.getByRole('combobox', { name: 'Direct message tone' }), 'Pulse')
+
+      await waitFor(() => expect(oscillator.start).toHaveBeenCalledTimes(1))
+      expect(oscillator.type).toBe('square')
+      expect(harness.service.SetStringPreference).toHaveBeenCalledWith('notifications.sound_direct', 'Pulse')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('schedules a reminder for a specific Matrix message', async () => {
     const user = userEvent.setup()
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'schedule.default_reminder_minutes': '120' } })
@@ -2681,13 +3011,91 @@ describe('room history updates', () => {
 
     openMessageMenu(container)
     const menu = await screen.findByRole('menu', { name: 'Message actions' })
+    const target = container.querySelector('[data-event-id="$latest"]')
+    expect(container.querySelector('.message-context-scrim')).not.toBeNull()
+    expect(container.querySelectorAll('.message-context-scrim-panel')).toHaveLength(4)
+    expect(target?.classList.contains('is-context-target')).toBe(true)
     expect(within(menu).getByRole('menuitem', { name: 'Reply to Alice' })).toBeTruthy()
     expect(within(menu).getByRole('menuitem', { name: 'Set reminder for message' })).toBeTruthy()
     expect(within(menu).getByRole('menuitem', { name: 'Add reaction' })).toBeTruthy()
     expect(within(menu).getByRole('menuitem', { name: 'Copy message' })).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: 'Bookmark message' })).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: 'Mark room as unread' })).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: 'Copy message with timestamp' })).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: 'Forward message' })).toBeTruthy()
 
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('menu', { name: 'Message actions' })).toBeNull())
+    expect(container.querySelector('.message-context-scrim')).toBeNull()
+    expect(target?.classList.contains('is-context-target')).toBe(false)
+  })
+
+  it('persists a bookmark toggle for a message', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    openMessageMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: 'Bookmark message' }))
+
+    const key = `message.bookmark.${encodeURIComponent(room.id)}.${encodeURIComponent('$latest')}`
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(key, true))
+    openMessageMenu(container)
+    expect(await screen.findByRole('menuitem', { name: 'Remove message bookmark' })).toBeTruthy()
+  })
+
+  it('marks the current room unread from the message menu', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    openMessageMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: 'Mark room as unread' }))
+
+    await waitFor(() => expect(harness.service.MarkUnread).toHaveBeenCalledWith(room.id))
+  })
+
+  it('copies a message with a timestamp from the context menu', async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+
+    openMessageMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: 'Copy message with timestamp' }))
+
+    const timestamp = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(300))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`[${timestamp}] Alice: latest message`))
+  })
+
+  it('forwards a text message to another room', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, secondRoom] })
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    openMessageMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: 'Forward message' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Forward message' })
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Forward destination' }), secondRoom.id)
+    await user.click(within(dialog).getByRole('button', { name: 'Forward' }))
+
+    await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(secondRoom.id, 'Forwarded from Alice:\n\nlatest message'))
+  })
+
+  it('disables text forwarding for media messages', async () => {
+    harness.service.History.mockResolvedValue({
+      messages: [{ ...message('$latest', 'image caption', 300), mediaUri: 'mxc://example.org/image', mediaType: 'm.image', mediaMime: 'image/png' }],
+      before: '',
+      hasMore: false,
+    })
+    const { container } = render(<App />)
+    expect(await screen.findByText('image caption')).toBeTruthy()
+
+    openMessageMenu(container)
+
+    expect((await screen.findByRole('menuitem', { name: 'Forward message' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('copies a message with its timestamp when configured', async () => {

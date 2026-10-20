@@ -81,6 +81,53 @@ func TestAIChatCompletionSendsMessagesAndReturnsReply(t *testing.T) {
 	}
 }
 
+func TestAIAudioTranscriptionSendsAudioAndReturnsTranscript(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/audio/transcriptions" {
+			t.Errorf("request = %s %s, want POST /v1/audio/transcriptions", r.Method, r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("parse multipart form: %v", err)
+			return
+		}
+		if r.FormValue("model") != "whisper-small" || r.FormValue("response_format") != "json" {
+			t.Errorf("form fields = model %q, response_format %q", r.FormValue("model"), r.FormValue("response_format"))
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			t.Errorf("read audio file: %v", err)
+			return
+		}
+		defer file.Close()
+		data, err := io.ReadAll(file)
+		if err != nil {
+			t.Errorf("read audio bytes: %v", err)
+		}
+		if header.Filename != "voice-note.webm" || string(data) != "audio bytes" {
+			t.Errorf("uploaded file = %q, %q", header.Filename, data)
+		}
+		if header.Header.Get("Content-Type") != "audio/webm" {
+			t.Errorf("uploaded content type = %q", header.Header.Get("Content-Type"))
+		}
+		_, _ = io.WriteString(w, `{"text":"  hello from audio  "}`)
+	}))
+	defer server.Close()
+
+	transcript, err := aiAudioTranscription(context.Background(), server.Client(), server.URL+"/", "whisper-small", "voice-note.webm", "audio/webm; codecs=opus", []byte("audio bytes"))
+	if err != nil {
+		t.Fatalf("aiAudioTranscription() error = %v", err)
+	}
+	if transcript != "hello from audio" {
+		t.Fatalf("transcript = %q, want trimmed text", transcript)
+	}
+}
+
+func TestAIAudioTranscriptionRejectsEmptyAudio(t *testing.T) {
+	if _, err := aiAudioTranscription(context.Background(), http.DefaultClient, "http://localhost:8080", "", "audio.ogg", "audio/ogg", nil); err == nil {
+		t.Fatal("aiAudioTranscription() accepted empty audio")
+	}
+}
+
 func TestAIChatCompletionReportsServerErrors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)

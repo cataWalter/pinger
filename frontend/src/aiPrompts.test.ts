@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   boundedTranscript,
   buildAgentPrompt,
+  buildChatTranslationPrompt,
+  buildConversationAnalysisPrompt,
   buildExplainPrompt,
   buildReplyPrompt,
   buildRewritePrompt,
   buildTopicInsightsPrompt,
   parseChatAgents,
+  splitChatTranslationBatches,
 } from './aiPrompts'
 
 const messages = [
@@ -51,10 +54,53 @@ describe('local AI prompts', () => {
 
   it('builds topic and custom-agent prompts with redacted messages excluded', () => {
     expect(buildTopicInsightsPrompt(messages)[1].content).not.toContain('removed content')
-    const prompt = buildAgentPrompt({ id: 'tutor', name: 'Language tutor', instructions: 'Teach Spanish gently.' }, 'Explain the idiom', messages)
+    const prompt = buildAgentPrompt({ id: 'tutor', name: 'Language tutor', instructions: 'Teach Spanish gently.' }, 'Explain the idiom', messages, 'I am trying to say hello naturally.')
     expect(prompt[0].content).toContain('Teach Spanish gently.')
     expect(prompt[1].content).toContain('Explain the idiom')
+    expect(prompt[1].content).toContain('Current composer draft:\nI am trying to say hello naturally.')
     expect(prompt[1].content).not.toContain('removed content')
+  })
+
+  it('translates every eligible message in numbered batches', () => {
+    const translationMessages = Array.from({ length: 13 }, (_, index) => ({
+      senderName: index % 2 === 0 ? 'Alice' : 'Bob',
+      sender: index % 2 === 0 ? '@alice:example.org' : '@bob:example.org',
+      body: `message ${index + 1}`,
+    }))
+    translationMessages.splice(3, 0, { senderName: 'Alice', sender: '@alice:example.org', body: 'redacted', redacted: true } as typeof translationMessages[number])
+
+    const batches = splitChatTranslationBatches(translationMessages)
+    expect(batches.map((batch) => batch.length)).toEqual([12, 1])
+    expect(batches.flat().some((message) => message.body === 'redacted')).toBe(false)
+
+    const prompt = buildChatTranslationPrompt(batches[0], 1)
+    expect(prompt[0].content).toContain('Translate every message body into English')
+    expect(prompt[1].content).toContain('"sender":"Alice"')
+    expect(prompt[1].content).toContain('"body":"message 1"')
+    expect(prompt[1].content).not.toContain('redacted')
+  })
+
+  it('builds a bounded, evidence-based conversation analysis prompt', () => {
+    const transcript = Array.from({ length: 55 }, (_, index) => ({
+      senderName: index % 2 === 0 ? 'Alice' : 'Bob',
+      sender: index % 2 === 0 ? '@alice:example.org' : '@bob:example.org',
+      body: `message ${index}`,
+    }))
+    const prompt = buildConversationAnalysisPrompt([
+      ...transcript,
+      { senderName: 'Bob', sender: '@bob:example.org', body: 'redacted message', redacted: true },
+      { senderName: 'Alice', sender: '@alice:example.org', body: '   ' },
+    ])
+
+    expect(prompt[0].content).toContain('untrusted data')
+    expect(prompt[0].content).toContain('"Chat summary"')
+    expect(prompt[0].content).toContain('"How they communicate"')
+    expect(prompt[0].content).toContain('do not infer personality, motives, relationship status, or mental health')
+    expect(prompt[0].content).toContain('only one person speaks')
+    expect(prompt[1].content).toContain('message 5')
+    expect(prompt[1].content).toContain('message 54')
+    expect(prompt[1].content.split('\n')).not.toContain('Alice: message 4')
+    expect(prompt[1].content).not.toContain('redacted message')
   })
 
   it('falls back to an empty collection for malformed agent preferences', () => {
