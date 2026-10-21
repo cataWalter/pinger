@@ -36,6 +36,9 @@ tasks:
   dev:
     summary: Runs the application in development mode
     cmds:
-      - node scripts/dev.mjs
+      - cmd: bash scripts/dev.sh
+        platforms: [darwin]
+      - cmd: node scripts/dev.mjs
+        platforms: [linux, windows]
     env:
       WAILS_VITE_PORT: "{{.VITE_PORT}}"

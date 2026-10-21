@@ -3,9 +3,37 @@
 /mychat
 /dist/
 /frontend/node_modules/
+/node_modules/
+/node_modules/.vite/
+/node_modules/.vitest-cache/
 /frontend/bindings/
 /frontend/dist/
 /build/linux/appimage/build/
 .DS_Store
 /toolchain/
 /tools/msys64/
+
+
+# Logs & environment
+*.log
+.env*
+
+# Go workspace & test artifacts
+go.work
+go.work.sum
+*.test
+*.out
+coverage.out
+*.coverprofile
+
+# IDE & editors
+.vscode/
+.idea/
+*.swp
+.*.swp
+*~
+*.swo
+
+# macOS / Windows
+.DS_Store
+Thumbs.db

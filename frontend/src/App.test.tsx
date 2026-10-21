@@ -2,21 +2,23 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { Profiler } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Message, Room, Snapshot } from '../bindings/mychat/desktop/models.js'
+import type { AccountSummary, Message, Room, Snapshot } from '../bindings/mychat/desktop/models.js'
 import App from './App'
+import ChatMediaRenderer, { matrixMXCMediaURL } from './ChatMediaRenderer'
+import { SNIPPETS_STORAGE_KEY } from './snippets'
 
 const harness = vi.hoisted(() => ({
   eventHandlers: new Map<string, (event: { data: any }) => void>(),
   markdownRenderCount: 0,
   service: {
     Snapshot: vi.fn(),
-    OpenExternalURL: vi.fn(),
-    Logout: vi.fn(),
+    AddAccount: vi.fn(),
+    SwitchAccount: vi.fn(),
+    AccountRooms: vi.fn(),
     History: vi.fn(),
     SearchMessages: vi.fn(),
     ScheduledJobs: vi.fn(),
     ScheduleMessage: vi.fn(),
-    ScheduleRecurringMessage: vi.fn(),
     ScheduleReply: vi.fn(),
     ScheduleReminder: vi.fn(),
     UpdateScheduledJob: vi.fn(),
@@ -24,10 +26,15 @@ const harness = vi.hoisted(() => ({
     RetryScheduledMessage: vi.fn(),
     DismissScheduledJob: vi.fn(),
     RoomMembers: vi.fn(),
-    Devices: vi.fn(),
-    RevokeDevice: vi.fn(),
     SetActiveRoom: vi.fn(),
+    UpdateVisibleRange: vi.fn(),
     SetRoomUnanswered: vi.fn(),
+    RelationshipHealth: vi.fn(),
+    ContactDossier: vi.fn(),
+    RefreshContactDossier: vi.fn(),
+    RelationshipDecayContacts: vi.fn(),
+    SetRelationshipTier: vi.fn(),
+    SnoozeRelationshipDecay: vi.fn(),
     SetTyping: vi.fn(),
     MarkRead: vi.fn(),
     MarkUnread: vi.fn(),
@@ -41,25 +48,24 @@ const harness = vi.hoisted(() => ({
     SendMessage: vi.fn(),
     SendReply: vi.fn(),
     SendMessageWithMentions: vi.fn(),
-    DownloadAvatar: vi.fn(),
-    DownloadMedia: vi.fn(),
+    SaveMedia: vi.fn(),
     React: vi.fn(),
     AIComplete: vi.fn(),
+    CheckMessageTone: vi.fn(),
+    Ghostwriter: vi.fn(),
     AITranscribeMedia: vi.fn(),
     TestAIEndpoint: vi.fn(),
     StorageUsage: vi.fn(),
     MediaCacheUsage: vi.fn(),
-    DataLocation: vi.fn(),
-    ChooseDataFolder: vi.fn(),
-    SetDataFolder: vi.fn(),
-    UseDefaultDataFolder: vi.fn(),
-    RestartApp: vi.fn(),
     ClearMediaCache: vi.fn(),
     OptimizeDatabase: vi.fn(),
     RoomStorageUsage: vi.fn(),
     ClearCachedMedia: vi.fn(),
     AppVersion: vi.fn(),
     CheckForUpdates: vi.fn(),
+  },
+  tutorService: {
+    Analyze: vi.fn(),
   },
 }))
 
@@ -72,7 +78,15 @@ vi.mock('@wailsio/runtime', () => ({
   },
 }))
 
-vi.mock('../bindings/mychat/desktop', () => ({ AppService: harness.service }))
+vi.mock('../bindings/mychat/desktop', () => ({
+  AppService: harness.service,
+  TurkishTutorService: harness.tutorService,
+  GhostwriterMode: {
+    GhostwriterModeChips: 'chips',
+    GhostwriterModeAutocomplete: 'autocomplete',
+    GhostwriterModeSlash: 'slash',
+  },
+}))
 
 vi.mock('./MarkdownMessage', () => ({
   default: ({ body }: { body: string }) => {
@@ -80,44 +94,6 @@ vi.mock('./MarkdownMessage', () => ({
     return <div className="message-body">{body}</div>
   },
 }))
-
-vi.mock('react-virtuoso', async () => {
-  const React = await import('react')
-  const Virtuoso = React.forwardRef((props: any, ref: React.ForwardedRef<any>) => {
-    const scroller = React.useRef<HTMLDivElement | null>(null)
-    const setScroller = (element: HTMLDivElement | null) => {
-      scroller.current = element
-      props.scrollerRef?.(element)
-    }
-    React.useImperativeHandle(ref, () => ({
-      scrollToIndex(location: number | { index: number; align?: string }) {
-        const align = typeof location === 'number' ? 'start' : location.align
-        if (scroller.current && align === 'end') scroller.current.scrollTop = scroller.current.scrollHeight
-        props.atBottomStateChange?.(align === 'end')
-      },
-    }))
-    React.useEffect(() => {
-      if (typeof ResizeObserver === 'undefined' || !scroller.current) return
-      const observer = new ResizeObserver(() => props.totalListHeightChanged?.(scroller.current?.scrollHeight ?? 0))
-      observer.observe(scroller.current)
-      return () => observer.disconnect()
-    }, [props.totalListHeightChanged])
-    const Header = props.components?.Header
-    const Footer = props.components?.Footer
-    const firstVisibleIndex = Math.max(0, props.data.length - 30)
-    return <div className={props.className} ref={setScroller} onScroll={() => {
-      const element = scroller.current
-      if (!element) return
-      props.atBottomStateChange?.(element.scrollHeight - element.scrollTop - element.clientHeight <= (props.atBottomThreshold ?? 0))
-      if (element.scrollTop <= 240) props.startReached?.(props.firstItemIndex)
-    }}>
-      {Header && <Header context={props.context} />}
-      {props.data.slice(firstVisibleIndex).map((item: Message, index: number) => props.itemContent(firstVisibleIndex + index + props.firstItemIndex, item))}
-      {Footer && <Footer context={props.context} />}
-    </div>
-  })
-  return { Virtuoso }
-})
 
 const room: Room = {
   id: '!room:example.org',
@@ -198,9 +174,17 @@ const snapshot: Snapshot = {
     avatarUri: '',
     verified: true,
   },
+  accounts: [],
   activeAccountId: 'primary',
   rooms: [room],
+  slidingSyncListCounts: { main: 1 },
   preferences: {},
+}
+
+function renderGhostwriterComposer() {
+  harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ghostwriter.enabled': true } })
+  harness.service.History.mockResolvedValue({ messages: [message('$incoming', 'Can you review this?', 300)], before: 0, hasMore: false })
+  return render(<App />)
 }
 
 describe('settings storage, integrations, help, and about', () => {
@@ -211,24 +195,27 @@ describe('settings storage, integrations, help, and about', () => {
     confirmSpy = undefined
     cleanup()
     vi.unstubAllGlobals()
+    window.localStorage.removeItem(SNIPPETS_STORAGE_KEY)
   })
 
   beforeEach(() => {
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.OpenExternalURL.mockResolvedValue(undefined)
-    harness.service.Logout.mockResolvedValue(undefined)
+    harness.service.AccountRooms.mockResolvedValue([])
     harness.service.History.mockResolvedValue({ messages: [], before: 0, hasMore: false })
     harness.service.ScheduledJobs.mockResolvedValue([])
     harness.service.SetActiveRoom.mockResolvedValue(undefined)
     harness.service.SetRoomUnanswered.mockResolvedValue(undefined)
-    harness.service.DownloadMedia.mockResolvedValue('aW1hZ2U=')
+    harness.service.RelationshipHealth.mockResolvedValue({ roomId: room.id, accountId: snapshot.activeAccountId, error: '' })
+    harness.service.ContactDossier.mockResolvedValue({ accountId: 'primary', roomId: room.id, contactId: room.id, displayName: room.name, tier: 'NONE', linkedChannels: ['Matrix'], enabled: true, analyzing: false, insufficientData: true, keyFacts: [], lastRecap: '', unresolvedCommitments: [], updatedAt: 0, error: '' })
+    harness.service.RefreshContactDossier.mockResolvedValue({ accountId: 'primary', roomId: room.id, contactId: room.id, displayName: room.name, tier: 'NONE', linkedChannels: ['Matrix'], enabled: true, analyzing: true, insufficientData: false, keyFacts: [], lastRecap: '', unresolvedCommitments: [], updatedAt: 0, error: '' })
+    harness.service.RelationshipDecayContacts.mockResolvedValue({ accountId: 'primary', enabled: false, contacts: [] })
+    harness.service.SetRelationshipTier.mockResolvedValue(undefined)
+    harness.service.SnoozeRelationshipDecay.mockResolvedValue(undefined)
+    harness.service.SaveMedia.mockResolvedValue('')
     harness.service.SetTyping.mockResolvedValue(undefined)
     harness.service.MarkRead.mockResolvedValue(undefined)
     harness.service.RoomMembers.mockResolvedValue([])
-    harness.service.Devices.mockResolvedValue([])
-    harness.service.RevokeDevice.mockResolvedValue(undefined)
-    harness.service.DownloadAvatar.mockResolvedValue('')
     harness.service.NativeNotificationsSupported.mockResolvedValue(false)
     harness.service.NotificationPermission.mockResolvedValue('default')
     harness.service.OpenNotificationSettings.mockResolvedValue(undefined)
@@ -236,11 +223,21 @@ describe('settings storage, integrations, help, and about', () => {
     harness.service.SetStringPreference.mockResolvedValue(undefined)
     harness.service.StorageUsage.mockResolvedValue({ databaseBytes: 2048, walBytes: 0 })
     harness.service.MediaCacheUsage.mockResolvedValue({ bytes: 4096, files: 3 })
-    harness.service.DataLocation.mockResolvedValue({ dataDir: 'C:\\Users\\tester\\AppData\\Roaming\\gomuks-desktop', defaultDir: 'C:\\Users\\tester\\AppData\\Roaming\\gomuks-desktop', pendingDir: '', mediaCacheDir: 'C:\\Users\\tester\\AppData\\Local\\gomuks-desktop\\media' })
     harness.service.RoomStorageUsage.mockResolvedValue([])
     harness.service.ClearCachedMedia.mockResolvedValue({ files: 0, bytes: 0 })
     harness.service.AppVersion.mockResolvedValue('1.0.0')
     harness.service.CheckForUpdates.mockResolvedValue({ currentVersion: '1.0.0', latestVersion: '', releaseUrl: 'https://github.com/cataWalter/pinger/releases', publishedAt: '', releaseNotes: '', updateAvailable: false, message: 'Pinger is up to date.' })
+    harness.service.Ghostwriter.mockResolvedValue([])
+    harness.tutorService.Analyze.mockResolvedValue({
+      detected_language: 'it',
+      original_text: 'Ciao, come stai?',
+      corrected_text: 'Merhaba, nasılsın?',
+      translation: 'Ciao, come stai?',
+      has_grammar_errors: false,
+      morpheme_breakdown: [{ word: 'nasılsın', breakdown: 'nasıl-sın -> come-sei', meaning: 'how are you' }],
+      grammar_rule: 'The second-person ending follows vowel harmony.',
+      text_to_insert: 'Merhaba, nasılsın?',
+    })
   })
 
   async function openSettingsTab(name: string) {
@@ -251,31 +248,6 @@ describe('settings storage, integrations, help, and about', () => {
     return user
   }
 
-  it('opens Beeper account registration from the login screen', async () => {
-    const user = userEvent.setup()
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, loggedIn: false })
-    render(<App />)
-
-    await user.click(await screen.findByRole('button', { name: 'Create a Beeper account' }))
-
-    expect(harness.service.OpenExternalURL).toHaveBeenCalledWith('https://www.beeper.com/')
-    expect((screen.getByLabelText('Homeserver') as HTMLInputElement).value).toBe('https://matrix.beeper.com')
-  })
-
-  it('opens single-account settings from the profile and allows logging out', async () => {
-    const user = userEvent.setup()
-    render(<App />)
-    await user.click(await screen.findByRole('button', { name: 'Account settings' }))
-
-    const settings = await screen.findByRole('dialog', { name: 'Settings' })
-    expect(within(settings).getByRole('tab', { name: 'Account' }).getAttribute('aria-selected')).toBe('true')
-    await user.click(within(settings).getByRole('button', { name: 'Log out' }))
-    const confirmLogout = await within(settings).findByRole('group', { name: 'Confirm logout' })
-    await user.click(within(confirmLogout).getByRole('button', { name: 'Log out' }))
-
-    await waitFor(() => expect(harness.service.Logout).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('button', { name: 'Manage Matrix accounts' })).toBeNull()
-  })
 
   it('opens About and Settings from native application menu events', async () => {
     render(<App />)
@@ -294,41 +266,6 @@ describe('settings storage, integrations, help, and about', () => {
     expect(within(settingsDialog).getByRole('tab', { name: 'General' }).getAttribute('aria-selected')).toBe('true')
   })
 
-  it('revokes a device with password authentication and removes it from the list', async () => {
-    harness.service.Devices.mockResolvedValue([
-      { id: 'OLD_DEVICE', displayName: 'Old laptop', lastSeenIp: '', lastSeenAt: 0, current: false },
-      { id: 'CURRENT_DEVICE', displayName: 'This device', lastSeenIp: '', lastSeenAt: 0, current: true },
-    ])
-    const user = await openSettingsTab('Devices')
-
-    await user.click(await screen.findByRole('button', { name: 'Revoke' }))
-    const dialog = await screen.findByRole('alertdialog', { name: 'Revoke this device?' })
-    await user.type(within(dialog).getByLabelText('Matrix password'), 'matrix-password')
-    await user.click(within(dialog).getByRole('button', { name: 'Revoke device' }))
-
-    await waitFor(() => expect(harness.service.RevokeDevice).toHaveBeenCalledWith('OLD_DEVICE', 'matrix-password'))
-    await waitFor(() => expect(screen.queryByText('Old laptop')).toBeNull())
-    expect(screen.getByText('This device')).toBeTruthy()
-    expect(screen.queryByRole('alertdialog')).toBeNull()
-  })
-
-  it('keeps the device listed and reports an error when revocation fails', async () => {
-    harness.service.Devices.mockResolvedValue([
-      { id: 'OLD_DEVICE', displayName: 'Old laptop', lastSeenIp: '', lastSeenAt: 0, current: false },
-    ])
-    harness.service.RevokeDevice.mockRejectedValue(new Error('M_FORBIDDEN: Invalid password'))
-    const user = await openSettingsTab('Devices')
-
-    await user.click(await screen.findByRole('button', { name: 'Revoke' }))
-    const dialog = await screen.findByRole('alertdialog', { name: 'Revoke this device?' })
-    await user.type(within(dialog).getByLabelText('Matrix password'), 'wrong-password')
-    await user.click(within(dialog).getByRole('button', { name: 'Revoke device' }))
-
-    expect((await within(dialog).findByRole('alert')).textContent).toContain('M_FORBIDDEN: Invalid password')
-    expect(screen.getByText('Old laptop')).toBeTruthy()
-    expect(harness.service.RevokeDevice).toHaveBeenCalledWith('OLD_DEVICE', 'wrong-password')
-  })
-
   it('shows chat networks detected from bridged rooms instead of placeholder statuses', async () => {
     harness.service.Snapshot.mockResolvedValue({
       ...snapshot,
@@ -341,6 +278,21 @@ describe('settings storage, integrations, help, and about', () => {
     expect(within(status).getByText('Telegram').nextElementSibling?.textContent).toBe('No chats detected')
     expect(screen.queryByText('Not connected')).toBeNull()
     expect(screen.getByText(/Connecting a network requires a bridge set up on your homeserver/)).toBeTruthy()
+  })
+
+  it('keeps Ghostwriter opt-in and rejects non-loopback settings', async () => {
+    const user = await openSettingsTab('Integrations')
+    const enabled = screen.getByRole('checkbox', { name: 'Enable local AI Ghostwriter' }) as HTMLInputElement
+    const endpoint = screen.getByLabelText('Local endpoint') as HTMLInputElement
+    const save = screen.getByRole('button', { name: 'Save Ghostwriter settings' }) as HTMLButtonElement
+
+    expect(enabled.checked).toBe(false)
+    expect(endpoint.value).toBe('http://127.0.0.1:11434')
+    expect(save.disabled).toBe(false)
+    await user.clear(endpoint)
+    await user.type(endpoint, 'https://example.com')
+    expect(save.disabled).toBe(true)
+    expect(harness.service.Ghostwriter).not.toHaveBeenCalled()
   })
 
   it('lists per-chat storage and clears matching cached media after confirmation', async () => {
@@ -370,34 +322,6 @@ describe('settings storage, integrations, help, and about', () => {
     await user.click(await screen.findByRole('button', { name: 'Clear matching media' }))
     expect(confirmSpy).toHaveBeenCalled()
     expect(harness.service.ClearCachedMedia).not.toHaveBeenCalled()
-  })
-
-  it('moves the application data to a folder picked in the settings', async () => {
-    harness.service.ChooseDataFolder.mockResolvedValue('D:\\Pinger Data')
-    harness.service.SetDataFolder.mockResolvedValue({
-      dataDir: 'C:\\Users\\tester\\AppData\\Roaming\\gomuks-desktop',
-      defaultDir: 'C:\\Users\\tester\\AppData\\Roaming\\gomuks-desktop',
-      pendingDir: 'D:\\Pinger Data',
-      mediaCacheDir: 'C:\\Users\\tester\\AppData\\Local\\gomuks-desktop\\media',
-    })
-    const user = await openSettingsTab('Storage')
-
-    await user.click(await screen.findByRole('button', { name: 'Choose…' }))
-    await waitFor(() => expect(harness.service.SetDataFolder).toHaveBeenCalledWith('D:\\Pinger Data'))
-    expect(await screen.findByText(/Pinger moves its data to D:\\Pinger Data/)).toBeTruthy()
-  })
-
-  it('restarts Pinger to apply the picked data folder', async () => {
-    harness.service.DataLocation.mockResolvedValue({
-      dataDir: 'C:\\Users\\tester\\AppData\\Roaming\\gomuks-desktop',
-      defaultDir: 'C:\\Users\\tester\\AppData\\Roaming\\gomuks-desktop',
-      pendingDir: 'D:\\Pinger Data',
-      mediaCacheDir: 'C:\\Users\\tester\\AppData\\Local\\gomuks-desktop\\media',
-    })
-    const user = await openSettingsTab('Storage')
-
-    await user.click(await screen.findByRole('button', { name: 'Restart now' }))
-    await waitFor(() => expect(harness.service.RestartApp).toHaveBeenCalled())
   })
 
   it('checks for updates only when requested and shows the release', async () => {
@@ -510,6 +434,88 @@ describe('settings storage, integrations, help, and about', () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Settings search results' })).toBeNull())
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy()
   })
+
+  it('expands a snippet at the caret and restores its shortcut with Backspace', async () => {
+    render(<App />)
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    const original = 'before ;thanks, after'
+    const caret = original.indexOf(',') + 1
+
+    fireEvent.change(composer, { target: { value: original, selectionStart: caret, selectionEnd: caret } })
+    await waitFor(() => expect(composer.value).toBe('before Thanks for the update! I appreciate it., after'))
+
+    fireEvent.keyDown(composer, { key: 'Backspace' })
+    await waitFor(() => expect(composer.value).toBe(original))
+    expect(composer.selectionStart).toBe(original.indexOf(';thanks') + ';thanks'.length)
+  })
+
+  it('offers matching snippets and accepts the active suggestion with Tab', async () => {
+    render(<App />)
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+
+    fireEvent.change(composer, { target: { value: ';th', selectionStart: 3, selectionEnd: 3 } })
+    expect(await screen.findByRole('listbox', { name: 'Text snippet suggestions' })).toBeTruthy()
+    fireEvent.keyDown(composer, { key: 'ArrowDown' })
+    fireEvent.keyDown(composer, { key: 'Tab' })
+
+    await waitFor(() => expect(composer.value).toBe('Thanks for the update! I appreciate it.'))
+  })
+
+  it('creates, edits, and deletes local text snippets from settings', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('tab', { name: 'Keyboard' }))
+    await user.click(screen.getByRole('button', { name: 'Manage text snippets' }))
+    const manager = await screen.findByRole('dialog', { name: 'Text snippets' })
+
+    await user.click(within(manager).getByRole('button', { name: 'New snippet' }))
+    await user.type(within(manager).getByLabelText('Snippet prefix'), '/')
+    await user.type(within(manager).getByLabelText('Snippet trigger'), 'away')
+    await user.type(within(manager).getByLabelText('Snippet title'), 'Away reply')
+    await user.type(within(manager).getByLabelText('Snippet category'), 'Status')
+    await user.type(within(manager).getByLabelText('Snippet content'), 'I am away.')
+    await user.click(within(manager).getByRole('button', { name: 'Save snippet' }))
+    expect(await within(manager).findByText('Away reply')).toBeTruthy()
+    expect(JSON.parse(window.localStorage.getItem(SNIPPETS_STORAGE_KEY) ?? '{}').snippets).toHaveLength(4)
+
+    await user.click(within(manager).getByRole('button', { name: 'Edit snippet Away reply' }))
+    await user.clear(within(manager).getByLabelText('Snippet title'))
+    await user.type(within(manager).getByLabelText('Snippet title'), 'Out of office')
+    await user.clear(within(manager).getByLabelText('Snippet content'))
+    await user.type(within(manager).getByLabelText('Snippet content'), 'Away until tomorrow.')
+    await user.click(within(manager).getByRole('button', { name: 'Save changes' }))
+    expect(await within(manager).findByText('Out of office')).toBeTruthy()
+
+    await user.click(within(manager).getByRole('button', { name: 'Delete snippet Out of office' }))
+    expect(within(manager).queryByText('Out of office')).toBeNull()
+    expect(JSON.parse(window.localStorage.getItem(SNIPPETS_STORAGE_KEY) ?? '{}').snippets).toHaveLength(3)
+  })
+
+  it('imports snippet JSON and merges matching shortcuts into local storage', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('tab', { name: 'Keyboard' }))
+    await user.click(screen.getByRole('button', { name: 'Manage text snippets' }))
+    const manager = await screen.findByRole('dialog', { name: 'Text snippets' })
+    const imported = {
+      id: 'imported-snippet',
+      prefix: ';',
+      trigger: 'thanks',
+      title: 'Appreciate the update',
+      content: 'Thanks for letting me know.',
+      createdAt: 10,
+    }
+    const file = new File([JSON.stringify({ version: 1, snippets: [imported] })], 'snippets.json', { type: 'application/json' })
+
+    await user.upload(within(manager).getByLabelText('Import snippets'), file)
+    expect(await within(manager).findByText('Appreciate the update')).toBeTruthy()
+    expect(within(manager).getByText('Imported 1 snippet.')).toBeTruthy()
+    const saved = JSON.parse(window.localStorage.getItem(SNIPPETS_STORAGE_KEY) ?? '{}').snippets
+    expect(saved).toHaveLength(3)
+    expect(saved.find((snippet: { trigger: string }) => snippet.trigger === 'thanks').content).toBe('Thanks for letting me know.')
+  })
 })
 
 describe('room history updates', () => {
@@ -525,11 +531,19 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
+    harness.service.AccountRooms.mockResolvedValue([])
+    harness.service.AddAccount.mockResolvedValue(snapshot)
+    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
+    harness.service.RelationshipHealth.mockResolvedValue({ roomId: room.id, accountId: snapshot.activeAccountId, error: '' })
+    harness.service.ContactDossier.mockResolvedValue({ accountId: 'primary', roomId: room.id, contactId: room.id, displayName: room.name, tier: 'NONE', linkedChannels: ['Matrix'], enabled: true, analyzing: false, insufficientData: true, keyFacts: [], lastRecap: '', unresolvedCommitments: [], updatedAt: 0, error: '' })
+    harness.service.RefreshContactDossier.mockResolvedValue({ accountId: 'primary', roomId: room.id, contactId: room.id, displayName: room.name, tier: 'NONE', linkedChannels: ['Matrix'], enabled: true, analyzing: true, insufficientData: false, keyFacts: [], lastRecap: '', unresolvedCommitments: [], updatedAt: 0, error: '' })
+    harness.service.RelationshipDecayContacts.mockResolvedValue({ accountId: 'primary', enabled: false, contacts: [] })
+    harness.service.SetRelationshipTier.mockResolvedValue(undefined)
+    harness.service.SnoozeRelationshipDecay.mockResolvedValue(undefined)
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
     harness.service.ScheduleMessage.mockResolvedValue({})
-    harness.service.ScheduleRecurringMessage.mockResolvedValue({})
     harness.service.ScheduleReply.mockResolvedValue({})
     harness.service.ScheduleReminder.mockResolvedValue({})
     harness.service.UpdateScheduledJob.mockResolvedValue(undefined)
@@ -538,7 +552,6 @@ describe('room history updates', () => {
     harness.service.DismissScheduledJob.mockResolvedValue(undefined)
     harness.service.SetActiveRoom.mockResolvedValue(undefined)
     harness.service.SetRoomUnanswered.mockResolvedValue(undefined)
-    harness.service.DownloadMedia.mockResolvedValue('aW1hZ2U=')
     harness.service.SetTyping.mockResolvedValue(undefined)
     harness.service.MarkRead.mockResolvedValue(undefined)
     harness.service.SetBooleanPreference.mockResolvedValue(undefined)
@@ -552,6 +565,8 @@ describe('room history updates', () => {
     harness.service.RequestNotificationPermission.mockResolvedValue('granted')
     harness.service.SendNotification.mockResolvedValue(false)
     harness.service.AIComplete.mockResolvedValue('')
+    harness.service.CheckMessageTone.mockResolvedValue(JSON.stringify({ is_hostile_or_unprofessional: false, severity: 'LOW', tone_tags: [], calmer_alternative: '' }))
+    harness.service.Ghostwriter.mockResolvedValue([])
     harness.service.TestAIEndpoint.mockResolvedValue(undefined)
 
     let firstPageRequest = true
@@ -572,6 +587,136 @@ describe('room history updates', () => {
         hasMore: true,
       }
     })
+  })
+
+  it('opens and closes the contact dossier from the direct-chat header', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await screen.findByText('latest message')
+
+    await user.click(screen.getByRole('button', { name: 'Show contact dossier' }))
+    expect(await screen.findByRole('complementary', { name: 'Contact dossier' })).toBeTruthy()
+    expect(harness.service.ContactDossier).toHaveBeenCalledWith(room.id)
+    await user.click(screen.getByRole('button', { name: 'Close contact dossier' }))
+    expect(screen.queryByRole('complementary', { name: 'Contact dossier' })).toBeNull()
+  })
+
+  it('shows active relationship alerts in the sidebar drawer', async () => {
+    const contact = {
+      contactId: '@alex:example.org',
+      displayName: 'Alex',
+      tier: 'CLOSE_FRIEND',
+      roomIds: [room.id],
+      lastInteractionTimestamp: Date.now() - 20 * 86400000,
+      lastDecayAlertTimestamp: Date.now(),
+      snoozedUntil: 0,
+      nudge: 'Ask Alex how the new role is going.',
+      alerted: true,
+    }
+    harness.service.RelationshipDecayContacts.mockResolvedValue({ accountId: 'primary', enabled: true, contacts: [contact] })
+    const user = userEvent.setup()
+    render(<App />)
+
+    const shortcut = await screen.findByRole('button', { name: /Relationships/ })
+    expect(shortcut.textContent).toContain('1')
+    await user.click(shortcut)
+    expect(await screen.findByRole('dialog', { name: 'Relationships' })).toBeTruthy()
+    expect(screen.getByText('Ask Alex how the new role is going.')).toBeTruthy()
+  })
+
+  it('persists relationship tier changes and snoozes', async () => {
+    const contact = {
+      contactId: '@alex:example.org',
+      displayName: 'Alex',
+      tier: 'CLOSE_FRIEND',
+      roomIds: [room.id],
+      lastInteractionTimestamp: Date.now() - 20 * 86400000,
+      lastDecayAlertTimestamp: Date.now(),
+      snoozedUntil: 0,
+      nudge: 'Ask Alex how the new role is going.',
+      alerted: true,
+    }
+    const decay = { accountId: 'primary', enabled: true, contacts: [contact] }
+    harness.service.RelationshipDecayContacts.mockResolvedValue(decay)
+    harness.service.SetRelationshipTier.mockResolvedValue({ ...decay, contacts: [{ ...contact, tier: 'VIP' }] })
+    harness.service.SnoozeRelationshipDecay.mockResolvedValue({ ...decay, contacts: [{ ...contact, alerted: false }] })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: /Relationships/ }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Relationship tier for Alex' }), 'VIP')
+    await waitFor(() => expect(harness.service.SetRelationshipTier).toHaveBeenCalledWith(room.id, 'VIP'))
+    await user.click(screen.getByRole('button', { name: 'Snooze for a week' }))
+    await waitFor(() => expect(harness.service.SnoozeRelationshipDecay).toHaveBeenCalledWith(contact.contactId))
+  })
+
+  it('switches to the contact room and drafts a nudge without sending', async () => {
+    const contact = {
+      contactId: '@alex:example.org',
+      displayName: 'Alex',
+      tier: 'CLOSE_FRIEND',
+      roomIds: [secondRoom.id],
+      lastInteractionTimestamp: Date.now() - 20 * 86400000,
+      lastDecayAlertTimestamp: Date.now(),
+      snoozedUntil: 0,
+      nudge: 'Ask Alex how the new role is going.',
+      alerted: true,
+    }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, secondRoom] })
+    harness.service.RelationshipDecayContacts.mockResolvedValue({ accountId: 'primary', enabled: true, contacts: [contact] })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: /Relationships/ }))
+    await user.click(screen.getByRole('button', { name: 'Draft message' }))
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await waitFor(() => expect(composer.value).toBe(contact.nudge))
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    expect(harness.service.SendReply).not.toHaveBeenCalled()
+    expect(harness.service.SendMessageWithMentions).not.toHaveBeenCalled()
+  })
+
+  it('drafts a nudge directly when its room is already open', async () => {
+    const contact = {
+      contactId: '@alex:example.org',
+      displayName: 'Alex',
+      tier: 'CLOSE_FRIEND',
+      roomIds: [room.id],
+      lastInteractionTimestamp: Date.now() - 20 * 86400000,
+      lastDecayAlertTimestamp: Date.now(),
+      snoozedUntil: 0,
+      nudge: 'Ask Alex how the new role is going.',
+      alerted: true,
+    }
+    harness.service.RelationshipDecayContacts.mockResolvedValue({ accountId: 'primary', enabled: true, contacts: [contact] })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: /Relationships/ }))
+    await user.click(screen.getByRole('button', { name: 'Draft message' }))
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await waitFor(() => expect(composer.value).toBe(contact.nudge))
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    expect(harness.service.SendReply).not.toHaveBeenCalled()
+  })
+
+  it('reports the overscanned room range and prefetches when scrolling reaches the loaded tail', async () => {
+    const rooms = Array.from({ length: 20 }, (_, index) => ({
+      ...room,
+      id: `!room-${index}:example.org`,
+      name: `Room ${index}`,
+    }))
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms, slidingSyncListCounts: { main: 40 } })
+    render(<App />)
+
+    const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
+    await waitFor(() => expect(harness.service.UpdateVisibleRange).toHaveBeenCalledWith('main', 0, 18))
+
+    act(() => {
+      Object.defineProperty(roomList, 'scrollTop', { configurable: true, value: 1000 })
+      fireEvent.scroll(roomList)
+    })
+    await waitFor(() => expect(harness.service.UpdateVisibleRange).toHaveBeenLastCalledWith('main', 8, 40))
   })
 
   it('keeps AI actions disabled until an AI endpoint is set', async () => {
@@ -634,6 +779,98 @@ describe('room history updates', () => {
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Analyze conversation' })).toBeNull()
+  })
+
+  it('inserts a local quick reply into the composer without sending it', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ghostwriter.enabled': true } })
+    harness.service.History.mockResolvedValue({ messages: [message('$incoming', 'Can you review this?', 300)], before: 0, hasMore: false })
+    harness.service.Ghostwriter.mockResolvedValue([{ id: 'affirmative', type: 'chip', label: 'Yes', text: 'Sounds good!' }])
+    render(<App />)
+
+    await screen.findByText('Can you review this?')
+    await user.click(await screen.findByRole('button', { name: 'Use Yes: Sounds good!' }))
+
+    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Sounds good!')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    expect(harness.service.SendReply).not.toHaveBeenCalled()
+  })
+
+  it('shows a local-model offline state and retries quick replies', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ghostwriter.enabled': true } })
+    harness.service.History.mockResolvedValue({ messages: [message('$incoming', 'Can you review this?', 300)], before: 0, hasMore: false })
+    harness.service.Ghostwriter.mockRejectedValueOnce(new Error('local model unavailable'))
+    render(<App />)
+
+    await screen.findByText('Can you review this?')
+    expect(await screen.findByText('Local model unavailable')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Retry local reply suggestions' }))
+    await waitFor(() => expect(harness.service.Ghostwriter).toHaveBeenCalledTimes(2))
+  })
+
+  it('shows a debounced inline continuation and accepts it with Tab', async () => {
+    const user = userEvent.setup()
+    const { container } = renderGhostwriterComposer()
+    await screen.findByText('Can you review this?')
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await waitFor(() => expect(harness.service.Ghostwriter).toHaveBeenCalledTimes(1))
+    harness.service.Ghostwriter.mockResolvedValueOnce([{ id: 'completion', type: 'autocomplete', text: 'there' }])
+    await user.type(composer, 'hello')
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 350)) })
+
+    await waitFor(() => expect(container.querySelector('.ghostwriter-inline-preview')?.textContent).toBe('hello there'))
+    fireEvent.keyDown(composer, { key: 'Tab' })
+
+    expect(composer.value).toBe('hello there')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('does not apply an autocomplete response after the draft changes', async () => {
+    let resolveAutocomplete!: (suggestions: { id: string; type: string; text: string }[]) => void
+    renderGhostwriterComposer()
+    await screen.findByText('Can you review this?')
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await waitFor(() => expect(harness.service.Ghostwriter).toHaveBeenCalledTimes(1))
+    harness.service.Ghostwriter.mockImplementationOnce(() => new Promise((resolve) => { resolveAutocomplete = resolve }))
+    fireEvent.change(composer, { target: { value: 'first draft' } })
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 350)) })
+    await waitFor(() => expect(harness.service.Ghostwriter).toHaveBeenCalledTimes(2))
+
+    fireEvent.change(composer, { target: { value: 'newer draft' } })
+    await act(async () => resolveAutocomplete([{ id: 'completion', type: 'autocomplete', text: 'stale text' }]))
+
+    expect(composer.value).toBe('newer draft')
+    expect(document.querySelector('.ghostwriter-inline-preview')).toBeNull()
+  })
+
+  it('turns /ghost into an unsent draft and never sends the command', async () => {
+    harness.service.Ghostwriter.mockResolvedValueOnce([])
+    renderGhostwriterComposer()
+    await screen.findByText('Can you review this?')
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await waitFor(() => expect(harness.service.Ghostwriter).toHaveBeenCalledTimes(1))
+    harness.service.Ghostwriter.mockResolvedValueOnce([{ id: 'slash', type: 'slash_result', label: 'decline politely', text: 'I appreciate the offer, but I cannot.' }])
+    fireEvent.change(composer, { target: { value: '/ghost decline politely' } })
+    fireEvent.submit(composer.closest('form') as HTMLFormElement)
+
+    expect(await screen.findByText('Draft ready to review. It has not been sent.')).toBeTruthy()
+    expect(composer.value).toBe('I appreciate the offer, but I cannot.')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    expect(harness.service.SendReply).not.toHaveBeenCalled()
+    expect(harness.service.Ghostwriter).toHaveBeenLastCalledWith({ roomId: room.id, mode: 'slash', draft: '', intent: 'decline politely' })
+  })
+
+  it('keeps /ghost from falling through to Matrix sending while disabled', async () => {
+    render(<App />)
+    await screen.findByText('latest message')
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: '/ghost decline politely' } })
+    fireEvent.submit(composer.closest('form') as HTMLFormElement)
+
+    expect(await screen.findByText('Enable Ghostwriter in Settings > Integrations first.')).toBeTruthy()
+    expect(harness.service.Ghostwriter).not.toHaveBeenCalled()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
   it('shows hover descriptions for message and composer controls', async () => {
@@ -730,6 +967,37 @@ describe('room history updates', () => {
     expect(onRender).toHaveBeenCalledTimes(renderCount)
   })
 
+  it('applies room updates from a consolidated Matrix batch', async () => {
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await act(async () => {
+      harness.eventHandlers.get('matrix:batch_update')?.({
+        data: {
+          new_messages: [],
+          read_receipts: [],
+          typing_updates: [],
+          room_deltas: [{
+            update: {
+              rooms: [{ ...room, name: 'Batched room' }],
+              slidingSyncListCounts: snapshot.slidingSyncListCounts,
+              timelineChangedRoomId: [],
+              typingUsers: { [room.id]: [] },
+              notifications: [],
+              error: '',
+              initialSyncComplete: true,
+              needsVerification: false,
+              connectionState: 'connected',
+            },
+          }],
+        },
+      })
+      await Promise.resolve()
+    })
+
+    expect(await screen.findAllByText('Batched room')).toHaveLength(2)
+  })
+
   it('does not show a room ID beneath a room name when there is no topic', async () => {
     const roomWithoutTopic = { ...room, id: '!group:example.org', name: 'Actual room name', direct: false }
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [roomWithoutTopic] })
@@ -801,10 +1069,64 @@ describe('room history updates', () => {
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
-  it('translates the latest paginated chat messages inline without changing the timeline', async () => {
+  it('analyzes an outgoing draft and replaces it with ready-to-send Turkish', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:11434' },
+    })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'Ciao, come stai?' } })
+    await user.click(screen.getByRole('button', { name: 'Analyze draft with Turkish Tutor' }))
+
+    expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Ciao, come stai?')
+    const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
+    expect(within(dialog).getByText('Merhaba, nasılsın?')).toBeTruthy()
+    expect(within(dialog).getByText('nasıl-sın -> come-sei')).toBeTruthy()
+    await user.click(within(dialog).getByRole('button', { name: 'Replace draft with Turkish' }))
+
+    expect(composer.value).toBe('Merhaba, nasılsın?')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('analyzes the composer draft with Ctrl+Shift+T', async () => {
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:11434' },
+    })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = screen.getByRole('textbox', { name: 'Message' })
+    fireEvent.change(composer, { target: { value: 'Ben iyiyim.' } })
+    fireEvent.keyDown(composer, { key: 't', ctrlKey: true, shiftKey: true })
+
+    await waitFor(() => expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Ben iyiyim.'))
+    expect(await screen.findByRole('dialog', { name: 'Tutor this draft' })).toBeTruthy()
+  })
+
+  it('opens the read-only Turkish Tutor analysis from a message context menu', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:8080' },
+    })
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    openMessageMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: 'Analyze message with Turkish Tutor' }))
+
+    expect(harness.tutorService.Analyze).toHaveBeenCalledWith('latest message')
+    const dialog = await screen.findByRole('dialog', { name: 'Analyze message' })
+    expect(within(dialog).getByText('The second-person ending follows vowel harmony.')).toBeTruthy()
+    expect(within(dialog).queryByRole('button', { name: 'Replace draft with Turkish' })).toBeNull()
+  })
+
+  it('translates incoming chat messages beside their originals and excludes own messages', async () => {
     const user = userEvent.setup()
     const recentMessages = [
-      message('$latest-english', 'Good morning', 300),
+      { ...message('$latest-own', 'My latest message', 300), own: true, sender: snapshot.profile.userId },
       message('$latest-turkish', 'Günaydın', 400),
     ]
     const olderMessages = [
@@ -815,50 +1137,89 @@ describe('room history updates', () => {
     harness.service.History.mockImplementation(async (_roomID: string, before: number) => before === 0
       ? { messages: recentMessages, before: 80, hasMore: true }
       : { messages: olderMessages, before: 40, hasMore: false })
-    harness.service.AIComplete.mockResolvedValue('[1] Alice: Hello\n[2] Alice: Good morning\n[3] Alice: Good morning')
+    harness.service.AIComplete.mockResolvedValue(JSON.stringify(['Hello', 'Good morning']))
 
     const { container } = render(<App />)
     expect(await screen.findByText('Günaydın')).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Translate chat to English' }))
+    await user.click(screen.getByRole('button', { name: 'Translate latest 10 received messages to English' }))
 
-    const result = await screen.findByRole('region', { name: 'Chat translation' })
-    await within(result).findByText(/Good morning/)
+    await screen.findByText('Good morning')
     await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalledTimes(1))
     expect(harness.service.History).toHaveBeenCalledWith(room.id, 80)
-    expect(screen.getByRole('region', { name: 'Message timeline' }).contains(result)).toBe(true)
-    expect(screen.queryByRole('dialog', { name: 'Translate chat to English' })).toBeNull()
+    expect(container.querySelector('[data-event-id="$older-turkish"] .message-translation')?.textContent).toContain('Hello')
+    expect(container.querySelector('[data-event-id="$latest-turkish"] .message-translation')?.textContent).toContain('Good morning')
+    expect(container.querySelector('[data-event-id="$latest-own"] .message-translation')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Chat translation' })).toBeNull()
     const request = harness.service.AIComplete.mock.calls[0][0]
     expect(request[0].content).toContain('Translate every message body into English')
+    expect(request[0].content).toContain('valid JSON array')
     expect(request[1].content).toContain('Merhaba')
     expect(request[1].content).toContain('Günaydın')
+    expect(request[1].content).not.toContain('My latest message')
     expect(request[1].content).not.toContain('Silinmiş mesaj')
     expect(container.querySelector('[data-event-id="$latest-turkish"] .message-body')?.textContent).toBe('Günaydın')
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
-  it('translates only the newest 50 messages and stops loading older history', async () => {
+  it('explains malformed translation responses and reveals the raw AI output', async () => {
     const user = userEvent.setup()
-    const latestMessages = Array.from({ length: 50 }, (_, index) => message(`$recent-${index + 1}`, `recent message ${index + 1}`, index + 1))
+    const rawResponse = 'The translation is Hola, not JSON.'
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
-    harness.service.History.mockImplementation(async (_roomID: string, before: number) => before === 0
-      ? { messages: latestMessages, before: 50, hasMore: true }
-      : { messages: [message('$older-unrequested', 'older unrequested message', 0)], before: 0, hasMore: false })
-    harness.service.AIComplete.mockResolvedValue('Translated batch')
+    harness.service.History.mockResolvedValue({ messages: [message('$latest-turkish', 'Günaydın', 400)], before: 0, hasMore: false })
+    harness.service.AIComplete.mockResolvedValue(rawResponse)
 
     render(<App />)
-    expect(await screen.findByText('recent message 50')).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Translate chat to English' }))
-    const translation = await screen.findByRole('region', { name: 'Chat translation' })
-    await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalled())
+    expect(await screen.findByText('Günaydın')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Translate latest 10 received messages to English' }))
 
-    expect(harness.service.History.mock.calls.filter(([, before]) => before !== 0)).toHaveLength(0)
+    expect(await screen.findByText(/not valid JSON/)).toBeTruthy()
+    const responseDetails = screen.getByText('Show raw AI response').closest('details') as HTMLDetailsElement
+    expect(responseDetails.open).toBe(false)
+    await user.click(screen.getByText('Show raw AI response'))
+    expect(responseDetails.open).toBe(true)
+    expect(responseDetails.textContent).toContain(rawResponse)
+  })
+
+  it('translates only the latest 10 incoming messages and loads just enough history', async () => {
+    const user = userEvent.setup()
+    const latestMessages = Array.from({ length: 16 }, (_, index) => {
+      const sequence = index + 1
+      const isOwn = sequence % 2 === 0
+      const current = message(isOwn ? `$own-${sequence}` : `$received-${sequence}`, isOwn ? `my message ${sequence}` : `received message ${sequence}`, 100 + sequence)
+      return isOwn ? { ...current, own: true, sender: snapshot.profile.userId } : current
+    })
+    const olderMessages = [
+      message('$outside-last-ten', 'outside last ten received', 1),
+      message('$older-received-1', 'older received one', 2),
+      message('$older-received-2', 'older received two', 3),
+    ]
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    harness.service.History.mockImplementation(async (_roomID: string, before: number) => before === 0
+      ? { messages: latestMessages, before: 80, hasMore: true }
+      : before === 80
+        ? { messages: olderMessages, before: 40, hasMore: true }
+        : { messages: [message('$older-unrequested', 'older unrequested message', 0)], before: 0, hasMore: false })
+    harness.service.AIComplete.mockResolvedValue(JSON.stringify(Array.from({ length: 10 }, (_, index) => `Translated ${index + 1}`)))
+
+    render(<App />)
+    expect(await screen.findByText('received message 15')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Translate latest 10 received messages to English' }))
+    await screen.findByText('Translated 10')
+    await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalledTimes(1))
+
+    expect(harness.service.History.mock.calls.filter(([, before]) => before !== 0)).toEqual([[room.id, 80]])
     const submittedContent = harness.service.AIComplete.mock.calls
       .flatMap(([request]) => request.map((item: { content: string }) => item.content))
       .join('\n')
-    expect(submittedContent).toContain('recent message 1')
-    expect(submittedContent).toContain('recent message 50')
+    expect(submittedContent).toContain('older received one')
+    expect(submittedContent).toContain('older received two')
+    expect(submittedContent).toContain('received message 15')
+    expect(submittedContent).not.toContain('outside last ten received')
+    expect(submittedContent).not.toContain('my message')
     expect(submittedContent).not.toContain('older unrequested message')
-    expect(translation.textContent).toContain('Latest 50 messages in English')
+    expect(document.querySelector('[data-event-id="$outside-last-ten"] .message-translation')).toBeNull()
+    expect(document.querySelector('[data-event-id="$own-16"] .message-translation')).toBeNull()
+    expect(document.querySelector('[data-event-id="$received-15"] .message-translation')?.textContent).toContain('Translated 10')
   })
 
   it('drafts a reply from nearby context and keeps the selected message as the reply target', async () => {
@@ -994,6 +1355,43 @@ describe('room history updates', () => {
     expect(within(roomDialog).getByRole('textbox', { name: 'Instructions' })).toBeTruthy()
   })
 
+  it('loads chat agent preferences from the active account when room IDs overlap', async () => {
+    const user = userEvent.setup()
+    const secondProfile = {
+      userId: '@two:example.net',
+      displayName: 'Two',
+      homeserver: 'https://example.net',
+      deviceId: 'DEVICE_TWO',
+      avatarUri: '',
+      verified: true,
+    }
+    const secondAccount: AccountSummary = { id: 'second', profile: secondProfile }
+    const preferenceKey = `room.ai_agents.${room.id}`
+    const agentValue = (id: string, name: string) => JSON.stringify({ agents: [{ id, name, instructions: 'Offer a suggestion.' }], defaultAgentId: id })
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      accounts: [{ id: 'primary', profile: snapshot.profile }, secondAccount],
+      preferences: { [preferenceKey]: agentValue('primary-agent', 'Primary profile') },
+    })
+    harness.service.SwitchAccount.mockResolvedValue({
+      ...snapshot,
+      activeAccountId: secondAccount.id,
+      profile: secondProfile,
+      rooms: [{ ...room, accountId: 'second' }],
+      preferences: { [preferenceKey]: agentValue('second-agent', 'Second profile') },
+    })
+    render(<App />)
+    await screen.findByText('latest message')
+    await user.click(screen.getByRole('button', { name: 'Manage Matrix accounts' }))
+    await user.click(screen.getByRole('button', { name: /@two:example\.net/ }))
+    await waitFor(() => expect(harness.service.SwitchAccount).toHaveBeenCalledWith('second'))
+    await user.click(await screen.findByRole('button', { name: 'Room details' }))
+
+    const roomDialog = await screen.findByRole('dialog', { name: 'Test room' })
+    expect(within(roomDialog).getByRole('option', { name: 'Second profile' })).toBeTruthy()
+    expect(within(roomDialog).queryByRole('option', { name: 'Primary profile' })).toBeNull()
+  })
+
   it('summarizes recent messages in a read-only panel', async () => {
     const user = userEvent.setup()
     harness.service.AIComplete.mockResolvedValue('- Alice shared an update')
@@ -1065,6 +1463,211 @@ describe('room history updates', () => {
     expect(await screen.findByText('oldest history')).toBeTruthy()
     expect(screen.getByText('older history')).toBeTruthy()
     expect(harness.service.History).toHaveBeenLastCalledWith(room.id, 20)
+  })
+
+  it('sends one busy-mode reply in the language of the latest chat messages', async () => {
+    const user = userEvent.setup()
+    const spanishMessage = 'Podemos revisar los detalles del proyecto después de la reunión de mañana.'
+    const recentMessages = Array.from({ length: 10 }, (_, index) => message(`$spanish-${index}`, spanishMessage, 100 + index))
+    harness.service.SetBooleanPreference.mockResolvedValue(undefined)
+    harness.service.SendMessage.mockResolvedValue(undefined)
+    harness.service.History.mockResolvedValue({ messages: recentMessages, before: 0, hasMore: false })
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Turn busy mode on' }))
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('busy_mode.enabled', true))
+
+    const sendIncomingUpdate = () => act(() => {
+      harness.eventHandlers.get('matrix:update')?.({
+        data: {
+          rooms: [{ ...room, lastEventId: '$incoming-spanish', lastEventSender: '@alice:example.org' }],
+          timelineChangedRoomId: [room.id],
+          initialSyncComplete: true,
+          needsVerification: false,
+          connectionState: 'connected',
+        },
+      })
+    })
+    sendIncomingUpdate()
+
+    await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledTimes(1))
+    expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, expect.stringContaining('Soy el asistente de IA de Me'))
+    sendIncomingUpdate()
+    expect(harness.service.SendMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('translates only the generic busy reply for an unsupported chat language', async () => {
+    const czechMessage = 'Můžeme zítra po schůzce společně projít podrobnosti projektu a domluvit další postup.'
+    const recentMessages = Array.from({ length: 10 }, (_, index) => message(`$czech-${index}`, czechMessage, 100 + index))
+    const translatedReply = 'Dobrý den! Jsem AI asistent pro {name}. Vaše zpráva dorazila; odpoví, jakmile to bude možné. Děkuji za trpělivost.'
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'busy_mode.enabled': true, 'ai.endpoint': 'http://localhost:8080' } })
+    harness.service.History.mockResolvedValue({ messages: recentMessages, before: 0, hasMore: false })
+    harness.service.AIComplete.mockResolvedValue(translatedReply)
+    harness.service.SendMessage.mockResolvedValue(undefined)
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Turn busy mode off' })
+    act(() => {
+      harness.eventHandlers.get('matrix:update')?.({
+        data: {
+          rooms: [{ ...room, lastEventId: '$incoming-czech', lastEventSender: '@alice:example.org' }],
+          timelineChangedRoomId: [room.id],
+          initialSyncComplete: true,
+          needsVerification: false,
+          connectionState: 'connected',
+        },
+      })
+    })
+
+    await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledTimes(1))
+    expect(harness.service.AIComplete).toHaveBeenCalledTimes(1)
+    const prompt = harness.service.AIComplete.mock.calls[0][0]
+    expect(JSON.stringify(prompt)).toContain('Czech')
+    expect(JSON.stringify(prompt)).not.toContain(czechMessage)
+    expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, expect.stringContaining('Me'))
+  })
+
+  it('switches the active Matrix account and loads its rooms', async () => {
+    const user = userEvent.setup()
+    harness.service.ScheduledJobs.mockResolvedValueOnce([{
+      id: 'primary-scheduled',
+      kind: 'message',
+      roomId: room.id,
+      text: 'primary job',
+      eventId: '',
+      dueAt: Date.now() + 60_000,
+      createdAt: Date.now(),
+      status: 'pending',
+      error: '',
+    }]).mockResolvedValueOnce([])
+    const secondProfile = {
+      userId: '@two:example.net',
+      displayName: 'Two',
+      homeserver: 'https://example.net',
+      deviceId: 'DEVICE_TWO',
+      avatarUri: '',
+      verified: true,
+    }
+    const secondAccount: AccountSummary = { id: 'second', profile: secondProfile }
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      accounts: [{ id: 'primary', profile: snapshot.profile }, secondAccount],
+    })
+    harness.service.SwitchAccount.mockResolvedValue({
+      ...snapshot,
+      activeAccountId: secondAccount.id,
+      profile: secondProfile,
+      rooms: [secondRoom],
+    })
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    await waitFor(() => expect(container.querySelector('.scheduled-job-count')).toBeTruthy())
+    await user.click(screen.getByRole('button', { name: 'Manage Matrix accounts' }))
+    await user.click(screen.getByRole('button', { name: /@two:example\.net/ }))
+
+    await waitFor(() => expect(harness.service.SwitchAccount).toHaveBeenCalledWith(secondAccount.id))
+    await waitFor(() => expect(container.querySelector('.scheduled-job-count')).toBeNull())
+    expect(await screen.findByText('@two:example.net')).toBeTruthy()
+    await waitFor(() => expect(harness.service.History).toHaveBeenCalledWith(secondRoom.id, 0))
+  })
+
+  it('filters the inbox by account and switches accounts when opening another account room', async () => {
+    const user = userEvent.setup()
+    const secondProfile = {
+      userId: '@two:example.net',
+      displayName: 'Two',
+      homeserver: 'https://example.net',
+      deviceId: 'DEVICE_TWO',
+      avatarUri: '',
+      verified: true,
+    }
+    const secondAccount: AccountSummary = { id: 'second', profile: secondProfile }
+    const otherRoom: Room = { ...room, id: '!other:example.net', name: 'Other account room', accountId: 'second' }
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      accounts: [{ id: 'primary', profile: snapshot.profile }, secondAccount],
+    })
+    harness.service.AccountRooms.mockResolvedValue([room, otherRoom])
+    harness.service.SwitchAccount.mockResolvedValue({
+      ...snapshot,
+      activeAccountId: secondAccount.id,
+      profile: secondProfile,
+      rooms: [otherRoom],
+    })
+    render(<App />)
+
+    expect(await screen.findByText('Other account room')).toBeTruthy()
+    const accountFilter = screen.getByRole('combobox', { name: 'Filter rooms by account' })
+    await user.selectOptions(accountFilter, 'second')
+    const roomList = screen.getByRole('navigation', { name: 'Rooms' })
+    expect(within(roomList).queryByText('Test room')).toBeNull()
+    expect(within(roomList).getByText('Other account room')).toBeTruthy()
+
+    await user.click(within(roomList).getByText('Other account room'))
+    await waitFor(() => expect(harness.service.SwitchAccount).toHaveBeenCalledWith(secondAccount.id))
+  })
+
+  it('switches Matrix accounts with the account number shortcut', async () => {
+    const secondProfile = {
+      userId: '@two:example.net',
+      displayName: 'Two',
+      homeserver: 'https://example.net',
+      deviceId: 'DEVICE_TWO',
+      avatarUri: '',
+      verified: true,
+    }
+    const secondAccount: AccountSummary = { id: 'second', profile: secondProfile }
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      accounts: [{ id: 'primary', profile: snapshot.profile }, secondAccount],
+    })
+    harness.service.SwitchAccount.mockResolvedValue({
+      ...snapshot,
+      activeAccountId: secondAccount.id,
+      profile: secondProfile,
+      rooms: [secondRoom],
+    })
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    fireEvent.keyDown(container.querySelector('.app-shell')!, { key: '2', code: 'Digit2', ctrlKey: true, altKey: true })
+
+    await waitFor(() => expect(harness.service.SwitchAccount).toHaveBeenCalledWith(secondAccount.id))
+    expect(await screen.findByText('@two:example.net')).toBeTruthy()
+  })
+
+  it('adds another Matrix account from the account manager', async () => {
+    const user = userEvent.setup()
+    const secondProfile = {
+      userId: '@two:example.net',
+      displayName: 'Two',
+      homeserver: 'https://example.net',
+      deviceId: 'DEVICE_TWO',
+      avatarUri: '',
+      verified: true,
+    }
+    const secondAccount: AccountSummary = { id: 'second', profile: secondProfile }
+    harness.service.AddAccount.mockResolvedValue({
+      ...snapshot,
+      activeAccountId: secondAccount.id,
+      accounts: [{ id: 'primary', profile: snapshot.profile }, secondAccount],
+      profile: secondProfile,
+      rooms: [secondRoom],
+    })
+    render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Manage Matrix accounts' }))
+    await user.click(screen.getByRole('button', { name: 'Add account' }))
+    await user.clear(screen.getByLabelText('Homeserver'))
+    await user.type(screen.getByLabelText('Homeserver'), 'https://example.net')
+    await user.type(screen.getByLabelText('Username'), '@two:example.net')
+    await user.type(screen.getByLabelText('Password'), 'secret')
+    await user.click(screen.getByRole('button', { name: 'Add account' }))
+
+    await waitFor(() => expect(harness.service.AddAccount).toHaveBeenCalledWith('https://example.net', '@two:example.net', 'secret'))
+    expect(await screen.findByText('@two:example.net')).toBeTruthy()
   })
 
   it('sends incoming alerts through the native notification service when available', async () => {
@@ -1206,10 +1809,10 @@ describe('room history updates', () => {
   })
 
   it('loads older messages automatically when the timeline is scrolled to the top', async () => {
-    const { container } = render(<App />)
+    render(<App />)
 
     expect(await screen.findByText('latest message')).toBeTruthy()
-    const timeline = container.querySelector<HTMLElement>('.timeline-virtual-scroller')!
+    const timeline = screen.getByRole('region', { name: 'Message timeline' })
 
     fireEvent.scroll(timeline)
 
@@ -1221,7 +1824,7 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     const { container } = render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
-    const timeline = container.querySelector<HTMLElement>('.timeline-virtual-scroller')!
+    const timeline = screen.getByRole('region', { name: 'Message timeline' })
     Object.defineProperty(timeline, 'scrollHeight', { configurable: true, value: 400 })
     timeline.scrollTop = 12
 
@@ -1348,7 +1951,11 @@ describe('room history updates', () => {
     render(<App />)
 
     expect(await screen.findByText('latest message')).toBeTruthy()
-    expect(screen.getByRole('status', { name: 'Incognito mode is on' })).toBeTruthy()
+    expect(document.querySelector('.app-shell')?.getAttribute('data-incognito')).toBe('true')
+    const incognitoIndicator = screen.getByRole('status', { name: 'Incognito mode is on' })
+    expect(incognitoIndicator).toBeTruthy()
+    expect(incognitoIndicator.textContent).toBe('')
+    expect(document.querySelector('.conversation-room-avatar')).toBeTruthy()
   })
 
   it('honors the spellcheck preference in the message composer', async () => {
@@ -1365,7 +1972,7 @@ describe('room history updates', () => {
 
     expect(await screen.findByText('latest message')).toBeTruthy()
     const composer = screen.getByRole('textbox', { name: 'Message' })
-    const timeline = await screen.findByRole('region', { name: 'Message timeline' })
+    const timeline = screen.getByRole('region', { name: 'Message timeline' })
     composer.focus()
     fireEvent.keyDown(composer, { key: 'ArrowUp' })
 
@@ -1423,15 +2030,34 @@ describe('room history updates', () => {
     }
   }
 
-  it('automatically previews image attachments without a click', async () => {
+  it('opens a gallery with media collected from older room history', async () => {
+    const user = userEvent.setup()
+    const photo = { ...message('$gallery-photo', 'photo.png', 300), mediaUri: 'mxc://example.org/gallery-photo', mediaMime: 'image/png' }
+    const olderFile = { ...message('$gallery-file', 'report.pdf', 100), mediaUri: 'mxc://example.org/gallery-file', mediaType: 'm.file', mediaMime: 'application/pdf' }
+    harness.service.History.mockImplementation(async (_roomID: string, before: number) => {
+      if (before === 0) return { messages: [photo], before: 50, hasMore: true }
+      if (before === 50) return { messages: [olderFile], before: 20, hasMore: false }
+      return { messages: [], before, hasMore: false }
+    })
+    stubImageIntersectionObserver()
+    render(<App />)
+
+    expect(await screen.findByText('photo.png')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Media gallery' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Media in Test room' })
+    await waitFor(() => expect(within(dialog).getAllByRole('article')).toHaveLength(2))
+    expect(harness.service.History.mock.calls.filter(([, before]) => before === 0).length).toBeGreaterThanOrEqual(2)
+    await user.click(within(dialog).getByRole('button', { name: 'Files, 1' }))
+    expect(within(dialog).getAllByRole('article')).toHaveLength(1)
+    expect(dialog.querySelector('.file-card-copy strong')?.textContent).toBe('report.pdf')
+  })
+
+  it('streams image previews from the local media endpoint without a click', async () => {
     const mediaURL = 'mxc://example.org/photo'
     const imageMessage = { ...message('$photo', 'Attachment', 300), mediaUri: mediaURL, mediaMime: 'image/png', mediaSize: 12 }
     harness.service.History.mockResolvedValueOnce({ messages: [imageMessage], before: 0, hasMore: false })
     const intersection = stubImageIntersectionObserver()
-    vi.stubGlobal('URL', {
-      createObjectURL: vi.fn(() => 'blob:photo-preview'),
-      revokeObjectURL: vi.fn(),
-    })
 
     const { container } = render(<App />)
     const attachment = await waitFor(() => {
@@ -1439,7 +2065,6 @@ describe('room history updates', () => {
       expect(element).toBeTruthy()
       return element
     })
-    expect(harness.service.DownloadMedia).not.toHaveBeenCalled()
     intersection.setIntersecting(attachment!, true)
 
     const preview = await waitFor(() => {
@@ -1447,13 +2072,33 @@ describe('room history updates', () => {
       expect(image).toBeTruthy()
       return image
     })
-    expect(preview?.getAttribute('src')).toBe('blob:photo-preview')
-    expect(harness.service.DownloadMedia).toHaveBeenCalledWith(mediaURL)
+    expect(preview?.getAttribute('src')).toBe(`/media/matrix/${encodeURIComponent(room.id)}/${encodeURIComponent('$photo')}`)
     expect(container.querySelector('[data-event-id="$photo"] .media-load')).toBeNull()
 
     intersection.setIntersecting(attachment!, false)
-    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:photo-preview'))
+    await waitFor(() => expect(container.querySelector('[data-event-id="$photo"] .media-preview')).toBeNull())
     expect(container.querySelector('[data-event-id="$photo"] .media-preview')).toBeNull()
+  })
+
+  it('renders native image, audio, and video tags from Matrix event URLs', () => {
+    const { container } = render(<div>
+      <ChatMediaRenderer roomID={room.id} eventID="$photo" kind="image" alt="Photo" />
+      <ChatMediaRenderer roomID={room.id} eventID="$voice" kind="audio" alt="Voice note" />
+      <ChatMediaRenderer roomID={room.id} eventID="$clip" kind="video" alt="Clip" />
+    </div>)
+    const expectedURL = (eventID: string) => `/media/matrix/${encodeURIComponent(room.id)}/${encodeURIComponent(eventID)}`
+
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(expectedURL('$photo'))
+    expect(container.querySelector('img')?.getAttribute('loading')).toBe('lazy')
+    expect(container.querySelector('audio')?.getAttribute('src')).toBe(expectedURL('$voice'))
+    expect(container.querySelector('audio')?.hasAttribute('controls')).toBe(true)
+    expect(container.querySelector('video')?.getAttribute('src')).toBe(expectedURL('$clip'))
+    expect(container.querySelector('video')?.hasAttribute('controls')).toBe(true)
+  })
+
+  it('maps avatar MXC URIs to the local media endpoint', () => {
+    expect(matrixMXCMediaURL('mxc://example.org/avatar')).toBe('/media/mxc/example.org/avatar')
+    expect(matrixMXCMediaURL('not-an-mxc-uri')).toBe('')
   })
 
   it('hides images and videos from chat when enabled in Appearance settings', async () => {
@@ -1472,7 +2117,6 @@ describe('room history updates', () => {
     expect(container.querySelector('[data-event-id="$video-hidden"] .message-attachment')).toBeNull()
     expect(container.querySelector('[data-event-id="$audio-visible"] .audio-attachment')).toBeTruthy()
     expect(container.querySelector('[data-event-id="$audio-webm-visible"] .audio-attachment')).toBeTruthy()
-    expect(harness.service.DownloadMedia).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
     await user.click(screen.getByRole('tab', { name: 'Appearance' }))
@@ -1483,68 +2127,33 @@ describe('room history updates', () => {
       expect(container.querySelector('[data-event-id="$video-hidden"] .media-load')).toBeTruthy()
       expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('appearance.hide_images_and_videos', false)
     })
-    expect(harness.service.DownloadMedia).not.toHaveBeenCalled()
   })
 
-  it('does not create an image object URL when media finishes downloading after unmount', async () => {
-    const imageMessage = { ...message('$late-photo', 'Attachment', 300), mediaUri: 'mxc://example.org/late-photo', mediaMime: 'image/png', mediaSize: 12 }
-    harness.service.History.mockResolvedValueOnce({ messages: [imageMessage], before: 0, hasMore: false })
-    let resolveMedia!: (value: string) => void
-    harness.service.DownloadMedia.mockReturnValueOnce(new Promise<string>((resolve) => { resolveMedia = resolve }))
-    const intersection = stubImageIntersectionObserver()
-    const createObjectURL = vi.fn(() => 'blob:late-photo')
-    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: vi.fn() })
+  it('renders a file attachment in its media card without a duplicate message bubble', async () => {
+    const user = userEvent.setup()
+    const filename = '02 - Descrovi-Iotti-Bosia.pdf'
+    const savedPath = `/Users/test/Downloads/${filename}`
+    const fileMessage = { ...message('$file', filename, 300), mediaUri: 'mxc://example.org/file', mediaType: 'm.file', mediaMime: 'application/pdf', mediaSize: 200_300 }
+    harness.service.History.mockResolvedValueOnce({ messages: [fileMessage], before: 0, hasMore: false })
+    harness.service.SaveMedia.mockResolvedValueOnce(savedPath)
+    const { container } = render(<App />)
 
-    const rendered = render(<App />)
-    const attachment = await waitFor(() => {
-      const element = rendered.container.querySelector('[data-event-id="$late-photo"] .message-attachment')
-      expect(element).toBeTruthy()
+    const fileCard = await waitFor(() => {
+      const element = container.querySelector<HTMLElement>('[data-event-id="$file"] .file-card')
+      if (!element) throw new Error('File card did not render')
       return element
     })
-    intersection.setIntersecting(attachment!, true)
-    await waitFor(() => expect(harness.service.DownloadMedia).toHaveBeenCalledWith(imageMessage.mediaUri))
+    expect(fileCard.querySelector('.file-card-copy strong')?.textContent).toBe(filename)
+    expect(container.querySelector('[data-event-id="$file"] .message-body')).toBeNull()
 
-    rendered.unmount()
-    await act(async () => {
-      resolveMedia('aW1hZ2U=')
-      await Promise.resolve()
-    })
-
-    expect(createObjectURL).not.toHaveBeenCalled()
-  })
-
-  it('revokes a loaded image object URL when its message unmounts', async () => {
-    const imageMessage = { ...message('$unmount-photo', 'Attachment', 300), mediaUri: 'mxc://example.org/unmount-photo', mediaMime: 'image/png', mediaSize: 12 }
-    harness.service.History.mockResolvedValueOnce({ messages: [imageMessage], before: 0, hasMore: false })
-    const intersection = stubImageIntersectionObserver()
-    const revokeObjectURL = vi.fn()
-    vi.stubGlobal('URL', {
-      createObjectURL: vi.fn(() => 'blob:unmount-photo'),
-      revokeObjectURL,
-    })
-
-    const rendered = render(<App />)
-    const attachment = await waitFor(() => {
-      const element = rendered.container.querySelector('[data-event-id="$unmount-photo"] .message-attachment')
-      expect(element).toBeTruthy()
-      return element
-    })
-    intersection.setIntersecting(attachment!, true)
-    await waitFor(() => expect(rendered.container.querySelector('[data-event-id="$unmount-photo"] .media-preview')).toBeTruthy())
-
-    rendered.unmount()
-
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:unmount-photo')
+    await user.click(within(fileCard).getByRole('button', { name: `Download ${filename}` }))
+    expect(harness.service.SaveMedia).toHaveBeenCalledWith(fileMessage.mediaUri, filename)
+    expect(await screen.findByText(`Saved to ${savedPath}`)).toBeTruthy()
   })
 
   it('renders an audio attachment as one player card', async () => {
     const audioMessage = { ...message('$audio', 'Voice message.ogg', 300), mediaUri: 'mxc://example.org/audio', mediaMime: 'audio/ogg', mediaSize: 12 }
     harness.service.History.mockResolvedValueOnce({ messages: [audioMessage], before: 0, hasMore: false })
-    harness.service.DownloadMedia.mockResolvedValueOnce('YXVkaW8=')
-    vi.stubGlobal('URL', {
-      createObjectURL: vi.fn(() => 'blob:audio-preview'),
-      revokeObjectURL: vi.fn(),
-    })
 
     const { container } = render(<App />)
     const card = await waitFor(() => {
@@ -1559,6 +2168,7 @@ describe('room history updates', () => {
     fireEvent.click(card?.querySelector('.media-load') as HTMLButtonElement)
     await waitFor(() => expect(card?.querySelector('audio')).toBeTruthy())
     expect(card?.querySelector('audio')).toBeTruthy()
+    expect(card?.querySelector('audio')?.getAttribute('src')).toBe(`/media/matrix/${encodeURIComponent(room.id)}/${encodeURIComponent('$audio')}`)
     expect(row?.querySelector('.message-body')).toBeNull()
     expect(row?.querySelector('.media-download')).toBeNull()
   })
@@ -1567,11 +2177,6 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     const audioMessage = { ...message('$audio-webm', 'Voice message.mp4', 300), mediaUri: 'mxc://example.org/audio-webm', mediaMime: 'video/mp4', mediaType: 'm.audio', mediaDurationMs: 19_840 }
     harness.service.History.mockResolvedValueOnce({ messages: [audioMessage], before: 0, hasMore: false })
-    harness.service.DownloadMedia.mockResolvedValueOnce('YXVkaW8=')
-    vi.stubGlobal('URL', {
-      createObjectURL: vi.fn(() => 'blob:audio-webm-preview'),
-      revokeObjectURL: vi.fn(),
-    })
 
     const { container } = render(<App />)
     const card = await waitFor(() => {
@@ -1585,6 +2190,7 @@ describe('room history updates', () => {
     expect(card?.querySelector('.audio-player-bar')).toBeTruthy()
     expect(card?.querySelector('video')).toBeNull()
     expect(card?.querySelector('audio')?.hasAttribute('controls')).toBe(false)
+    expect(card?.querySelector('audio')?.getAttribute('src')).toBe(`/media/matrix/${encodeURIComponent(room.id)}/${encodeURIComponent('$audio-webm')}`)
     expect(card?.querySelector('.audio-duration')?.textContent).toBe('0:19')
   })
 
@@ -1640,14 +2246,10 @@ describe('room history updates', () => {
   async function renderRoomWithImageAtBottom() {
     const image = { ...message('$photo', 'Attachment', 300), mediaUri: 'mxc://example.org/photo', mediaMime: 'image/png', mediaSize: 12 }
     harness.service.History.mockResolvedValueOnce({ messages: [message('$older', 'older history', 100), image], before: 0, hasMore: false })
-    vi.stubGlobal('URL', {
-      createObjectURL: vi.fn(() => 'blob:photo-preview'),
-      revokeObjectURL: vi.fn(),
-    })
     const geometry = stubTimelineGeometry(700)
     const { container } = render(<App />)
     await waitFor(() => expect(container.querySelector('[data-event-id="$photo"] .media-preview')).toBeTruthy())
-    const timeline = container.querySelector<HTMLElement>('.timeline-virtual-scroller')!
+    const timeline = screen.getByRole('region', { name: 'Message timeline' })
     expect(timeline.scrollTop).toBe(700)
     return { geometry, timeline }
   }
@@ -1726,14 +2328,15 @@ describe('room history updates', () => {
     await user.click(container.querySelector('.room-button[title="Second room"]')!)
     expect(await screen.findByText('Loading messages')).toBeTruthy()
     expect(screen.queryByText('First room message')).toBeNull()
-    geometrySpies.push(vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(500))
+    const timeline = screen.getByRole('region', { name: 'Message timeline' })
+    Object.defineProperty(timeline, 'scrollHeight', { configurable: true, value: 500 })
 
     await act(async () => {
       resolveSecondPage?.({ messages: [message('$second-latest', 'Second room latest', 200)], before: 0, hasMore: false })
       await secondPage
     })
     expect(await screen.findByText('Second room latest')).toBeTruthy()
-    expect(container.querySelector<HTMLElement>('.timeline-virtual-scroller')?.scrollTop).toBe(500)
+    expect(timeline.scrollTop).toBe(500)
   })
 
   it('uses the same calendar date for yesterday messages in the sidebar and timeline', async () => {
@@ -1823,6 +2426,54 @@ describe('room history updates', () => {
     await user.click(await screen.findByRole('button', { name: 'Load older messages' }))
     expect(await screen.findByText('older after growth')).toBeTruthy()
     expect(harness.service.History).toHaveBeenLastCalledWith(room.id, 20)
+  })
+
+  it('shows typing status below the timeline and above the composer', async () => {
+    const typingUserID = '@aldo:example.org'
+    harness.service.RoomMembers.mockResolvedValue([{ id: typingUserID, displayName: 'aldo rossi' }])
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    act(() => {
+      harness.eventHandlers.get('matrix:update')?.({
+        data: {
+          rooms: [room],
+          timelineChangedRoomId: [],
+          typingUsers: { [room.id]: [typingUserID] },
+          initialSyncComplete: true,
+          needsVerification: false,
+          connectionState: 'connected',
+        },
+      })
+    })
+
+    expect(await screen.findByText('aldo rossi is typing')).toBeTruthy()
+    expect(container.textContent).not.toContain(typingUserID)
+    expect(container.querySelector('.timeline + .typing-indicator + .composer')).not.toBeNull()
+  })
+
+  it('uses the direct-room name when a member has no display name', async () => {
+    const typingUserID = '@aldo:example.org'
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [{ ...room, name: 'aldo rossi' }] })
+    harness.service.RoomMembers.mockResolvedValue([{ id: typingUserID, displayName: typingUserID }])
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    act(() => {
+      harness.eventHandlers.get('matrix:update')?.({
+        data: {
+          rooms: [{ ...room, name: 'aldo rossi' }],
+          timelineChangedRoomId: [],
+          typingUsers: { [room.id]: [typingUserID] },
+          initialSyncComplete: true,
+          needsVerification: false,
+          connectionState: 'connected',
+        },
+      })
+    })
+
+    expect(await screen.findByText('aldo rossi is typing')).toBeTruthy()
+    expect(document.body.textContent).not.toContain(typingUserID)
   })
 
   it('moves room focus with arrows and switches rooms with the primary modifier', async () => {
@@ -1927,10 +2578,7 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
-    const ageInput = screen.getByRole('spinbutton', { name: 'Inactive room age in days' })
-    await user.clear(ageInput)
-    await user.type(ageInput, '30')
-    fireEvent.blur(ageInput)
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Inactive room age' }), '30')
     await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('archive.older_than_days', '30'))
     await user.click(screen.getByRole('button', { name: 'Archive inactive rooms' }))
 
@@ -1939,35 +2587,6 @@ describe('room history updates', () => {
       expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(`room.archived.primary.${staleRoom.id}`, true)
     })
     expect(container.querySelector('.room-list .room-button')?.textContent).toContain(currentRoom.name)
-  })
-
-  it('automatically archives inactive rooms when enabled', async () => {
-    const staleRoom = { ...room, lastEventAt: Date.now() - 100 * 24 * 60 * 60 * 1000 }
-    const currentRoom = { ...secondRoom, lastEventAt: Date.now() }
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [staleRoom, currentRoom] })
-    const user = userEvent.setup()
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-
-    await user.click(screen.getByRole('button', { name: 'Settings' }))
-    await user.click(screen.getByRole('checkbox', { name: /^Automatically archive inactive rooms/ }))
-
-    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('archive.automatic', true))
-    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(`room.archived.primary.${staleRoom.id}`, true))
-  })
-
-  it('requires the inactive-room age to be a whole number within range', async () => {
-    const user = userEvent.setup()
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Settings' }))
-    const ageInput = screen.getByRole('spinbutton', { name: 'Inactive room age in days' })
-    await user.clear(ageInput)
-    await user.type(ageInput, '0')
-    fireEvent.blur(ageInput)
-
-    expect((await screen.findByRole('alert')).textContent).toContain('Enter a whole number from 1 to 3650 days.')
-    expect(harness.service.SetStringPreference).not.toHaveBeenCalledWith('archive.older_than_days', '0')
   })
 
   it('navigates to the next unread room after an explicit mark-read action', async () => {
@@ -2235,6 +2854,7 @@ describe('room history updates', () => {
         await Promise.resolve()
       })
       expect(screen.getByText('Marked Test room answered')).toBeTruthy()
+      expect(container.querySelector('.conversation .chat-notice-stack .triage-toast')).not.toBeNull()
 
       act(() => vi.advanceTimersByTime(9_999))
       expect(screen.getByText('Marked Test room answered')).toBeTruthy()
@@ -2246,8 +2866,23 @@ describe('room history updates', () => {
     }
   })
 
+  it('dismisses an answered notification immediately from the chat area', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [{ ...room, unanswered: true }] })
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    fireEvent.contextMenu(container.querySelector('.room-list .room-button')!, { clientX: 48, clientY: 48 })
+    await user.click(screen.getByRole('menuitem', { name: /Remove from Needs reply/ }))
+
+    expect(await screen.findByText('Marked Test room answered')).toBeTruthy()
+    expect(container.querySelector('.conversation .chat-notice-stack .triage-toast')).not.toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Dismiss notification' }))
+    expect(screen.queryByText('Marked Test room answered')).toBeNull()
+  })
+
   it('dismisses scheduled reminder notices after 10 seconds', async () => {
-    render(<App />)
+    const { container } = render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
     vi.useFakeTimers()
     try {
@@ -2256,6 +2891,7 @@ describe('room history updates', () => {
         await Promise.resolve()
       })
       expect(screen.getByText('Test room: Take a break')).toBeTruthy()
+      expect(container.querySelector('.conversation .chat-notice-stack .scheduled-notice')).not.toBeNull()
 
       act(() => vi.advanceTimersByTime(9_999))
       expect(screen.getByText('Test room: Take a break')).toBeTruthy()
@@ -2315,6 +2951,7 @@ describe('room history updates', () => {
       'System default',
       'Light (light)',
       'Dark (dark)',
+      'VS Code (dark)',
       'OLED black (dark)',
       'Bosco (light)',
       'Rosa (light)',
@@ -2324,6 +2961,11 @@ describe('room history updates', () => {
       'Solarized (light)',
       'Sepia (light)',
     ])
+
+    await user.selectOptions(themeSelect, 'VS Code')
+    expect(container.querySelector('.app-shell')?.getAttribute('data-theme')).toBe('vs-code')
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('appearance.theme', 'VS Code'))
+    expect(screen.getByText(/VS Code is a dark theme\./)).toBeTruthy()
 
     await user.selectOptions(themeSelect, 'Bosco')
     expect(container.querySelector('.app-shell')?.getAttribute('data-theme')).toBe('bosco')
@@ -2436,6 +3078,28 @@ describe('room history updates', () => {
     await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('appearance.zoom', '100'))
   })
 
+  it('toggles Incognito blur with the privacy shortcut and preserves the draft', async () => {
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const appShell = container.querySelector('.app-shell')!
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'private draft' } })
+    composer.focus()
+
+    fireEvent.keyDown(composer, { key: 'p', metaKey: true, shiftKey: true })
+    await waitFor(() => expect(appShell.getAttribute('data-incognito')).toBe('true'))
+    expect(screen.queryByRole('button', { name: 'Show screen content' })).toBeNull()
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('privacy.incognito', true))
+    expect(composer.value).toBe('private draft')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(window, { key: 'p', metaKey: true, shiftKey: true })
+    await waitFor(() => expect(appShell.getAttribute('data-incognito')).toBe('false'))
+    expect(screen.queryByRole('button', { name: 'Show screen content' })).toBeNull()
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('privacy.incognito', false))
+    expect(composer.value).toBe('private draft')
+  })
+
   it('opens keyboard help and focuses room search with unmodified shortcuts', async () => {
     const user = userEvent.setup()
     const { container } = render(<App />)
@@ -2462,6 +3126,37 @@ describe('room history updates', () => {
     expect((await screen.findByRole('tab', { name: 'Keyboard' })).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('Navigate the focused timeline')).toBeTruthy()
     expect(screen.getByText('Reply to the focused message')).toBeTruthy()
+    expect(screen.getByText('Toggle Incognito blur')).toBeTruthy()
+  })
+
+  it('disables spelling correction in search and filter inputs', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    const expectNoCorrection = (input: HTMLElement) => {
+      expect(input.getAttribute('spellcheck')).toBe('false')
+      expect(input.getAttribute('autocorrect')).toBe('off')
+      expect(input.getAttribute('autocapitalize')).toBe('off')
+    }
+    expectNoCorrection(screen.getByRole('textbox', { name: 'Find a room' }))
+
+    fireEvent.keyDown(container.querySelector('.app-shell')!, { key: 'k', ctrlKey: true })
+    const quickSearch = await screen.findByRole('textbox', { name: 'Search rooms' })
+    expectNoCorrection(quickSearch)
+    fireEvent.keyDown(quickSearch, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Quick switcher' })).toBeNull())
+
+    await user.click(screen.getByRole('button', { name: 'Search messages' }))
+    const messageSearch = await screen.findByRole('textbox', { name: 'Search local message history' })
+    expectNoCorrection(messageSearch)
+    await user.click(screen.getByText('Filters'))
+    expectNoCorrection(screen.getByRole('textbox', { name: 'Filter by sender' }))
+    fireEvent.keyDown(messageSearch, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Search local message history' })).toBeNull())
+
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    expectNoCorrection(screen.getByRole('searchbox', { name: 'Search settings' }))
   })
 
   it('searches all chats, paginates results, and opens the matching message', async () => {
@@ -2577,23 +3272,6 @@ describe('room history updates', () => {
     expect(harness.service.ScheduleMessage.mock.calls[0][2]).toBeGreaterThan(Date.now())
   })
 
-  it('schedules a composer draft to repeat weekly until cancelled', async () => {
-    const user = userEvent.setup()
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-
-    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'weekly update')
-    await user.click(screen.getByRole('button', { name: 'Schedule message' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Schedule message' })
-    expect(within(dialog).getByText('Sends every week on the selected day and time until cancelled.')).toBeTruthy()
-    await user.click(within(dialog).getByRole('checkbox', { name: 'Repeat weekly' }))
-    expect(within(dialog).getByText(/Repeats every /)).toBeTruthy()
-    await user.click(within(dialog).getByRole('button', { name: 'Schedule message' }))
-
-    await waitFor(() => expect(harness.service.ScheduleRecurringMessage).toHaveBeenCalledWith(room.id, 'weekly update', expect.any(Number)))
-    expect(harness.service.ScheduleMessage).not.toHaveBeenCalled()
-  })
-
   it('holds a sent message until the undo window is cancelled', async () => {
     const user = userEvent.setup()
     harness.service.SendMessage.mockClear()
@@ -2667,7 +3345,6 @@ describe('room history updates', () => {
       encrypted: true,
     }
     harness.service.History.mockResolvedValueOnce({ messages: [incomingMessage, outgoingMessage], before: 0, hasMore: false })
-    harness.service.DownloadAvatar.mockResolvedValue('data:image/png;base64,avatar')
     const { container } = render(<App />)
 
     expect(await screen.findByText('hello from alice')).toBeTruthy()
@@ -2676,7 +3353,6 @@ describe('room history updates', () => {
     expect(container.querySelector('.message-row .message-avatar')).toBeNull()
     expect(container.querySelector('.message-row img')).toBeNull()
     expect(screen.queryByTitle('Encrypted message')).toBeNull()
-    expect(harness.service.DownloadAvatar).not.toHaveBeenCalledWith('mxc://example.org/me-avatar')
   })
 
   it('refreshes the room preview after sending a message', async () => {
@@ -2693,6 +3369,112 @@ describe('room history updates', () => {
 
     await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, 'sent from the composer'))
     await waitFor(() => expect(container.querySelector('.room-preview')?.textContent).toBe('sent from the composer'))
+  })
+
+  it('replaces emoticons as you type when enabled in Keyboard settings', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [{ ...room, direct: false }], preferences: { 'emoji.replace_emoticons': true } })
+    render(<App />)
+
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.type(composer, 'Hi :)')
+
+    expect(composer.value).toBe('Hi 🙂')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('holds a concerning draft and sends the calmer alternative', async () => {
+    const user = userEvent.setup()
+    const toneRoom = { ...room, direct: false }
+    const draft = 'This message has enough words to make the optional tone review run.'
+    const calmer = 'Could we review the plan together?'
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [toneRoom], preferences: { [`room.tone_guard.${room.id}`]: true } })
+    harness.service.History.mockResolvedValueOnce({
+      messages: [
+        message('$oldest', 'Earlier context should not be included.', 100),
+        message('$incoming-one', 'Can you explain the change?', 200),
+        message('$incoming-two', 'You never listen when I explain the issue.', 300),
+      ],
+      before: 0,
+      hasMore: false,
+    })
+    harness.service.CheckMessageTone.mockResolvedValueOnce(JSON.stringify({
+      is_hostile_or_unprofessional: true,
+      severity: 'MEDIUM',
+      tone_tags: ['accusatory'],
+      calmer_alternative: calmer,
+    }))
+    render(<App />)
+
+    expect(await screen.findByText('You never listen when I explain the issue.')).toBeTruthy()
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.type(composer, draft)
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    expect(await screen.findByRole('alert', { name: 'Tone Guard warning' })).toBeTruthy()
+    expect(composer.value).toBe(draft)
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    const request = harness.service.CheckMessageTone.mock.calls[0][0]
+    expect(JSON.parse(request[1].content)).toEqual({
+      draft,
+      recent_incoming_messages: ['Can you explain the change?', 'You never listen when I explain the issue.'],
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Replace & Send' }))
+    await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, calmer))
+    expect(composer.value).toBe('')
+  })
+
+  it('allows Send Anyway and cancels a hold with Escape', async () => {
+    const user = userEvent.setup()
+    const toneRoom = { ...room, direct: false }
+    const draft = 'This message contains enough words to trigger the configured tone review.'
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [toneRoom], preferences: { [`room.tone_guard.${room.id}`]: true } })
+    harness.service.CheckMessageTone.mockResolvedValue(JSON.stringify({
+      is_hostile_or_unprofessional: true,
+      severity: 'HIGH',
+      tone_tags: ['insulting'],
+      calmer_alternative: 'I see this differently; can we discuss it?'
+    }))
+    render(<App />)
+
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.type(composer, draft)
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    let warning = await screen.findByRole('alert', { name: 'Tone Guard warning' })
+    fireEvent.keyDown(warning, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('alert', { name: 'Tone Guard warning' })).toBeNull())
+    expect(composer.value).toBe(draft)
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    warning = await screen.findByRole('alert', { name: 'Tone Guard warning' })
+    await user.click(within(warning).getByRole('button', { name: 'Send Anyway' }))
+    await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, draft))
+  })
+
+  it('accepts the calmer alternative with Enter and fails open when the local model errors', async () => {
+    const user = userEvent.setup()
+    const toneRoom = { ...room, direct: false }
+    const draft = 'This message has enough words to trigger the tone review.'
+    const calmer = 'Could we talk through this together?'
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [toneRoom], preferences: { [`room.tone_guard.${room.id}`]: true } })
+    harness.service.CheckMessageTone
+      .mockResolvedValueOnce(JSON.stringify({ is_hostile_or_unprofessional: true, severity: 'HIGH', tone_tags: [], calmer_alternative: calmer }))
+      .mockRejectedValueOnce(new Error('local model unavailable'))
+    render(<App />)
+
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.type(composer, draft)
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    const warning = await screen.findByRole('alert', { name: 'Tone Guard warning' })
+    fireEvent.keyDown(warning, { key: 'Enter' })
+    await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, calmer))
+
+    await user.type(composer, draft)
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, draft))
+    expect(screen.queryByRole('alert', { name: 'Tone Guard warning' })).toBeNull()
   })
 
   it('uses the configured time suggestions in the schedule dialog', async () => {
@@ -2963,28 +3745,6 @@ describe('room history updates', () => {
     await waitFor(() => expect(harness.service.CancelScheduledJob).toHaveBeenCalledWith('scheduled-1'))
   })
 
-  it('shows the weekly recurrence for a scheduled message', async () => {
-    const user = userEvent.setup()
-    harness.service.ScheduledJobs.mockResolvedValue([{
-      id: 'weekly-1',
-      kind: 'message',
-      roomId: room.id,
-      text: 'weekly update',
-      eventId: '',
-      dueAt: Date.now() + 60_000,
-      createdAt: Date.now(),
-      status: 'pending',
-      error: '',
-      repeatWeekly: true,
-    }])
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-
-    await user.click(screen.getByRole('button', { name: 'Scheduled messages and reminders' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Scheduled messages and reminders' })
-    expect(within(dialog).getByText(/Repeats every .* until cancelled/)).toBeTruthy()
-  })
-
   it('surfaces a due reminder and keeps it available in the queue', async () => {
     const user = userEvent.setup()
     const reminder = {
@@ -3053,6 +3813,32 @@ describe('room history updates', () => {
     await waitFor(() => expect(screen.queryByRole('menu', { name: 'Message actions' })).toBeNull())
     expect(container.querySelector('.message-context-scrim')).toBeNull()
     expect(target?.classList.contains('is-context-target')).toBe(false)
+  })
+
+  it('opens message actions when right-clicking selected bubble text', async () => {
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const body = container.querySelector<HTMLElement>('[data-event-id="$latest"] .message-body')
+    if (!body) throw new Error('Message body did not render')
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(body)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    fireEvent.contextMenu(body, { clientX: 48, clientY: 48 })
+
+    expect(await screen.findByRole('menu', { name: 'Message actions' })).toBeTruthy()
+  })
+
+  it('marks a Matrix reply even when its original message preview is unavailable', async () => {
+    const reply = { ...message('$reply', 'Reply text', 300), replyToEventId: '$missing-parent' }
+    harness.service.History.mockResolvedValueOnce({ messages: [reply], before: 0, hasMore: false })
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('Reply text')).toBeTruthy()
+    const preview = container.querySelector('[data-event-id="$reply"] .reply-preview')
+    expect(preview?.textContent).toContain('Original message unavailable')
   })
 
   it('persists a bookmark toggle for a message', async () => {

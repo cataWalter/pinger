@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log"
+	"net/http"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -13,15 +15,12 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
-	"mychat/datadir"
-	"mychat/logging"
 	"mychat/matrix"
 	"mychat/notifications"
 	sharedpreferences "mychat/preferences"
 )
 
 const (
-	updateEventName             = "matrix:update"
 	hostErrorEventName          = "matrix:host-error"
 	attachmentSentEventName     = "matrix:attachment-sent"
 	preferencesUpdateEventName  = "preferences:update"
@@ -32,7 +31,7 @@ const (
 	applicationMenuSearchName   = "application-menu:search"
 )
 
-func Run(client *matrix.Client, assets fs.FS, icon []byte, dataDir, defaultDataDir, preferencesPath, mediaCacheDir string) error {
+func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, defaultDataDir, preferencesPath, mediaCacheDir string) error {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		return fmt.Errorf("open embedded frontend assets: %w", err)
@@ -43,7 +42,7 @@ func Run(client *matrix.Client, assets fs.FS, icon []byte, dataDir, defaultDataD
 	}
 	if preferencesPath != "" {
 		if _, importErr := sharedPreferences.ImportLegacy(preferencesPath, primaryAccountID); importErr != nil {
-			logging.For("app").Warn().Err(importErr).Msg("could not import legacy preferences")
+			log.Printf("could not import legacy preferences: %v", importErr)
 		}
 	}
 	scheduledJobs, err := newScheduledJobStore(filepath.Join(filepath.Dir(preferencesPath), "scheduled-jobs.json"))
@@ -54,64 +53,55 @@ func Run(client *matrix.Client, assets fs.FS, icon []byte, dataDir, defaultDataD
 
 	ctx, cancel := context.WithCancel(context.Background())
 	notifier := notifications.New()
-	service := &AppService{client: client, sharedPreferences: sharedPreferences, notifier: notifier, ctx: ctx, cancel: cancel, scheduled: scheduledJobs}
-	service.dataDir = dataDir
-	service.defaultDataDir = defaultDataDir
+	service := &AppService{client: client, dataDir: dataDir, defaultDataDir: defaultDataDir, sharedPreferences: sharedPreferences, notifier: notifier, ctx: ctx, cancel: cancel, scheduled: scheduledJobs}
 	if err = service.initializeAccounts(dataDir, mediaCacheDir); err != nil {
 		cancel()
 		_ = sharedPreferences.Close()
 		client.Close()
 		return fmt.Errorf("initialize Matrix accounts: %w", err)
 	}
-	accounts := service.accountClientsSnapshot()
-	logging.For("app").Info().
-		Int("accounts", len(accounts)).
-		Bool("logged_in", anyLoggedInAccount(accounts)).
-		Msg("desktop application initialized")
 	var shutdownOnce sync.Once
 	shutdown := func() {
 		shutdownOnce.Do(func() {
-			logging.For("app").Info().Msg("shutting down desktop application")
 			service.close()
 			service.closeAccountClients()
 			if lifecycle, ok := notifier.(notifications.Lifecycle); ok {
 				if closeErr := lifecycle.Close(); closeErr != nil {
-					logging.For("app").Warn().Err(closeErr).Msg("stop native notifications")
-				}
-			}
-			// The databases are closed, so a data folder the user picked in the settings
-			// can be applied now.
-			if defaultDataDir != "" {
-				if _, moveErr := datadir.ApplyPending(defaultDataDir); moveErr != nil {
-					logging.For("app").Error().Err(moveErr).Msg("move application data")
-				}
-			}
-			if service.restartRequested.Load() {
-				if restartErr := relaunch(); restartErr != nil {
-					logging.For("app").Error().Err(restartErr).Msg("restart Pinger")
+					log.Printf("stop native notifications: %v", closeErr)
 				}
 			}
 		})
 	}
+	staticAssets := application.AssetFileServerFS(frontend)
+	mediaAssets := newMediaAssetHandler(service)
 
 	app := application.New(application.Options{
 		Name:        "Pinger",
 		Description: "A Matrix desktop client",
-		Icon:        icon,
-		Linux: application.LinuxOptions{
-			ApplicationID: "fi.mau.pinger",
-		},
 		Services: []application.Service{
 			application.NewService(service),
+			application.NewService(NewTurkishTutorService(service)),
 		},
 		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(frontend),
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.URL.Path, mediaAssetPathPrefix) {
+					mediaAssets.ServeHTTP(w, r)
+					return
+				}
+				staticAssets.ServeHTTP(w, r)
+			}),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 		OnShutdown: shutdown,
 	})
+	app.SetIcon(applicationIcon)
+	eventBatcher := NewEventBatcher(ctx, defaultEventBatchFlushInterval)
+	eventBatcher.SetEmitter(func(eventName string, payload BatchedPayload) {
+		app.Event.Emit(eventName, payload)
+	})
+	eventBatcher.Start(ctx)
 	service.openURL = func(url string) error {
 		if runtime.GOOS != "darwin" {
 			return app.Browser.OpenURL(url)
@@ -127,7 +117,7 @@ func Run(client *matrix.Client, assets fs.FS, icon []byte, dataDir, defaultDataD
 	}
 	if lifecycle, ok := notifier.(notifications.Lifecycle); ok {
 		if startErr := lifecycle.Start(ctx); startErr != nil {
-			logging.For("app").Warn().Err(startErr).Msg("native notifications unavailable")
+			log.Printf("native notifications unavailable: %v", startErr)
 		}
 	}
 	service.quit = app.Quit
@@ -142,7 +132,7 @@ func Run(client *matrix.Client, assets fs.FS, icon []byte, dataDir, defaultDataD
 	}
 	launchAtStartup, _ := service.preferenceValues()["system.launch_at_startup"].(bool)
 	if err = service.setAutostart(launchAtStartup); err != nil {
-		logging.For("app").Warn().Err(err).Msg("apply launch-at-startup preference")
+		log.Printf("apply launch at startup preference: %v", err)
 	}
 
 	// The menu-bar icon is the only way to reopen a hidden window, so hiding to tray and starting minimized require it.
@@ -173,16 +163,7 @@ func Run(client *matrix.Client, assets fs.FS, icon []byte, dataDir, defaultDataD
 	}
 
 	icons := trayIcons()
-	if runtime.GOOS == "linux" {
-		linuxIcons, iconErr := linuxTrayIcons()
-		if iconErr != nil {
-			logging.For("app").Warn().Err(iconErr).Msg("could not prepare Linux system tray icon")
-		} else {
-			icons = linuxIcons
-		}
-	}
 	tray := app.SystemTray.New()
-	tray.SetLabel("Pinger")
 	var trayHasUnread atomic.Bool
 	var trayDarkMode atomic.Bool
 	trayDarkMode.Store(app.Env.IsDarkMode())
@@ -230,7 +211,7 @@ func Run(client *matrix.Client, assets fs.FS, icon []byte, dataDir, defaultDataD
 	markAllRoomsRead := func() {
 		go func() {
 			if markErr := service.markAllRead(); markErr != nil && service.ctx.Err() == nil {
-				logging.For("app").Error().Err(markErr).Msg("mark all rooms as read")
+				log.Printf("mark all rooms as read: %v", markErr)
 				app.Event.Emit(hostErrorEventName, map[string]string{"error": markErr.Error()})
 			}
 		}()
@@ -309,7 +290,6 @@ func Run(client *matrix.Client, assets fs.FS, icon []byte, dataDir, defaultDataD
 
 	emitHostError := func(hostErr error) {
 		if hostErr != nil {
-			logging.For("app").Warn().Err(hostErr).Msg("desktop operation failed")
 			app.Event.Emit(hostErrorEventName, map[string]string{"error": hostErr.Error()})
 		}
 	}
@@ -356,22 +336,31 @@ func Run(client *matrix.Client, assets fs.FS, icon []byte, dataDir, defaultDataD
 			}
 			lastUnread = unread
 		}
-		app.Event.Emit(updateEventName, update)
+		eventBatcher.EnqueueUpdate(update)
 	})
+	service.emitRelationshipHealth = func(update RelationshipHealthSnapshot) {
+		app.Event.Emit(relationshipHealthEventName, update)
+	}
+	service.emitRelationshipDecay = func(update RelationshipDecaySnapshot) {
+		app.Event.Emit(relationshipDecayEventName, update)
+	}
+	service.emitContactDossier = func(update ContactDossierSnapshot) {
+		app.Event.Emit(contactDossierEventName, update)
+	}
 	service.startPreferencePump(func(state Snapshot) {
 		app.Event.Emit(preferencesUpdateEventName, state)
 	})
 	service.startScheduledJobWorker()
+	service.startRelationshipDecayWorker()
 
-	logging.For("app").Info().Msg("starting Wails desktop window")
 	service.startSync()
 
 	err = app.Run()
 	shutdown()
-	if err != nil {
-		logging.For("app").Error().Err(err).Msg("Wails desktop window stopped with an error")
-	} else {
-		logging.For("app").Info().Msg("Wails desktop window closed")
+	if service.restartRequested.Load() {
+		if restartErr := relaunch(); restartErr != nil {
+			return fmt.Errorf("restart Pinger: %w", restartErr)
+		}
 	}
 	return err
 }

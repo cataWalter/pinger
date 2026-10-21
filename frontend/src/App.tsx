@@ -1,13 +1,13 @@
-import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactElement, type ReactNode } from 'react'
+import { Fragment, lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Events } from '@wailsio/runtime'
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import {
   ArrowDown,
   ArrowLeft,
   ArrowUpRight,
   Archive,
   ArchiveRestore,
+  ChevronDown,
   Bell,
   BellOff,
   BellRing,
@@ -39,25 +39,37 @@ import {
   Download,
   EyeOff,
   HardDrive,
+  HeartHandshake,
+  Images,
   LogOut,
   Mic,
+  PanelRight,
   Plus,
   Upload,
   Square,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
-import { AppService } from '../bindings/mychat/desktop'
-import type { AIMessage, DataLocation, Device, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, UpdateStatus } from '../bindings/mychat/desktop/models.js'
-import { emojiQueryAt, insertEmoji, replaceEmoticons, suggestEmoji, wrapSelection, type EmojiQuery } from './composerText'
+import { AppService, GhostwriterMode as GhostwriterRequestMode, TurkishTutorService } from '../bindings/mychat/desktop'
+import type { AIMessage, Device, GhostSuggestion as GhostwriterSuggestion, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, RelationshipDecayContact, RelationshipDecaySnapshot, RelationshipHealthPoint, RelationshipHealthSnapshot, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, TutorAnalysis, UpdateStatus } from '../bindings/mychat/desktop/models.js'
+import { createBusyReplyForLanguage, detectBusyReplyLanguage, ENGLISH_BUSY_REPLY_TEMPLATE, hasBusyReplyTemplate } from './busyMode'
+import { emojiQueryAt, insertEmoji, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, wrapSelection, type EmojiQuery } from './composerText'
 import { fuzzyScore } from './fuzzy'
+import { appendGhostCompletion, ghostwriterDefaultEndpoints, isGhostCommandDraft, isLoopbackEndpoint, parseGhostCommand, type GhostwriterProvider } from './ghostwriter'
 import { SYSTEM_THEME_NAME, defaultBubbleColorForTheme, findThemeByName, themeIdForPreference, themes as appearanceThemes } from './themes'
 import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
-import { EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, boundedTranscript, buildAgentPrompt, buildChatTranslationPrompt, buildConversationAnalysisPrompt, buildExplainPrompt, buildReplyPrompt, buildRewritePrompt, buildTopicInsightsPrompt, parseChatAgents, serializeChatAgents, splitChatTranslationBatches, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage } from './aiPrompts'
+import { expandSnippetContent, findSnippetBoundaryMatch, findSnippetMatch, matchingSnippets, type SnippetMatch } from './snippetExpander'
+import { createSnippetID, loadSnippets, mergeImportedSnippets, parseSnippetImport, saveSnippets, serializeSnippets, type Snippet, type SnippetDraft } from './snippets'
+import { ChatTranslationResponseError, EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, boundedTranscript, buildAgentPrompt, buildChatTranslationPrompt, buildConversationAnalysisPrompt, buildExplainPrompt, buildReplyPrompt, buildRewritePrompt, buildTopicInsightsPrompt, parseChatAgents, parseChatTranslationResponse, serializeChatAgents, splitChatTranslationBatches, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage } from './aiPrompts'
+import { parseToneAssessment, shouldCheckToneGuard, TONE_GUARD_SYSTEM_PROMPT, type ToneAssessment } from './toneGuard'
+import { matrixMediaURL, matrixMXCMediaURL } from './ChatMediaRenderer'
+import { useMatrixBatch } from './useMatrixBatch'
+import ContactHUD from './ContactHUD'
 const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
 
 type MatrixUpdate = {
   rooms: Room[]
+  slidingSyncListCounts?: Record<string, number> | null
   timelineChangedRoomId: string[] | null
   typingUsers?: Record<string, string[]> | null
   notifications?: MatrixNotification[] | null
@@ -82,10 +94,80 @@ type RoomRefinements = { unanswered: boolean; favorite: boolean }
 type PendingSend = { roomID: string; text: string; replyTo: Message | null; mentionUserIDs: string[]; mentionBindings: { token: string; userID: string }[]; timer: number }
 type MessageMenuItem = { key: string; label: string; ariaLabel: string; icon: ReactElement; danger?: boolean; disabled?: boolean; separatorBefore?: boolean; run: () => void }
 type AIAcceptAction = { kind: 'none' } | { kind: 'draft' | 'rewrite' } | { kind: 'reply'; target: Message }
-type AIPanel = { title: string; busy: boolean; result: string; error: string; acceptAction: AIAcceptAction; status?: string; placement?: 'dialog' | 'timeline'; roomID?: string }
+type AIPanel = { title: string; busy: boolean; result: string; error: string; acceptAction: AIAcceptAction; status?: string }
+type TurkishTutorState = { mode: 'draft' | 'message'; originalText: string; analysis: TutorAnalysis | null; busy: boolean; error: string }
+type ChatTranslationState = { requestID: number; roomID: string; targetMessageIDs: string[]; translations: Record<string, string>; busy: boolean; status: string; error: string; errorResponse: string | null }
+type GhostwriterChipState = { roomID: string; messageID: string; status: 'loading' | 'offline' | 'ready'; suggestions: GhostwriterSuggestion[] }
+type GhostwriterCompletionState = { roomID: string; draft: string; text: string }
+type ToneGuardSource = 'composer' | 'queued' | 'forward'
+type ToneGuardHold = {
+  message: Pick<PendingSend, 'roomID' | 'text' | 'replyTo' | 'mentionUserIDs'>
+  assessment: ToneAssessment
+  source: ToneGuardSource
+  mentionBindings: { token: string; userID: string }[]
+}
+type SnippetUndo = { roomID: string; originalText: string; expandedText: string; originalCaret: number; pendingCaret: number; expandedCaret: number }
 type ScheduledDraft =
   | { kind: 'message'; roomID: string; text: string; replyToEventID?: string; replyToSender?: string; replyToPreview?: string }
   | { kind: 'reminder'; roomID: string; eventID: string; text: string; archiveAfter?: boolean }
+type MediaGalleryFilter = 'all' | 'images' | 'videos' | 'audio' | 'files'
+const MEDIA_GALLERY_FILTERS: { value: MediaGalleryFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'images', label: 'Images' },
+  { value: 'videos', label: 'Videos' },
+  { value: 'audio', label: 'Audio' },
+  { value: 'files', label: 'Files' },
+]
+
+function textareaCaretPoint(textarea: HTMLTextAreaElement, position: number) {
+  const bounds = textarea.getBoundingClientRect()
+  const computed = window.getComputedStyle(textarea)
+  const mirror = document.createElement('div')
+  const properties = [
+    'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant', 'letter-spacing', 'word-spacing',
+    'line-height', 'text-transform', 'text-indent', 'padding-top', 'padding-right', 'padding-bottom',
+    'padding-left', 'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
+    'tab-size', 'direction',
+  ]
+  mirror.style.position = 'fixed'
+  mirror.style.left = `${bounds.left - textarea.scrollLeft}px`
+  mirror.style.top = `${bounds.top - textarea.scrollTop}px`
+  mirror.style.width = `${bounds.width}px`
+  mirror.style.boxSizing = 'border-box'
+  mirror.style.whiteSpace = 'pre-wrap'
+  mirror.style.overflowWrap = 'break-word'
+  mirror.style.visibility = 'hidden'
+  mirror.style.overflow = 'hidden'
+  for (const property of properties) mirror.style.setProperty(property, computed.getPropertyValue(property))
+  const marker = document.createElement('span')
+  marker.textContent = '\u200b'
+  mirror.append(document.createTextNode(textarea.value.slice(0, position)), marker)
+  document.body.append(mirror)
+  const markerBounds = marker.getBoundingClientRect()
+  const lineHeight = Number.parseFloat(computed.lineHeight) || Number.parseFloat(computed.fontSize) * 1.55 || 20
+  mirror.remove()
+  return { left: markerBounds.left, top: markerBounds.top, lineHeight }
+}
+
+function mediaGalleryCategory(message: Message): Exclude<MediaGalleryFilter, 'all'> {
+  if (message.mediaMime.startsWith('audio/') || message.mediaType === 'm.audio') return 'audio'
+  if (message.mediaMime.startsWith('image/') || message.mediaType === 'm.image') return 'images'
+  if (message.mediaMime.startsWith('video/') || message.mediaType === 'm.video') return 'videos'
+  return 'files'
+}
+
+function filterMediaGalleryItems(items: Message[], filter: MediaGalleryFilter) {
+  return filter === 'all' ? items : items.filter((message) => mediaGalleryCategory(message) === filter)
+}
+
+function hasGalleryMedia(message: Message) {
+  return Boolean(message.mediaUri && !message.redacted && !message.decryptionError)
+}
+
+function mediaGalleryMessageKey(message: Message) {
+  return message.id || message.transactionId || `${message.timestamp}:${message.sender}:${message.mediaUri}:${message.body}`
+}
+
 type TimelineMessageActions = {
   onDoubleClick: (message: Message) => void
   onOpenContextMenu: (message: Message, x: number, y: number) => void
@@ -94,7 +176,6 @@ type TimelineMessageActions = {
   onUseTranscript: (text: string) => void
   onSendReaction: (message: Message, emoji: string) => void
 }
-type TimelineListContext = { header: ReactNode; footer: ReactNode }
 type RoomButtonActions = {
   onSelect: (room: Room, index: number, event: React.MouseEvent<HTMLButtonElement>) => void
   onKeyDown: (room: Room, index: number, event: KeyboardEvent<HTMLButtonElement>) => void
@@ -106,6 +187,8 @@ const EMPTY_ROOMS: Room[] = []
 const MAX_CACHED_AVATARS = 128
 const MAX_MISSING_AVATARS = 512
 const ROOM_LIST_VIRTUALIZATION_THRESHOLD = 100
+const ROOM_LIST_RANGE_PREFETCH = 20
+const ROOM_LIST_MAX_SYNC_RANGE = 200
 
 function cachedAvatarSource(uri: string) {
   const cached = avatarSources.get(uri)
@@ -117,6 +200,7 @@ function cachedAvatarSource(uri: string) {
 }
 
 function cacheMissingAvatar(uri: string) {
+  avatarSources.delete(uri)
   missingAvatarSources.delete(uri)
   missingAvatarSources.add(uri)
   if (missingAvatarSources.size > MAX_MISSING_AVATARS) {
@@ -131,6 +215,24 @@ function newestPersistentMessage(messages: Message[]) {
     if (message.id && !message.id.startsWith('~')) return message
   }
   return null
+}
+
+function isMatrixUserID(value: string) {
+  return /^@[^:\s]+:[^\s]+$/.test(value.trim())
+}
+
+function formatTypingStatus(userIDs: string[], members: Member[], messages: Message[], directRoomName: string) {
+  if (userIDs.length === 0) return ''
+  const names = userIDs.map((userID) => {
+    const memberName = members.find((member) => member.id === userID)?.displayName.trim()
+    if (memberName && !isMatrixUserID(memberName)) return memberName
+    const senderName = messages.find((message) => message.sender === userID && message.senderName.trim())?.senderName.trim()
+    if (senderName && !isMatrixUserID(senderName)) return senderName
+    const roomName = directRoomName.trim()
+    return roomName && !isMatrixUserID(roomName) ? roomName : 'Someone'
+  })
+  if (names.length === 1) return `${names[0]} is typing`
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} are typing`
 }
 
 function newestOtherAvatar(messages: Message[]) {
@@ -183,7 +285,6 @@ function avatarStyle(label: string) {
 
 const avatarSources = new Map<string, string>()
 const missingAvatarSources = new Set<string>()
-const avatarRequests = new Map<string, Promise<string | null>>()
 const mediaVisibilityCallbacks = new Map<Element, (isNearViewport: boolean) => void>()
 let mediaVisibilityObserver: IntersectionObserver | null = null
 
@@ -215,27 +316,17 @@ function loadAvatarSource(uri: string) {
   if (cached) return Promise.resolve(cached)
   if (missingAvatarSources.has(uri)) return Promise.resolve(null)
 
-  let request = avatarRequests.get(uri)
-  if (!request) {
-    request = AppService.DownloadAvatar(uri)
-      .then((source) => {
-        if (source?.startsWith('data:image/')) {
-          avatarSources.delete(uri)
-          avatarSources.set(uri, source)
-          if (avatarSources.size > MAX_CACHED_AVATARS) {
-            const oldest = avatarSources.keys().next().value
-            if (oldest) avatarSources.delete(oldest)
-          }
-          return source
-        }
-        cacheMissingAvatar(uri)
-        return null
-      })
-      .catch(() => null)
-      .finally(() => avatarRequests.delete(uri))
-    avatarRequests.set(uri, request)
+  const source = matrixMXCMediaURL(uri)
+  if (!source) {
+    cacheMissingAvatar(uri)
+    return Promise.resolve(null)
   }
-  return request
+  avatarSources.set(uri, source)
+  if (avatarSources.size > MAX_CACHED_AVATARS) {
+    const oldest = avatarSources.keys().next().value
+    if (oldest) avatarSources.delete(oldest)
+  }
+  return Promise.resolve(source)
 }
 
 function Avatar({ uri, label, className, style, deferLoad = false }: {
@@ -288,7 +379,10 @@ function Avatar({ uri, label, className, style, deferLoad = false }: {
 
   return (
     <div ref={avatarRef} className={className} style={style}>
-      {source ? <img className="avatar-image" src={source} alt="" /> : initials(label)}
+      {source ? <img className="avatar-image" src={source} alt="" onError={() => {
+        if (uri) cacheMissingAvatar(uri)
+        setSource(null)
+      }} /> : initials(label)}
     </div>
   )
 }
@@ -319,14 +413,6 @@ function localDateTimeInputValue(timestamp: number) {
 
 function formatScheduledTime(timestamp: number) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(timestamp))
-}
-
-function formatWeeklySchedule(timestamp: number) {
-  if (!Number.isFinite(timestamp)) return 'Select a send date and time'
-  const date = new Date(timestamp)
-  const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(date)
-  const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date)
-  return `Repeats every ${weekday} at ${time}`
 }
 
 function preferenceBoolean(preferences: PreferenceValues, key: string, fallback = false) {
@@ -420,100 +506,66 @@ function mergeTimelineMessages(current: Message[], incoming: Message[]) {
   return merged.sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id))
 }
 
+function timelineMessageID(message: Message) {
+  return message.id || message.transactionId
+}
+
+function isOwnMessage(message: Message, currentUserID: string) {
+  return message.own || Boolean(message.sender && message.sender === currentUserID)
+}
+
 const TimelineMessageList = memo(function TimelineMessageList({
   messages,
   hideDeleted,
   preferences,
   currentUserID,
   selectedRoomID,
+  chatTranslation,
   contextMessageID,
   reactingMessageID,
   autoPlayNextMessageId,
   canUseTranscriptAsDraft,
   actionsRef,
-  listRef,
-  firstItemIndex,
-  isFollowing,
-  onAtBottomChange,
-  onStartReached,
-  header,
-  footer,
-  scrollRef,
 }: {
   messages: Message[]
   hideDeleted: boolean
   preferences: PreferenceValues
   currentUserID: string
   selectedRoomID: string
+  chatTranslation: ChatTranslationState | null
   contextMessageID: string
   reactingMessageID: string
   autoPlayNextMessageId: string | null
   canUseTranscriptAsDraft: boolean
   actionsRef: { current: TimelineMessageActions }
-  listRef: { current: VirtuosoHandle | null }
-  firstItemIndex: number
-  isFollowing: () => boolean
-  onAtBottomChange: (atBottom: boolean) => void
-  onStartReached: () => void
-  header: ReactNode
-  footer: ReactNode
-  scrollRef: { current: HTMLElement | null }
 }) {
   const visibleMessages = hideDeleted ? messages.filter((message) => !message.redacted) : messages
 
-  return <Virtuoso
-    ref={listRef}
-    className="timeline-virtualizer"
-    style={{ height: '100%', width: '100%' }}
-    data={visibleMessages}
-    firstItemIndex={firstItemIndex}
-    initialTopMostItemIndex={visibleMessages.length - 1}
-    initialItemCount={30}
-    defaultItemHeight={88}
-    increaseViewportBy={{ top: 500, bottom: 500 }}
-    atBottomThreshold={96}
-    atBottomStateChange={onAtBottomChange}
-    followOutput={() => isFollowing() ? 'auto' : false}
-    totalListHeightChanged={() => {
-      if (isFollowing() && visibleMessages.length > 0) {
-        listRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' })
-      }
-    }}
-    startReached={onStartReached}
-    computeItemKey={(_index, message) => message.id || message.transactionId}
-    context={{ header, footer } satisfies TimelineListContext}
-    components={{
-      Header: ({ context }: { context?: TimelineListContext }) => <>{context?.header}</>,
-      Footer: ({ context }: { context?: TimelineListContext }) => <>{context?.footer}</>,
-    }}
-    scrollerRef={(element) => {
-      if (element instanceof HTMLElement) {
-        element.classList.add('timeline-virtual-scroller')
-        scrollRef.current = element
-      } else {
-        scrollRef.current = null
-      }
-    }}
-    itemContent={(index, message) => {
-      const messageIndex = index - firstItemIndex
-      const ownMessage = message.own || Boolean(message.sender && message.sender === currentUserID)
+  return <>
+    {visibleMessages.map((message, index) => {
+      const ownMessage = isOwnMessage(message, currentUserID)
+      const messageID = timelineMessageID(message)
+      const translatedBody = !ownMessage ? chatTranslation?.translations[messageID] : undefined
+      const translationPending = Boolean(!ownMessage && chatTranslation?.busy && chatTranslation.targetMessageIDs.includes(messageID))
+      const showTranslation = Boolean(translatedBody || translationPending)
       const isAudioAttachment = Boolean(message.mediaUri && (message.mediaMime.startsWith('audio/') || message.mediaType === 'm.audio'))
+      const isFileAttachment = Boolean(message.mediaUri && message.mediaType === 'm.file' && !message.redacted && !message.decryptionError)
       const isImageOrVideoAttachment = !isAudioAttachment && (
         message.mediaMime.startsWith('image/') || message.mediaMime.startsWith('video/') || message.mediaType === 'm.image' || message.mediaType === 'm.video'
       )
       const hideImagesAndVideos = preferenceBoolean(preferences, 'appearance.hide_images_and_videos')
-      const previous = messageIndex > 0 ? visibleMessages[messageIndex - 1] : null
+      const previous = index > 0 ? visibleMessages[index - 1] : null
       const grouped = Boolean(previous && !previous.redacted && previous.sender === message.sender && message.timestamp - previous.timestamp < 5 * 60_000 && isSameDay(previous.timestamp, message.timestamp))
-      const next = messageIndex + 1 < visibleMessages.length ? visibleMessages[messageIndex + 1] : null
+      const next = index + 1 < visibleMessages.length ? visibleMessages[index + 1] : null
       const nextIsGrouped = Boolean(next && !message.redacted && !next.redacted && next.sender === message.sender && next.timestamp - message.timestamp < 5 * 60_000 && isSameDay(message.timestamp, next.timestamp))
       const lastInGroup = !nextIsGrouped
       const showDayDivider = !previous || !isSameDay(previous.timestamp, message.timestamp)
       const displayBody = displayMessageBody(message)
       const isContextTarget = (message.id || message.transactionId) === contextMessageID
       return (
-        <div className="timeline-virtual-item" key={message.id || message.transactionId}>
+        <Fragment key={message.id || message.transactionId}>
           {showDayDivider && message.timestamp > 0 && <div className="day-divider" aria-label={formatDayLabel(message.timestamp)}><span>{formatDayLabel(message.timestamp)}</span></div>}
-          <article className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''} ${isContextTarget ? 'is-context-target' : ''}`} data-event-id={message.id || message.transactionId} tabIndex={message.id || message.transactionId ? -1 : undefined} style={{ '--message-index': Math.min(messageIndex, 12) } as React.CSSProperties} onDoubleClick={() => actionsRef.current.onDoubleClick(message)} onContextMenu={(event) => {
+          <article className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''} ${showTranslation ? 'has-translation' : ''} ${isContextTarget ? 'is-context-target' : ''}`} data-event-id={messageID} tabIndex={messageID ? -1 : undefined} style={{ '--message-index': Math.min(index, 12) } as React.CSSProperties} onDoubleClick={() => actionsRef.current.onDoubleClick(message)} onContextMenu={(event) => {
             if (!selectedRoomID) return
             event.preventDefault()
             actionsRef.current.onOpenContextMenu(message, event.clientX, event.clientY)
@@ -528,15 +580,16 @@ const TimelineMessageList = memo(function TimelineMessageList({
                 {message.timestamp > 0 && preferenceBoolean(preferences, 'appearance.show_timestamps', true) && <time>{formatTimelineTime(message.timestamp, preferences)}</time>}
                 {message.edited && <span className="edited-mark" title={message.editHistory?.length ? message.editHistory.join('\n') : 'Edited message'}>edited{(message.editHistory?.length ?? 0) > 0 && ` (${message.editHistory?.length} prior)`}</span>}
               </div>}
-              {message.replyToPreview && <button className="reply-preview" type="button" disabled={!message.replyToEventId} title="Jump to quoted message" onClick={() => actionsRef.current.onFocusMessage(message.replyToEventId)}>
+              {message.replyToEventId && <button className="reply-preview" type="button" title="Jump to quoted message" onClick={() => actionsRef.current.onFocusMessage(message.replyToEventId)}>
                 <span className="reply-preview-sender">{message.replyToSender || 'Reply'}</span>
-                <span className="reply-preview-text">{message.replyToPreview}</span>
+                <span className="reply-preview-text">{message.replyToPreview || 'Original message unavailable'}</span>
               </button>}
-              {!isAudioAttachment && <Suspense fallback={<div className="message-body">{displayBody}</div>}>
+              {!isAudioAttachment && !isFileAttachment && <Suspense fallback={<div className="message-body">{displayBody}</div>}>
                 <MarkdownMessage body={displayBody} />
               </Suspense>}
               {message.mediaUri && !message.redacted && !message.decryptionError && !(hideImagesAndVideos && isImageOrVideoAttachment) && (
                 <MessageMedia
+                  roomID={selectedRoomID}
                   message={message}
                   autoPlayNext={autoPlayNextMessageId === message.id}
                   aiEnabled={Boolean(preferenceString(preferences, 'ai.endpoint', '').trim())}
@@ -559,11 +612,15 @@ const TimelineMessageList = memo(function TimelineMessageList({
                 {quickReactionOptions(preferences).map((emoji) => <button key={emoji} type="button" aria-label={`React with ${emoji}`} title={`React with ${emoji}`} onClick={() => actionsRef.current.onSendReaction(message, emoji)}>{emoji}</button>)}
               </div>}
             </div>
+            {showTranslation && <aside className="message-translation" role="note" aria-label="English translation" aria-live="polite">
+              <span className="message-translation-label">English</span>
+              <p>{translatedBody || 'Translating…'}</p>
+            </aside>}
           </article>
-        </div>
+        </Fragment>
       )
-    }}
-  />
+    })}
+  </>
 })
 
 const accentPalettes = [
@@ -796,55 +853,13 @@ function quickReactionOptions(preferences: PreferenceValues) {
   return [...new Set(defaultEmoji ? [defaultEmoji, ...base] : base)].slice(0, 6)
 }
 
-function encodeBase64(bytes: Uint8Array) {
-  let binary = ''
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+async function requestLocalAsset(path: string, init: RequestInit) {
+  const response = await fetch(path, init)
+  if (!response.ok) {
+    const detail = (await response.text()).trim()
+    throw new Error(detail || `Local request failed with status ${response.status}.`)
   }
-  return btoa(binary)
-}
-
-function createMediaObjectURL(encoded: string, mimeType: string) {
-  const binary = atob(encoded)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
-  return URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: mimeType || 'application/octet-stream' }))
-}
-
-const MAX_CACHED_IMAGE_DATA_CHARACTERS = 8 * 1024 * 1024
-const cachedImageData = new Map<string, string>()
-const imageDataRequests = new Map<string, ReturnType<typeof AppService.DownloadMedia>>()
-let cachedImageDataCharacters = 0
-
-function loadImageData(uri: string) {
-  const cached = cachedImageData.get(uri)
-  if (cached) {
-    cachedImageData.delete(uri)
-    cachedImageData.set(uri, cached)
-    return Promise.resolve(cached)
-  }
-  const pending = imageDataRequests.get(uri)
-  if (pending) return pending
-
-  const request = AppService.DownloadMedia(uri).then((encoded) => {
-    if (!encoded) return encoded
-    if (encoded.length <= MAX_CACHED_IMAGE_DATA_CHARACTERS) {
-      const existing = cachedImageData.get(uri)
-      if (existing) cachedImageDataCharacters -= existing.length
-      cachedImageData.delete(uri)
-      while (cachedImageDataCharacters + encoded.length > MAX_CACHED_IMAGE_DATA_CHARACTERS) {
-        const oldest = cachedImageData.keys().next().value
-        if (!oldest) break
-        cachedImageDataCharacters -= cachedImageData.get(oldest)?.length ?? 0
-        cachedImageData.delete(oldest)
-      }
-      cachedImageData.set(uri, encoded)
-      cachedImageDataCharacters += encoded.length
-    }
-    return encoded
-  }).finally(() => imageDataRequests.delete(uri))
-  imageDataRequests.set(uri, request)
-  return request
+  return response
 }
 
 function encodeVoiceNoteWav(audio: AudioBuffer) {
@@ -888,17 +903,43 @@ function App() {
   const [search, setSearch] = useState('')
   const [roomScope, setRoomScope] = useState<RoomScope>('all')
   const [roomRefinements, setRoomRefinements] = useState<RoomRefinements>({ unanswered: false, favorite: false })
+  const [inboxAccountScope, setInboxAccountScope] = useState('all')
+  const [otherAccountRooms, setOtherAccountRooms] = useState<Room[]>([])
   const [messages, setMessages] = useState<Message[]>([])
-  const [timelineFirstItemIndex, setTimelineFirstItemIndex] = useState(100_000)
   const [olderCursor, setOlderCursor] = useState(0)
   const [hasOlder, setHasOlder] = useState(false)
   const hasOlderRef = useRef(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
-  // The virtualizer can signal its start repeatedly before `loadingOlder`
-  // re-renders, so this ref prevents overlapping history requests.
+  // Scroll events fire far faster than state updates commit, so a scroll
+  // handler calling loadOlderMessages() could start several fetches before
+  // `loadingOlder` re-renders. This ref closes that window.
   const loadingOlderRef = useRef(false)
-  const archiveInactiveRoomsRef = useRef<() => Promise<void>>(async () => { })
   const [composeText, setComposeText] = useState('')
+  const [snippets, setSnippets] = useState<Snippet[]>(() => loadSnippets())
+  const [snippetMatch, setSnippetMatch] = useState<SnippetMatch | null>(null)
+  const [snippetActiveIndex, setSnippetActiveIndex] = useState(0)
+  const [snippetCaret, setSnippetCaret] = useState<number | null>(null)
+  const [snippetMenuPosition, setSnippetMenuPosition] = useState<{ left: number; top: number; above: boolean } | null>(null)
+  const [ghostwriterChips, setGhostwriterChips] = useState<GhostwriterChipState | null>(null)
+  const [ghostwriterChipRetryRevision, setGhostwriterChipRetryRevision] = useState(0)
+  const [ghostwriterCompletion, setGhostwriterCompletion] = useState<GhostwriterCompletionState | null>(null)
+  const [ghostwriterAutocompleteStatus, setGhostwriterAutocompleteStatus] = useState<'idle' | 'loading' | 'offline'>('idle')
+  const [ghostwriterDraftStatus, setGhostwriterDraftStatus] = useState('')
+  const [ghostwriterDraftBusy, setGhostwriterDraftBusy] = useState(false)
+  const [toneGuardHold, setToneGuardHold] = useState<ToneGuardHold | null>(null)
+  const [toneGuardChecking, setToneGuardChecking] = useState(false)
+  const [toneGuardResolving, setToneGuardResolving] = useState(false)
+    const [relationshipHealth, setRelationshipHealth] = useState<RelationshipHealthSnapshot | null>(null)
+    const [relationshipHealthLoading, setRelationshipHealthLoading] = useState(false)
+    const [relationshipHealthTargetRoomID, setRelationshipHealthTargetRoomID] = useState('')
+    const [relationshipHealthActionBusy, setRelationshipHealthActionBusy] = useState(false)
+    const [relationshipHealthActionError, setRelationshipHealthActionError] = useState('')
+    const [relationshipHealthLoadError, setRelationshipHealthLoadError] = useState('')
+  const [relationshipDecay, setRelationshipDecay] = useState<RelationshipDecaySnapshot | null>(null)
+  const [relationshipsOpen, setRelationshipsOpen] = useState(false)
+  const [relationshipDecayBusy, setRelationshipDecayBusy] = useState('')
+  const [relationshipDecayError, setRelationshipDecayError] = useState('')
+  const [contactHUDOpen, setContactHUDOpen] = useState(false)
   const [mentionBindings, setMentionBindings] = useState<{ token: string; userID: string }[]>([])
   const [mentionStart, setMentionStart] = useState(-1)
   const [mentionEnd, setMentionEnd] = useState(0)
@@ -911,6 +952,13 @@ function App() {
   const [reactingMessageID, setReactingMessageID] = useState('')
   const [redactTarget, setRedactTarget] = useState<Message | null>(null)
   const [roomInfoOpen, setRoomInfoOpen] = useState(false)
+  const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false)
+  const [mediaGalleryFilter, setMediaGalleryFilter] = useState<MediaGalleryFilter>('all')
+  const [mediaGalleryItems, setMediaGalleryItems] = useState<Message[]>([])
+  const [mediaGalleryLoading, setMediaGalleryLoading] = useState(false)
+  const [mediaGalleryScanned, setMediaGalleryScanned] = useState(0)
+  const [mediaGalleryError, setMediaGalleryError] = useState('')
+  const mediaGalleryRequestRef = useRef(0)
   const [agentEditor, setAgentEditor] = useState<ChatAgentProfile | null>(null)
   const [agentPickerOpen, setAgentPickerOpen] = useState(false)
   const [agentPickerID, setAgentPickerID] = useState('')
@@ -937,7 +985,6 @@ function App() {
   const [scheduledJobsOpen, setScheduledJobsOpen] = useState(false)
   const [scheduledDraft, setScheduledDraft] = useState<ScheduledDraft | null>(null)
   const [scheduledDueAt, setScheduledDueAt] = useState('')
-  const [scheduledRepeatWeekly, setScheduledRepeatWeekly] = useState(false)
   const [scheduledTimes, setScheduledTimes] = useState<Record<string, string>>({})
   const [scheduledLoading, setScheduledLoading] = useState(false)
   const [scheduledSaving, setScheduledSaving] = useState(false)
@@ -947,6 +994,12 @@ function App() {
   const [scheduledNotice, setScheduledNotice] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('General')
+  const [accountManagerOpen, setAccountManagerOpen] = useState(false)
+  const [addingAccount, setAddingAccount] = useState(false)
+  const [accountHomeserver, setAccountHomeserver] = useState('https://matrix.org')
+  const [accountUsername, setAccountUsername] = useState('')
+  const [accountPassword, setAccountPassword] = useState('')
+  const [accountError, setAccountError] = useState('')
   const [undoRoomID, setUndoRoomID] = useState('')
   const undoToastTimerRef = useRef<number | null>(null)
   const scheduledNoticeTimerRef = useRef<number | null>(null)
@@ -962,7 +1015,7 @@ function App() {
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false)
   const [quickSwitcherQuery, setQuickSwitcherQuery] = useState('')
   const [quickSwitcherIndex, setQuickSwitcherIndex] = useState(0)
-  const [homeserver, setHomeserver] = useState('https://matrix.beeper.com')
+  const [homeserver, setHomeserver] = useState('https://matrix.org')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [recoveryKey, setRecoveryKey] = useState('')
@@ -985,34 +1038,48 @@ function App() {
   const editTargetRef = useRef<Message | null>(null)
   const markRoomAnsweredRef = useRef<(roomID: string) => Promise<void>>(async () => { })
   const preferencesRef = useRef<PreferenceValues>({})
+  const setPreferenceRef = useRef<(key: string, value: boolean | string) => Promise<boolean>>(async () => false)
   const roomsRef = useRef<Room[]>([])
   const roomSelectionAnchorRef = useRef('')
   const messagesRef = useRef<Message[]>([])
+  const composeTextRef = useRef('')
+  const snippetsRef = useRef(snippets)
+  const snippetUndoRef = useRef<SnippetUndo | null>(null)
+  const snippetExpansionRequestRef = useRef(0)
+  const snippetCaretPlacementRef = useRef<{ text: string; caret: number } | null>(null)
+  const selectedRoomIDRef = useRef(selectedRoomID)
+  selectedRoomIDRef.current = selectedRoomID
+  const pendingRelationshipNudgeRef = useRef<{ roomID: string; draft: string } | null>(null)
+  const ghostwriterSelectedRoomRef = useRef('')
+    const relationshipHealthSelectedRoomRef = useRef('')
+    const relationshipHealthAccountRef = useRef('')
+    const relationshipHealthEnabledRef = useRef(false)
+    const relationshipHealthRequestRef = useRef(0)
+  const ghostwriterChipEventRef = useRef('')
+  const ghostwriterChipRequestRef = useRef(0)
+  const ghostwriterAutocompleteRequestRef = useRef(0)
+  const ghostwriterDraftRequestRef = useRef(0)
+  const ghostwriterAutocompleteSuppressedDraftRef = useRef('')
+  const ghostwriterPreviewRef = useRef<HTMLDivElement | null>(null)
   const nativeNotificationsRef = useRef(false)
   const lastReadEventByRoom = useRef(new Map<string, string>())
+  const busyRoomLastEventIDRef = useRef(new Map<string, string>())
+  const busyAutoRepliedRoomsRef = useRef(new Set<string>())
+  const busyReplyInFlightRoomsRef = useRef(new Map<string, number>())
+  const busyModeSessionRef = useRef(0)
+  const currentUserIDRef = useRef('')
+  const currentDisplayNameRef = useRef('')
   const draftsRef = useRef(new Map<string, string>())
   const triageBusyRef = useRef(false)
-  const archiveInactiveRunningRef = useRef(false)
   const dragDepthRef = useRef(0)
   const timelineRef = useRef<HTMLDivElement>(null)
-  const timelineScrollRef = useRef<HTMLElement | null>(null)
-  const timelineVirtuosoRef = useRef<VirtuosoHandle>(null)
+  const timelineHeightBeforePrepend = useRef<number | null>(null)
   const stickToBottomRef = useRef(true)
-  const lastTimelineScrollTopRef = useRef<number | null>(null)
-  const loadOlderMessagesRef = useRef<() => Promise<void>>(async () => { })
-  const isTimelineFollowing = useCallback(() => stickToBottomRef.current, [])
-  const onTimelineAtBottomChange = useCallback((atBottom: boolean) => {
-    const scrollTop = timelineScrollRef.current?.scrollTop
-    if (atBottom) {
-      stickToBottomRef.current = true
-    } else if (scrollTop !== undefined && lastTimelineScrollTopRef.current !== null && scrollTop !== lastTimelineScrollTopRef.current) {
-      stickToBottomRef.current = false
-    }
-    if (scrollTop !== undefined) lastTimelineScrollTopRef.current = scrollTop
-  }, [])
-  const onTimelineStartReached = useCallback(() => {
-    if (hasOlderRef.current && !loadingOlderRef.current) void loadOlderMessagesRef.current()
-  }, [])
+  const roomSwitchRef = useRef(false)
+  // scrollTop after the last pin to the newest message. A scroll event at this position comes from
+  // that pin, or from content growing below it, so it must not count as the reader scrolling away.
+  const pinnedScrollTopRef = useRef<number | null>(null)
+  const timelineResizeObserverRef = useRef<ResizeObserver | null>(null)
   const timelineMessageActionsRef = useRef<TimelineMessageActions>({
     onDoubleClick: () => { },
     onOpenContextMenu: () => { },
@@ -1027,6 +1094,10 @@ function App() {
     onContextMenu: () => { },
   })
   const pendingSendRef = useRef<PendingSend | null>(null)
+  const toneGuardPromptRef = useRef<HTMLElement | null>(null)
+  const toneGuardHoldRef = useRef<ToneGuardHold | null>(null)
+  const toneGuardCheckRef = useRef(false)
+  const toneGuardResolutionRef = useRef(false)
   const notificationBatchesRef = useRef(new Map<string, { notifications: MatrixNotification[]; timer: number }>())
   const repeatRemindersRef = useRef(new Map<string, number>())
 
@@ -1045,9 +1116,18 @@ function App() {
   const roomSearchInputRef = useRef<HTMLInputElement>(null)
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
   const [aiPanel, setAIPanel] = useState<AIPanel | null>(null)
+  const [turkishTutorState, setTurkishTutorState] = useState<TurkishTutorState | null>(null)
+  const turkishTutorRequestRef = useRef(0)
+  const [chatTranslation, setChatTranslation] = useState<ChatTranslationState | null>(null)
   const aiRequestRef = useRef(0)
+  const chatTranslationRequestRef = useRef(0)
   const quickSwitcherInputRef = useRef<HTMLInputElement>(null)
   const pendingSearchJumpRef = useRef<{ roomID: string; eventID: string; timelineCursor: number } | null>(null)
+
+  useEffect(() => {
+    chatTranslationRequestRef.current++
+    setChatTranslation(null)
+  }, [selectedRoomID])
 
   useEffect(() => {
     let active = true
@@ -1059,6 +1139,12 @@ function App() {
     return () => { active = false }
   }, [])
 
+  useEffect(() => {
+    if (!toneGuardHold) return
+    const frame = requestAnimationFrame(() => toneGuardPromptRef.current?.focus())
+    return () => cancelAnimationFrame(frame)
+  }, [toneGuardHold])
+
   const rooms = snapshot?.rooms ?? EMPTY_ROOMS
   const selectedRoom = useMemo(() => rooms.find((room) => room.id === selectedRoomID), [rooms, selectedRoomID])
   const selectedRoomAvatar = useMemo(() => selectedRoom?.avatar || (
@@ -1066,7 +1152,20 @@ function App() {
       ? newestOtherAvatar(messages)
       : ''
   ), [messages, selectedRoom?.avatar, selectedRoomID, historyRoomIDRef.current])
+  const typingStatus = formatTypingStatus(typingUsers, roomMembers, messages, selectedRoom?.direct ? selectedRoom.name : '')
   const preferences = snapshot?.preferences ?? {}
+    const relationshipHealthEnabled = preferenceBoolean(preferences, 'relationship_health.enabled')
+    const currentRelationshipHealth = relationshipHealth?.roomId === selectedRoomID
+      && relationshipHealth?.accountId === snapshot?.activeAccountId
+      ? relationshipHealth
+      : null
+  const currentRelationshipDecay = relationshipDecay?.accountId === snapshot?.activeAccountId ? relationshipDecay : null
+  const relationshipDecayContacts = currentRelationshipDecay?.contacts ?? []
+  const relationshipDecayAlertCount = relationshipDecayContacts.filter((contact) => contact.alerted).length
+  const ghostwriterEnabled = preferenceBoolean(preferences, 'ghostwriter.enabled')
+  const ghostwriterInlineSuffix = ghostwriterCompletion?.roomID === selectedRoomID && ghostwriterCompletion.draft === composeText
+    ? appendGhostCompletion(composeText, ghostwriterCompletion.text).slice(composeText.length)
+    : ''
   const roomAgentsPreferenceKey = selectedRoom ? `room.ai_agents.${selectedRoom.id}` : ''
   const roomAgents = useMemo<ChatAgentCollection>(() => parseChatAgents(preferenceString(preferences, roomAgentsPreferenceKey, JSON.stringify(EMPTY_CHAT_AGENTS))), [preferences, roomAgentsPreferenceKey])
   const appZoom = preferenceNumber(preferences, 'appearance.zoom', 100, 75, 125)
@@ -1074,10 +1173,169 @@ function App() {
   const answeredShortcut = preferenceString(preferences, 'shortcuts.mark_answered', 'E').trim().toUpperCase() || 'E'
   const singleKeyShortcuts = preferenceBoolean(preferences, 'shortcuts.single_keys', true)
   const hideDeletedMessages = preferenceBoolean(preferences, 'appearance.hide_deleted_messages')
+  const busyModeEnabled = preferenceBoolean(preferences, 'busy_mode.enabled')
   const visibleMessages = useMemo(() => hideDeletedMessages ? messages.filter((message) => !message.redacted) : messages, [messages, hideDeletedMessages])
   preferencesRef.current = preferences
   roomsRef.current = rooms
   messagesRef.current = messages
+  composeTextRef.current = composeText
+  ghostwriterSelectedRoomRef.current = selectedRoomID
+    relationshipHealthSelectedRoomRef.current = selectedRoomID
+    relationshipHealthAccountRef.current = snapshot?.activeAccountId ?? ''
+    relationshipHealthEnabledRef.current = relationshipHealthEnabled
+  currentUserIDRef.current = snapshot?.profile.userId ?? ''
+  currentDisplayNameRef.current = snapshot?.profile.displayName ?? ''
+
+  useEffect(() => {
+    const roomID = selectedRoom?.direct ? selectedRoom.id : ''
+    const accountID = snapshot?.activeAccountId ?? ''
+    const requestID = ++relationshipHealthRequestRef.current
+    setRelationshipHealth(null)
+    setRelationshipHealthLoadError('')
+    setRelationshipHealthActionError('')
+    setRelationshipHealthActionBusy(false)
+    if (!roomID || !accountID) {
+      setRelationshipHealthLoading(false)
+      return
+    }
+    setRelationshipHealthLoading(true)
+    void AppService.RelationshipHealth(roomID)
+      .then((health) => {
+        if (requestID !== relationshipHealthRequestRef.current
+          || relationshipHealthSelectedRoomRef.current !== roomID
+          || relationshipHealthAccountRef.current !== accountID
+          || health.accountId !== accountID) return
+        setRelationshipHealth(health)
+        setRelationshipHealthLoadError(health.error)
+      })
+      .catch((healthError: unknown) => {
+        if (requestID === relationshipHealthRequestRef.current
+          && relationshipHealthSelectedRoomRef.current === roomID
+          && relationshipHealthAccountRef.current === accountID) {
+          setRelationshipHealthLoadError(describeError(healthError))
+        }
+      })
+      .finally(() => {
+        if (requestID === relationshipHealthRequestRef.current
+          && relationshipHealthSelectedRoomRef.current === roomID
+          && relationshipHealthAccountRef.current === accountID) setRelationshipHealthLoading(false)
+      })
+    return () => {
+      if (relationshipHealthRequestRef.current === requestID) relationshipHealthRequestRef.current++
+    }
+  }, [selectedRoom?.direct, selectedRoom?.id, snapshot?.activeAccountId])
+
+  useEffect(() => {
+    const unsubscribe = Events.On('relationship-health:update', (event: any) => {
+      const health = event.data as RelationshipHealthSnapshot | undefined
+      if (!health
+        || !relationshipHealthEnabledRef.current
+        || health.accountId !== relationshipHealthAccountRef.current
+        || health.roomId !== relationshipHealthSelectedRoomRef.current) return
+      setRelationshipHealth(health)
+      setRelationshipHealthLoadError(health.error)
+      setRelationshipHealthLoading(false)
+    })
+    return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    const accountID = snapshot?.activeAccountId
+    if (!accountID) {
+      setRelationshipDecay(null)
+      return
+    }
+    let active = true
+    void AppService.RelationshipDecayContacts()
+      .then((decay) => {
+        if (active && decay.accountId === accountID) setRelationshipDecay(decay)
+      })
+      .catch((decayError: unknown) => {
+        if (active) setRelationshipDecayError(describeError(decayError))
+      })
+    return () => { active = false }
+  }, [snapshot?.activeAccountId])
+
+  useEffect(() => {
+    const accountID = snapshot?.activeAccountId
+    const unsubscribe = Events.On('relationship-decay:update', (event: any) => {
+      const decay = event.data as RelationshipDecaySnapshot | undefined
+      if (!decay || decay.accountId !== accountID) return
+      setRelationshipDecay(decay)
+      setRelationshipDecayError('')
+    })
+    return unsubscribe
+  }, [snapshot?.activeAccountId])
+
+  useEffect(() => {
+    if (!ghostwriterEnabled || !selectedRoomID) {
+      ghostwriterChipEventRef.current = ''
+      ghostwriterChipRequestRef.current++
+      setGhostwriterChips(null)
+      return
+    }
+    if (loadingHistory || historyRoomIDRef.current !== selectedRoomID) return
+    if (composeText.trim() || replyTarget || editTarget) return
+
+    const newestMessage = newestPersistentMessage(messages)
+    if (!newestMessage || newestMessage.own || newestMessage.redacted || newestMessage.decryptionError || newestMessage.mediaUri || !newestMessage.body.trim()) {
+      ghostwriterChipEventRef.current = ''
+      ghostwriterChipRequestRef.current++
+      setGhostwriterChips(null)
+      return
+    }
+
+    const eventKey = `${selectedRoomID}\u0000${newestMessage.id}`
+    if (ghostwriterChipEventRef.current === eventKey) return
+    ghostwriterChipEventRef.current = eventKey
+    const requestID = ++ghostwriterChipRequestRef.current
+    const roomID = selectedRoomID
+    setGhostwriterChips({ roomID, messageID: newestMessage.id, status: 'loading', suggestions: [] })
+    void AppService.Ghostwriter({ roomId: roomID, mode: GhostwriterRequestMode.GhostwriterModeChips, draft: '', intent: '' })
+      .then((suggestions) => {
+        if (requestID !== ghostwriterChipRequestRef.current || ghostwriterSelectedRoomRef.current !== roomID || ghostwriterChipEventRef.current !== eventKey) return
+        setGhostwriterChips({ roomID, messageID: newestMessage.id, status: 'ready', suggestions: suggestions ?? [] })
+      })
+      .catch(() => {
+        if (requestID !== ghostwriterChipRequestRef.current || ghostwriterSelectedRoomRef.current !== roomID || ghostwriterChipEventRef.current !== eventKey) return
+        setGhostwriterChips({ roomID, messageID: newestMessage.id, status: 'offline', suggestions: [] })
+      })
+  }, [composeText, editTarget, ghostwriterChipRetryRevision, ghostwriterEnabled, loadingHistory, messages, replyTarget, selectedRoomID])
+
+  useEffect(() => {
+    const requestID = ++ghostwriterAutocompleteRequestRef.current
+    setGhostwriterCompletion(null)
+    setGhostwriterAutocompleteStatus('idle')
+    if (!ghostwriterEnabled || !selectedRoomID || !composeText.trim() || editTarget || isGhostCommandDraft(composeText)) return
+    if (composeText === ghostwriterAutocompleteSuppressedDraftRef.current) {
+      ghostwriterAutocompleteSuppressedDraftRef.current = ''
+      return
+    }
+    if (composerInputRef.current && composerInputRef.current.selectionStart !== composeText.length) return
+
+    const roomID = selectedRoomID
+    const draft = composeText
+    const timer = window.setTimeout(() => {
+      if (requestID !== ghostwriterAutocompleteRequestRef.current) return
+      setGhostwriterAutocompleteStatus('loading')
+      void AppService.Ghostwriter({ roomId: roomID, mode: GhostwriterRequestMode.GhostwriterModeAutocomplete, draft, intent: '' })
+        .then((suggestions) => {
+          if (requestID !== ghostwriterAutocompleteRequestRef.current || ghostwriterSelectedRoomRef.current !== roomID || composeTextRef.current !== draft) return
+          const completion = suggestions?.find((suggestion) => suggestion.type === 'autocomplete')
+          if (completion?.text.trim()) setGhostwriterCompletion({ roomID, draft, text: completion.text })
+          setGhostwriterAutocompleteStatus('idle')
+        })
+        .catch(() => {
+          if (requestID !== ghostwriterAutocompleteRequestRef.current || ghostwriterSelectedRoomRef.current !== roomID || composeTextRef.current !== draft) return
+          setGhostwriterAutocompleteStatus('offline')
+        })
+    }, 300)
+
+    return () => {
+      window.clearTimeout(timer)
+      if (ghostwriterAutocompleteRequestRef.current === requestID) ghostwriterAutocompleteRequestRef.current++
+    }
+  }, [composeText, editTarget, ghostwriterEnabled, selectedRoomID])
   timelineMessageActionsRef.current = {
     onDoubleClick: handleMessageDoubleClick,
     onOpenContextMenu: openMessageContextMenu,
@@ -1093,6 +1351,15 @@ function App() {
   useEffect(() => {
     setSelectedAudioInputDeviceId(preferenceString(preferences, 'audio.input_device', ''))
   }, [preferences['audio.input_device']])
+
+  useEffect(() => {
+    busyModeSessionRef.current++
+    busyRoomLastEventIDRef.current = busyModeEnabled
+      ? new Map(rooms.map((room): [string, string] => [room.id, room.lastEventId]))
+      : new Map()
+    busyAutoRepliedRoomsRef.current.clear()
+    busyReplyInFlightRoomsRef.current.clear()
+  }, [busyModeEnabled, snapshot?.activeAccountId])
 
   useEffect(() => {
     let active = true
@@ -1113,11 +1380,30 @@ function App() {
   }, [])
   hasOlderRef.current = hasOlder
   editTargetRef.current = editTarget
-  loadOlderMessagesRef.current = loadOlderMessages
-  const timelineOlderButton = useMemo(() => hasOlder && <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={() => { void loadOlderMessagesRef.current() }} disabled={loadingOlder}>
-    {loadingOlder ? <><span className="loading-mark" />Loading older messages</> : 'Load older messages'}
-  </button>, [hasOlder, loadingOlder])
-  const scopedRooms = rooms
+  const inboxAccountCount = snapshot?.accounts?.length ?? 0
+  const activeAccountID = snapshot?.activeAccountId ?? ''
+  useEffect(() => {
+    if (inboxAccountCount < 2) return
+    let active = true
+    const refreshOtherAccountRooms = () => {
+      void AppService.AccountRooms().then((accountRooms) => {
+        if (active) setOtherAccountRooms((accountRooms ?? []).filter((room) => room.accountId !== activeAccountID))
+      }).catch(() => undefined)
+    }
+    refreshOtherAccountRooms()
+    const timer = window.setInterval(refreshOtherAccountRooms, 15000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [inboxAccountCount, activeAccountID])
+  // Rooms of signed-in accounts other than the active one are cached and refreshed on an interval.
+  const effectiveAccountScope = inboxAccountCount > 1 ? inboxAccountScope : 'all'
+  const crossAccountRooms = inboxAccountCount > 1 ? otherAccountRooms : EMPTY_ROOMS
+  const scopedRooms = useMemo(() => effectiveAccountScope === 'all'
+    ? (crossAccountRooms.length > 0 ? [...rooms, ...crossAccountRooms] : rooms)
+    : effectiveAccountScope === activeAccountID ? rooms : crossAccountRooms.filter((room) => room.accountId === effectiveAccountScope),
+    [rooms, crossAccountRooms, effectiveAccountScope, activeAccountID])
   const filteredRooms = useMemo(() => {
     const query = search.trim().toLowerCase()
     const today = Date.now()
@@ -1179,7 +1465,7 @@ function App() {
   useEffect(() => {
     setSelectedRoomIDs([])
     roomSelectionAnchorRef.current = ''
-  }, [roomScope, roomRefinements.unanswered, roomRefinements.favorite, search])
+  }, [effectiveAccountScope, roomScope, roomRefinements.unanswered, roomRefinements.favorite, search])
   const mentionOptions = mentionStart < 0 ? [] : roomMembers.filter((member) => {
     const query = mentionQuery.toLowerCase()
     return `${member.displayName} ${member.id}`.toLowerCase().includes(query)
@@ -1222,6 +1508,57 @@ function App() {
     void refreshScheduledJobs()
   }
 
+  async function updateRelationshipTier(contact: RelationshipDecayContact, tier: string) {
+    const roomIDs = contact.roomIds ?? []
+    const roomID = roomIDs[0]
+    if (!roomID) return
+    setRelationshipDecayBusy(contact.contactId)
+    setRelationshipDecayError('')
+    try {
+      const decay = await AppService.SetRelationshipTier(roomID, tier)
+      if (decay.accountId === snapshot?.activeAccountId) setRelationshipDecay(decay)
+    } catch (tierError) {
+      setRelationshipDecayError(describeError(tierError))
+    } finally {
+      setRelationshipDecayBusy('')
+    }
+  }
+
+  async function snoozeRelationshipContact(contact: RelationshipDecayContact) {
+    setRelationshipDecayBusy(contact.contactId)
+    setRelationshipDecayError('')
+    try {
+      const decay = await AppService.SnoozeRelationshipDecay(contact.contactId)
+      if (decay.accountId === snapshot?.activeAccountId) setRelationshipDecay(decay)
+    } catch (snoozeError) {
+      setRelationshipDecayError(describeError(snoozeError))
+    } finally {
+      setRelationshipDecayBusy('')
+    }
+  }
+
+  function draftRelationshipNudge(contact: RelationshipDecayContact) {
+    const roomIDs = contact.roomIds ?? []
+    const room = rooms.find((candidate) => roomIDs.includes(candidate.id) && isActiveAccountRoom(candidate))
+      ?? rooms.find((candidate) => roomIDs.includes(candidate.id))
+    const draft = contact.nudge.trim()
+    if (!room || !draft) return
+    setRelationshipsOpen(false)
+    if (selectedRoomID === room.id && isActiveAccountRoom(room)) {
+      pendingRelationshipNudgeRef.current = null
+      draftsRef.current.set(room.id, draft)
+      composeTextRef.current = draft
+      setReplyTarget(null)
+      setEditTarget(null)
+      setComposeText(draft)
+      ghostwriterDraftRequestRef.current++
+      window.requestAnimationFrame(() => composerInputRef.current?.focus())
+      return
+    }
+    pendingRelationshipNudgeRef.current = { roomID: room.id, draft }
+    openInboxRoom(room)
+  }
+
   function openScheduleMessage() {
     if (!selectedRoomID || !composeText.trim() || editTarget) return
     setScheduledDraft({
@@ -1233,7 +1570,6 @@ function App() {
       replyToPreview: replyTarget?.body,
     })
     setScheduledDueAt(localDateTimeInputValue(Date.now() + defaultScheduleDelayMinutes('schedule.default_send_minutes', 5) * 60_000))
-    setScheduledRepeatWeekly(false)
     setScheduledDialogError('')
   }
 
@@ -1241,7 +1577,6 @@ function App() {
     if (!selectedRoomID || !message.id || message.id.startsWith('~') || message.redacted) return
     setScheduledDraft({ kind: 'reminder', roomID: selectedRoomID, eventID: message.id, text: '', archiveAfter: false })
     setScheduledDueAt(localDateTimeInputValue(Date.now() + defaultScheduleDelayMinutes('schedule.default_reminder_minutes', 60) * 60_000))
-    setScheduledRepeatWeekly(false)
     setScheduledDialogError('')
   }
 
@@ -1253,7 +1588,22 @@ function App() {
   useEffect(() => {
     selectedRoomRef.current = selectedRoomID
     void AppService.SetActiveRoom(selectedRoomID)
-  }, [selectedRoomID])
+  }, [selectedRoomID, snapshot?.activeAccountId])
+
+  useEffect(() => {
+    const handleIncognitoShortcut = (event: globalThis.KeyboardEvent) => {
+      if (!event.metaKey && !event.ctrlKey) return
+      if (!event.shiftKey || event.altKey || event.repeat || event.isComposing || event.key.toLowerCase() !== 'p') return
+      event.preventDefault()
+      event.stopPropagation()
+      void setPreferenceRef.current('privacy.incognito', !preferenceBoolean(preferencesRef.current, 'privacy.incognito'))
+    }
+
+    window.addEventListener('keydown', handleIncognitoShortcut)
+    return () => {
+      window.removeEventListener('keydown', handleIncognitoShortcut)
+    }
+  }, [])
 
   useEffect(() => {
     const handleGlobalAnsweredShortcut = (event: globalThis.KeyboardEvent) => {
@@ -1315,13 +1665,24 @@ function App() {
     }
   }, [reactingMessageID])
 
-  function scrollTimelineToBottom(behavior: 'auto' | 'smooth' = 'auto') {
-    if (visibleMessages.length === 0) return
-    timelineVirtuosoRef.current?.scrollToIndex({
-      index: visibleMessages.length - 1,
-      align: 'end',
-      behavior,
-    })
+  function isNearBottom(element: HTMLElement, tolerance = 96) {
+    return element.scrollHeight - element.scrollTop - element.clientHeight <= tolerance
+  }
+
+  function isNearTop(element: HTMLElement, tolerance = 240) {
+    return element.scrollTop <= tolerance
+  }
+
+  function pinTimelineToBottom(timeline: HTMLElement) {
+    timeline.scrollTop = timeline.scrollHeight
+    pinnedScrollTopRef.current = timeline.scrollTop
+  }
+
+  function scrollTimelineToBottom(behavior: ScrollBehavior = 'auto') {
+    const timeline = timelineRef.current
+    if (!timeline) return
+    if (typeof timeline.scrollTo === 'function') timeline.scrollTo({ top: timeline.scrollHeight, behavior })
+    else timeline.scrollTop = timeline.scrollHeight
   }
 
   function jumpToLatest() {
@@ -1330,55 +1691,48 @@ function App() {
   }
 
   function focusTimelineMessage(eventID: string) {
-    const index = visibleMessages.findIndex((message) => message.id === eventID || message.transactionId === eventID)
-    if (index >= 0) focusTimelineItem(index)
+    const timeline = timelineRef.current
+    if (!timeline || !eventID) return
+    const target = Array.from(timeline.querySelectorAll<HTMLElement>('[data-event-id]'))
+      .find((element) => element.dataset.eventId === eventID)
+    if (!target) return
+    target.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+    target.focus({ preventScroll: true })
   }
 
   function focusTimelineItem(index: number) {
-    const message = visibleMessages[index]
-    if (!message) return
-    const eventID = message.id || message.transactionId
-    timelineVirtuosoRef.current?.scrollToIndex({
-      index,
-      align: 'center',
-      behavior: 'smooth',
-    })
-    const focusTarget = () => {
-      const target = Array.from(timelineRef.current?.querySelectorAll<HTMLElement>('[data-event-id]') ?? [])
-        .find((element) => element.dataset.eventId === eventID)
-      target?.focus({ preventScroll: true })
-    }
-    if (Array.from(timelineRef.current?.querySelectorAll<HTMLElement>('[data-event-id]') ?? [])
-      .some((element) => element.dataset.eventId === eventID)) {
-      focusTarget()
-    } else {
-      requestAnimationFrame(() => requestAnimationFrame(focusTarget))
-    }
+    const timeline = timelineRef.current
+    const items = timeline ? Array.from(timeline.querySelectorAll<HTMLElement>('[data-event-id]')) : []
+    const target = items[index]
+    if (!target) return
+    target.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+    target.focus({ preventScroll: true })
   }
 
   function moveTimelineFocus(direction: number, boundary?: 'first' | 'last') {
-    if (visibleMessages.length === 0) return
+    const timeline = timelineRef.current
+    if (!timeline) return
+    const items = Array.from(timeline.querySelectorAll<HTMLElement>('[data-event-id]'))
+    if (items.length === 0) return
     if (boundary) {
-      focusTimelineItem(boundary === 'first' ? 0 : visibleMessages.length - 1)
+      focusTimelineItem(boundary === 'first' ? 0 : items.length - 1)
       return
     }
     const activeItem = document.activeElement instanceof HTMLElement
       ? document.activeElement.closest<HTMLElement>('[data-event-id]')
       : null
-    const currentIndex = activeItem
-      ? visibleMessages.findIndex((message) => message.id === activeItem.dataset.eventId || message.transactionId === activeItem.dataset.eventId)
-      : -1
+    const currentIndex = activeItem ? items.indexOf(activeItem) : -1
     const nextIndex = currentIndex < 0
-      ? direction > 0 ? 0 : visibleMessages.length - 1
+      ? direction > 0 ? 0 : items.length - 1
       : currentIndex + direction
-    if (nextIndex >= 0 && nextIndex < visibleMessages.length) focusTimelineItem(nextIndex)
+    if (nextIndex >= 0 && nextIndex < items.length) focusTimelineItem(nextIndex)
   }
 
   function handleTimelineKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.metaKey || event.ctrlKey || event.altKey || isTextEntryTarget(event.target)) return
     const target = event.target instanceof HTMLElement ? event.target : null
     const row = target?.closest<HTMLElement>('[data-event-id]')
-    if (!row && target !== event.currentTarget && !target?.classList.contains('timeline-virtual-scroller')) return
+    if (!row && target !== event.currentTarget) return
 
     if (!singleKeyShortcuts && event.key.length === 1) return
 
@@ -1406,6 +1760,45 @@ function App() {
     }
   }
 
+  useLayoutEffect(() => {
+    const timeline = timelineRef.current
+    if (!timeline) return
+    const previousHeight = timelineHeightBeforePrepend.current
+    if (previousHeight !== null) {
+      timeline.scrollTop += timeline.scrollHeight - previousHeight
+      timelineHeightBeforePrepend.current = null
+      return
+    }
+    if (roomSwitchRef.current || stickToBottomRef.current) {
+      pinTimelineToBottom(timeline)
+      if (!roomSwitchRef.current || historyRoomIDRef.current === selectedRoomID) roomSwitchRef.current = false
+    }
+  }, [messages, selectedRoomID])
+
+  // Media, fonts, and composer or banner changes resize the timeline without changing `messages`.
+  // Re-pin to the newest message after each resize while the reader is following the conversation.
+  useLayoutEffect(() => {
+    const timeline = timelineRef.current
+    if (!timeline || typeof ResizeObserver === 'undefined') return
+    if (!timelineResizeObserverRef.current) {
+      timelineResizeObserverRef.current = new ResizeObserver(() => {
+        const current = timelineRef.current
+        if (current && stickToBottomRef.current) pinTimelineToBottom(current)
+      })
+    }
+    const observer = timelineResizeObserverRef.current
+    observer.disconnect()
+    observer.observe(timeline)
+    for (const child of Array.from(timeline.children)) observer.observe(child)
+  }, [messages, selectedRoomID])
+
+  useEffect(() => {
+    return () => {
+      timelineResizeObserverRef.current?.disconnect()
+      timelineResizeObserverRef.current = null
+    }
+  }, [])
+
   useEffect(() => {
     setSearchOpen(false)
     setMessageSearch('')
@@ -1422,10 +1815,21 @@ function App() {
     setTypingUsers([])
     setComposeText(draftsRef.current.get(selectedRoomID) ?? '')
     stickToBottomRef.current = true
-    lastTimelineScrollTopRef.current = null
-    setTimelineFirstItemIndex(100_000)
+    pinnedScrollTopRef.current = null
     setReplyTarget(null)
     setEditTarget(null)
+    const pendingNudge = pendingRelationshipNudgeRef.current
+    if (pendingNudge?.roomID === selectedRoomID) {
+      window.requestAnimationFrame(() => {
+        if (selectedRoomIDRef.current !== pendingNudge.roomID || pendingRelationshipNudgeRef.current !== pendingNudge) return
+        pendingRelationshipNudgeRef.current = null
+        draftsRef.current.set(pendingNudge.roomID, pendingNudge.draft)
+        composeTextRef.current = pendingNudge.draft
+        setComposeText(pendingNudge.draft)
+        ghostwriterDraftRequestRef.current++
+        window.requestAnimationFrame(() => composerInputRef.current?.focus())
+      })
+    }
   }, [selectedRoomID])
 
   useEffect(() => {
@@ -1465,14 +1869,21 @@ function App() {
     return () => window.clearTimeout(timeout)
   }, [composeText, selectedRoomID, preferences])
 
+  const matrixUpdateHandlerRef = useRef<((update: MatrixUpdate) => void) | null>(null)
+
   useEffect(() => {
     let active = true
-    const unsubscribe = Events.On('matrix:update', (event: any) => {
-      const update = event.data as MatrixUpdate
+    const applyMatrixUpdate = (update: MatrixUpdate) => {
+      if (!active) return
       const nextTypingUsers = update.typingUsers?.[selectedRoomRef.current] ?? []
       setSnapshot((current) => {
         if (!current) return current
         const rooms = reconcileRoomSnapshots(current.rooms, update.rooms ?? [])
+        const slidingSyncListCounts = update.slidingSyncListCounts ?? current.slidingSyncListCounts
+        const currentListCounts = current.slidingSyncListCounts ?? {}
+        const nextListCounts = slidingSyncListCounts ?? {}
+        const listCountsChanged = Object.keys(currentListCounts).length !== Object.keys(nextListCounts).length
+          || Object.entries(nextListCounts).some(([listKey, count]) => currentListCounts[listKey] !== count)
         const syncReady = current.syncReady || update.initialSyncComplete
         const needsVerification = update.needsVerification
         const connectionState = update.connectionState || current.connectionState
@@ -1481,16 +1892,28 @@ function App() {
           : { ...current.profile, verified: !needsVerification }
         if (
           rooms === current.rooms
+          && !listCountsChanged
           && syncReady === current.syncReady
           && needsVerification === current.needsVerification
           && profile === current.profile
           && connectionState === current.connectionState
         ) return current
-        return { ...current, rooms, syncReady, needsVerification, profile, connectionState }
+        return { ...current, rooms, slidingSyncListCounts, syncReady, needsVerification, profile, connectionState }
       })
       setTypingUsers((current) => current.length === nextTypingUsers.length && current.every((user, index) => user === nextTypingUsers[index])
         ? current
         : nextTypingUsers)
+      if (preferenceBoolean(preferencesRef.current, 'busy_mode.enabled')) {
+        for (const roomID of update.timelineChangedRoomId ?? []) {
+          const room = (update.rooms ?? []).find((candidate) => candidate.id === roomID) ?? roomsRef.current.find((candidate) => candidate.id === roomID)
+          if (!room) continue
+          const previousEventID = busyRoomLastEventIDRef.current.get(roomID)
+          busyRoomLastEventIDRef.current.set(roomID, room.lastEventId)
+          const isNewEvent = previousEventID === undefined ? Boolean(room.lastEventId) : previousEventID !== room.lastEventId
+          if (!isNewEvent || !room.direct || !room.lastEventId || room.lastEventSender === currentUserIDRef.current) continue
+          void sendBusyModeReply(room)
+        }
+      }
       for (const notification of update.notifications ?? []) {
         const currentPreferences = preferencesRef.current
         if (!notificationAllowed(currentPreferences, notification.roomId, notification.category)) continue
@@ -1527,6 +1950,10 @@ function App() {
           }
         }
       }
+    }
+    matrixUpdateHandlerRef.current = applyMatrixUpdate
+    const unsubscribe = Events.On('matrix:update', (event: any) => {
+      applyMatrixUpdate(event.data as MatrixUpdate)
     })
     const unsubscribePreferences = Events.On('preferences:update', (event: any) => {
       if (!active) return
@@ -1603,6 +2030,7 @@ function App() {
 
     return () => {
       active = false
+      matrixUpdateHandlerRef.current = null
       unsubscribe()
       unsubscribePreferences()
       unsubscribeHostError()
@@ -1614,6 +2042,28 @@ function App() {
       unsubscribeScheduledReminder()
     }
   }, [])
+
+  useMatrixBatch<MatrixUpdate>((batch) => {
+    for (const delta of batch.room_deltas ?? []) {
+      matrixUpdateHandlerRef.current?.(delta.update)
+    }
+    const selectedRoomID = selectedRoomRef.current
+    if (selectedRoomID && (
+      (batch.new_messages ?? []).some((item) => item.roomId === selectedRoomID)
+      || (batch.read_receipts ?? []).some((receipt) => receipt.roomId === selectedRoomID)
+    )) {
+      setHistoryRevision((revision) => revision + 1)
+    }
+    for (const typing of batch.typing_updates ?? []) {
+      if (typing.roomId === selectedRoomID) setTypingUsers(typing.userIds)
+    }
+  })
+
+  useEffect(() => {
+    mediaGalleryRequestRef.current++
+    setMediaGalleryOpen(false)
+    setMediaGalleryLoading(false)
+  }, [selectedRoomID])
 
   useEffect(() => {
     if (!selectedRoomID) {
@@ -1632,9 +2082,9 @@ function App() {
     setOlderCursor(0)
     setHasOlder(false)
     setLoadingOlder(false)
-    setTimelineFirstItemIndex(100_000)
+    timelineHeightBeforePrepend.current = null
+    roomSwitchRef.current = true
     stickToBottomRef.current = true
-    if (searchJump) stickToBottomRef.current = false
     void (async () => {
       try {
         let page = await AppService.History(selectedRoomID, 0)
@@ -1730,46 +2180,137 @@ function App() {
   async function loadOlderMessages() {
     if (!selectedRoomID || !hasOlder || loadingOlder || loadingOlderRef.current) return
     const roomID = selectedRoomID
+    timelineHeightBeforePrepend.current = timelineRef.current?.scrollHeight ?? null
     loadingOlderRef.current = true
     setLoadingOlder(true)
     try {
       const page = await AppService.History(roomID, olderCursor)
       if (selectedRoomRef.current !== roomID) return
-      const currentKeys = new Set(messagesRef.current.map((message) => message.id || message.transactionId))
-      const olderMessages = (page.messages ?? []).filter((message) => !currentKeys.has(message.id || message.transactionId))
-      const olderVisibleCount = hideDeletedMessages
-        ? olderMessages.filter((message) => !message.redacted).length
-        : olderMessages.length
-      if (olderVisibleCount > 0) {
-        setTimelineFirstItemIndex((index) => Math.max(1, index - olderVisibleCount))
-      }
       setMessages((current) => {
+        const currentKeys = new Set(current.map((message) => message.id || message.transactionId))
+        const olderMessages = (page.messages ?? []).filter((message) => !currentKeys.has(message.id || message.transactionId))
+        // Nothing new arrived, so drop the saved height: the prepend-detecting
+        // layout effect only runs on a `messages` change and would otherwise
+        // apply this stale delta to the next unrelated update.
+        if (olderMessages.length === 0) timelineHeightBeforePrepend.current = null
         return [...olderMessages, ...current]
       })
       setOlderCursor(page.before)
       setHasOlder(page.hasMore && page.before !== olderCursor)
     } catch (historyError) {
       setError(describeError(historyError))
+      timelineHeightBeforePrepend.current = null
     } finally {
       loadingOlderRef.current = false
       setLoadingOlder(false)
     }
   }
 
-  // Keep short timelines filled even when the initial page creates no scroll
-  // range for the virtualizer's start-reached callback.
+  async function sendBusyModeReply(room: Room) {
+    const sessionID = busyModeSessionRef.current
+    if (!preferenceBoolean(preferencesRef.current, 'busy_mode.enabled') || !room.direct || !room.lastEventId || room.lastEventSender === currentUserIDRef.current) return
+    if (busyAutoRepliedRoomsRef.current.has(room.id) || busyReplyInFlightRoomsRef.current.has(room.id)) return
+    busyReplyInFlightRoomsRef.current.set(room.id, sessionID)
+    try {
+      const page = await AppService.History(room.id, 0)
+      if (busyModeSessionRef.current !== sessionID || !preferenceBoolean(preferencesRef.current, 'busy_mode.enabled')) return
+      const recentTexts = [...(page.messages ?? [])]
+        .sort((left, right) => left.timestamp - right.timestamp)
+        .filter((message) => !message.redacted && !message.decryptionError && !message.mediaUri && message.body.trim())
+        .slice(-10)
+        .map((message) => message.body.trim())
+      const displayName = currentDisplayNameRef.current || currentUserIDRef.current
+      const language = detectBusyReplyLanguage(recentTexts)
+      let reply = createBusyReplyForLanguage(language, displayName)
+      if (!hasBusyReplyTemplate(language)) {
+        const languageName = new Intl.DisplayNames(['en'], { type: 'language' }).of(language)
+        if (languageName) {
+          const translatedReply = await AppService.AIComplete([
+            { role: 'system', content: `Translate this brief automatic reply into ${languageName}. Preserve the literal {name} placeholder exactly, remain polite, and return only the translated text.` },
+            { role: 'user', content: ENGLISH_BUSY_REPLY_TEMPLATE },
+          ]).catch(() => '')
+          if (translatedReply.trim().includes('{name}')) {
+            reply = translatedReply.trim().replace(/\{name\}/g, () => displayName || 'the person you contacted')
+          }
+        }
+      }
+      if (busyModeSessionRef.current !== sessionID || !preferenceBoolean(preferencesRef.current, 'busy_mode.enabled')) return
+      await AppService.SendMessage(room.id, reply)
+      if (busyModeSessionRef.current === sessionID) busyAutoRepliedRoomsRef.current.add(room.id)
+    } catch (replyError) {
+      if (busyModeSessionRef.current === sessionID) setError(`Busy mode auto-reply failed: ${describeError(replyError)}`)
+    } finally {
+      if (busyReplyInFlightRoomsRef.current.get(room.id) === sessionID) busyReplyInFlightRoomsRef.current.delete(room.id)
+    }
+  }
+
+  function closeMediaGallery() {
+    mediaGalleryRequestRef.current++
+    setMediaGalleryOpen(false)
+    setMediaGalleryLoading(false)
+  }
+
+  async function openMediaGallery() {
+    if (!selectedRoomID || loadingHistory || historyRoomIDRef.current !== selectedRoomID) return
+    const roomID = selectedRoomID
+    const requestID = ++mediaGalleryRequestRef.current
+    const initialItems = messages.filter(hasGalleryMedia)
+    const seenMessageKeys = new Set(initialItems.map(mediaGalleryMessageKey))
+    const collectedItems = [...initialItems]
+    let cursor = 0
+    let hasMore = true
+
+    setMediaGalleryFilter('all')
+    setMediaGalleryOpen(true)
+    setMediaGalleryLoading(true)
+    setMediaGalleryScanned(0)
+    setMediaGalleryError('')
+    setMediaGalleryItems([...collectedItems].sort((left, right) => right.timestamp - left.timestamp))
+
+    try {
+      while (hasMore) {
+        const page = await AppService.History(roomID, cursor)
+        if (mediaGalleryRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
+        const pageMessages = page.messages ?? []
+        for (const message of pageMessages) {
+          if (!hasGalleryMedia(message)) continue
+          const messageKey = mediaGalleryMessageKey(message)
+          if (seenMessageKeys.has(messageKey)) continue
+          seenMessageKeys.add(messageKey)
+          collectedItems.push(message)
+        }
+        setMediaGalleryItems([...collectedItems].sort((left, right) => right.timestamp - left.timestamp))
+        setMediaGalleryScanned((count) => count + pageMessages.length)
+        if (page.before === cursor) {
+          if (page.hasMore) throw new Error('Room history pagination did not advance.')
+          break
+        }
+        cursor = page.before
+        hasMore = page.hasMore
+      }
+    } catch (galleryError) {
+      if (mediaGalleryRequestRef.current === requestID && selectedRoomRef.current === roomID) {
+        setMediaGalleryError(describeError(galleryError))
+      }
+    } finally {
+      if (mediaGalleryRequestRef.current === requestID && selectedRoomRef.current === roomID) {
+        setMediaGalleryLoading(false)
+      }
+    }
+  }
+
+  // Keep the viewport filled. A room whose newest page is shorter than the
+  // timeline box can't be scrolled at all, so the scroll handler below would
+  // never fire and older history would stay stuck behind the button. This
+  // terminates: a page either grows the content (stopping the fill) or stops
+  // advancing the cursor, which makes loadOlderMessages clear `hasOlder`.
   useEffect(() => {
-    const timeline = timelineScrollRef.current
+    const timeline = timelineRef.current
     if (!selectedRoomID || loadingHistory || loadingOlder || !hasOlder) return
     if (!timeline || timeline.clientHeight <= 0) return
     if (timeline.scrollHeight > timeline.clientHeight) return
     void loadOlderMessages()
   }, [selectedRoomID, loadingHistory, loadingOlder, hasOlder, messages])
-
-  useEffect(() => {
-    if (loadingHistory || !stickToBottomRef.current || visibleMessages.length === 0) return
-    timelineVirtuosoRef.current?.scrollToIndex({ index: visibleMessages.length - 1, align: 'end' })
-  }, [loadingHistory, messages, selectedRoomID, visibleMessages.length])
 
   function messageSearchRequest(nextBatch = ''): MessageSearchRequest | null {
     const query = messageSearch.trim()
@@ -1882,6 +2423,8 @@ function App() {
       return false
     }
   }
+
+  setPreferenceRef.current = setPreference
 
   function archivedPreferenceKey(roomID: string, accountID = '') {
     return `room.archived.${accountID || snapshot?.activeAccountId || 'primary'}.${roomID}`
@@ -2002,45 +2545,29 @@ function App() {
   }
 
   async function archiveInactiveRooms() {
-    if (archiveInactiveRunningRef.current) return
-    archiveInactiveRunningRef.current = true
-    try {
-      const ageDays = Number(preferenceString(preferences, 'archive.older_than_days', '90'))
-      const cutoff = Date.now() - ageDays * 24 * 60 * 60 * 1000
-      const inactiveRooms = rooms.filter((room) => room.lastEventAt > 0
-        && room.lastEventAt < cutoff
-        && !preferenceBoolean(preferences, archivedPreferenceKey(room.id)))
-      const archivedRoomIDs = new Set<string>()
-      for (const room of inactiveRooms) {
-        if ((room.unread > 0 || room.markedUnread) && room.lastEventId) {
-          try {
-            await AppService.MarkRead(room.id, room.lastEventId)
-            setSnapshot((current) => current ? {
-              ...current,
-              rooms: (current.rooms ?? []).map((candidate) => candidate.id === room.id ? { ...candidate, unread: 0, markedUnread: false, mentions: 0 } : candidate),
-            } : current)
-          } catch (readError) {
-            setError(describeError(readError))
-            continue
-          }
+    const ageDays = Number(preferenceString(preferences, 'archive.older_than_days', '90'))
+    const cutoff = Date.now() - ageDays * 24 * 60 * 60 * 1000
+    const inactiveRooms = rooms.filter((room) => room.lastEventAt > 0
+      && room.lastEventAt < cutoff
+      && !preferenceBoolean(preferences, archivedPreferenceKey(room.id)))
+    const archivedRoomIDs = new Set<string>()
+    for (const room of inactiveRooms) {
+      if ((room.unread > 0 || room.markedUnread) && room.lastEventId) {
+        try {
+          await AppService.MarkRead(room.id, room.lastEventId)
+          setSnapshot((current) => current ? {
+            ...current,
+            rooms: (current.rooms ?? []).map((candidate) => candidate.id === room.id ? { ...candidate, unread: 0, markedUnread: false, mentions: 0 } : candidate),
+          } : current)
+        } catch (readError) {
+          setError(describeError(readError))
+          continue
         }
-        if (await setPreference(archivedPreferenceKey(room.id), true)) archivedRoomIDs.add(room.id)
       }
-      if (archivedRoomIDs.has(selectedRoomID)) showRoom(nextRoomAfterArchive(archivedRoomIDs))
-    } finally {
-      archiveInactiveRunningRef.current = false
+      if (await setPreference(archivedPreferenceKey(room.id), true)) archivedRoomIDs.add(room.id)
     }
+    if (archivedRoomIDs.has(selectedRoomID)) showRoom(nextRoomAfterArchive(archivedRoomIDs))
   }
-
-  archiveInactiveRoomsRef.current = archiveInactiveRooms
-
-  useEffect(() => {
-    if (!preferenceBoolean(preferences, 'archive.automatic')) return
-    const archiveIfInactive = () => { void archiveInactiveRoomsRef.current() }
-    archiveIfInactive()
-    const timer = window.setInterval(archiveIfInactive, 24 * 60 * 60 * 1000)
-    return () => window.clearInterval(timer)
-  }, [rooms, selectedRoomID, preferences['archive.automatic'], preferences['archive.older_than_days']])
 
   function openRoomContextMenu(roomID: string, x: number, y: number) {
     const menuWidth = 232
@@ -2065,10 +2592,6 @@ function App() {
   }
 
   function openMessageContextMenu(message: Message, x: number, y: number) {
-    // A selection means the user wants the platform's own menu (Copy), so leave
-    // the native context menu alone in that case.
-    const selection = window.getSelection()
-    if (selection && !selection.isCollapsed && selection.toString().trim()) return
     const menuWidth = 260
     const menuHeight = Math.max(0, Math.min(620, window.innerHeight - 16))
     const targetKey = message.id || message.transactionId
@@ -2115,6 +2638,7 @@ function App() {
       { key: 'received-at', label: `Received at ${receivedAt}`, ariaLabel: `Received at ${receivedAt}`, icon: <Clock3 size={14} />, disabled: true, separatorBefore: true, run: () => { } },
       { key: 'remind', label: 'Set reminder', ariaLabel: 'Set reminder for message', icon: <BellRing size={14} />, disabled: !manageable, separatorBefore: true, run: () => openReminder(message) },
       { key: 'translate', label: 'Translate', ariaLabel: 'Translate message with local AI', icon: <Languages size={14} />, disabled: !aiEnabled || !message.body || Boolean(message.redacted), run: () => translateMessage(message) },
+      { key: 'turkish-tutor', label: 'Analyze with Turkish Tutor', ariaLabel: 'Analyze message with Turkish Tutor', icon: <Languages size={14} />, disabled: !aiEnabled || !body || Boolean(message.redacted), run: () => void analyzeWithTurkishTutor(body, 'message') },
       { key: 'ai-reply', label: 'Draft reply with AI', ariaLabel: 'Draft reply with local AI', icon: <Reply size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => draftAIReply(message) },
       { key: 'ai-explain', label: 'Explain message', ariaLabel: 'Explain message with local AI', icon: <Sparkles size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => explainMessage(message) },
     ]
@@ -2151,7 +2675,7 @@ function App() {
   }
 
   async function confirmMessageForward() {
-    if (!forwardingMessage || forwardBusy) return
+    if (!forwardingMessage || forwardBusy || toneGuardHoldRef.current || toneGuardCheckRef.current) return
     const destination = rooms.find((candidate) => candidate.id === forwardTargetRoomID && isActiveAccountRoom(candidate))
     const body = displayMessageBody(forwardingMessage).trim()
     if (!destination || !body) return
@@ -2159,7 +2683,8 @@ function App() {
     setForwardError('')
     try {
       const sender = forwardingMessage.senderName || forwardingMessage.sender || 'Unknown sender'
-      await dispatchMessage({ roomID: destination.id, text: `Forwarded from ${sender}:\n\n${body}`, replyTo: null, mentionUserIDs: [] })
+      const sent = await dispatchMessage({ roomID: destination.id, text: `Forwarded from ${sender}:\n\n${body}`, replyTo: null, mentionUserIDs: [] }, { source: 'forward' })
+      if (!sent) return
       setForwardingMessage(null)
       void refreshRoomSnapshotAfterSend()
     } catch (sendError) {
@@ -2314,7 +2839,9 @@ function App() {
       setOlderCursor(0)
       setHasOlder(false)
       setLoadingOlder(false)
+      timelineHeightBeforePrepend.current = null
     }
+    roomSwitchRef.current = true
     stickToBottomRef.current = true
     setSelectedRoomID(roomID)
     setMobilePane(roomID ? 'conversation' : 'rooms')
@@ -2323,16 +2850,21 @@ function App() {
     })
   }
 
-  function isActiveAccountRoom(_room: Room) {
-    return true
+  function isActiveAccountRoom(room: Room) {
+    return !room.accountId || room.accountId === snapshot?.activeAccountId
   }
 
   function isLastMessageByCurrentUser(room: Room) {
-    return Boolean(room.lastEventSender && snapshot?.profile.userId === room.lastEventSender)
+    const userID = isActiveAccountRoom(room)
+      ? snapshot?.profile.userId
+      : snapshot?.accounts?.find((account) => account.id === room.accountId)?.profile.userId
+    return Boolean(room.lastEventSender && userID === room.lastEventSender)
   }
 
+  // Rooms from other accounts switch to their account before opening.
   function openInboxRoom(room: Room) {
-    showRoom(room.id)
+    if (isActiveAccountRoom(room)) showRoom(room.id)
+    else void switchAccount(room.accountId, room.id)
   }
 
   function selectRoomByOffset(direction: number, unansweredOnly = false) {
@@ -2356,6 +2888,15 @@ function App() {
 
     const key = event.key.toLowerCase()
     const hasPrimaryModifier = event.metaKey || event.ctrlKey
+    const accountShortcutNumber = event.code.match(/^Digit([1-9])$/)?.[1] ?? (/^[1-9]$/.test(event.key) ? event.key : '')
+    if (hasPrimaryModifier && event.altKey && accountShortcutNumber) {
+      const account = snapshot?.accounts?.[Number(accountShortcutNumber) - 1]
+      if (account) {
+        event.preventDefault()
+        void switchAccount(account.id)
+      }
+      return
+    }
     if (!hasPrimaryModifier && !event.altKey && event.key === '?') {
       event.preventDefault()
       setSettingsTab('Keyboard')
@@ -2494,12 +3035,63 @@ function App() {
     }
   }
 
-  async function openBeeperRegistration() {
-    setError('')
+  function resetAccountWorkspace(state: Snapshot) {
+    setSnapshot(state)
+    setSelectedRoomID((state.rooms ?? [])[0]?.id ?? '')
+    setMobilePane('rooms')
+    setMessages([])
+    setComposeText('')
+    setMentionBindings([])
+    setReplyTarget(null)
+    setEditTarget(null)
+    setSearchOpen(false)
+    setSearchResults([])
+    setSearchNextBatch('')
+    setScheduledJobs([])
+    setScheduledTimes({})
+    draftsRef.current.clear()
+    lastReadEventByRoom.current.clear()
+    historyRoomIDRef.current = ''
+    pendingHistoryRefreshRoomIDRef.current = ''
+    void refreshScheduledJobs()
+  }
+
+  async function switchAccount(accountID: string, roomID = '') {
+    if (accountID === snapshot?.activeAccountId) {
+      setAccountManagerOpen(false)
+      if (roomID) showRoom(roomID)
+      return
+    }
+    setBusy(true)
+    setAccountError('')
     try {
-      await AppService.OpenExternalURL('https://www.beeper.com/')
-    } catch (registrationError) {
-      setError(`Could not open Beeper's website: ${describeError(registrationError)}`)
+      await flushPendingSend()
+      const state = await AppService.SwitchAccount(accountID)
+      resetAccountWorkspace(state)
+      if (roomID) showRoom(roomID)
+      setAccountManagerOpen(false)
+    } catch (switchError) {
+      setAccountError(describeError(switchError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function submitAddAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setBusy(true)
+    setAccountError('')
+    try {
+      const state = await AppService.AddAccount(accountHomeserver.trim(), accountUsername.trim(), accountPassword)
+      resetAccountWorkspace(state)
+      setAccountPassword('')
+      setAccountUsername('')
+      setAddingAccount(false)
+      setAccountManagerOpen(false)
+    } catch (addError) {
+      setAccountError(describeError(addError))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -2530,9 +3122,7 @@ function App() {
     setScheduledDialogError('')
     try {
       if (scheduledDraft.kind === 'message') {
-        if (scheduledRepeatWeekly) {
-          await AppService.ScheduleRecurringMessage(scheduledDraft.roomID, scheduledDraft.text, dueAt)
-        } else if (scheduledDraft.replyToEventID) {
+        if (scheduledDraft.replyToEventID) {
           await AppService.ScheduleReply(scheduledDraft.roomID, scheduledDraft.text, scheduledDraft.replyToEventID, dueAt)
         } else {
           await AppService.ScheduleMessage(scheduledDraft.roomID, scheduledDraft.text, dueAt)
@@ -2581,12 +3171,130 @@ function App() {
 
   const undoSendSeconds = Number(preferenceString(preferences, 'composer.undo_send_seconds', '0')) || 0
 
-  async function dispatchMessage(message: Pick<PendingSend, 'roomID' | 'text' | 'replyTo' | 'mentionUserIDs'>) {
+  async function dispatchMessage(
+    message: Pick<PendingSend, 'roomID' | 'text' | 'replyTo' | 'mentionUserIDs'>,
+    options: { source: ToneGuardSource; bypassToneGuard?: boolean; mentionBindings?: { token: string; userID: string }[] },
+  ) {
+    if (toneGuardHoldRef.current && !options.bypassToneGuard) return false
+    const incomingMessages = messagesRef.current
+      .filter((item) => !item.own && !item.redacted)
+      .slice(-2)
+      .map((item) => displayMessageBody(item).trim())
+      .filter(Boolean)
+    const toneGuardEnabled = preferenceBoolean(preferencesRef.current, `room.tone_guard.${message.roomID}`)
+    if (!options.bypassToneGuard && shouldCheckToneGuard(message.text, toneGuardEnabled, new Date(), incomingMessages)) {
+      if (toneGuardCheckRef.current) return false
+      toneGuardCheckRef.current = true
+      setToneGuardChecking(true)
+      try {
+        const response = await AppService.CheckMessageTone([
+          { role: 'system', content: TONE_GUARD_SYSTEM_PROMPT },
+          { role: 'user', content: JSON.stringify({ draft: message.text, recent_incoming_messages: incomingMessages }) },
+        ])
+        const assessment = parseToneAssessment(response)
+        if (assessment?.is_hostile_or_unprofessional && assessment.severity !== 'LOW') {
+          const hold: ToneGuardHold = {
+            message: { ...message },
+            assessment,
+            source: options.source,
+            mentionBindings: options.mentionBindings ?? [],
+          }
+          toneGuardHoldRef.current = hold
+          setToneGuardHold(hold)
+          return false
+        }
+      } catch {
+      } finally {
+        toneGuardCheckRef.current = false
+        setToneGuardChecking(false)
+      }
+    }
     if (message.replyTo) await AppService.SendReply(message.roomID, message.text, message.replyTo.id)
     else if (message.mentionUserIDs.length > 0) await AppService.SendMessageWithMentions(message.roomID, message.text, message.mentionUserIDs)
     else await AppService.SendMessage(message.roomID, message.text)
     if (preferenceString(preferencesRef.current, 'sounds.effects', 'Off') === 'Sent messages') {
       playNotificationSound(preferenceNumber(preferencesRef.current, 'notifications.volume', 50), 'Soft')
+    }
+    return true
+  }
+
+  function dismissToneGuard() {
+    toneGuardHoldRef.current = null
+    setToneGuardHold(null)
+  }
+
+  function handleToneGuardPromptKeyDown(event: KeyboardEvent<HTMLElement>) {
+    const hold = toneGuardHoldRef.current
+    if (!hold) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      dismissToneGuard()
+    } else if (event.key === 'Enter' && !event.shiftKey && event.target === event.currentTarget && hold.assessment.calmer_alternative) {
+      event.preventDefault()
+      event.stopPropagation()
+      void resolveToneGuard('alternative')
+    }
+  }
+
+  function renderToneGuardPrompt(source: 'composer' | 'forward') {
+    if (!toneGuardHold || (source === 'forward') !== (toneGuardHold.source === 'forward')) return null
+    const { assessment, message } = toneGuardHold
+    return <section ref={toneGuardPromptRef} className="tone-guard-warning" role="alert" aria-label="Tone Guard warning" tabIndex={-1} onKeyDown={handleToneGuardPromptKeyDown}>
+      <div className="tone-guard-copy">
+        <strong>Pause before sending · {assessment.severity.toLowerCase()} severity</strong>
+        <span>{assessment.tone_tags.join(' · ') || 'This message may sound hostile or unprofessional.'}</span>
+        <p className="tone-guard-held-text">{message.text}</p>
+        {assessment.calmer_alternative && <p className="tone-guard-alternative"><span>Calmer option</span>{assessment.calmer_alternative}</p>}
+      </div>
+      <div className="tone-guard-actions">
+        <button className="is-primary" type="button" disabled={toneGuardResolving || !assessment.calmer_alternative} onClick={() => void resolveToneGuard('alternative')}>Replace &amp; Send</button>
+        <button type="button" disabled={toneGuardResolving} onClick={() => void resolveToneGuard('anyway')}>Send Anyway</button>
+        <button type="button" disabled={toneGuardResolving} onClick={dismissToneGuard}>Keep editing</button>
+      </div>
+    </section>
+  }
+
+  async function resolveToneGuard(choice: 'alternative' | 'anyway') {
+    const hold = toneGuardHoldRef.current
+    if (!hold || toneGuardResolutionRef.current) return
+    const replacement = choice === 'alternative' ? hold.assessment.calmer_alternative : hold.message.text
+    if (!replacement.trim()) return
+    const mentionUserIDs = choice === 'alternative'
+      ? hold.message.mentionUserIDs.filter((userID) => hold.mentionBindings.some((binding) => binding.userID === userID && replacement.includes(binding.token)))
+      : hold.message.mentionUserIDs
+    toneGuardResolutionRef.current = true
+    setToneGuardResolving(true)
+    setError('')
+    try {
+      await dispatchMessage({ ...hold.message, text: replacement, mentionUserIDs }, { source: hold.source, bypassToneGuard: true })
+      toneGuardHoldRef.current = null
+      setToneGuardHold(null)
+      if (hold.source === 'forward') {
+        setForwardingMessage(null)
+      } else if (selectedRoomRef.current === hold.message.roomID) {
+        const currentDraft = composeTextRef.current
+        const remainingDraft = hold.source === 'queued'
+          ? currentDraft.startsWith(hold.message.text)
+            ? currentDraft.slice(hold.message.text.length).replace(/^\n/, '')
+            : null
+          : currentDraft.trim() === hold.message.text ? '' : null
+        if (remainingDraft !== null) {
+          setComposeDraft(remainingDraft)
+          setMentionBindings((current) => current.filter((binding) => remainingDraft.includes(binding.token)))
+          setMentionStart(-1)
+          if (replyTarget?.id === hold.message.replyTo?.id) setReplyTarget(null)
+        }
+      }
+      await refreshRoomSnapshotAfterSend()
+      stickToBottomRef.current = true
+      scrollTimelineToBottom()
+      setHistoryRevision((revision) => revision + 1)
+    } catch (sendError) {
+      setError(describeError(sendError))
+    } finally {
+      toneGuardResolutionRef.current = false
+      setToneGuardResolving(false)
     }
   }
 
@@ -2720,6 +3428,7 @@ function App() {
     const restored = existing ? `${pending.text}\n${existing}` : pending.text
     draftsRef.current.set(pending.roomID, restored)
     if (selectedRoomRef.current !== pending.roomID) return
+    composeTextRef.current = restored
     setComposeText(restored)
     setReplyTarget(pending.replyTo)
     setMentionBindings(pending.mentionBindings)
@@ -2732,7 +3441,11 @@ function App() {
     pendingSendRef.current = null
     setPendingSendPreview(null)
     try {
-      await dispatchMessage(pending)
+      const sent = await dispatchMessage(pending, { source: 'queued', mentionBindings: pending.mentionBindings })
+      if (!sent) {
+        restorePendingSend(pending)
+        return
+      }
       await refreshRoomSnapshotAfterSend()
       setHistoryRevision((revision) => revision + 1)
     } catch (sendError) {
@@ -2752,9 +3465,55 @@ function App() {
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (toneGuardHoldRef.current || toneGuardCheckRef.current) return
     const roomID = selectedRoomID
+    const sourceDraft = composeText
+    const ghostIntent = parseGhostCommand(sourceDraft)
+    if (ghostIntent !== null) {
+      if (!roomID || busy || ghostwriterDraftBusy) return
+      if (!ghostwriterEnabled) {
+        setGhostwriterDraftStatus('Enable Ghostwriter in Settings > Integrations first.')
+        return
+      }
+      if (!ghostIntent) {
+        setGhostwriterDraftStatus('Add an intent after /ghost.')
+        return
+      }
+      const requestID = ++ghostwriterDraftRequestRef.current
+      ghostwriterAutocompleteRequestRef.current++
+      setGhostwriterCompletion(null)
+      setGhostwriterAutocompleteStatus('idle')
+      setGhostwriterDraftBusy(true)
+      setGhostwriterDraftStatus('Generating a local draft…')
+      try {
+        const suggestions = await AppService.Ghostwriter({ roomId: roomID, mode: GhostwriterRequestMode.GhostwriterModeSlash, draft: '', intent: ghostIntent })
+        if (requestID !== ghostwriterDraftRequestRef.current) return
+        if (ghostwriterSelectedRoomRef.current !== roomID || composeTextRef.current !== sourceDraft) {
+          setGhostwriterDraftBusy(false)
+          setGhostwriterDraftStatus('Draft not inserted because the chat or draft changed.')
+          return
+        }
+        const draft = suggestions?.find((suggestion) => suggestion.type === 'slash_result')?.text.trim()
+        if (!draft) throw new Error('The local model returned no draft.')
+        setGhostwriterDraftBusy(false)
+        ghostwriterAutocompleteSuppressedDraftRef.current = draft
+        setComposeDraft(draft)
+        setGhostwriterDraftStatus('Draft ready to review. It has not been sent.')
+        requestAnimationFrame(() => {
+          const input = composerInputRef.current
+          if (!input) return
+          input.focus()
+          input.setSelectionRange(draft.length, draft.length)
+        })
+      } catch {
+        if (requestID === ghostwriterDraftRequestRef.current) setGhostwriterDraftStatus('Local model unavailable. Check that it is running.')
+      } finally {
+        if (requestID === ghostwriterDraftRequestRef.current) setGhostwriterDraftBusy(false)
+      }
+      return
+    }
     const text = (preferenceBoolean(preferences, 'emoji.replace_emoticons') ? replaceEmoticons(composeText) : composeText).trim()
-    if (!roomID || !text || busy) return
+    if (!roomID || !text || busy || ghostwriterDraftBusy) return
     const mentionUserIDs = [...new Set(mentionBindings.filter(({ token }) => text.includes(token)).map(({ userID }) => userID))]
     if (!editTarget && undoSendSeconds > 0) {
       void flushPendingSend()
@@ -2775,7 +3534,8 @@ function App() {
       if (editTarget) {
         await AppService.EditMessage(roomID, text, editTarget.id)
       } else {
-        await dispatchMessage({ roomID, text, replyTo: replyTarget, mentionUserIDs })
+        const sent = await dispatchMessage({ roomID, text, replyTo: replyTarget, mentionUserIDs }, { source: 'composer', mentionBindings })
+        if (!sent) return
         await refreshRoomSnapshotAfterSend()
       }
       const nextDraft = editTarget ? draftsRef.current.get(roomID) ?? '' : ''
@@ -2811,8 +3571,16 @@ function App() {
           setError(`${file.name || 'Attachments'} cannot exceed 50 MiB.`)
           continue
         }
-        const bytes = new Uint8Array(await file.arrayBuffer())
-        await AppService.SendAttachment(roomID, file.name, encodeBase64(bytes), voiceDurationMilliseconds > 0, voiceDurationMilliseconds)
+        const query = new URLSearchParams({
+          filename: file.name,
+          voiceNote: String(voiceDurationMilliseconds > 0),
+          durationMs: String(voiceDurationMilliseconds),
+        })
+        await requestLocalAsset(`/media/ipc/attachment/${encodeURIComponent(roomID)}?${query}`, {
+          method: 'POST',
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+          body: file,
+        })
         uploadedAny = true
       }
       if (uploadedAny) setHistoryRevision((revision) => revision + 1)
@@ -2991,6 +3759,41 @@ function App() {
     && composeText.slice(emojiMatch.start, emojiMatch.end).toLowerCase() === `:${emojiMatch.query}`
     ? suggestEmoji(emojiMatch.query)
     : []
+  const snippetOptions = snippetMatch ? matchingSnippets(snippets, snippetMatch) : []
+  const snippetMenuVisible = snippetOptions.length > 0
+    && !(mentionStart >= 0 && mentionOptions.length > 0)
+    && emojiOptions.length === 0
+
+  useLayoutEffect(() => {
+    if (!snippetMenuVisible) return
+    const textarea = composerInputRef.current
+    if (!textarea) return
+    const caret = snippetCaret ?? textarea.selectionStart
+    const point = textareaCaretPoint(textarea, caret)
+    const panelWidth = Math.min(360, window.innerWidth - 16)
+    const left = Math.max(8, Math.min(point.left, window.innerWidth - panelWidth - 8))
+    const menuHeight = Math.min(250, 42 + snippetOptions.length * 52)
+    const below = point.top + point.lineHeight + menuHeight + 4 <= window.innerHeight - 8
+    setSnippetMenuPosition({
+      left,
+      top: below ? point.top + point.lineHeight + 4 : Math.max(8, point.top - 8),
+      above: !below,
+    })
+  }, [snippetMenuVisible, snippetCaret, composeText, snippetOptions.length])
+
+  useLayoutEffect(() => {
+    const placement = snippetCaretPlacementRef.current
+    if (!placement) return
+    if (composeText !== placement.text) {
+      snippetCaretPlacementRef.current = null
+      return
+    }
+    const textarea = composerInputRef.current
+    if (!textarea) return
+    snippetCaretPlacementRef.current = null
+    textarea.focus()
+    textarea.setSelectionRange(placement.caret, placement.caret)
+  }, [composeText])
 
   function updateMentionQuery(value: string, cursor: number) {
     const match = /(^|\s)@([^\s@]*)$/.exec(value.slice(0, cursor))
@@ -3031,6 +3834,12 @@ function App() {
   function updateEmojiQuery(value: string, cursor: number) {
     setEmojiMatch(emojiQueryAt(value, cursor))
     setEmojiActiveIndex(0)
+  }
+
+  function updateSnippetQuery(value: string, cursor: number) {
+    setSnippetMatch(findSnippetMatch(value, cursor, snippetsRef.current))
+    setSnippetCaret(cursor)
+    setSnippetActiveIndex(0)
   }
 
   const aiEndpoint = preferenceString(preferences, 'ai.endpoint', '')
@@ -3078,6 +3887,44 @@ function App() {
     }
   }
 
+  async function analyzeWithTurkishTutor(text: string, mode: TurkishTutorState['mode']) {
+    const originalText = text.trim()
+    if (!originalText) {
+      setError(mode === 'draft' ? 'Write a Turkish or Italian draft first.' : 'This message has no text to analyze.')
+      return
+    }
+    if (!aiEnabled) {
+      setError('Set a local AI endpoint in Settings > Integrations to use Turkish Tutor.')
+      return
+    }
+    const requestID = turkishTutorRequestRef.current + 1
+    turkishTutorRequestRef.current = requestID
+    setTurkishTutorState({ mode, originalText, analysis: null, busy: true, error: '' })
+    try {
+      const analysis = await TurkishTutorService.Analyze(originalText)
+      if (turkishTutorRequestRef.current === requestID) {
+        setTurkishTutorState((current) => current ? { ...current, analysis, busy: false } : current)
+      }
+    } catch (analysisError) {
+      if (turkishTutorRequestRef.current === requestID) {
+        setTurkishTutorState((current) => current ? { ...current, busy: false, error: describeError(analysisError) } : current)
+      }
+    }
+  }
+
+  function closeTurkishTutor() {
+    turkishTutorRequestRef.current++
+    setTurkishTutorState(null)
+  }
+
+  function useTurkishTutorDraft() {
+    const text = turkishTutorState?.analysis?.text_to_insert.trim()
+    if (turkishTutorState?.mode !== 'draft' || !text || editTarget) return
+    setComposeDraft(text)
+    closeTurkishTutor()
+    requestAnimationFrame(() => composerInputRef.current?.focus())
+  }
+
   function closeAIResult() {
     aiRequestRef.current++
     setAIPanel(null)
@@ -3119,61 +3966,107 @@ function App() {
   async function translateRoomToEnglish() {
     if (!selectedRoomID || !aiEnabled || (!hasAIConversationContext && !hasOlder)) return
     const roomID = selectedRoomID
-    const requestID = aiRequestRef.current + 1
-    aiRequestRef.current = requestID
-    setAIPanel({
-      title: 'Translate chat to English',
-      busy: true,
-      result: '',
-      error: '',
-      acceptAction: { kind: 'none' },
-      status: hasOlder && messages.length < 50 ? 'Loading the latest 50 messages…' : 'Preparing the latest 50 messages…',
-      placement: 'timeline',
+    const requestID = chatTranslationRequestRef.current + 1
+    chatTranslationRequestRef.current = requestID
+    const currentUserID = snapshot?.profile.userId ?? ''
+    let allMessages = [...messages]
+    let cursor = olderCursor
+    let moreHistory = hasOlder
+    const receivedTextMessages = () => allMessages.filter((message) =>
+      Boolean(timelineMessageID(message))
+      && !isOwnMessage(message, currentUserID)
+      && !message.redacted
+      && Boolean(message.body.trim()),
+    )
+    setChatTranslation({
+      requestID,
       roomID,
+      targetMessageIDs: [],
+      translations: {},
+      busy: true,
+      status: receivedTextMessages().length < 10 && moreHistory ? 'Loading recent received messages…' : 'Preparing translations…',
+      error: '',
+      errorResponse: null,
     })
+    let pagingHistory = false
+    let fetchedHistory = false
 
     try {
-      let allMessages = [...messages]
-      let cursor = olderCursor
-      let moreHistory = hasOlder
-      while (allMessages.length < 50 && moreHistory) {
-        if (aiRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
+      if (receivedTextMessages().length < 10 && moreHistory) {
+        if (loadingOlderRef.current) throw new Error('Wait for older messages to finish loading.')
+        pagingHistory = true
+        loadingOlderRef.current = true
+        setLoadingOlder(true)
+      }
+      while (receivedTextMessages().length < 10 && moreHistory) {
+        if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
         const page = await AppService.History(roomID, cursor)
-        if (aiRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
+        if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
         if (page.before === cursor && page.hasMore) throw new Error('Could not continue loading the rest of this chat history.')
         allMessages = mergeTimelineMessages(allMessages, page.messages ?? [])
         cursor = page.before
         moreHistory = page.hasMore
+        fetchedHistory = true
       }
 
-      const translatableMessages = promptMessages(allMessages.slice(-50)).filter((message) => message.body.trim() && !message.redacted)
-      if (translatableMessages.length === 0) throw new Error('There are no text messages to translate in this chat.')
-      const batches = splitChatTranslationBatches(translatableMessages)
-      const translations: string[] = []
+      if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
+      if (fetchedHistory) {
+        if (allMessages.length > messages.length) {
+          timelineHeightBeforePrepend.current = timelineRef.current?.scrollHeight ?? null
+          setMessages((current) => mergeTimelineMessages(current, allMessages))
+        }
+        setOlderCursor(cursor)
+        setHasOlder(moreHistory && cursor !== olderCursor)
+      }
+
+      const targetMessages = receivedTextMessages().slice(-10)
+      if (targetMessages.length === 0) throw new Error('There are no incoming text messages to translate in this chat.')
+      const targetMessageIDs = targetMessages.map(timelineMessageID)
+      setChatTranslation((current) => current?.requestID === requestID
+        ? { ...current, targetMessageIDs, status: 'Translating…' }
+        : current)
+      const batches = splitChatTranslationBatches(promptMessages(targetMessages))
       let completedMessages = 0
 
       for (const batch of batches) {
-        if (aiRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
-        const firstMessageNumber = completedMessages + 1
-        const lastMessageNumber = completedMessages + batch.length
-        setAIPanel((current) => current && aiRequestRef.current === requestID
-          ? { ...current, status: `Translating messages ${firstMessageNumber}–${lastMessageNumber} of ${translatableMessages.length}…` }
+        if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
+        const translations = parseChatTranslationResponse(
+          await AppService.AIComplete(buildChatTranslationPrompt(batch, completedMessages + 1)),
+          batch.length,
+        )
+        if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
+        const batchMessageIDs = targetMessageIDs.slice(completedMessages, completedMessages + batch.length)
+        const translatedBatch = Object.fromEntries(batchMessageIDs.map((messageID, index) => [messageID, translations[index]]))
+        completedMessages += batch.length
+        setChatTranslation((current) => current?.requestID === requestID
+          ? { ...current, translations: { ...current.translations, ...translatedBatch }, status: `Translated ${completedMessages} of ${targetMessages.length}…` }
           : current)
-        const translation = (await AppService.AIComplete(buildChatTranslationPrompt(batch, firstMessageNumber))).trim()
-        if (aiRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
-        if (!translation) throw new Error(`The AI endpoint returned an empty translation for messages ${firstMessageNumber}–${lastMessageNumber}.`)
-        translations.push(translation)
-        completedMessages = lastMessageNumber
       }
 
-      if (aiRequestRef.current === requestID) {
-        setAIPanel((current) => current ? { ...current, busy: false, result: translations.join('\n\n'), status: '' } : current)
+      if (chatTranslationRequestRef.current === requestID) {
+        setChatTranslation((current) => current?.requestID === requestID ? { ...current, busy: false, status: '' } : current)
       }
     } catch (translationError) {
-      if (aiRequestRef.current === requestID) {
-        setAIPanel((current) => current ? { ...current, busy: false, error: describeError(translationError), status: '' } : current)
+      if (chatTranslationRequestRef.current === requestID) {
+        setChatTranslation((current) => current?.requestID === requestID ? {
+          ...current,
+          busy: false,
+          error: describeError(translationError),
+          errorResponse: translationError instanceof ChatTranslationResponseError ? translationError.response : null,
+          status: '',
+        } : current)
+      }
+    } finally {
+      if (pagingHistory) {
+        loadingOlderRef.current = false
+        setLoadingOlder(false)
       }
     }
+  }
+
+  function clearChatTranslation() {
+    chatTranslationRequestRef.current++
+    setChatTranslation(null)
   }
 
   function draftAIReply(message: Message) {
@@ -3296,11 +4189,102 @@ function App() {
   }
 
   function setComposeDraft(text: string) {
+    ghostwriterDraftRequestRef.current++
+    composeTextRef.current = text
     setComposeText(text)
     if (!editTarget && selectedRoomID) {
       if (text) draftsRef.current.set(selectedRoomID, text)
       else draftsRef.current.delete(selectedRoomID)
     }
+  }
+
+  function updateSnippets(next: Snippet[]) {
+    snippetsRef.current = next
+    setSnippets(next)
+    saveSnippets(next)
+    setSnippetMatch(null)
+  }
+
+  function expandSnippet(snippet: Snippet, match: SnippetMatch, delimiter = '') {
+    const originalText = composeTextRef.current
+    if (originalText.slice(match.start, match.end).toLocaleLowerCase() !== match.shortcut.toLocaleLowerCase()) return
+    const roomID = selectedRoomIDRef.current
+    const requestID = ++snippetExpansionRequestRef.current
+    const applyExpansion = (clipboardText: string) => {
+      const input = composerInputRef.current
+      if (requestID !== snippetExpansionRequestRef.current
+        || composeTextRef.current !== originalText
+        || selectedRoomIDRef.current !== roomID
+        || (input && input.selectionStart !== match.end + delimiter.length)) return
+
+      const expanded = expandSnippetContent(snippet.content, clipboardText)
+      const nextText = originalText.slice(0, match.start)
+        + expanded.text
+        + delimiter
+        + originalText.slice(match.end + delimiter.length)
+      const caret = match.start + expanded.cursorPosition + (expanded.hasCursor ? 0 : delimiter.length)
+      snippetUndoRef.current = {
+        roomID,
+        originalText,
+        expandedText: nextText,
+        originalCaret: match.end,
+        pendingCaret: match.end + delimiter.length,
+        expandedCaret: caret,
+      }
+      snippetCaretPlacementRef.current = { text: nextText, caret }
+      setComposeDraft(nextText)
+      setSnippetMatch(null)
+      setEmojiMatch(null)
+      setMentionStart(-1)
+    }
+
+    if (snippet.content.includes('{clipboard}') && navigator.clipboard?.readText) {
+      try {
+        void navigator.clipboard.readText().then(applyExpansion).catch(() => applyExpansion(''))
+      } catch {
+        applyExpansion('')
+      }
+    } else {
+      applyExpansion('')
+    }
+  }
+
+  function applyGhostwriterSuggestion(suggestion: GhostwriterSuggestion) {
+    const draft = suggestion.text.trim()
+    if (!draft) return
+    ghostwriterAutocompleteSuppressedDraftRef.current = draft
+    setGhostwriterCompletion(null)
+    setGhostwriterAutocompleteStatus('idle')
+    setGhostwriterDraftStatus('')
+    setComposeDraft(draft)
+    requestAnimationFrame(() => {
+      const input = composerInputRef.current
+      if (!input) return
+      input.focus()
+      input.setSelectionRange(draft.length, draft.length)
+    })
+  }
+
+  function retryGhostwriterChips() {
+    ghostwriterChipEventRef.current = ''
+    setGhostwriterChipRetryRevision((revision) => revision + 1)
+  }
+
+  function acceptGhostwriterCompletion() {
+    if (!ghostwriterCompletion || ghostwriterCompletion.roomID !== selectedRoomID || ghostwriterCompletion.draft !== composeText) return
+    const draft = appendGhostCompletion(ghostwriterCompletion.draft, ghostwriterCompletion.text)
+    if (draft === composeText) return
+    ghostwriterAutocompleteSuppressedDraftRef.current = draft
+    ghostwriterAutocompleteRequestRef.current++
+    setGhostwriterCompletion(null)
+    setGhostwriterAutocompleteStatus('idle')
+    setComposeDraft(draft)
+    requestAnimationFrame(() => {
+      const input = composerInputRef.current
+      if (!input) return
+      input.focus()
+      input.setSelectionRange(draft.length, draft.length)
+    })
   }
 
   function applyEmojiSuggestion(emoji: string) {
@@ -3350,6 +4334,32 @@ function App() {
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Backspace') snippetExpansionRequestRef.current++
+    const pendingSnippetUndo = snippetUndoRef.current
+    const canUndoSnippet = pendingSnippetUndo !== null
+      && event.key === 'Backspace'
+      && pendingSnippetUndo.roomID === selectedRoomIDRef.current
+      && composeTextRef.current === pendingSnippetUndo.expandedText
+      && event.currentTarget.selectionStart === event.currentTarget.selectionEnd
+      && (event.currentTarget.selectionStart === pendingSnippetUndo.pendingCaret
+        || event.currentTarget.selectionStart === pendingSnippetUndo.expandedCaret)
+    if (canUndoSnippet && pendingSnippetUndo) {
+      event.preventDefault()
+      snippetUndoRef.current = null
+      snippetExpansionRequestRef.current++
+      snippetCaretPlacementRef.current = { text: pendingSnippetUndo.originalText, caret: pendingSnippetUndo.originalCaret }
+      setComposeDraft(pendingSnippetUndo.originalText)
+      updateMentionQuery(pendingSnippetUndo.originalText, pendingSnippetUndo.originalCaret)
+      updateEmojiQuery(pendingSnippetUndo.originalText, pendingSnippetUndo.originalCaret)
+      updateSnippetQuery(pendingSnippetUndo.originalText, pendingSnippetUndo.originalCaret)
+      return
+    }
+    if (pendingSnippetUndo) snippetUndoRef.current = null
+    if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 't') {
+      event.preventDefault()
+      void analyzeWithTurkishTutor(composeText, 'draft')
+      return
+    }
     if (event.key === 'ArrowUp' && !composeText && preferenceBoolean(preferences, 'composer.arrow_up_focus_timeline')) {
       event.preventDefault()
       timelineRef.current?.focus()
@@ -3399,6 +4409,33 @@ function App() {
         return
       }
     }
+    if (snippetMenuVisible && snippetMatch) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setSnippetActiveIndex((index) => (index + 1) % snippetOptions.length)
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setSnippetActiveIndex((index) => (index - 1 + snippetOptions.length) % snippetOptions.length)
+        return
+      }
+      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+        event.preventDefault()
+        expandSnippet(snippetOptions[snippetActiveIndex] ?? snippetOptions[0], snippetMatch)
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setSnippetMatch(null)
+        return
+      }
+    }
+    if (event.key === 'Tab' && ghostwriterCompletion?.roomID === selectedRoomID && ghostwriterCompletion.draft === composeText && composerInputRef.current?.selectionStart === composeText.length) {
+      event.preventDefault()
+      acceptGhostwriterCompletion()
+      return
+    }
     const ctrlEnter = preferenceBoolean(preferences, 'composer.ctrl_enter')
     if (event.key === 'Enter' && !event.shiftKey && (!ctrlEnter || event.ctrlKey)) {
       event.preventDefault()
@@ -3427,7 +4464,7 @@ function App() {
           <div className="auth-heading">
             <span className="eyebrow">MATRIX ACCOUNT</span>
             <h1 id="auth-title">Sign in</h1>
-            <p>Sign in with your Beeper Matrix account.</p>
+            <p>Use your homeserver credentials to continue.</p>
           </div>
           <form className="auth-form" onSubmit={submitLogin}>
             <label>
@@ -3448,9 +4485,6 @@ function App() {
               {!busy && <ArrowDown className="button-arrow" size={17} />}
             </button>
           </form>
-          <button className="auth-register" type="button" onClick={() => void openBeeperRegistration()}>
-            Create a Beeper account
-          </button>
           <div className="auth-footnote"><LockKeyhole size={14} /><span>Session and encryption keys stay on this device.</span></div>
         </section>
         <div className="auth-side" aria-hidden="true">
@@ -3506,17 +4540,6 @@ function App() {
     )
   }
 
-  const timelineTranslationPanel = aiPanel?.placement === 'timeline' && aiPanel.roomID === selectedRoomID && <section className="chat-translation-result" role="region" aria-label="Chat translation" aria-live="polite" aria-busy={aiPanel.busy}>
-    <header className="chat-translation-header">
-      <div><span className="eyebrow">AI TRANSLATION</span><h3>Latest 50 messages in English</h3></div>
-      <button className="icon-button" type="button" aria-label="Close chat translation" title="Close chat translation" onClick={closeAIResult}><X size={16} /></button>
-    </header>
-    {aiPanel.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />{aiPanel.status || 'Waiting for the configured model…'}</p>}
-    {aiPanel.error && <p className="settings-error" role="alert">{aiPanel.error}</p>}
-    {aiPanel.result && <div className="ai-result-text">{aiPanel.result}</div>}
-    <p className="chat-translation-note">The translation is sent to the configured AI endpoint, which may be remote. No Matrix message is sent automatically.</p>
-  </section>
-
   return (
     <main
       className="app-shell"
@@ -3527,6 +4550,7 @@ function App() {
       onDrop={handleFileDrop}
       data-theme={themeChoice}
       data-mobile-pane={mobilePane}
+      data-incognito={preferenceBoolean(preferences, 'privacy.incognito')}
       data-compact={preferenceBoolean(preferences, 'appearance.compact')}
       data-message-animations={preferenceBoolean(preferences, 'appearance.message_animations', true)}
       data-font-size={preferenceString(preferences, 'appearance.font_size', 'Medium').toLowerCase()}
@@ -3550,10 +4574,16 @@ function App() {
       <aside className={`sidebar ${preferenceBoolean(preferences, 'sidebar.transparent') ? 'is-transparent' : ''}`}>
         <label className="room-search">
           <Search size={16} />
-          <input ref={roomSearchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a room" aria-label="Find a room" />
+          <input ref={roomSearchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a room" aria-label="Find a room" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
           {search && <button type="button" aria-label="Clear room search" onClick={() => setSearch('')}>×</button>}
         </label>
         <div className="room-filters" role="group" aria-label="Filter rooms">
+          {inboxAccountCount > 1 && (
+            <select className="room-account-filter" aria-label="Filter rooms by account" value={effectiveAccountScope} onChange={(event) => setInboxAccountScope(event.target.value)}>
+              <option value="all">All accounts</option>
+              {(snapshot?.accounts ?? []).map((account) => <option key={account.id} value={account.id}>{account.profile.displayName || account.profile.userId}</option>)}
+            </select>
+          )}
           <div className="room-scope-filters" role="group" aria-label="Room visibility">
             <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-pressed={roomScope === 'all'} onClick={() => setRoomScope('all')}><MessageCircleMore size={13} /><span className="filter-label">All</span></button>
             <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} onClick={() => { setRoomScope('archived'); setRoomRefinements({ unanswered: false, favorite: false }) }}><Archive size={13} /><span className="filter-label">Archive</span></button>
@@ -3565,12 +4595,20 @@ function App() {
             <button type="button" className={roomRefinements.favorite ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={roomRefinements.favorite} title="Favorites" onClick={() => setRoomRefinements((current) => ({ ...current, favorite: !current.favorite }))}><Star size={14} /><span className="filter-label">Favorites</span></button>
           </div>
         </div>
+        <button className="relationship-shortcut" type="button" onClick={() => { setRelationshipDecayError(''); setRelationshipsOpen(true) }}>
+          <HeartHandshake size={15} />
+          <span>Relationships</span>
+          {relationshipDecayAlertCount > 0 && <span className="relationship-alert-count" aria-label={`${relationshipDecayAlertCount} check-ins due`}>{relationshipDecayAlertCount}</span>}
+        </button>
         <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : 'ROOMS'}</span><span className="room-section-actions">{roomScope !== 'archived' && <button className="room-archive-all" type="button" aria-label="Archive all read rooms" title="Archive all read rooms" disabled={readRoomCount === 0} onClick={() => void archiveAllReadRooms()}><Archive size={13} /></button>}{filteredRooms.length.toString().padStart(2, '0')}</span></div>
         <VirtualRoomList
           listRef={roomListRef}
           rooms={filteredRooms}
           selectedRoomIndex={selectedRoomListIndex}
           rowHeight={preferenceBoolean(preferences, 'sidebar.compact_chat_list') ? 46 : 62}
+          listCount={Math.max(filteredRooms.length, snapshot?.slidingSyncListCounts?.main ?? 0)}
+          rangeKey={snapshot?.activeAccountId ?? ''}
+          onVisibleRange={reportRoomListVisibleRange}
           renderRoom={(room, index) => (
             <RoomButton
               key={`${room.accountId}:${room.id}`}
@@ -3628,12 +4666,13 @@ function App() {
           </button>}
         </div>}
         <div className="sidebar-profile">
-          <button className="profile-settings-trigger" type="button" aria-label="Account settings" title="Account settings" onClick={() => { setSettingsTab('Account'); setSettingsOpen(true) }}>
+          <button className="account-switcher-trigger" type="button" aria-label="Manage Matrix accounts" title="Manage Matrix accounts" onClick={() => { setAccountError(''); setAddingAccount(false); setAccountManagerOpen(true) }}>
             <Avatar uri={snapshot.profile.avatarUri} label={snapshot.profile.displayName || snapshot.profile.userId} className="profile-avatar" />
             <span className="profile-copy">
               <strong>{snapshot.profile.displayName || snapshot.profile.userId}</strong>
               <span>{snapshot.profile.userId}</span>
             </span>
+            <ChevronDown size={14} />
           </button>
           <button className="sidebar-icon" type="button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}>
             <Settings size={16} />
@@ -3646,7 +4685,7 @@ function App() {
           <button className="mobile-back-button icon-button" type="button" aria-label="Back to rooms" title="Back to rooms" onClick={() => setMobilePane('rooms')}>
             <ArrowLeft size={17} />
           </button>
-          {preferenceBoolean(preferences, 'privacy.incognito') && <span className="incognito-indicator" role="status" aria-label="Incognito mode is on" title="Incognito mode is on"><EyeOff size={14} /><span>Incognito</span></span>}
+          {preferenceBoolean(preferences, 'privacy.incognito') && <span className="incognito-indicator" role="status" aria-label="Incognito mode is on" title="Incognito mode is on"><EyeOff size={14} /></span>}
           {selectedRoom ? (
             <>
               <Avatar uri={selectedRoomAvatar} label={selectedRoom.name || selectedRoom.id} className="conversation-room-avatar" />
@@ -3657,6 +4696,19 @@ function App() {
                 <IconTooltip label="Scheduled messages">
                   <button className="icon-button scheduled-jobs-button" type="button" aria-label="Scheduled messages and reminders" onClick={openScheduledJobs}>
                     <Clock3 size={16} />{scheduledJobCount > 0 && <span className="scheduled-job-count">{scheduledJobCount}</span>}
+                  </button>
+                </IconTooltip>
+                {selectedRoom.direct && <IconTooltip label={contactHUDOpen ? 'Hide contact dossier' : 'Show contact dossier'}>
+                  <button className={`icon-button ${contactHUDOpen ? 'is-selected' : ''}`} type="button" aria-label={contactHUDOpen ? 'Hide contact dossier' : 'Show contact dossier'} aria-pressed={contactHUDOpen} onClick={() => setContactHUDOpen((open) => !open)}><PanelRight size={16} /></button>
+                </IconTooltip>}
+                <IconTooltip label={busyModeEnabled ? 'Turn off busy mode' : 'Turn on busy mode'}>
+                  <button className={`icon-button ${busyModeEnabled ? 'is-selected' : ''}`} type="button" aria-label={busyModeEnabled ? 'Turn busy mode off' : 'Turn busy mode on'} aria-pressed={busyModeEnabled} onClick={() => void setPreference('busy_mode.enabled', !busyModeEnabled)}>
+                    <MessageCircleMore size={16} />
+                  </button>
+                </IconTooltip>
+                <IconTooltip label="Media gallery">
+                  <button className="icon-button" type="button" aria-label="Media gallery" disabled={loadingHistory} onClick={() => void openMediaGallery()}>
+                    <Images size={16} />
                   </button>
                 </IconTooltip>
                 {selectedRoom.unanswered && <IconTooltip label="Mark room answered"><button className="icon-button" type="button" aria-label="Mark room answered" onClick={() => void markRoomAnswered(selectedRoom.id)}><Check size={16} /></button></IconTooltip>}
@@ -3716,7 +4768,21 @@ function App() {
           )}
         </header>
 
-        {typingUsers.length > 0 && <div className="typing-indicator" aria-live="polite"><UsersRound size={13} />{typingUsers.length === 1 ? `${typingUsers[0]} is typing…` : `${typingUsers.length} people are typing…`}</div>}
+        <div className="conversation-workspace">
+          <div className="conversation-thread">
+        {(scheduledNotice || undoRoomID) && <div className="chat-notice-stack" aria-label="Notifications">
+          {scheduledNotice && <div className="scheduled-notice" role="status">
+            <BellRing size={16} />
+            <span>{scheduledNotice}</span>
+            <button type="button" title="Open reminders" onClick={openScheduledJobs}>View reminders</button>
+            <button className="icon-button" type="button" aria-label="Dismiss reminder notice" title="Dismiss reminder notice" onClick={clearScheduledNotice}><X size={15} /></button>
+          </div>}
+          {undoRoomID && <div className="triage-toast" role="status">
+            <span>Marked {rooms.find((room) => room.id === undoRoomID)?.name || 'room'} answered</span>
+            <button type="button" onClick={() => void undoAnswered()}><RotateCcw size={14} />Undo</button>
+            <button className="icon-button" type="button" aria-label="Dismiss notification" title="Dismiss notification" onClick={clearUndoToast}><X size={15} /></button>
+          </div>}
+        </div>}
 
         {searchOpen && (
           <section className="message-search-panel" aria-label="Search messages across rooms">
@@ -3733,6 +4799,9 @@ function App() {
                 onChange={(event) => setMessageSearch(event.target.value)}
                 placeholder="Search all chats"
                 aria-label="Search local message history"
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
               />
               <button className="search-submit" type="submit" aria-label="Search" title="Search messages" disabled={!messageSearch.trim() || searching}>
                 <Search size={16} />
@@ -3750,7 +4819,7 @@ function App() {
                 </label>
                 <label>
                   <span>Sender</span>
-                  <input aria-label="Filter by sender" value={searchSender} onChange={(event) => setSearchSender(event.target.value)} placeholder="@user:server" />
+                  <input aria-label="Filter by sender" value={searchSender} onChange={(event) => setSearchSender(event.target.value)} placeholder="@user:server" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
                 </label>
                 <label>
                   <span>From</span>
@@ -3784,33 +4853,53 @@ function App() {
 
         {error && <div className="inline-error" role="alert"><CircleAlert size={15} />{error}<button aria-label="Dismiss error" title="Dismiss error" onClick={() => setError('')}>×</button></div>}
 
-        <div className="timeline" key={selectedRoomID} ref={timelineRef} role="region" aria-label="Message timeline" tabIndex={0} onKeyDown={handleTimelineKeyDown}>
+        <div className="timeline" key={selectedRoomID} ref={timelineRef} role="region" aria-label="Message timeline" tabIndex={0} onKeyDown={handleTimelineKeyDown} onScroll={(event) => {
+          const element = event.currentTarget
+          const atPinnedPosition = pinnedScrollTopRef.current !== null && Math.abs(element.scrollTop - pinnedScrollTopRef.current) < 1
+          // Only a scroll away from the bottom that is not our own pin stops following the newest message.
+          if (isNearBottom(element)) stickToBottomRef.current = true
+          else if (!atPinnedPosition) stickToBottomRef.current = false
+          // Infinite scroll: reaching the top of the loaded history fetches the
+          // next older page. The refs keep a burst of scroll events from
+          // starting several fetches before `loadingOlder` commits.
+          if (hasOlderRef.current && !loadingOlderRef.current && isNearTop(element)) {
+            void loadOlderMessages()
+          }
+        }}>
           {!selectedRoom && <div className="timeline-empty"><MessageCircleMore size={25} /><span>Select a room</span></div>}
           {selectedRoom && loadingHistory && messages.length === 0 && <div className="timeline-empty"><span className="loading-mark" />Loading messages</div>}
           {selectedRoom && !loadingHistory && visibleMessages.length === 0 && <div className="timeline-empty"><MessageCircleMore size={25} /><span>{messages.length > 0 ? 'Deleted messages are hidden' : hasOlder ? 'No messages in the past 24 hours' : 'No messages yet'}</span></div>}
-          {selectedRoom && visibleMessages.length === 0 && timelineOlderButton}
-          {selectedRoom && visibleMessages.length > 0 && <TimelineMessageList
+          {selectedRoom && hasOlder && (
+            <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={loadOlderMessages} disabled={loadingOlder}>
+              {loadingOlder ? <><span className="loading-mark" />Loading older messages</> : 'Load older messages'}
+            </button>
+          )}
+          <TimelineMessageList
             messages={messages}
             hideDeleted={preferenceBoolean(preferences, 'appearance.hide_deleted_messages')}
             preferences={preferences}
             currentUserID={snapshot?.profile.userId ?? ''}
             selectedRoomID={selectedRoomID}
+            chatTranslation={chatTranslation?.roomID === selectedRoomID ? chatTranslation : null}
             contextMessageID={messageContextMenu?.message.id || messageContextMenu?.message.transactionId || ''}
             reactingMessageID={reactingMessageID}
             autoPlayNextMessageId={autoPlayNextMessageId}
             canUseTranscriptAsDraft={!editTarget}
             actionsRef={timelineMessageActionsRef}
-            listRef={timelineVirtuosoRef}
-            firstItemIndex={timelineFirstItemIndex}
-            isFollowing={isTimelineFollowing}
-            onAtBottomChange={onTimelineAtBottomChange}
-            onStartReached={onTimelineStartReached}
-            header={timelineOlderButton}
-            footer={timelineTranslationPanel}
-            scrollRef={timelineScrollRef}
-          />}
-          {visibleMessages.length === 0 && timelineTranslationPanel}
+          />
+          {chatTranslation?.roomID === selectedRoomID && <div className="chat-translation-status">
+            {chatTranslation.busy && chatTranslation.targetMessageIDs.length === 0 && <p role="status">{chatTranslation.status}</p>}
+            {chatTranslation.error && <>
+              <p role="alert">{chatTranslation.error}</p>
+              {chatTranslation.errorResponse !== null && <details className="chat-translation-response">
+                <summary>Show raw AI response</summary>
+                <pre>{chatTranslation.errorResponse || '(empty response)'}</pre>
+              </details>}
+            </>}
+            {chatTranslation.targetMessageIDs.length > 0 && <p className="chat-translation-note">Translations are sent to the configured AI endpoint, which may be remote. No Matrix message is sent automatically.</p>}
+          </div>}
         </div>
+        {typingStatus && <div className="typing-indicator" aria-live="polite"><UsersRound size={13} />{typingStatus}</div>}
         {messageContextMenu && <div className="message-context-scrim" aria-hidden="true">
           <div className="message-context-scrim-panel message-context-scrim-top" style={{ height: messageContextMenu.targetBounds.top }} />
           <div className="message-context-scrim-panel message-context-scrim-left" style={{ top: messageContextMenu.targetBounds.top, width: messageContextMenu.targetBounds.left, height: messageContextMenu.targetBounds.bottom - messageContextMenu.targetBounds.top }} />
@@ -3845,6 +4934,13 @@ function App() {
               <span className="room-member-avatar">{initials(member.displayName || member.id)}</span><span><strong>{member.displayName || member.id}</strong><small>{member.id}</small></span>
             </button>)}
           </div>}
+          {ghostwriterEnabled && ghostwriterChips?.roomID === selectedRoomID && !composeText.trim() && !replyTarget && !editTarget && <div className="ghostwriter-suggestions" role="group" aria-label="AI Ghostwriter reply suggestions">
+            {ghostwriterChips.status === 'loading' && <span className="ghostwriter-suggestions-status" role="status">Drafting replies…</span>}
+            {ghostwriterChips.status === 'offline' && <><span className="ghostwriter-suggestions-status" role="status">Local model unavailable</span><button className="icon-button" type="button" aria-label="Retry local reply suggestions" title="Retry local reply suggestions" onClick={retryGhostwriterChips}><RotateCcw size={14} /></button></>}
+            {ghostwriterChips.status === 'ready' && ghostwriterChips.suggestions.map((suggestion) => <button key={suggestion.id} className="ghostwriter-chip" type="button" aria-label={`Use ${suggestion.label || 'suggested reply'}: ${suggestion.text}`} onClick={() => applyGhostwriterSuggestion(suggestion)}>
+              <span className="ghostwriter-chip-label">{suggestion.label || 'Suggested reply'}</span><span className="ghostwriter-chip-text">{suggestion.text}</span>
+            </button>)}
+          </div>}
           {composerContextMessage && <div className={`composer-context ${editTarget ? 'is-editing' : 'is-replying'}`}>
             <span className="composer-context-icon" aria-hidden="true">{editTarget ? <Pencil size={15} /> : <Reply size={15} />}</span>
             <div className="composer-context-copy">
@@ -3866,30 +4962,91 @@ function App() {
             <div className="composer-context-copy"><strong>Message queued</strong><small>{pendingSendPreview.length > 80 ? `${pendingSendPreview.slice(0, 80)}…` : pendingSendPreview}</small></div>
             <button className="composer-context-link" type="button" title="Cancel the queued message" onClick={cancelPendingSend}>Undo send</button>
           </div>}
-          <textarea
-            ref={composerInputRef}
-            value={composeText}
-            spellCheck={preferenceBoolean(preferences, 'composer.spellcheck', true)}
-            onChange={(event) => {
-              const value = event.currentTarget.value
-              setComposeText(value)
-              if (!editTarget && selectedRoomID) {
-                if (value) draftsRef.current.set(selectedRoomID, value)
-                else draftsRef.current.delete(selectedRoomID)
-              }
-              setMentionBindings((current) => current.every(({ token }) => value.includes(token))
-                ? current
-                : current.filter(({ token }) => value.includes(token)))
-              updateMentionQuery(value, event.currentTarget.selectionStart)
-              updateEmojiQuery(value, event.currentTarget.selectionStart)
-            }}
-            onKeyDown={handleComposerKeyDown}
-            onPaste={handleComposerPaste}
-            placeholder={selectedRoom ? `Message ${selectedRoom.name || selectedRoom.id}` : 'Select a room to start'}
-            aria-label="Message"
-            disabled={!selectedRoom || busy || voiceCaptureStatus !== null}
-            rows={1}
-          />
+          <div className="composer-input-wrap">
+            {ghostwriterEnabled && ghostwriterInlineSuffix && <div ref={ghostwriterPreviewRef} className="ghostwriter-inline-preview" aria-hidden="true"><span className="ghostwriter-inline-draft">{composeText}</span><span className="ghostwriter-inline-suffix">{ghostwriterInlineSuffix}</span></div>}
+            <textarea
+              ref={composerInputRef}
+              value={composeText}
+              spellCheck={preferenceBoolean(preferences, 'composer.spellcheck', true)}
+              onChange={(event) => {
+                const rawValue = event.currentTarget.value
+                const rawCursor = event.currentTarget.selectionStart
+                snippetUndoRef.current = null
+                snippetExpansionRequestRef.current++
+                const converted = preferenceBoolean(preferencesRef.current, 'emoji.replace_emoticons')
+                  ? replaceEmoticonsAtCursor(rawValue, rawCursor)
+                  : { text: rawValue, cursor: rawCursor }
+                const value = converted.text
+                if (value !== rawValue) {
+                  requestAnimationFrame(() => {
+                    if (document.activeElement === composerInputRef.current) composerInputRef.current?.setSelectionRange(converted.cursor, converted.cursor)
+                  })
+                }
+                ghostwriterDraftRequestRef.current++
+                composeTextRef.current = value
+                setGhostwriterDraftBusy(false)
+                setGhostwriterDraftStatus('')
+                setComposeText(value)
+                if (!editTarget && selectedRoomID) {
+                  if (value) draftsRef.current.set(selectedRoomID, value)
+                  else draftsRef.current.delete(selectedRoomID)
+                }
+                setMentionBindings((current) => current.every(({ token }) => value.includes(token))
+                  ? current
+                  : current.filter(({ token }) => value.includes(token)))
+                updateMentionQuery(value, converted.cursor)
+                updateEmojiQuery(value, converted.cursor)
+                updateSnippetQuery(value, converted.cursor)
+                const boundaryMatch = findSnippetBoundaryMatch(value, converted.cursor, snippetsRef.current)
+                if (boundaryMatch) expandSnippet(boundaryMatch.snippet, boundaryMatch.match, boundaryMatch.delimiter)
+              }}
+              onKeyDown={handleComposerKeyDown}
+              onClick={(event) => updateSnippetQuery(event.currentTarget.value, event.currentTarget.selectionStart)}
+              onKeyUp={(event) => {
+                if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+                  updateSnippetQuery(event.currentTarget.value, event.currentTarget.selectionStart)
+                }
+              }}
+              onPaste={handleComposerPaste}
+              onScroll={(event) => {
+                if (ghostwriterPreviewRef.current) ghostwriterPreviewRef.current.scrollTop = event.currentTarget.scrollTop
+              }}
+              placeholder={selectedRoom ? `Message ${selectedRoom.name || selectedRoom.id}` : 'Select a room to start'}
+              aria-label="Message"
+              aria-controls={snippetMenuVisible ? 'snippet-suggestions' : undefined}
+              aria-activedescendant={snippetMenuVisible ? `snippet-option-${snippetActiveIndex}` : undefined}
+              disabled={!selectedRoom || busy || voiceCaptureStatus !== null}
+              rows={1}
+            />
+            {snippetMenuVisible && snippetMatch && <div
+              id="snippet-suggestions"
+              className={`snippet-menu${snippetMenuPosition?.above ? ' is-above' : ''}`}
+              role="listbox"
+              aria-label="Text snippet suggestions"
+              style={snippetMenuPosition ? { left: snippetMenuPosition.left, top: snippetMenuPosition.top } : undefined}
+            >
+              <div className="snippet-menu-heading">Text snippets</div>
+              {snippetOptions.map((snippet, index) => <button
+                key={snippet.id}
+                id={`snippet-option-${index}`}
+                className={`snippet-option${index === snippetActiveIndex ? ' is-active' : ''}`}
+                type="button"
+                role="option"
+                aria-selected={index === snippetActiveIndex}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setSnippetActiveIndex(index)}
+                onClick={() => expandSnippet(snippet, snippetMatch)}
+              >
+                <span className="snippet-option-title"><strong>{snippet.title}</strong><code>{snippet.prefix}{snippet.trigger}</code></span>
+                <small>{snippet.category || 'Uncategorized'}</small>
+                <span className="snippet-option-preview">{expandSnippetContent(snippet.content).text}</span>
+              </button>)}
+            </div>}
+          </div>
+          {toneGuardChecking && <p className="tone-guard-checking" role="status">Checking this draft on your local model…</p>}
+          {renderToneGuardPrompt('composer')}
+          {ghostwriterDraftStatus && <p className="ghostwriter-composer-status" role="status">{ghostwriterDraftStatus}</p>}
+          {ghostwriterAutocompleteStatus === 'offline' && <p className="ghostwriter-composer-status" role="status">Local autocomplete unavailable. Check that the model is running.</p>}
           {preferenceBoolean(preferences, 'composer.formatting_toolbar') && <div className="composer-format-toolbar" role="toolbar" aria-label="Formatting">
             <button className="composer-format-button" type="button" aria-label="Bold" title="Bold" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('**')}><strong>B</strong></button>
             <button className="composer-format-button" type="button" aria-label="Italic" title="Italic" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('_')}><em>I</em></button>
@@ -3898,6 +5055,7 @@ function App() {
           </div>}
           <div className="composer-footer">
             <div className="composer-tools">
+              <IconTooltip label={aiEnabled ? 'Turkish Tutor · Ctrl+Shift+T' : 'Turkish Tutor · set up a local AI endpoint'}><button className="composer-tutor-button" type="button" aria-label="Analyze draft with Turkish Tutor" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => void analyzeWithTurkishTutor(composeText, 'draft')}><Languages size={14} /><span>Tutor</span></button></IconTooltip>
               <IconTooltip label="Attach file"><button className="icon-button" type="button" aria-label="Attach file" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onClick={() => attachmentInputRef.current?.click()}><Paperclip size={15} /></button></IconTooltip>
               <IconTooltip label={voiceCaptureStatus === 'recording' ? 'Stop and send voice note' : 'Record voice note'}><button className="icon-button" type="button" aria-label={voiceCaptureStatus === 'recording' ? 'Stop and send voice note' : 'Record voice note'} aria-pressed={voiceCaptureStatus === 'recording'} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing'} onClick={() => voiceCaptureStatus === 'recording' ? stopVoiceNoteRecording() : void startVoiceNoteRecording()}>{voiceCaptureStatus === 'recording' ? <Square size={15} /> : <Mic size={15} />}</button></IconTooltip>
               <IconTooltip label={askAILabel}><button className="icon-button" type="button" aria-label="Ask AI about the composer text" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={askAI}><Sparkles size={15} /></button></IconTooltip>
@@ -3906,7 +5064,8 @@ function App() {
               <IconTooltip label={aiEnabled ? 'Shorten draft' : 'Shorten · unavailable'}><button className="icon-button" type="button" aria-label="Shorten composer draft" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => rewriteDraft('shorten')}><ArrowDown size={15} /></button></IconTooltip>
               <IconTooltip label={aiEnabled ? 'Analyze topics' : 'Analyze · unavailable'}><button className="icon-button" type="button" aria-label="Analyze chat topics" disabled={!selectedRoom || busy || !aiEnabled || messages.length === 0} onClick={analyzeTopics}><FileText size={15} /></button></IconTooltip>
               {selectedRoom?.direct && <IconTooltip label={aiEnabled ? 'Analyze chat' : 'Analyze chat · unavailable'}><button className="icon-button" type="button" aria-label="Analyze conversation" disabled={busy || !aiEnabled || !hasAIConversationContext} onClick={analyzeConversation}><MessageCircleMore size={15} /></button></IconTooltip>}
-              <IconTooltip label={aiEnabled ? 'Translate chat to English' : 'Translate chat · unavailable'}><button className="icon-button" type="button" aria-label="Translate chat to English" disabled={!selectedRoom || busy || !aiEnabled || (!hasAIConversationContext && !hasOlder)} onClick={() => void translateRoomToEnglish()}><Languages size={15} /></button></IconTooltip>
+              <IconTooltip label={aiEnabled ? 'Translate latest 10 received messages to English' : 'Translate messages · unavailable'}><button className="icon-button" type="button" aria-label="Translate latest 10 received messages to English" disabled={!selectedRoom || busy || loadingOlder || !aiEnabled || (!hasAIConversationContext && !hasOlder)} onClick={() => void translateRoomToEnglish()}><Languages size={15} /></button></IconTooltip>
+              {chatTranslation?.roomID === selectedRoomID && <IconTooltip label="Clear message translations"><button className="icon-button" type="button" aria-label="Clear message translations" onClick={clearChatTranslation}><X size={15} /></button></IconTooltip>}
               <IconTooltip label={roomAgents.agents.length === 0 ? 'Create a chat agent' : aiEnabled ? 'Run chat agent' : 'Chat agent · unavailable'}><button className="icon-button" type="button" aria-label={roomAgents.agents.length === 0 ? 'Create a chat agent' : 'Run a chat agent'} disabled={!selectedRoom || busy || (roomAgents.agents.length > 0 && !aiEnabled)} onClick={openChatAgentAction}><UsersRound size={15} /></button></IconTooltip>
               <IconTooltip label={replyTarget ? 'Schedule reply' : 'Schedule message'}><button className="icon-button" type="button" aria-label={replyTarget ? 'Schedule reply' : 'Schedule message'} disabled={!selectedRoom || !composeText.trim() || busy || voiceCaptureStatus !== null || Boolean(editTarget)} onClick={openScheduleMessage}><Clock3 size={15} /></button></IconTooltip>
               <span>{voiceCaptureStatus === 'recording' ? 'Recording voice note · click stop to send' : voiceCaptureStatus === 'processing' ? 'Preparing voice note…' : selectedRoom ? busy ? 'Sending…' : preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter to send' : 'Enter to send · Shift + Enter for a new line' : ' '}</span>
@@ -3918,13 +5077,10 @@ function App() {
             </IconTooltip>
           </div>
         </form>
+          </div>
+          {contactHUDOpen && selectedRoom?.direct && <ContactHUD accountID={snapshot?.activeAccountId ?? ''} roomID={selectedRoom.id} onClose={() => setContactHUDOpen(false)} />}
+        </div>
       </section>
-      {scheduledNotice && <div className="scheduled-notice" role="status">
-        <BellRing size={16} />
-        <span>{scheduledNotice}</span>
-        <button type="button" title="Open reminders" onClick={openScheduledJobs}>View reminders</button>
-        <button className="icon-button" type="button" aria-label="Dismiss reminder notice" title="Dismiss reminder notice" onClick={clearScheduledNotice}><X size={15} /></button>
-      </div>}
       {forwardingMessage && <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setForwardingMessage(null) }}>
         <DialogSurface className="room-info-dialog forward-message-dialog" labelledBy="forward-message-title" onClose={() => setForwardingMessage(null)} onClick={(event) => event.stopPropagation()}>
           <header className="room-info-header">
@@ -3933,6 +5089,7 @@ function App() {
           </header>
           <div className="room-info-content forward-message-content">
             <div className="forward-message-preview">{displayMessageBody(forwardingMessage)}</div>
+            {renderToneGuardPrompt('forward')}
             <label className="forward-message-destination"><span>Send to</span><select aria-label="Forward destination" value={forwardTargetRoomID} onChange={(event) => setForwardTargetRoomID(event.target.value)}>
               {rooms.filter((room) => room.id !== selectedRoomID && isActiveAccountRoom(room)).map((room) => <option key={room.id} value={room.id}>{room.name || room.id}</option>)}
             </select></label>
@@ -3944,7 +5101,7 @@ function App() {
           </div>
         </DialogSurface>
       </div>}
-      {aiPanel && aiPanel.placement !== 'timeline' && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeAIResult() }}>
+      {aiPanel && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeAIResult() }}>
         <DialogSurface className="room-info-dialog ai-result-dialog" labelledBy="ai-result-title" onClose={closeAIResult} onClick={(event) => event.stopPropagation()}>
           <header className="room-info-header ai-result-header">
             <div><span className="eyebrow">AI RESULT</span><h2 id="ai-result-title">{aiPanel.title}</h2></div>
@@ -3967,11 +5124,92 @@ function App() {
           </footer>
         </DialogSurface>
       </div>}
+      {turkishTutorState && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeTurkishTutor() }}>
+        <DialogSurface className="room-info-dialog ai-result-dialog turkish-tutor-dialog" labelledBy="turkish-tutor-title" onClose={closeTurkishTutor} onClick={(event) => event.stopPropagation()}>
+          <header className="room-info-header ai-result-header">
+            <div><span className="eyebrow">TURKISH TUTOR</span><h2 id="turkish-tutor-title">{turkishTutorState.mode === 'draft' ? 'Tutor this draft' : 'Analyze message'}</h2></div>
+            <button className="icon-button" type="button" aria-label="Close Turkish Tutor" title="Close Turkish Tutor" onClick={closeTurkishTutor}><X size={16} /></button>
+          </header>
+          <div className="ai-result-content turkish-tutor-content" aria-live="polite" aria-busy={turkishTutorState.busy}>
+            {turkishTutorState.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with the local model…</p>}
+            {turkishTutorState.error && <p className="settings-error" role="alert">{turkishTutorState.error}</p>}
+            {turkishTutorState.analysis && <>
+              <section className="turkish-tutor-section">
+                <span className="eyebrow">ORIGINAL · {turkishTutorState.analysis.detected_language === 'tr' ? 'TURKISH' : 'ITALIAN'}</span>
+                <p>{turkishTutorState.originalText}</p>
+              </section>
+              <section className="turkish-tutor-section">
+                <span className="eyebrow">CORRECTED TURKISH</span>
+                <p lang="tr">{turkishTutorState.analysis.corrected_text}</p>
+                {turkishTutorState.analysis.has_grammar_errors && turkishTutorState.analysis.error_explanation && <small className="turkish-tutor-error-note">{turkishTutorState.analysis.error_explanation}</small>}
+              </section>
+              <section className="turkish-tutor-section">
+                <span className="eyebrow">TRANSLATION · {turkishTutorState.analysis.detected_language === 'tr' ? 'ITALIAN' : 'TURKISH'}</span>
+                <p lang={turkishTutorState.analysis.detected_language === 'tr' ? 'it' : 'tr'}>{turkishTutorState.analysis.translation}</p>
+              </section>
+              <section className="turkish-tutor-section">
+                <span className="eyebrow">WORD-BY-WORD MORPHEMES</span>
+                <ol className="turkish-tutor-morphemes">
+                  {(turkishTutorState.analysis.morpheme_breakdown ?? []).map((item, index) => <li key={`${item.word}-${index}`}>
+                    <strong lang="tr">{item.word}</strong>
+                    <span>{item.breakdown}</span>
+                    <small>{item.meaning}</small>
+                  </li>)}
+                </ol>
+              </section>
+              <section className="turkish-tutor-section turkish-tutor-rule">
+                <span className="eyebrow">GRAMMAR RULE</span>
+                <p>{turkishTutorState.analysis.grammar_rule}</p>
+              </section>
+            </>}
+          </div>
+          <aside className="ai-result-disclaimer">
+            <ShieldCheck size={16} aria-hidden="true" />
+            <p>Analysis uses the local AI endpoint configured in Settings. No Matrix message is sent.</p>
+          </aside>
+          <footer className="room-info-footer ai-result-footer">
+            {turkishTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" disabled={!turkishTutorState.analysis || turkishTutorState.busy || Boolean(editTarget)} onClick={useTurkishTutorDraft}>Replace draft with Turkish</button>}
+            <button className="settings-command" type="button" onClick={closeTurkishTutor}>Close</button>
+          </footer>
+        </DialogSurface>
+      </div>}
+      {accountManagerOpen && <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setAccountManagerOpen(false) }}>
+        <DialogSurface className="room-info-dialog account-dialog" labelledBy="account-manager-title" onClose={() => { if (!busy) setAccountManagerOpen(false) }} onClick={(event) => event.stopPropagation()}>
+          <header className="room-info-header">
+            <div><span className="eyebrow">MATRIX</span><h2 id="account-manager-title">{addingAccount ? 'Add account' : 'Accounts'}</h2></div>
+            <button className="icon-button" type="button" aria-label="Close account manager" disabled={busy} onClick={() => setAccountManagerOpen(false)}><X size={16} /></button>
+          </header>
+          {accountError && <p className="account-manager-error" role="alert">{accountError}</p>}
+          {addingAccount ? <form className="account-add-form" onSubmit={submitAddAccount}>
+            <label><span>Homeserver</span><input type="url" value={accountHomeserver} onChange={(event) => setAccountHomeserver(event.target.value)} autoComplete="url" required /></label>
+            <label><span>Username</span><input value={accountUsername} onChange={(event) => setAccountUsername(event.target.value)} autoComplete="username" autoCapitalize="none" required /></label>
+            <label><span>Password</span><input type="password" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} autoComplete="new-password" required /></label>
+            <div className="account-manager-actions">
+              <button className="settings-command" type="button" disabled={busy} onClick={() => { setAddingAccount(false); setAccountError('') }}>Cancel</button>
+              <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Connecting…' : 'Add account'}{!busy && <Plus size={15} />}</button>
+            </div>
+          </form> : <div className="account-manager-content">
+            <div className="account-option-list" aria-label="Connected Matrix accounts">
+              {(snapshot.accounts ?? []).map((account) => {
+                const label = account.profile.displayName || account.profile.userId
+                const active = account.id === snapshot.activeAccountId
+                return <button key={account.id} className="account-option" type="button" aria-current={active ? 'true' : undefined} disabled={busy} onClick={() => void switchAccount(account.id)}>
+                  <Avatar uri={account.profile.avatarUri} label={label} className="profile-avatar" />
+                  <span className="account-option-copy"><strong>{label}</strong><span>{account.profile.userId}</span></span>
+                  {active ? <Check size={16} aria-label="Current account" /> : <span className="account-option-homeserver">{account.profile.homeserver}</span>}
+                </button>
+              })}
+            </div>
+            <button className="settings-command account-add-button" type="button" disabled={busy} onClick={() => { setAccountError(''); setAddingAccount(true) }}><Plus size={15} />Add account</button>
+          </div>}
+        </DialogSurface>
+      </div>}
       {settingsOpen && (
         <SettingsDialog
           tab={settingsTab}
           profile={snapshot.profile}
           preferences={preferences}
+          snippets={snippets}
           rooms={rooms}
           audioInputDevices={audioInputDevices}
           selectedAudioInputDeviceId={selectedAudioInputDeviceId}
@@ -3981,10 +5219,55 @@ function App() {
           onLogout={async () => {
             await AppService.Logout()
             setSettingsOpen(false)
+            try {
+              resetAccountWorkspace(await AppService.Snapshot())
+            } catch {
+              // The app is closing after logout from the final account.
+            }
           }}
           onPreferenceChange={(key, value) => setPreference(key, value)}
+          onSnippetsChange={updateSnippets}
         />
       )}
+      {relationshipsOpen && <div className="room-info-scrim" role="presentation" onClick={() => setRelationshipsOpen(false)}>
+        <DialogSurface className="room-info-dialog relationship-dialog" labelledBy="relationships-title" onClose={() => setRelationshipsOpen(false)} onClick={(event) => event.stopPropagation()}>
+          <header className="room-info-header">
+            <div><span className="eyebrow">LOCAL CHECK-INS</span><h2 id="relationships-title">Relationships</h2></div>
+            <button className="icon-button" type="button" aria-label="Close relationships" onClick={() => setRelationshipsOpen(false)}><X size={16} /></button>
+          </header>
+          <div className="room-info-content relationship-list" aria-live="polite">
+            {relationshipDecayError && <p className="room-info-state is-error" role="alert">{relationshipDecayError}</p>}
+            {!currentRelationshipDecay?.enabled && <p className="relationship-note">Enable relationship check-ins in Settings to receive local reminders.</p>}
+            {relationshipDecayContacts.length === 0 && <p className="room-info-state">No tracked relationships yet.</p>}
+            {relationshipDecayContacts.map((contact) => {
+              const roomIDs = contact.roomIds ?? []
+              const contactRoom = rooms.find((candidate) => roomIDs.includes(candidate.id))
+              const busy = relationshipDecayBusy === contact.contactId
+              return <article className="relationship-contact" key={contact.contactId}>
+                <div className="relationship-contact-heading">
+                  <div><strong>{contact.displayName || contact.contactId}</strong><span>{contact.alerted ? 'Check-in suggested' : 'No check-in due'}</span></div>
+                  <label className="relationship-tier-control">Tier
+                    <select aria-label={`Relationship tier for ${contact.displayName || contact.contactId}`} value={contact.tier || 'NONE'} disabled={busy || !roomIDs.length} onChange={(event) => void updateRelationshipTier(contact, event.target.value)}>
+                      <option value="VIP">VIP</option>
+                      <option value="CLOSE_FRIEND">Close friend</option>
+                      <option value="CASUAL">Casual</option>
+                      <option value="CLIENT">Client</option>
+                      <option value="NONE">Not tracked</option>
+                    </select>
+                  </label>
+                </div>
+                <span className="relationship-last-contact">{contact.lastInteractionTimestamp > 0 ? `Last interaction ${new Date(contact.lastInteractionTimestamp).toLocaleDateString()}` : 'No interactions recorded'}</span>
+                {contact.nudge && <p className="relationship-nudge">{contact.nudge}</p>}
+                <div className="relationship-contact-actions">
+                  {contact.nudge && contactRoom && <button className="settings-command" type="button" onClick={() => draftRelationshipNudge(contact)}><Pencil size={14} />Draft message</button>}
+                  {contact.alerted && <button className="settings-command" type="button" disabled={busy} onClick={() => void snoozeRelationshipContact(contact)}><Clock3 size={14} />Snooze for a week</button>}
+                </div>
+              </article>
+            })}
+          </div>
+          <footer className="room-info-footer"><button className="settings-command" type="button" onClick={() => setRelationshipsOpen(false)}>Close</button></footer>
+        </DialogSurface>
+      </div>}
       {scheduledJobsOpen && <div className="room-info-scrim" role="presentation" onClick={() => setScheduledJobsOpen(false)}>
         <DialogSurface className="room-info-dialog scheduled-dialog" labelledBy="scheduled-jobs-title" onClose={() => setScheduledJobsOpen(false)} onClick={(event) => event.stopPropagation()}>
           <header className="room-info-header">
@@ -4011,7 +5294,6 @@ function App() {
                 </div>
                 <span className="scheduled-job-room">{roomName}</span>
                 {job.replyToEventId && <span className="scheduled-job-room">Reply to {job.replyToEventId}</span>}
-                {job.repeatWeekly && <span className="scheduled-job-repeat">{formatWeeklySchedule(job.dueAt)} until cancelled</span>}
                 <p>{job.text || (job.kind === 'reminder' ? 'Reminder for a message' : '')}</p>
                 {editable && <label className="scheduled-job-time">New time
                   <input type="datetime-local" value={scheduledTimes[job.id] ?? localDateTimeInputValue(job.dueAt)} onChange={(event) => setScheduledTimes((current) => ({ ...current, [job.id]: event.target.value }))} />
@@ -4053,13 +5335,6 @@ function App() {
               <label>{scheduledDraft.kind === 'message' ? 'Send at' : 'Remind me at'}
                 <input type="datetime-local" required value={scheduledDueAt} onChange={(event) => setScheduledDueAt(event.target.value)} />
               </label>
-              {scheduledDraft.kind === 'message' && !scheduledDraft.replyToEventID && <>
-                <label className="scheduled-repeat-toggle">
-                  <input type="checkbox" aria-label="Repeat weekly" checked={scheduledRepeatWeekly} disabled={scheduledSaving} onChange={(event) => setScheduledRepeatWeekly(event.target.checked)} />
-                  <span><strong>Repeat weekly</strong><small>Sends every week on the selected day and time until cancelled.</small></span>
-                </label>
-                {scheduledRepeatWeekly && <p className="scheduled-repeat-description">{formatWeeklySchedule(new Date(scheduledDueAt).getTime())}</p>}
-              </>}
               <div className="scheduled-time-suggestions" role="group" aria-label="Time suggestions">
                 {scheduleTimeSuggestions.map((minutes) => <button key={minutes} className="settings-command" type="button" onClick={() => setScheduledDueAt(localDateTimeInputValue(Date.now() + minutes * 60_000))}>{formatTimeSuggestion(minutes)}</button>)}
               </div>
@@ -4081,6 +5356,11 @@ function App() {
           <div className="room-info-content">
             <div className="room-info-fact"><span>Room ID</span><strong>{selectedRoom.id}</strong></div>
             {selectedRoom.topic && <div className="room-info-fact"><span>Topic</span><strong>{selectedRoom.topic}</strong></div>}
+            <section className="room-agent-settings" aria-label="Tone Guard">
+              <div className="room-members-heading"><h3>Tone Guard</h3></div>
+              <p className="room-agent-note">When triggered, the draft and up to two recent incoming messages are checked by a local loopback model. A missing or unavailable local model never blocks sending.</p>
+              <PreferenceToggle label="Check messages in this room" checked={preferenceBoolean(preferences, `room.tone_guard.${selectedRoom.id}`)} onChange={(value) => { void setPreference(`room.tone_guard.${selectedRoom.id}`, value) }} />
+            </section>
             <section className="room-agent-settings" aria-label="Chat agents">
               <div className="room-members-heading"><h3>Chat agents</h3><span>{roomAgents.agents.length}/{MAX_CHAT_AGENTS}</span></div>
               <p className="room-agent-note">Profiles are saved to this account for this room. Profile instructions and included chat text are sent to the configured endpoint, which may be remote.</p>
@@ -4116,6 +5396,40 @@ function App() {
           </footer>
         </DialogSurface>
       </div>}
+      {mediaGalleryOpen && selectedRoom && <div className="media-gallery-scrim" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) closeMediaGallery() }}>
+        <DialogSurface className="media-gallery-dialog" labelledBy="media-gallery-title" onClose={closeMediaGallery} onClick={(event) => event.stopPropagation()}>
+          <header className="room-info-header media-gallery-header">
+            <div><span className="eyebrow">ROOM MEDIA</span><h2 id="media-gallery-title">Media in {selectedRoom.name || selectedRoom.id}</h2></div>
+            <button className="icon-button" type="button" aria-label="Close media gallery" title="Close media gallery" onClick={closeMediaGallery}><X size={16} /></button>
+          </header>
+          <div className="media-gallery-toolbar">
+            <div className="media-gallery-filters" role="group" aria-label="Filter media">
+              {MEDIA_GALLERY_FILTERS.map((filter) => (
+                <button key={filter.value} className="media-gallery-filter" type="button" aria-label={`${filter.label}, ${filterMediaGalleryItems(mediaGalleryItems, filter.value).length}`} aria-pressed={mediaGalleryFilter === filter.value} onClick={() => setMediaGalleryFilter(filter.value)}>
+                  {filter.label}<span>{filterMediaGalleryItems(mediaGalleryItems, filter.value).length}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="media-gallery-content">
+            {mediaGalleryLoading && <p className="media-gallery-status" role="status">Scanning room history, {mediaGalleryScanned} messages checked.</p>}
+            {mediaGalleryError && <div className="media-gallery-error" role="alert"><span>{mediaGalleryError}</span><button className="media-gallery-retry" type="button" onClick={() => void openMediaGallery()}><RotateCcw size={14} />Retry</button></div>}
+            {filterMediaGalleryItems(mediaGalleryItems, mediaGalleryFilter).length === 0
+              ? <p className="media-gallery-empty">{mediaGalleryLoading ? 'No media found yet.' : `No ${mediaGalleryFilter === 'all' ? 'media' : mediaGalleryFilter} in this room.`}</p>
+              : <div className="media-gallery-grid">
+                {filterMediaGalleryItems(mediaGalleryItems, mediaGalleryFilter).map((message) => (
+                  <article key={mediaGalleryMessageKey(message)} className="media-gallery-item" aria-label={`${mediaGalleryCategory(message)} attachment ${message.body || 'attachment'} from ${message.senderName || message.sender}`}>
+                    <div className="media-gallery-item-meta">
+                      <span title={message.senderName || message.sender}>{message.senderName || message.sender || 'Unknown sender'}</span>
+                      {message.timestamp > 0 && <time dateTime={new Date(message.timestamp).toISOString()}>{formatTimelineTime(message.timestamp, preferences)}</time>}
+                    </div>
+                    <MessageMedia roomID={selectedRoom.id} message={message} aiEnabled={Boolean(preferenceString(preferences, 'ai.endpoint', '').trim())} canUseDraft={false} onUseDraft={() => {}} />
+                  </article>
+                ))}
+              </div>}
+          </div>
+        </DialogSurface>
+      </div>}
       {agentPickerOpen && selectedRoom && <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAgentPickerOpen(false) }}>
         <DialogSurface className="room-info-dialog agent-picker-dialog" labelledBy="agent-picker-title" onClose={() => setAgentPickerOpen(false)} onClick={(event) => event.stopPropagation()}>
           <header className="room-info-header">
@@ -4147,10 +5461,6 @@ function App() {
           <div><button type="button" onClick={() => setRedactTarget(null)}>Cancel</button><button className="is-danger" type="button" disabled={busy} onClick={() => void redactMessage()}>{busy ? 'Deleting…' : 'Delete'}</button></div>
         </DialogSurface>
       </div>}
-      {undoRoomID && <div className="triage-toast" role="status">
-        <span>Marked {rooms.find((room) => room.id === undoRoomID)?.name || 'room'} answered</span>
-        <button type="button" onClick={() => void undoAnswered()}><RotateCcw size={14} />Undo</button>
-      </div>}
       {quickSwitcherOpen && <div className="quick-switcher-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickSwitcherOpen(false) }}>
         <DialogSurface className="quick-switcher" label="Quick switcher" onClose={() => setQuickSwitcherOpen(false)}>
           <div className="quick-switcher-input"><Search size={17} /><input ref={quickSwitcherInputRef} value={quickSwitcherQuery} onChange={(event) => setQuickSwitcherQuery(event.target.value)} onKeyDown={(event) => {
@@ -4171,7 +5481,7 @@ function App() {
                 setQuickSwitcherOpen(false)
               }
             }
-          }} placeholder="Search rooms" aria-label="Search rooms" autoComplete="off" />
+          }} placeholder="Search rooms" aria-label="Search rooms" autoComplete="off" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
             <button className="icon-button" type="button" aria-label="Close quick switcher" onClick={() => setQuickSwitcherOpen(false)}><X size={16} /></button>
           </div>
           <div className="quick-switcher-results" role="listbox" aria-label="Matching rooms">
@@ -4198,7 +5508,8 @@ function formatAudioTime(seconds: number) {
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
 }
 
-function MessageMedia({ message, onAudioEnded, autoPlayNext, aiEnabled, canUseDraft, onUseDraft }: {
+function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, canUseDraft, onUseDraft }: {
+  roomID: string
   message: Message
   onAudioEnded?: () => void
   autoPlayNext?: boolean
@@ -4209,6 +5520,7 @@ function MessageMedia({ message, onAudioEnded, autoPlayNext, aiEnabled, canUseDr
   const [source, setSource] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [downloadStatus, setDownloadStatus] = useState('')
   const [transcription, setTranscription] = useState('')
   const [transcriptionLoading, setTranscriptionLoading] = useState(false)
   const [transcriptionError, setTranscriptionError] = useState('')
@@ -4237,10 +5549,15 @@ function MessageMedia({ message, onAudioEnded, autoPlayNext, aiEnabled, canUseDr
     mountedRef.current = true
     return () => {
       mountedRef.current = false
-      if (sourceRef.current) URL.revokeObjectURL(sourceRef.current)
       sourceRef.current = ''
     }
   }, [])
+
+  useEffect(() => {
+    sourceRef.current = ''
+    setSource('')
+    setError('')
+  }, [roomID, message.id])
 
   useEffect(() => {
     if (!viewerOpen) return
@@ -4259,15 +5576,14 @@ function MessageMedia({ message, onAudioEnded, autoPlayNext, aiEnabled, canUseDr
       nearViewportRef.current = isNearViewport
       setNearViewport(isNearViewport)
     })
-  }, [isImage, message.mediaUri])
+  }, [isImage, roomID, message.id])
 
   useEffect(() => {
     if (isImage && nearViewport) void prepareMedia()
-  }, [isImage, nearViewport, message.mediaUri])
+  }, [isImage, nearViewport, roomID, message.id])
 
   useEffect(() => {
     if (!isImage || nearViewport || !sourceRef.current) return
-    URL.revokeObjectURL(sourceRef.current)
     sourceRef.current = ''
     setSource('')
   }, [isImage, nearViewport, source])
@@ -4279,13 +5595,12 @@ function MessageMedia({ message, onAudioEnded, autoPlayNext, aiEnabled, canUseDr
     setLoading(true)
     setError('')
     try {
-      const encoded = isImage ? await loadImageData(message.mediaUri) : await AppService.DownloadMedia(message.mediaUri)
-      if (!encoded) throw new Error('No media data returned.')
+      const mediaURL = matrixMediaURL(roomID, message.id)
+      if (!mediaURL) throw new Error('This media event has no server ID.')
       if (!mountedRef.current || (isImage && !nearViewportRef.current)) return ''
-      const objectURL = createMediaObjectURL(encoded, mimeType)
-      sourceRef.current = objectURL
-      setSource(objectURL)
-      return objectURL
+      sourceRef.current = mediaURL
+      setSource(mediaURL)
+      return mediaURL
     } catch (mediaError) {
       setError(describeError(mediaError))
       return ''
@@ -4304,11 +5619,19 @@ function MessageMedia({ message, onAudioEnded, autoPlayNext, aiEnabled, canUseDr
   }
 
   async function downloadFile() {
+    if (loadingRef.current) return
+    loadingRef.current = true
+    setLoading(true)
     setError('')
+    setDownloadStatus('')
     try {
-      await AppService.SaveMedia(message.mediaUri, filename)
+      const savedPath = await AppService.SaveMedia(message.mediaUri, filename)
+      if (savedPath) setDownloadStatus(`Saved to ${savedPath}`)
     } catch (downloadError) {
       setError(describeError(downloadError))
+    } finally {
+      loadingRef.current = false
+      setLoading(false)
     }
   }
 
@@ -4417,7 +5740,7 @@ function MessageMedia({ message, onAudioEnded, autoPlayNext, aiEnabled, canUseDr
       {error && <span className="media-error" role="status">{error}</span>}
       {source && isImage && <>
         <button className="media-preview-button" type="button" aria-label={`Open image ${filename}`} title={`Open image ${filename}`} onClick={() => void openImage()}>
-          <img className="media-preview" src={source} alt={filename} />
+          <img className="media-preview" src={source} alt={filename} loading="lazy" onError={() => setError('This image could not be loaded.')} />
         </button>
         <div className="media-toolbar"><span>{filename}</span><a className="media-download" href={source} download={filename} aria-label={`Download ${filename}`}><Download size={13} />Download</a></div>
       </>}
@@ -4447,13 +5770,13 @@ function MessageMedia({ message, onAudioEnded, autoPlayNext, aiEnabled, canUseDr
         />
       </>}
       {source && isVideo && <>
-        <video className="media-player" controls preload="metadata" src={source} aria-label={filename} />
+        <video className="media-player" controls preload="metadata" src={source} aria-label={filename} onError={() => setError('This video could not be played.')} />
         <a className="media-download" href={source} download={filename}><Download size={13} />Download {filename}</a>
       </>}
       {!isImage && !isAudio && !isVideo && <div className="file-card">
         <span className="file-card-icon"><FileText size={17} /></span>
-        <span className="file-card-copy"><strong title={filename}>{filename}</strong><small>{fileType}{message.mediaSize > 0 && ` · ${formatBytes(message.mediaSize)}`}</small></span>
-        <button className="icon-button" type="button" title={`Download ${filename}`} aria-label={`Download ${filename}`} disabled={loading} onClick={() => void downloadFile()}><Download size={15} /></button>
+        <span className="file-card-copy"><strong title={filename}>{filename}</strong><small>{fileType}{message.mediaSize > 0 && ` · ${formatBytes(message.mediaSize)}`}</small>{downloadStatus && <small className="media-download-status" title={downloadStatus} role="status">{downloadStatus}</small>}</span>
+        <button className="icon-button" type="button" title={loading ? `Saving ${filename}` : `Download ${filename}`} aria-label={loading ? `Saving ${filename}` : `Download ${filename}`} disabled={loading} onClick={() => void downloadFile()}>{loading ? <span className="loading-mark" /> : <Download size={15} />}</button>
       </div>}
       {viewerOpen && source && createPortal(
         <div className="media-viewer-scrim" role="presentation" onClick={() => setViewerOpen(false)}>
@@ -4502,11 +5825,18 @@ const RoomButton = memo(function RoomButton({ room, index, active, multiSelected
   )
 })
 
-function VirtualRoomList({ listRef, rooms, selectedRoomIndex, rowHeight, renderRoom, emptyContent }: {
+function reportRoomListVisibleRange(startIndex: number, endIndex: number) {
+  void Promise.resolve(AppService.UpdateVisibleRange('main', startIndex, endIndex)).catch(() => undefined)
+}
+
+function VirtualRoomList({ listRef, rooms, selectedRoomIndex, rowHeight, listCount, rangeKey, onVisibleRange, renderRoom, emptyContent }: {
   listRef: { current: HTMLElement | null }
   rooms: Room[]
   selectedRoomIndex: number
   rowHeight: number
+  listCount: number
+  rangeKey: string
+  onVisibleRange: (startIndex: number, endIndex: number) => void
   renderRoom: (room: Room, index: number) => ReactNode
   emptyContent: ReactNode
 }) {
@@ -4515,6 +5845,14 @@ function VirtualRoomList({ listRef, rooms, selectedRoomIndex, rowHeight, renderR
   const pendingScrollTop = useRef(0)
   const scrollFrame = useRef(0)
   const virtualized = rooms.length > ROOM_LIST_VIRTUALIZATION_THRESHOLD
+  const overscan = 8
+  const first = Math.min(rooms.length, Math.max(0, Math.floor(scrollTop / rowHeight) - overscan))
+  const visibleEnd = Math.min(rooms.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan)
+  const knownListCount = Math.max(rooms.length, listCount)
+  const requestedEnd = visibleEnd >= rooms.length && rooms.length < knownListCount
+    ? Math.min(knownListCount, rooms.length + ROOM_LIST_RANGE_PREFETCH)
+    : visibleEnd
+  const rangeEnd = Math.min(requestedEnd, first + ROOM_LIST_MAX_SYNC_RANGE)
 
   useEffect(() => {
     const list = listRef.current
@@ -4537,6 +5875,11 @@ function VirtualRoomList({ listRef, rooms, selectedRoomIndex, rowHeight, renderR
   useEffect(() => () => {
     if (scrollFrame.current) window.cancelAnimationFrame(scrollFrame.current)
   }, [])
+
+  useEffect(() => {
+    if (rangeEnd <= first) return
+    onVisibleRange(first, rangeEnd)
+  }, [first, onVisibleRange, rangeEnd, rangeKey])
 
   useEffect(() => {
     const list = listRef.current
@@ -4564,12 +5907,9 @@ function VirtualRoomList({ listRef, rooms, selectedRoomIndex, rowHeight, renderR
   } else if (!virtualized) {
     content = rooms.map((room, index) => renderRoom(room, index))
   } else {
-    const overscan = 8
-    const first = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)
-    const last = Math.min(rooms.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan)
     content = (
       <div className="room-list-virtual-content" style={{ height: rooms.length * rowHeight }}>
-        {rooms.slice(first, last).map((room, offset) => {
+        {rooms.slice(first, visibleEnd).map((room, offset) => {
           const index = first + offset
           return <div className="room-list-virtual-row" key={`${room.accountId}:${room.id}`} style={{ top: index * rowHeight }}>{renderRoom(room, index)}</div>
         })}
@@ -4582,7 +5922,7 @@ function VirtualRoomList({ listRef, rooms, selectedRoomIndex, rowHeight, renderR
       ref={(element) => { listRef.current = element }}
       className={`room-list ${virtualized ? 'is-virtualized' : ''}`}
       aria-label="Rooms"
-      onScroll={virtualized ? handleScroll : undefined}
+      onScroll={handleScroll}
       style={virtualized ? { '--room-row-height': `${rowHeight}px` } as React.CSSProperties : undefined}
     >
       {content}
@@ -4828,12 +6168,60 @@ function LocalAISettings({ endpoint, model, transcriptionModel, translateLanguag
   )
 }
 
+function GhostwriterSettings({ enabled, provider, endpoint, model, onSave }: {
+  enabled: boolean
+  provider: GhostwriterProvider
+  endpoint: string
+  model: string
+  onSave: (key: string, value: boolean | string) => Promise<boolean>
+}) {
+  const [enabledDraft, setEnabledDraft] = useState(enabled)
+  const [providerDraft, setProviderDraft] = useState(provider)
+  const [endpointDraft, setEndpointDraft] = useState(endpoint)
+  const [modelDraft, setModelDraft] = useState(model)
+  const [status, setStatus] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function saveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSaving(true)
+    setStatus('')
+    let saved = await onSave('ghostwriter.provider', providerDraft)
+    if (saved) saved = await onSave('ghostwriter.endpoint', endpointDraft.trim())
+    if (saved) saved = await onSave('ghostwriter.model', modelDraft.trim())
+    if (saved) saved = await onSave('ghostwriter.enabled', enabledDraft)
+    setStatus(saved ? 'Ghostwriter settings saved. Requests go only to this local endpoint.' : 'Not saved. Use an HTTP localhost or loopback endpoint.')
+    setSaving(false)
+  }
+
+  return (
+    <form className="ai-settings-form ghostwriter-settings" onSubmit={(event) => void saveSettings(event)}>
+      <h4>AI Ghostwriter</h4>
+      <p className="settings-note">Uses the active chat’s local history and your outgoing messages for style examples. Requests are restricted to localhost; no message is sent automatically. Autocomplete waits 300 ms and times out after 1.5 seconds.</p>
+      <PreferenceToggle label="Enable local AI Ghostwriter" checked={enabledDraft} onChange={setEnabledDraft} />
+      <label><span>Provider</span><select value={providerDraft} onChange={(event) => {
+        const nextProvider = event.target.value as GhostwriterProvider
+        if (endpointDraft === ghostwriterDefaultEndpoints[providerDraft]) setEndpointDraft(ghostwriterDefaultEndpoints[nextProvider])
+        setProviderDraft(nextProvider)
+      }}>
+        <option value="ollama">Ollama</option>
+        <option value="openai-compatible">llama.cpp / OpenAI-compatible</option>
+      </select></label>
+      <label><span>Local endpoint</span><input type="url" value={endpointDraft} placeholder={ghostwriterDefaultEndpoints[providerDraft]} onChange={(event) => setEndpointDraft(event.target.value)} /></label>
+      <label><span>Model name</span><input type="text" value={modelDraft} placeholder={providerDraft === 'ollama' ? 'qwen2.5:3b' : 'Uses the loaded model'} onChange={(event) => setModelDraft(event.target.value)} /></label>
+      <div className="ai-settings-actions"><button className="settings-command" type="submit" disabled={saving || !isLoopbackEndpoint(endpointDraft)}>{saving ? 'Saving…' : 'Save Ghostwriter settings'}</button></div>
+      {status && <p className="settings-note" role="status">{status}</p>}
+    </form>
+  )
+}
+
 const SETTING_TARGET_SELECTORS = [
   '.setting-row strong',
   '.setting-toggle > span',
   '.help-item h4',
   '.security-field > span',
   '.ai-settings-form label > span',
+  '.ghostwriter-settings label > span',
   'button.settings-command',
   'a.settings-link',
 ]
@@ -4857,6 +6245,7 @@ function SettingsDialog({
   tab,
   profile,
   preferences,
+  snippets,
   rooms,
   audioInputDevices,
   selectedAudioInputDeviceId,
@@ -4865,10 +6254,12 @@ function SettingsDialog({
   onClose,
   onLogout,
   onPreferenceChange,
+  onSnippetsChange,
 }: {
   tab: SettingsTab
   profile: Snapshot['profile']
   preferences: PreferenceValues
+  snippets: Snippet[]
   rooms: Room[]
   audioInputDevices: MediaDeviceInfo[]
   selectedAudioInputDeviceId: string
@@ -4877,6 +6268,7 @@ function SettingsDialog({
   onClose: () => void
   onLogout: () => Promise<void>
   onPreferenceChange: (key: string, value: boolean | string) => Promise<boolean>
+  onSnippetsChange: (snippets: Snippet[]) => void
 }) {
   const tabs = SETTINGS_TABS
   const theme = preferenceString(preferences, 'appearance.theme', SYSTEM_THEME_NAME)
@@ -4892,6 +6284,8 @@ function SettingsDialog({
   const activeWallpaper = chatWallpapers.find((wallpaper) => wallpaper.name === preferenceString(preferences, 'appearance.chat_wallpaper', 'None')) ?? chatWallpapers[0]
   const answeredShortcut = preferenceString(preferences, 'shortcuts.mark_answered', 'E').trim().toUpperCase() || 'E'
   const safeBubbleColor = /^#[0-9a-fA-F]{6}$/.test(bubbleColor) ? bubbleColor : '#236b52'
+  const ghostwriterProviderValue = preferenceString(preferences, 'ghostwriter.provider', 'ollama')
+  const ghostwriterProvider: GhostwriterProvider = ghostwriterProviderValue === 'openai-compatible' ? 'openai-compatible' : 'ollama'
   const downloadFolder = preferenceString(preferences, 'downloads.folder', '')
   const [downloadError, setDownloadError] = useState('')
   async function chooseDownloadFolder() {
@@ -4906,24 +6300,16 @@ function SettingsDialog({
   const [devices, setDevices] = useState<Device[]>([])
   const [devicesLoading, setDevicesLoading] = useState(false)
   const [devicesError, setDevicesError] = useState('')
-  const [revokeTarget, setRevokeTarget] = useState<Device | null>(null)
-  const [revokePassword, setRevokePassword] = useState('')
-  const [revokeError, setRevokeError] = useState('')
-  const [revokeBusy, setRevokeBusy] = useState(false)
   const [scheduleSuggestionsDraft, setScheduleSuggestionsDraft] = useState(preferenceString(preferences, 'schedule.suggestions_minutes', '5,15,60'))
   const [scheduleSuggestionsError, setScheduleSuggestionsError] = useState('')
   const [scheduleSendDelayDraft, setScheduleSendDelayDraft] = useState(preferenceString(preferences, 'schedule.default_send_minutes', '5'))
   const [scheduleReminderDelayDraft, setScheduleReminderDelayDraft] = useState(preferenceString(preferences, 'schedule.default_reminder_minutes', '60'))
   const [scheduleSendDelayError, setScheduleSendDelayError] = useState('')
   const [scheduleReminderDelayError, setScheduleReminderDelayError] = useState('')
-  const [inactiveRoomAgeDraft, setInactiveRoomAgeDraft] = useState(preferenceString(preferences, 'archive.older_than_days', '90'))
-  const [inactiveRoomAgeError, setInactiveRoomAgeError] = useState('')
   const [storage, setStorage] = useState<{ database: StorageUsage; media: MediaCacheUsage } | null>(null)
   const [storageLoading, setStorageLoading] = useState(false)
   const [storageError, setStorageError] = useState('')
   const [storageAction, setStorageAction] = useState('')
-  const [dataLocation, setDataLocation] = useState<DataLocation | null>(null)
-  const [dataLocationError, setDataLocationError] = useState('')
   const [backupPassphrase, setBackupPassphrase] = useState('')
   const [backupConfirmation, setBackupConfirmation] = useState('')
   const [importPassphrase, setImportPassphrase] = useState('')
@@ -4934,14 +6320,15 @@ function SettingsDialog({
   const [notificationPermission, setNotificationPermission] = useState('unsupported')
   const [searchQuery, setSearchQuery] = useState('')
   const [searchTarget, setSearchTarget] = useState<{ entry: SettingsEntry; nonce: number } | null>(null)
+  const [snippetManagerOpen, setSnippetManagerOpen] = useState(false)
+  const [snippetDraft, setSnippetDraft] = useState<SnippetDraft | null>(null)
+  const [snippetEditingID, setSnippetEditingID] = useState('')
+  const [snippetEditorError, setSnippetEditorError] = useState('')
+  const [snippetManagerError, setSnippetManagerError] = useState('')
+  const [snippetManagerStatus, setSnippetManagerStatus] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
   const settingsPanelRef = useRef<HTMLDivElement>(null)
   const searchNonceRef = useRef(0)
-
-  useEffect(() => {
-    setInactiveRoomAgeDraft(preferenceString(preferences, 'archive.older_than_days', '90'))
-    setInactiveRoomAgeError('')
-  }, [preferences['archive.older_than_days']])
 
   const searchResults = useMemo(() => searchSettings(searchQuery), [searchQuery])
   const searchResultsByTab = useMemo(() => groupSettingsByTab(searchResults), [searchResults])
@@ -4952,6 +6339,117 @@ function SettingsDialog({
     setSearchQuery('')
     setSearchTarget({ entry, nonce: searchNonceRef.current })
     onTabChange(entry.tab)
+  }
+
+  function closeSnippetManager() {
+    setSnippetManagerOpen(false)
+    setSnippetDraft(null)
+    setSnippetEditingID('')
+    setSnippetEditorError('')
+  }
+
+  function editSnippet(snippet?: Snippet) {
+    setSnippetEditingID(snippet?.id ?? '')
+    setSnippetDraft(snippet
+      ? { prefix: snippet.prefix, trigger: snippet.trigger, title: snippet.title, content: snippet.content, category: snippet.category ?? '' }
+      : { prefix: ';', trigger: '', title: '', content: '', category: '' })
+    setSnippetEditorError('')
+    setSnippetManagerError('')
+  }
+
+  function saveSnippetDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!snippetDraft) return
+    const prefix = snippetDraft.prefix.trim()
+    const trigger = snippetDraft.trigger.trim()
+    const title = snippetDraft.title.trim()
+    const content = snippetDraft.content
+    const category = snippetDraft.category?.trim() ?? ''
+    if (!prefix || prefix.length > 8 || /\s/.test(prefix)) {
+      setSnippetEditorError('Use a prefix of 1 to 8 characters with no spaces.')
+      return
+    }
+    if (!trigger || trigger.length > 64 || /\s/.test(trigger)) {
+      setSnippetEditorError('Use a one-word trigger of up to 64 characters.')
+      return
+    }
+    if (!title || title.length > 100 || !content.trim() || content.length > 10000) {
+      setSnippetEditorError('Add a title and non-empty content of up to 10,000 characters.')
+      return
+    }
+    const duplicate = snippets.some((snippet) => snippet.id !== snippetEditingID
+      && snippet.prefix.toLocaleLowerCase() === prefix.toLocaleLowerCase()
+      && snippet.trigger.toLocaleLowerCase() === trigger.toLocaleLowerCase())
+    if (duplicate) {
+      setSnippetEditorError('A snippet already uses that prefix and trigger.')
+      return
+    }
+    const existing = snippets.find((snippet) => snippet.id === snippetEditingID)
+    const nextSnippet: Snippet = {
+      id: existing?.id ?? createSnippetID(),
+      prefix,
+      trigger,
+      title,
+      content,
+      ...(category ? { category } : {}),
+      createdAt: existing?.createdAt ?? Date.now(),
+    }
+    onSnippetsChange(existing
+      ? snippets.map((snippet) => snippet.id === existing.id ? nextSnippet : snippet)
+      : [...snippets, nextSnippet])
+    setSnippetDraft(null)
+    setSnippetEditingID('')
+    setSnippetEditorError('')
+    setSnippetManagerError('')
+    setSnippetManagerStatus('Snippet saved.')
+  }
+
+  function deleteSnippet(snippet: Snippet) {
+    onSnippetsChange(snippets.filter((candidate) => candidate.id !== snippet.id))
+    if (snippetEditingID === snippet.id) {
+      setSnippetDraft(null)
+      setSnippetEditingID('')
+    }
+    setSnippetManagerStatus('Snippet deleted.')
+    setSnippetManagerError('')
+  }
+
+  function exportSnippetFile() {
+    try {
+      const file = new Blob([serializeSnippets(snippets)], { type: 'application/json' })
+      const url = URL.createObjectURL(file)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'pinger-snippets.json'
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setSnippetManagerStatus('Snippets exported.')
+      setSnippetManagerError('')
+    } catch {
+      setSnippetManagerError('Could not create the snippets download.')
+      setSnippetManagerStatus('')
+    }
+  }
+
+  async function importSnippetFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) {
+      setSnippetManagerError('Snippet files must be smaller than 2 MiB.')
+      setSnippetManagerStatus('')
+      return
+    }
+    try {
+      const imported = parseSnippetImport(await file.text())
+      const next = mergeImportedSnippets(snippets, imported)
+      onSnippetsChange(next)
+      setSnippetManagerStatus(`Imported ${imported.length} snippet${imported.length === 1 ? '' : 's'}.`)
+      setSnippetManagerError('')
+    } catch (importError) {
+      setSnippetManagerError(describeError(importError))
+      setSnippetManagerStatus('')
+    }
   }
 
   useEffect(() => {
@@ -4979,18 +6477,6 @@ function SettingsDialog({
     setDraft(value)
     setError('')
     void onPreferenceChange(key, value)
-  }
-
-  function saveInactiveRoomAge() {
-    const days = Number(inactiveRoomAgeDraft)
-    if (!Number.isInteger(days) || days < 1 || days > 3650) {
-      setInactiveRoomAgeError('Enter a whole number from 1 to 3650 days.')
-      return
-    }
-    const value = String(days)
-    setInactiveRoomAgeDraft(value)
-    setInactiveRoomAgeError('')
-    void onPreferenceChange('archive.older_than_days', value)
   }
 
   useEffect(() => {
@@ -5065,66 +6551,13 @@ function SettingsDialog({
     return () => { active = false }
   }, [tab])
 
-  useEffect(() => {
-    if (tab !== 'Storage') return
-    let active = true
-    AppService.DataLocation()
-      .then((location) => { if (active) setDataLocation(location) })
-      .catch(() => { if (active) setDataLocation(null) })
-    return () => { active = false }
-  }, [tab])
-
-  async function chooseDataFolder() {
-    setDataLocationError('')
+  async function revokeDevice(device: Device) {
+    if (!window.confirm(`Revoke ${device.displayName || device.id}?`)) return
     try {
-      const folder = await AppService.ChooseDataFolder()
-      if (!folder) return
-      setDataLocation(await AppService.SetDataFolder(folder))
-    } catch (folderError) {
-      setDataLocationError(describeError(folderError))
-    }
-  }
-
-  async function useDefaultDataFolder() {
-    setDataLocationError('')
-    try {
-      setDataLocation(await AppService.UseDefaultDataFolder())
-    } catch (folderError) {
-      setDataLocationError(describeError(folderError))
-    }
-  }
-
-  async function restartApp() {
-    setDataLocationError('')
-    try {
-      await AppService.RestartApp()
-    } catch (restartError) {
-      setDataLocationError(describeError(restartError))
-    }
-  }
-
-  function closeRevokeDialog() {
-    if (revokeBusy) return
-    setRevokeTarget(null)
-    setRevokePassword('')
-    setRevokeError('')
-  }
-
-  async function revokeDevice(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!revokeTarget || !revokePassword.trim()) return
-    setRevokeBusy(true)
-    setRevokeError('')
-    try {
-      await AppService.RevokeDevice(revokeTarget.id, revokePassword)
-      setDevices((current) => current.filter((item) => item.id !== revokeTarget.id))
-      setRevokeTarget(null)
-      setRevokePassword('')
+      await AppService.RevokeDevice(device.id)
+      setDevices((current) => current.filter((item) => item.id !== device.id))
     } catch (revokeError) {
-      setRevokeError(describeError(revokeError))
-    } finally {
-      setRevokeBusy(false)
-      setRevokePassword('')
+      setDevicesError(describeError(revokeError))
     }
   }
 
@@ -5163,12 +6596,19 @@ function SettingsDialog({
     setKeyBusy(true)
     setKeyStatus('')
     try {
-      const backup = await AppService.ExportRoomKeys(backupPassphrase)
-      if (!backup) throw new Error('The homeserver returned an empty room key backup.')
+      const response = await requestLocalAsset('/media/ipc/room-keys/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passphrase: backupPassphrase }),
+      })
+      const backup = await response.blob()
+      if (backup.size === 0) throw new Error('The homeserver returned an empty room key backup.')
+      const objectURL = URL.createObjectURL(backup)
       const link = document.createElement('a')
-      link.href = `data:application/octet-stream;base64,${backup}`
+      link.href = objectURL
       link.download = 'matrix-room-keys.txt'
       link.click()
+      window.setTimeout(() => URL.revokeObjectURL(objectURL), 1000)
       setKeyStatus('Encrypted room key backup exported.')
       setBackupPassphrase('')
       setBackupConfirmation('')
@@ -5194,12 +6634,15 @@ function SettingsDialog({
     setKeyBusy(true)
     setKeyStatus('')
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer())
-      let binary = ''
-      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
-      }
-      const result = await AppService.ImportRoomKeys(importPassphrase, btoa(binary))
+      const response = await requestLocalAsset('/media/ipc/room-keys/import', {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'X-Matrix-Backup-Passphrase': importPassphrase,
+        },
+        body: file,
+      })
+      const result = await response.json() as { imported: number; total: number }
       setKeyStatus(`Imported ${result.imported} of ${result.total} room keys.`)
       setImportPassphrase('')
     } catch (importError) {
@@ -5220,6 +6663,7 @@ function SettingsDialog({
   }
 
   return (
+    <>
     <div className="settings-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <DialogSurface className="settings-dialog" labelledBy="settings-title" onClose={onClose}>
         <header className="settings-header">
@@ -5234,6 +6678,9 @@ function SettingsDialog({
             value={searchQuery}
             placeholder="Search settings"
             aria-label="Search settings"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
             onChange={(event) => setSearchQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== 'Escape') return
@@ -5360,12 +6807,10 @@ function SettingsDialog({
                   <option value="none">Clear selection</option>
                 </select>
               </label>
-              <label className="setting-row"><span><strong>Inactive room age</strong><small>Archive rooms without activity for this many days (1–3650).</small></span>
-                <input className="inactive-room-age-input" type="number" min="1" max="3650" step="1" value={inactiveRoomAgeDraft} aria-label="Inactive room age in days" aria-invalid={Boolean(inactiveRoomAgeError)} onChange={(event) => { setInactiveRoomAgeDraft(event.target.value); setInactiveRoomAgeError('') }} onBlur={saveInactiveRoomAge} />
-              </label>
-              {inactiveRoomAgeError && <p className="form-error" role="alert">{inactiveRoomAgeError}</p>}
-              <label className="setting-toggle"><span><strong>Automatically archive inactive rooms</strong><small>Check daily while Pinger is open and whenever room activity updates.</small></span>
-                <input type="checkbox" checked={preferenceBoolean(preferences, 'archive.automatic')} onChange={(event) => onPreferenceChange('archive.automatic', event.target.checked)} />
+              <label className="setting-row"><span><strong>Inactive room age</strong><small>Archive rooms without activity for this long.</small></span>
+                <select aria-label="Inactive room age" value={preferenceString(preferences, 'archive.older_than_days', '90')} onChange={(event) => onPreferenceChange('archive.older_than_days', event.target.value)}>
+                  {['30', '60', '90', '180', '365'].map((days) => <option key={days} value={days}>{days} days</option>)}
+                </select>
               </label>
               <button className="settings-command" type="button" onClick={() => void onArchiveInactiveRooms()}><Archive size={15} />Archive inactive rooms</button>
               <label className="setting-row"><span><strong>Voice-note microphone</strong><small>Choose the input used for recording.</small></span>
@@ -5465,6 +6910,8 @@ function SettingsDialog({
                 onPreferenceChange('notifications.enabled', value)
                 if (value) void enableSystemNotifications()
               }} />
+              <PreferenceToggle label="Busy mode auto-replies" checked={preferenceBoolean(preferences, 'busy_mode.enabled')} onChange={(value) => onPreferenceChange('busy_mode.enabled', value)} />
+              <p className="settings-note">Automatically replies once in each direct chat while busy mode is on. Language detection runs on this device. For other languages, only the generic reply is sent to the configured AI endpoint for translation; without one, the reply uses English.</p>
               <PreferenceToggle label="Notify while Pinger is focused" checked={!preferenceBoolean(preferences, 'notifications.only_when_unfocused', true)} onChange={(value) => onPreferenceChange('notifications.only_when_unfocused', !value)} />
               <PreferenceToggle label="Play a notification sound" checked={preferenceBoolean(preferences, 'notifications.sound')} onChange={(value) => onPreferenceChange('notifications.sound', value)} />
               <label className="setting-row"><span><strong>Notification volume</strong><small>Adjust the alert tone level.</small></span>
@@ -5528,7 +6975,7 @@ function SettingsDialog({
               <PreferenceToggle label="Spellcheck messages" checked={preferenceBoolean(preferences, 'composer.spellcheck', true)} onChange={(value) => onPreferenceChange('composer.spellcheck', value)} />
               <PreferenceToggle label="Show formatting toolbar" checked={preferenceBoolean(preferences, 'composer.formatting_toolbar')} onChange={(value) => onPreferenceChange('composer.formatting_toolbar', value)} />
               <PreferenceToggle label="Suggest emoji for :shortcodes:" checked={preferenceBoolean(preferences, 'emoji.autocomplete')} onChange={(value) => onPreferenceChange('emoji.autocomplete', value)} />
-              <PreferenceToggle label="Replace emoticons when sending" checked={preferenceBoolean(preferences, 'emoji.replace_emoticons')} onChange={(value) => onPreferenceChange('emoji.replace_emoticons', value)} />
+              <PreferenceToggle label="Replace emoticons as you type" checked={preferenceBoolean(preferences, 'emoji.replace_emoticons')} onChange={(value) => onPreferenceChange('emoji.replace_emoticons', value)} />
               <PreferenceToggle label="Include timestamps when copying messages" checked={preferenceBoolean(preferences, 'clipboard.copy_timestamp')} onChange={(value) => onPreferenceChange('clipboard.copy_timestamp', value)} />
               <PreferenceToggle label="Use Up to focus the message list when the composer is empty" checked={preferenceBoolean(preferences, 'composer.arrow_up_focus_timeline')} onChange={(value) => onPreferenceChange('composer.arrow_up_focus_timeline', value)} />
               <PreferenceToggle label="Enable single-key shortcuts (R, J, K and the answered key)" checked={preferenceBoolean(preferences, 'shortcuts.single_keys', true)} onChange={(value) => onPreferenceChange('shortcuts.single_keys', value)} />
@@ -5536,6 +6983,8 @@ function SettingsDialog({
               <label className="setting-row"><span><strong>Mark answered shortcut</strong><small>Use one letter to mark the selected room answered.</small></span>
                 <input className="shortcut-input" type="text" maxLength={1} value={preferenceString(preferences, 'shortcuts.mark_answered', 'E')} aria-label="Mark answered shortcut" onChange={(event) => { const value = event.target.value.toUpperCase(); if (value) onPreferenceChange('shortcuts.mark_answered', value) }} />
               </label>
+              <button className="settings-command" type="button" onClick={() => { setSnippetManagerOpen(true); setSnippetManagerStatus(''); setSnippetManagerError('') }}><FileText size={15} />Manage text snippets</button>
+              <p className="settings-note">Expand personal shortcuts while composing. Snippets are stored on this device.</p>
               <dl className="keyboard-shortcut-list" aria-label="Keyboard shortcuts">
                 {[
                   ['Ctrl / ⌘ + K', 'Quick switch rooms'],
@@ -5545,8 +6994,11 @@ function SettingsDialog({
                   ['Alt + ↑ / ↓', 'Switch rooms'],
                   ['Ctrl / ⌘ + Shift + ↑ / ↓', 'Switch needs-reply rooms'],
                   ['Ctrl / ⌘ + 1–9', 'Switch to a visible room'],
+                  ['Ctrl / ⌘ + Alt + 1–9', 'Switch Matrix accounts'],
                   ['Ctrl / ⌘ + + / -', 'Adjust app zoom'],
                   ['Ctrl / ⌘ + 0', 'Reset app zoom'],
+                  ['Ctrl / ⌘ + Shift + P', 'Toggle Incognito blur'],
+                  ['Ctrl + Shift + T', 'Analyze draft with Turkish Tutor'],
                   ['Ctrl / ⌘ + Shift + A', 'Show all rooms'],
                   ['Ctrl / ⌘ + Shift + U', 'Show needs-reply rooms'],
                   ['Ctrl / ⌘ + Shift + L', 'Jump to latest messages'],
@@ -5588,7 +7040,7 @@ function SettingsDialog({
               <div className="account-details"><span>Homeserver</span><strong>{profile.homeserver}</strong><span>This device</span><strong>{profile.deviceId}</strong><span>Encryption</span><strong>{profile.verified ? 'Verified' : 'Needs verification'}</strong></div>
               <PreferenceToggle label="Send typing indicators" checked={preferenceBoolean(preferences, 'privacy.send_typing', true)} onChange={(value) => onPreferenceChange('privacy.send_typing', value)} />
               <PreferenceToggle label="Incognito mode" checked={preferenceBoolean(preferences, 'privacy.incognito')} onChange={(value) => onPreferenceChange('privacy.incognito', value)} />
-              {preferenceBoolean(preferences, 'privacy.incognito') && <p className="settings-note" role="status">Incognito mode is active.</p>}
+              {preferenceBoolean(preferences, 'privacy.incognito') && <p className="settings-note" role="status">Incognito mode is active. Message text, names, and room images are blurred until hovered.</p>}
               <p className="settings-note">Session data and encryption keys are stored locally on this device.</p>
               {!logoutConfirm ? (
                 <button className="settings-command is-danger" type="button" onClick={() => setLogoutConfirm(true)}><LogOut size={15} />Log out</button>
@@ -5610,25 +7062,13 @@ function SettingsDialog({
               {devices.map((device) => (
                 <article className="device-row" key={device.id}>
                   <div><strong>{device.displayName || '(unnamed device)'}</strong><span>{device.id}{device.current ? ' · this device' : ''}</span><small>{device.lastSeenAt > 0 ? `Last active ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(device.lastSeenAt))}` : device.lastSeenIp || 'Last active time unavailable'}</small></div>
-                  {!device.current && <button className="settings-command is-danger" type="button" onClick={() => { setRevokeTarget(device); setRevokePassword(''); setRevokeError('') }}>Revoke</button>}
+                  {!device.current && <button className="settings-command is-danger" type="button" onClick={() => void revokeDevice(device)}>Revoke</button>}
                 </article>
               ))}
             </div>
           )}
           {tab === 'Storage' && (
             <div className="settings-section">
-              <h3>Data folder</h3>
-              <div className="setting-row"><span><strong>Application data</strong><small>{dataLocation?.dataDir ?? 'Default folder'}</small></span>
-                <span>
-                  <button type="button" className="settings-command" onClick={() => void chooseDataFolder()}>Choose…</button>
-                  {dataLocation && dataLocation.dataDir !== dataLocation.defaultDir && <button type="button" className="settings-command" onClick={() => void useDefaultDataFolder()}>Use default</button>}
-                </span>
-              </div>
-              {dataLocation?.pendingDir && <div className="setting-row"><span><strong>Waiting for a restart</strong><small>Pinger moves its data to {dataLocation.pendingDir} the next time it starts.</small></span>
-                <span><button type="button" className="settings-command" onClick={() => void restartApp()}>Restart now</button></span>
-              </div>}
-              {dataLocationError && <p className="settings-error" role="alert">{dataLocationError}</p>}
-              <p className="settings-note">The database, encryption keys and preferences are stored in this folder. Downloaded media stays in the system cache.</p>
               <h3>Local storage</h3>
               {storageLoading && <p className="settings-note">Reading storage usage…</p>}
               {storageError && <p className="settings-error" role="alert">{storageError}</p>}
@@ -5666,6 +7106,13 @@ function SettingsDialog({
                 translateLanguage={preferenceString(preferences, 'ai.translate_language', 'English')}
                 onSave={onPreferenceChange}
               />
+              <GhostwriterSettings
+                enabled={preferenceBoolean(preferences, 'ghostwriter.enabled')}
+                provider={ghostwriterProvider}
+                endpoint={preferenceString(preferences, 'ghostwriter.endpoint', ghostwriterDefaultEndpoints[ghostwriterProvider])}
+                model={preferenceString(preferences, 'ghostwriter.model', '')}
+                onSave={onPreferenceChange}
+              />
               <div className="integration-status" aria-label="Detected chat networks">
                 {chatNetworks.map(({ code, name }) => {
                   const count = rooms.filter((room) => room.bridge === code).length
@@ -5696,18 +7143,56 @@ function SettingsDialog({
           )}
         </div>
       </DialogSurface>
-      {revokeTarget && <div className="confirm-scrim" role="presentation">
-        <DialogSurface className="confirm-dialog" role="alertdialog" labelledBy="revoke-device-title" onClose={closeRevokeDialog}>
-          <form onSubmit={(event) => void revokeDevice(event)}>
-            <h2 id="revoke-device-title">Revoke this device?</h2>
-            <p>Sign out {revokeTarget.displayName || revokeTarget.id}. Enter your Matrix account password to confirm this action.</p>
-            <label className="security-field"><span>Matrix password</span><input type="password" autoComplete="current-password" autoFocus value={revokePassword} onChange={(event) => setRevokePassword(event.target.value)} disabled={revokeBusy} required /></label>
-            {revokeError && <p className="settings-error" role="alert">{revokeError}</p>}
-            <div><button type="button" disabled={revokeBusy} onClick={closeRevokeDialog}>Cancel</button><button className="is-danger" type="submit" disabled={revokeBusy || !revokePassword.trim()}>{revokeBusy ? 'Revoking…' : 'Revoke device'}</button></div>
-          </form>
-        </DialogSurface>
-      </div>}
     </div>
+    {snippetManagerOpen && <div className="room-info-scrim snippet-manager-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSnippetManager() }}>
+      <DialogSurface className="room-info-dialog snippet-manager-dialog" labelledBy="snippet-manager-title" onClose={closeSnippetManager} onClick={(event) => event.stopPropagation()}>
+        <header className="room-info-header">
+          <div><span className="eyebrow">COMPOSER</span><h2 id="snippet-manager-title">Text snippets</h2></div>
+          <button className="icon-button" type="button" aria-label="Close text snippets" title="Close text snippets" onClick={closeSnippetManager}><X size={16} /></button>
+        </header>
+        <div className="snippet-manager-content">
+          <div className="snippet-manager-toolbar">
+            <button className="settings-command" type="button" onClick={() => editSnippet()}><Plus size={14} />New snippet</button>
+            <button className="settings-command" type="button" disabled={snippets.length === 0} onClick={exportSnippetFile}><Download size={14} />Export JSON</button>
+            <label className="settings-command file-command"><Upload size={14} />Import JSON<input type="file" accept=".json,application/json" aria-label="Import snippets" onChange={(event) => void importSnippetFile(event)} /></label>
+          </div>
+          {snippetManagerError && <p className="settings-error" role="alert">{snippetManagerError}</p>}
+          {snippetManagerStatus && <p className="settings-note" role="status">{snippetManagerStatus}</p>}
+          {snippetDraft && <form className="snippet-manager-editor" onSubmit={saveSnippetDraft}>
+            <h3>{snippetEditingID ? 'Edit snippet' : 'New snippet'}</h3>
+            <div className="snippet-manager-fields">
+              <label className="snippet-manager-field"><span>Prefix</span><input aria-label="Snippet prefix" value={snippetDraft.prefix} maxLength={8} onChange={(event) => setSnippetDraft((current) => current ? { ...current, prefix: event.target.value } : current)} /></label>
+              <label className="snippet-manager-field"><span>Trigger</span><input aria-label="Snippet trigger" value={snippetDraft.trigger} maxLength={64} onChange={(event) => setSnippetDraft((current) => current ? { ...current, trigger: event.target.value } : current)} /></label>
+              <label className="snippet-manager-field"><span>Title</span><input aria-label="Snippet title" value={snippetDraft.title} maxLength={100} onChange={(event) => setSnippetDraft((current) => current ? { ...current, title: event.target.value } : current)} /></label>
+              <label className="snippet-manager-field"><span>Category</span><input aria-label="Snippet category" value={snippetDraft.category ?? ''} maxLength={40} onChange={(event) => setSnippetDraft((current) => current ? { ...current, category: event.target.value } : current)} /></label>
+            </div>
+            <label className="snippet-manager-field"><span>Content</span><textarea aria-label="Snippet content" value={snippetDraft.content} maxLength={10000} rows={5} onChange={(event) => setSnippetDraft((current) => current ? { ...current, content: event.target.value } : current)} /></label>
+            <p className="settings-note">Variables: {'{date}'}, {'{time}'}, {'{clipboard}'}, and {'{cursor}'}.</p>
+            {snippetEditorError && <p className="settings-error" role="alert">{snippetEditorError}</p>}
+            <div className="snippet-manager-actions">
+              <button className="settings-command" type="button" onClick={() => { setSnippetDraft(null); setSnippetEditingID(''); setSnippetEditorError('') }}>Cancel</button>
+              <button className="settings-command is-primary" type="submit">{snippetEditingID ? 'Save changes' : 'Save snippet'}</button>
+            </div>
+          </form>}
+          <ul className="snippet-manager-list" aria-label="Saved text snippets">
+            {snippets.map((snippet) => <li className="snippet-manager-item" key={snippet.id}>
+              <div className="snippet-manager-item-top">
+                <div><strong>{snippet.title}</strong><code>{snippet.prefix}{snippet.trigger}</code></div>
+                <div className="snippet-manager-item-actions">
+                  <button className="icon-button" type="button" aria-label={`Edit snippet ${snippet.title}`} title="Edit snippet" onClick={() => editSnippet(snippet)}><Pencil size={14} /></button>
+                  <button className="icon-button" type="button" aria-label={`Delete snippet ${snippet.title}`} title="Delete snippet" onClick={() => deleteSnippet(snippet)}><Trash2 size={14} /></button>
+                </div>
+              </div>
+              <p>{snippet.content}</p>
+              <small>{snippet.category || 'Uncategorized'}</small>
+            </li>)}
+            {snippets.length === 0 && <li className="snippet-manager-empty">No snippets saved.</li>}
+          </ul>
+        </div>
+        <footer className="room-info-footer"><button className="settings-command" type="button" onClick={closeSnippetManager}>Close</button></footer>
+      </DialogSurface>
+    </div>}
+    </>
   )
 }
 

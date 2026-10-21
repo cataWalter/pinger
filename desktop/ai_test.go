@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateAIEndpointRequiresHTTPURL(t *testing.T) {
@@ -78,6 +79,65 @@ func TestAIChatCompletionSendsMessagesAndReturnsReply(t *testing.T) {
 	}
 	if reply != "Hola" {
 		t.Fatalf("reply = %q, want %q", reply, "Hola")
+	}
+}
+
+func TestAIToneGuardCompletionUsesLocalLowTemperatureRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model       string      `json:"model"`
+			Messages    []AIMessage `json:"messages"`
+			Stream      bool        `json:"stream"`
+			Temperature float64     `json:"temperature"`
+			MaxTokens   int         `json:"max_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if body.Model != "local-tone-model" || body.Stream || body.Temperature != 0.1 || body.MaxTokens != aiToneGuardMaxTokens || len(body.Messages) != 2 {
+			t.Errorf("unexpected Tone Guard request: %+v", body)
+		}
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"{\"is_hostile_or_unprofessional\":false}"}}]}`)
+	}))
+	defer server.Close()
+
+	result, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "local-tone-model", []AIMessage{{Role: "system", Content: "classify"}, {Role: "user", Content: "draft"}})
+	if err != nil {
+		t.Fatalf("aiToneGuardCompletion() error = %v", err)
+	}
+	if !strings.Contains(result, `"is_hostile_or_unprofessional":false`) {
+		t.Fatalf("result = %q, want classifier JSON", result)
+	}
+}
+
+func TestAIToneGuardCompletionRejectsNonLocalEndpoints(t *testing.T) {
+	for _, endpoint := range []string{"https://localhost:8080", "http://example.com:8080", "http://localhost:8080/v1"} {
+		if _, err := aiToneGuardCompletion(context.Background(), http.DefaultClient, endpoint, "", []AIMessage{{Role: "user", Content: "draft"}}); err == nil {
+			t.Errorf("aiToneGuardCompletion(%q) accepted a non-local endpoint", endpoint)
+		}
+	}
+}
+
+func TestAIToneGuardCompletionTimesOut(t *testing.T) {
+	releaseHandler := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-releaseHandler:
+		}
+	}))
+	defer func() {
+		close(releaseHandler)
+		server.Close()
+	}()
+
+	started := time.Now()
+	_, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "", []AIMessage{{Role: "user", Content: "draft"}})
+	if err == nil {
+		t.Fatal("aiToneGuardCompletion() succeeded after the deadline")
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("aiToneGuardCompletion() took %v, want at most 2s", elapsed)
 	}
 }
 

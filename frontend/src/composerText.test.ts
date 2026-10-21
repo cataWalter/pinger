@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { emojiQueryAt, insertEmoji, replaceEmoticons, suggestEmoji, wrapSelection } from './composerText'
+import { emojiQueryAt, insertEmoji, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, wrapSelection } from './composerText'
 
 describe('replaceEmoticons', () => {
   it('replaces whole-word emoticons', () => {
@@ -13,6 +13,20 @@ describe('replaceEmoticons', () => {
 
   it('skips inline code spans', () => {
     expect(replaceEmoticons('use `:)` but not :)')).toBe('use `:)` but not 🙂')
+  })
+})
+
+describe('replaceEmoticonsAtCursor', () => {
+  it('converts a completed emoticon before the caret and preserves the caret position', () => {
+    expect(replaceEmoticonsAtCursor('hi ;-)', 6)).toEqual({ text: 'hi 😉', cursor: 5 })
+  })
+
+  it('leaves an unfinished emoticon alone while typing', () => {
+    expect(replaceEmoticonsAtCursor('hi :', 4)).toEqual({ text: 'hi :', cursor: 4 })
+  })
+
+  it('does not convert emoticons inside inline code', () => {
+    expect(replaceEmoticonsAtCursor('use `:)`', 8)).toEqual({ text: 'use `:)`', cursor: 8 })
   })
 })
 

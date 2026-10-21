@@ -11,6 +11,9 @@ describe('settings search', () => {
     expect(searchSettings('launch').map((entry) => entry.id)).toContain('general.launch-at-login')
     expect(searchSettings('dark mode').map((entry) => entry.id)).toContain('appearance.theme')
     expect(searchSettings('llama').map((entry) => entry.id)).toContain('help.ai')
+    expect(searchSettings('busy mode').map((entry) => entry.id)).toContain('notifications.busy-mode')
+    expect(searchSettings('ghostwriter').map((entry) => entry.id)).toContain('integrations.ghostwriter')
+    expect(searchSettings('localhost').map((entry) => entry.id)).toContain('integrations.ghostwriter-endpoint')
   })
 
   it('ignores the case of the query', () => {

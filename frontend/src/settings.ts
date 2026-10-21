@@ -39,7 +39,7 @@ export const settingsEntries: SettingsEntry[] = [
 
   { id: 'account.details', tab: 'Account', title: 'Account details', description: 'Your user ID, homeserver, device and verification status.', keywords: 'profile user id homeserver device verified', anchor: '.account-details' },
   { id: 'account.send-typing', tab: 'Account', title: 'Send typing indicators', description: 'Let others see when you are typing.', keywords: 'typing privacy indicator' },
-  { id: 'account.incognito', tab: 'Account', title: 'Incognito mode', description: 'Keep conversations and activity out of sight.', keywords: 'privacy hidden incognito' },
+  { id: 'account.incognito', tab: 'Account', title: 'Incognito mode', description: 'Blur message text, names, and room images until hovered; suppress read receipts.', keywords: 'privacy hidden incognito blur hover messages names' },
   { id: 'account.log-out', tab: 'Account', title: 'Log out', description: 'Sign out and clear the local session data.', keywords: 'sign out logout session exit' },
 
   { id: 'appearance.theme', tab: 'Appearance', title: 'Theme', description: 'Choose the conversation surface.', keywords: 'dark light mode oled black color scheme dracula midnight slate solarized sepia' },
@@ -66,6 +66,7 @@ export const settingsEntries: SettingsEntry[] = [
 
   { id: 'notifications.system-permission', tab: 'Notifications', title: 'System permission', description: 'Allow Pinger to post desktop alerts.', keywords: 'permission notification centre macos allow' },
   { id: 'notifications.enabled', tab: 'Notifications', title: 'Enable notifications', description: 'Show alerts for new messages.', keywords: 'notification alerts enable' },
+  { id: 'notifications.busy-mode', tab: 'Notifications', title: 'Busy mode auto-replies', description: 'Reply once in each direct chat using the language of the latest 10 text messages.', keywords: 'busy away auto reply automatic response out of office' },
   { id: 'notifications.focused', tab: 'Notifications', title: 'Notify while Pinger is focused', description: 'Alert even when the app is open.', keywords: 'notification focused active window' },
   { id: 'notifications.sound', tab: 'Notifications', title: 'Play a notification sound', description: 'Play a sound with each alert.', keywords: 'notification sound alert' },
   { id: 'notifications.volume', tab: 'Notifications', title: 'Notification volume', description: 'Adjust the alert tone level.', keywords: 'volume alert sound level' },
@@ -87,7 +88,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'keyboard.spellcheck', tab: 'Keyboard', title: 'Spellcheck messages', description: 'Check spelling while you type.', keywords: 'spellcheck spell check' },
   { id: 'keyboard.formatting-toolbar', tab: 'Keyboard', title: 'Show formatting toolbar', description: 'Show bold, italic and link controls.', keywords: 'formatting toolbar bold italic' },
   { id: 'keyboard.emoji-autocomplete', tab: 'Keyboard', title: 'Suggest emoji for :shortcodes:', description: 'Complete :shortcodes: as you type.', keywords: 'emoji autocomplete shortcode' },
-  { id: 'keyboard.emoticon-replacement', tab: 'Keyboard', title: 'Replace emoticons when sending', description: 'Turn :-) into an emoji.', keywords: 'emoticon emoji replace' },
+  { id: 'keyboard.emoticon-replacement', tab: 'Keyboard', title: 'Replace emoticons as you type', description: 'Turn :-) into an emoji in the composer and when sending.', keywords: 'emoticon emoji replace' },
   { id: 'keyboard.copy-timestamp', tab: 'Keyboard', title: 'Include timestamps when copying messages', description: 'Add the time to copied text.', keywords: 'clipboard copy timestamp' },
   { id: 'keyboard.arrow-up-focus', tab: 'Keyboard', title: 'Use Up to focus the message list when the composer is empty', description: 'Move focus to the timeline with the Up arrow.', keywords: 'up arrow focus timeline composer' },
   { id: 'keyboard.single-keys', tab: 'Keyboard', title: 'Enable single-key shortcuts (R, J, K and the answered key)', description: 'Reply, navigate and mark rooms without modifiers.', keywords: 'single key shortcuts r j k' },
@@ -118,6 +119,11 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'integrations.ai-model', tab: 'Integrations', title: 'Model name (optional)', description: 'Model served by the endpoint.', keywords: 'ai model name' },
   { id: 'integrations.ai-translate', tab: 'Integrations', title: 'Translate into', description: 'Language used for translations.', keywords: 'ai translate language' },
   { id: 'integrations.ai-test', tab: 'Integrations', title: 'Test endpoint', description: 'Check that the endpoint answers.', keywords: 'ai test connection endpoint' },
+  { id: 'integrations.ghostwriter', tab: 'Integrations', title: 'AI Ghostwriter', description: 'Draft context-aware replies using your local chat history and writing style.', keywords: 'ghostwriter autocomplete quick reply slash local ollama llama.cpp', anchor: '.ghostwriter-settings' },
+  { id: 'integrations.ghostwriter-enabled', tab: 'Integrations', title: 'Enable local AI Ghostwriter', description: 'Show local reply chips, inline completions, and /ghost drafts.', keywords: 'ghostwriter opt in autocomplete replies', anchor: '.ghostwriter-settings .setting-toggle' },
+  { id: 'integrations.ghostwriter-provider', tab: 'Integrations', title: 'Ghostwriter provider', description: 'Choose Ollama or an OpenAI-compatible local server.', keywords: 'ollama llama.cpp local provider', anchor: '.ghostwriter-settings select' },
+  { id: 'integrations.ghostwriter-endpoint', tab: 'Integrations', title: 'Ghostwriter local endpoint', description: 'Must use localhost or a loopback IP address.', keywords: 'ghostwriter endpoint localhost privacy', anchor: '.ghostwriter-settings input[type="url"]' },
+  { id: 'integrations.ghostwriter-model', tab: 'Integrations', title: 'Ghostwriter model', description: 'Model loaded by Ollama or your local server.', keywords: 'ghostwriter model qwen llama gguf', anchor: '.ghostwriter-settings input[type="text"]' },
   { id: 'integrations.networks', tab: 'Integrations', title: 'Detected chat networks', description: 'Bridged networks found in your chats.', keywords: 'bridges whatsapp telegram signal integration', anchor: '.integration-status' },
 
   { id: 'help.keyboard', tab: 'Help', title: 'Keyboard shortcuts', description: 'A quick tour of the shortcuts Pinger uses.', keywords: 'help shortcuts' },

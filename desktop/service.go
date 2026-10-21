@@ -2,10 +2,9 @@ package desktop
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"net/http"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,46 +14,54 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
-	"mychat/logging"
 	"mychat/matrix"
 	"mychat/notifications"
 	sharedpreferences "mychat/preferences"
 )
 
 type AppService struct {
-	client                 *matrix.Client
-	clientMu               sync.RWMutex
-	accountMu              sync.RWMutex
-	accountRegistry        *accountRegistry
-	accountClients         map[string]*matrix.Client
-	accountEventPumps      map[string]bool
-	accountSyncStarted     map[string]bool
-	accountDataDir         string
-	accountMediaCacheDir   string
-	activeAccountID        string
-	dataDir                string
-	defaultDataDir         string
-	preferences            *PreferenceStore
-	sharedPreferences      *sharedpreferences.Store
-	preferencesUnsubscribe func()
-	notifier               notifications.Notifier
-	ctx                    context.Context
-	cancel                 context.CancelFunc
-	quit                   func()
-	openURL                func(string) error
-	setAutostart           func(bool) error
-	setMenuBarIcon         func(bool)
-	chooseSavePath         func(directory, filename string) (string, error)
-	chooseDownloadFolder   func() (string, error)
-	chooseDataFolder       func() (string, error)
-	restartRequested       atomic.Bool
-	activeRoomMu           sync.RWMutex
-	activeRoomID           string
-	workers                sync.WaitGroup
-	scheduled              *scheduledJobStore
+	client                   *matrix.Client
+	clientMu                 sync.RWMutex
+	accountMu                sync.RWMutex
+	accountRegistry          *accountRegistry
+	accountClients           map[string]*matrix.Client
+	accountEventPumps        map[string]bool
+	accountSyncStarted       map[string]bool
+	dataDir                  string
+	defaultDataDir           string
+	accountMediaCacheDir     string
+	activeAccountID          string
+	preferences              *PreferenceStore
+	sharedPreferences        *sharedpreferences.Store
+	preferencesUnsubscribe   func()
+	notifier                 notifications.Notifier
+	ctx                      context.Context
+	cancel                   context.CancelFunc
+	quit                     func()
+	openURL                  func(string) error
+	chooseDataFolder         func() (string, error)
+	restartRequested         atomic.Bool
+	setAutostart             func(bool) error
+	setMenuBarIcon           func(bool)
+	chooseSavePath           func(directory, filename string) (string, error)
+	chooseDownloadFolder     func() (string, error)
+	activeRoomMu             sync.RWMutex
+	activeRoomID             string
+	activeRoomClient         *matrix.Client
+	workers                  sync.WaitGroup
+	scheduled                *scheduledJobStore
+	relationshipHealthMu     sync.Mutex
+	relationshipHealthStores map[string]*relationshipHealthStore
+	relationshipHealthJobs   map[string]bool
+	contactDossierJobs       map[string]bool
+	relationshipDecayWorker  bool
+	relationshipDecayTrigger chan struct{}
 
-	emitUpdate   func(Update)
-	emitReminder func(ScheduledJob)
+	emitUpdate             func(Update)
+	emitReminder           func(ScheduledJob)
+	emitRelationshipHealth func(RelationshipHealthSnapshot)
+	emitRelationshipDecay  func(RelationshipDecaySnapshot)
+	emitContactDossier     func(ContactDossierSnapshot)
 }
 
 func (s *AppService) OpenExternalURL(rawURL string) error {
@@ -69,14 +76,16 @@ func (s *AppService) OpenExternalURL(rawURL string) error {
 }
 
 type Snapshot struct {
-	LoggedIn          bool           `json:"loggedIn"`
-	NeedsVerification bool           `json:"needsVerification"`
-	SyncReady         bool           `json:"syncReady"`
-	ConnectionState   string         `json:"connectionState"`
-	Profile           AccountProfile `json:"profile"`
-	ActiveAccountID   string         `json:"activeAccountId"`
-	Rooms             []Room         `json:"rooms"`
-	Preferences       map[string]any `json:"preferences"`
+	LoggedIn              bool             `json:"loggedIn"`
+	NeedsVerification     bool             `json:"needsVerification"`
+	SyncReady             bool             `json:"syncReady"`
+	ConnectionState       string           `json:"connectionState"`
+	SlidingSyncListCounts map[string]int   `json:"slidingSyncListCounts"`
+	Profile               AccountProfile   `json:"profile"`
+	Accounts              []AccountSummary `json:"accounts"`
+	ActiveAccountID       string           `json:"activeAccountId"`
+	Rooms                 []Room           `json:"rooms"`
+	Preferences           map[string]any   `json:"preferences"`
 }
 
 type Room struct {
@@ -208,6 +217,7 @@ type Notification struct {
 
 type Update struct {
 	Rooms                 []Room              `json:"rooms"`
+	SlidingSyncListCounts map[string]int      `json:"slidingSyncListCounts"`
 	ChangedRoomID         []string            `json:"changedRoomId"`
 	TimelineChangedRoomID []string            `json:"timelineChangedRoomId"`
 	TypingUsers           map[string][]string `json:"typingUsers"`
@@ -228,10 +238,11 @@ func (s *AppService) Snapshot() (Snapshot, error) {
 	rooms := mapRoomsWithPreferences(client.Rooms(), preferences)
 	tagRooms(rooms, s.currentAccountID())
 	return Snapshot{
-		LoggedIn:          client.IsLoggedIn(),
-		NeedsVerification: client.NeedsVerification(),
-		SyncReady:         client.SyncReady(),
-		ConnectionState:   string(client.ConnectionState()),
+		LoggedIn:              client.IsLoggedIn(),
+		NeedsVerification:     client.NeedsVerification(),
+		SyncReady:             client.SyncReady(),
+		ConnectionState:       string(client.ConnectionState()),
+		SlidingSyncListCounts: client.SlidingSyncListCounts(),
 		Profile: AccountProfile{
 			UserID:      profile.UserID,
 			DisplayName: profile.DisplayName,
@@ -240,6 +251,7 @@ func (s *AppService) Snapshot() (Snapshot, error) {
 			AvatarURI:   profile.AvatarURI,
 			Verified:    profile.Verified,
 		},
+		Accounts:        s.Accounts(),
 		ActiveAccountID: s.currentAccountID(),
 		Rooms:           rooms,
 		Preferences:     preferences,
@@ -254,7 +266,7 @@ func (s *AppService) preferenceValuesForAccount(accountID string) map[string]any
 	if s.sharedPreferences != nil {
 		values, err := s.sharedPreferences.Snapshot(accountID)
 		if err != nil {
-			logging.For("service").Error().Err(err).Msg("read shared preferences")
+			log.Printf("read shared preferences: %v", err)
 			return map[string]any{}
 		}
 		return values
@@ -297,7 +309,7 @@ func (s *AppService) startPreferencePump(emit func(Snapshot)) {
 				}
 				state, err := s.Snapshot()
 				if err != nil {
-					logging.For("service").Error().Err(err).Msg("build preference update")
+					log.Printf("build preference update: %v", err)
 					continue
 				}
 				emit(state)
@@ -442,13 +454,6 @@ func (s *AppService) ScheduleMessage(roomID, text string, dueAt int64) (Schedule
 	return s.scheduled.scheduleMessage(s.currentAccountID(), roomID, text, dueAt)
 }
 
-func (s *AppService) ScheduleRecurringMessage(roomID, text string, dueAt int64) (ScheduledJob, error) {
-	if err := s.validateScheduledRoom(roomID); err != nil {
-		return ScheduledJob{}, err
-	}
-	return s.scheduled.scheduleRecurringMessage(s.currentAccountID(), roomID, text, dueAt)
-}
-
 func (s *AppService) ScheduleReply(roomID, text, replyToEventID string, dueAt int64) (ScheduledJob, error) {
 	if err := s.validateScheduledRoom(roomID); err != nil {
 		return ScheduledJob{}, err
@@ -551,34 +556,22 @@ func (s *AppService) Devices() ([]Device, error) {
 	return mapped, nil
 }
 
-func (s *AppService) RevokeDevice(deviceID, password string) error {
-	return s.currentClient().RevokeDevice(s.ctx, deviceID, password)
+func (s *AppService) RevokeDevice(deviceID string) error {
+	return s.currentClient().RevokeDevice(s.ctx, deviceID)
 }
 
-func (s *AppService) ExportRoomKeys(passphrase string) ([]byte, error) {
-	return s.currentClient().ExportRoomKeys(s.ctx, passphrase)
-}
-
-func (s *AppService) ImportRoomKeys(passphrase string, data []byte) (RoomKeyImportResult, error) {
-	imported, total, err := s.currentClient().ImportRoomKeys(s.ctx, passphrase, data)
-	if err != nil {
-		return RoomKeyImportResult{}, err
-	}
-	return RoomKeyImportResult{Imported: imported, Total: total}, nil
-}
-
-func (s *AppService) SendAttachment(roomID, filename string, data []byte, voiceNote bool, durationMilliseconds int64) error {
+func (s *AppService) sendAttachment(ctx context.Context, roomID, filename string, data []byte, voiceNote bool, durationMilliseconds int64) error {
 	if int64(len(data)) > maxAttachmentSize {
 		return fmt.Errorf("attachment exceeds the 50 MiB limit")
 	}
-	if voiceNote {
-		return s.currentClient().SendVoiceNote(s.ctx, roomID, filename, data, durationMilliseconds)
+	client := s.currentClient()
+	if client == nil {
+		return errors.New("Matrix account unavailable")
 	}
-	return s.currentClient().SendAttachment(s.ctx, roomID, filename, data)
-}
-
-func (s *AppService) DownloadMedia(mxc string) ([]byte, error) {
-	return s.currentClient().CachedMediaBytes(s.ctx, mxc)
+	if voiceNote {
+		return client.SendVoiceNote(ctx, roomID, filename, data, durationMilliseconds)
+	}
+	return client.SendAttachment(ctx, roomID, filename, data)
 }
 
 // SaveMedia writes a cached attachment to the download folder, or to a path chosen in a save dialog when ask-each-time is enabled. An empty path with no error means the user cancelled.
@@ -653,21 +646,6 @@ func uniqueDownloadPath(directory, name string) string {
 		candidate = filepath.Join(directory, fmt.Sprintf("%s (%d)%s", base, i, ext))
 	}
 	return candidate
-}
-
-func (s *AppService) DownloadAvatar(mxc string) (string, error) {
-	data, err := s.currentClient().DownloadAvatar(s.ctx, mxc)
-	if err != nil {
-		return "", err
-	}
-	if len(data) == 0 {
-		return "", nil
-	}
-	mimeType := http.DetectContentType(data)
-	if !strings.HasPrefix(mimeType, "image/") {
-		return "", fmt.Errorf("Matrix avatar is not an image: %s", mimeType)
-	}
-	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
 func (s *AppService) StorageUsage() (StorageUsage, error) {
@@ -772,9 +750,51 @@ func (s *AppService) SetBooleanPreference(key string, value bool) error {
 }
 
 func (s *AppService) SetActiveRoom(roomID string) {
+	client := s.currentClient()
 	s.activeRoomMu.Lock()
+	previousRoomID := s.activeRoomID
+	previousClient := s.activeRoomClient
+	if previousRoomID == roomID && previousClient == client {
+		s.activeRoomMu.Unlock()
+		return
+	}
 	s.activeRoomID = roomID
+	s.activeRoomClient = client
+	if previousClient != nil && previousRoomID != "" {
+		if err := previousClient.UnsubscribeFromRoom(previousRoomID); err != nil {
+			log.Printf("unsubscribe from active Matrix room %s: %v", previousRoomID, err)
+		}
+	}
+	if client != nil && roomID != "" {
+		if err := client.SubscribeToRoom(roomID); err != nil {
+			log.Printf("subscribe to active Matrix room %s: %v", roomID, err)
+		}
+	}
 	s.activeRoomMu.Unlock()
+}
+
+func (s *AppService) UpdateVisibleRange(listKey string, startIndex, endIndex int) error {
+	client := s.currentClient()
+	if client == nil {
+		return nil
+	}
+	return client.UpdateVisibleRange(listKey, startIndex, endIndex)
+}
+
+func (s *AppService) SubscribeToRoom(roomID string) error {
+	client := s.currentClient()
+	if client == nil {
+		return nil
+	}
+	return client.SubscribeToRoom(roomID)
+}
+
+func (s *AppService) UnsubscribeFromRoom(roomID string) error {
+	client := s.currentClient()
+	if client == nil {
+		return nil
+	}
+	return client.UnsubscribeFromRoom(roomID)
 }
 
 func (s *AppService) sendDroppedFiles(paths []string) (string, bool, error) {
@@ -796,7 +816,7 @@ func (s *AppService) sendDroppedFiles(paths []string) (string, bool, error) {
 			combinedErr = errors.Join(combinedErr, err)
 			continue
 		}
-		if err = s.SendAttachment(roomID, filename, data, false, 0); err != nil {
+		if err = s.sendAttachment(s.ctx, roomID, filename, data, false, 0); err != nil {
 			combinedErr = errors.Join(combinedErr, fmt.Errorf("send dropped file %q: %w", filename, err))
 			continue
 		}
@@ -865,9 +885,32 @@ func (s *AppService) SendNotification(title, body, roomID string) (bool, error) 
 }
 
 func (s *AppService) Logout() error {
+	accountID := s.currentAccountID()
 	client := s.currentClient()
 	if err := client.Logout(s.ctx); err != nil {
 		return err
+	}
+	clients := s.accountClientsSnapshot()
+	s.accountMu.RLock()
+	registry := s.accountRegistry
+	s.accountMu.RUnlock()
+	if registry != nil {
+		for _, account := range registry.All() {
+			nextClient := clients[account.ID]
+			if account.ID == accountID || nextClient == nil || !nextClient.IsLoggedIn() {
+				continue
+			}
+			if err := registry.SetActive(account.ID); err != nil {
+				return err
+			}
+			s.accountMu.Lock()
+			s.activeAccountID = account.ID
+			s.accountMu.Unlock()
+			s.clientMu.Lock()
+			s.client = nextClient
+			s.clientMu.Unlock()
+			return nil
+		}
 	}
 	if s.quit != nil {
 		s.quit()
@@ -902,11 +945,9 @@ func (s *AppService) startAccountSync(accountID string, client *matrix.Client) {
 	s.accountSyncStarted[accountID] = true
 	s.workers.Add(1)
 	s.accountMu.Unlock()
-	logging.For("service").Info().Msg("starting Matrix sync for account")
 	go func() {
 		defer s.workers.Done()
 		if err := client.StartWithRetry(s.ctx); err != nil && s.ctx.Err() == nil && s.currentAccountID() == accountID && s.emitUpdate != nil {
-			logging.For("service").Error().Err(err).Msg("Matrix sync stopped")
 			s.emitUpdate(Update{Error: err.Error(), ConnectionState: string(matrix.StateOffline)})
 		}
 	}()
@@ -954,12 +995,7 @@ func dispatchDueScheduledMessagesForAccount(ctx context.Context, store *schedule
 		startedAt := time.Now().UnixMilli()
 		sendErr := dispatchScheduledMessage(ctx, sender, job)
 		if finishErr := store.finishMessage(job.ID, sendErr, startedAt, time.Now().UnixMilli()); finishErr != nil {
-			logging.For("scheduler").Error().Err(finishErr).Msg("record scheduled message result")
-		}
-		if sendErr != nil {
-			logging.For("scheduler").Warn().Err(sendErr).Msg("scheduled message delivery failed")
-		} else {
-			logging.For("scheduler").Info().Msg("scheduled message delivered")
+			log.Printf("finish scheduled message %s: %v", job.ID, finishErr)
 		}
 	}
 	return nil
@@ -975,16 +1011,13 @@ func (s *AppService) processDueScheduledJobs() {
 			continue
 		}
 		if err := dispatchDueScheduledMessagesForAccount(s.ctx, s.scheduled, accountID, client, now); err != nil {
-			logging.For("scheduler").Error().Err(err).Msg("claim scheduled messages")
+			log.Printf("claim scheduled messages for account %s: %v", accountID, err)
 		}
 	}
 	reminders, err := s.scheduled.claimDue(scheduledReminderKind, now)
 	if err != nil {
-		logging.For("scheduler").Error().Err(err).Msg("claim scheduled reminders")
+		log.Printf("claim scheduled reminders: %v", err)
 		return
-	}
-	if len(reminders) > 0 {
-		logging.For("scheduler").Info().Int("count", len(reminders)).Msg("scheduled reminders are due")
 	}
 	for _, reminder := range reminders {
 		if s.emitReminder != nil {
@@ -996,13 +1029,14 @@ func (s *AppService) processDueScheduledJobs() {
 func (s *AppService) close() {
 	s.cancel()
 	s.workers.Wait()
+	s.closeRelationshipHealthStores()
 	if s.preferencesUnsubscribe != nil {
 		s.preferencesUnsubscribe()
 		s.preferencesUnsubscribe = nil
 	}
 	if s.sharedPreferences != nil {
 		if err := s.sharedPreferences.Close(); err != nil {
-			logging.For("service").Error().Err(err).Msg("close shared preferences")
+			log.Printf("close shared preferences: %v", err)
 		}
 	}
 }
@@ -1108,6 +1142,7 @@ func mapUpdate(update matrix.Update, preferences map[string]any) Update {
 	}
 	return Update{
 		Rooms:                 mapRoomsWithPreferences(update.Rooms, preferences),
+		SlidingSyncListCounts: update.SlidingSyncListCounts,
 		ChangedRoomID:         update.ChangedRoomID,
 		TimelineChangedRoomID: update.TimelineChangedRoomID,
 		TypingUsers:           update.TypingUsers,

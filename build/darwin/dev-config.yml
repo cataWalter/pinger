@@ -1,0 +1,46 @@
+version: '3'
+
+info:
+  companyName: "Pinger"
+  productName: "Pinger"
+  productIdentifier: "fi.mau.pinger"
+  description: "A Matrix desktop client"
+  version: "0.1.0"
+
+dev_mode:
+  root_path: .
+  log_level: info
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - frontend
+      - bin
+    file:
+      - .DS_Store
+      - .gitignore
+      - .gitkeep
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+      - "*.js"
+      - "*.ts"
+    git_ignore: true
+  executes:
+    - cmd: wails3 task common:install:frontend:deps
+      type: blocking
+    - cmd: wails3 task common:generate:bindings
+      type: blocking
+    - cmd: cd frontend && npm exec -- vite build --minify false --mode development
+      type: blocking
+    - cmd: >-
+        mkdir -p bin &&
+        env CGO_ENABLED=1 CGO_CFLAGS="-mmacosx-version-min=12.0" CGO_LDFLAGS="-mmacosx-version-min=12.0" MACOSX_DEPLOYMENT_TARGET=12.0
+        go build -tags=sqlite_fts5,goolm -buildvcs=false -gcflags=all=-l -o bin/pinger .
+      type: blocking
+    - cmd: wails3 task common:dev:frontend
+      type: background
+    - cmd: wails3 task darwin:run
+      type: primary
+      exit_policy: shutdown

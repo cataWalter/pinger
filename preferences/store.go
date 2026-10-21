@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -452,6 +452,19 @@ func preferenceEnabled(values map[string]any, key string, fallback bool) bool {
 	return value
 }
 
+func ValidateLocalHTTPEndpoint(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return errors.New("Ghostwriter endpoint must be a localhost HTTP URL without a path")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	ip := net.ParseIP(host)
+	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return errors.New("Ghostwriter endpoint must use localhost or a loopback IP address")
+	}
+	return nil
+}
+
 func Validate(key string, value any) error {
 	const roomAIAgentsPrefix = "room.ai_agents."
 	const messageBookmarkPrefix = "message.bookmark."
@@ -474,7 +487,7 @@ func Validate(key string, value any) error {
 		}
 		return nil
 	}
-	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted."} {
+	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted.", "room.tone_guard."} {
 		if strings.HasPrefix(key, prefix) {
 			if strings.TrimPrefix(key, prefix) == "" {
 				return errors.New("room preference requires a room ID")
@@ -489,7 +502,7 @@ func Validate(key string, value any) error {
 	case "appearance.compact", "appearance.hide_deleted_messages", "appearance.hide_images_and_videos", "appearance.message_animations", "appearance.pointer_cursor", "appearance.show_avatars", "appearance.show_timestamps", "appearance.time_24_hour", "appearance.relative_timestamps",
 		"clipboard.copy_timestamp", "composer.arrow_up_focus_timeline", "composer.ctrl_enter", "composer.spellcheck", "notifications.enabled", "notifications.only_when_unfocused", "notifications.sound",
 		"sidebar.compact_chat_list", "sidebar.show_previews", "sidebar.show_unread_counts", "window.minimize_to_tray", "window.room_details_visible", "window.sidebar_visible", "system.launch_at_startup", "voice.autoplay_next",
-		"notifications.direct", "notifications.mentions", "notifications.group", "notifications.otp_immediate", "notifications.otp_copy", "sidebar.transparent", "sidebar.network_icons", "reactions.quick_enabled", "window.start_minimized", "window.quit_on_close", "window.menu_bar_icon", "downloads.ask_each_time", "appearance.balanced_text", "composer.formatting_toolbar", "emoji.autocomplete", "emoji.replace_emoticons", "archive.automatic":
+		"notifications.direct", "notifications.mentions", "notifications.group", "notifications.otp_immediate", "notifications.otp_copy", "sidebar.transparent", "sidebar.network_icons", "reactions.quick_enabled", "window.start_minimized", "window.quit_on_close", "window.menu_bar_icon", "downloads.ask_each_time", "appearance.balanced_text", "composer.formatting_toolbar", "emoji.autocomplete", "emoji.replace_emoticons", "privacy.incognito", "busy_mode.enabled", "ghostwriter.enabled", "relationship_health.enabled":
 		if _, ok := value.(bool); !ok {
 			return fmt.Errorf("preference %q must be a boolean", key)
 		}
@@ -511,6 +524,26 @@ func Validate(key string, value any) error {
 			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 				return errors.New("AI endpoint must be an HTTP or HTTPS URL")
 			}
+		}
+	case "ghostwriter.endpoint":
+		endpoint, ok := value.(string)
+		if !ok {
+			return errors.New("Ghostwriter endpoint must be a string")
+		}
+		if endpoint != "" {
+			return ValidateLocalHTTPEndpoint(endpoint)
+		}
+	case "ghostwriter.provider":
+		if !oneOf(value, "ollama", "openai-compatible") {
+			return errors.New("Ghostwriter provider has an unsupported value")
+		}
+	case "ghostwriter.model":
+		model, ok := value.(string)
+		if !ok {
+			return errors.New("Ghostwriter model must be a string")
+		}
+		if len(model) > 160 {
+			return errors.New("Ghostwriter model must be 160 characters or fewer")
 		}
 	case "ai.model", "ai.transcription_model", "appearance.bubble_color", "audio.input_device":
 		if _, ok := value.(string); !ok {
@@ -561,7 +594,7 @@ func Validate(key string, value any) error {
 			return errors.New("sounds.effects has an unsupported value")
 		}
 	case "appearance.theme":
-		if !oneOf(value, "System default", "Light", "Dark", "OLED black", "Bosco", "Rosa", "Dracula", "Midnight", "Slate", "Solarized", "Sepia") {
+		if !oneOf(value, "System default", "Light", "Dark", "VS Code", "OLED black", "Bosco", "Rosa", "Dracula", "Midnight", "Slate", "Solarized", "Sepia") {
 			return errors.New("appearance.theme has an unsupported value")
 		}
 	case "appearance.accent_color":
@@ -601,10 +634,8 @@ func Validate(key string, value any) error {
 			return errors.New("archive.next_room has an unsupported value")
 		}
 	case "archive.older_than_days":
-		days, ok := value.(string)
-		dayCount, err := strconv.Atoi(days)
-		if !ok || err != nil || strconv.Itoa(dayCount) != days || dayCount < 1 || dayCount > 3650 {
-			return errors.New("archive.older_than_days must be a whole number from 1 to 3650")
+		if !oneOf(value, "30", "60", "90", "180", "365") {
+			return errors.New("archive.older_than_days has an unsupported value")
 		}
 	case "inbox.after_read":
 		if !oneOf(value, "stay", "next_visible", "next_unread", "none") {

@@ -22,17 +22,40 @@ const emoticonReplacements = new Map<string, string>([
 
 // Replaces whole-word emoticons outside of inline code spans. Matching is
 // token-based so text such as URLs is left alone.
+function replaceEmoticonsInSegment(segment: string) {
+  return segment
+    .split(/(\s+)/)
+    .map((token) => emoticonReplacements.get(token) ?? token)
+    .join('')
+}
+
 export function replaceEmoticons(text: string): string {
   return text
     .split(/(`[^`]*`)/)
-    .map((segment, index) => {
-      if (index % 2 === 1) return segment
-      return segment
-        .split(/(\s+)/)
-        .map((token) => emoticonReplacements.get(token) ?? token)
-        .join('')
-    })
+    .map((segment, index) => index % 2 === 1 ? segment : replaceEmoticonsInSegment(segment))
     .join('')
+}
+
+export function replaceEmoticonsAtCursor(text: string, cursor: number) {
+  const position = Math.max(0, Math.min(cursor, text.length))
+  const segments = text.split(/(`[^`]*`)/)
+  let sourceOffset = 0
+  let output = ''
+  let outputCursor = position
+  for (const [index, segment] of segments.entries()) {
+    const end = sourceOffset + segment.length
+    if (index % 2 === 1) {
+      if (position >= sourceOffset && position <= end) outputCursor = output.length + position - sourceOffset
+      output += segment
+    } else {
+      if (position >= sourceOffset && position <= end) {
+        outputCursor = output.length + replaceEmoticonsInSegment(segment.slice(0, position - sourceOffset)).length
+      }
+      output += replaceEmoticonsInSegment(segment)
+    }
+    sourceOffset = end
+  }
+  return { text: output, cursor: outputCursor }
 }
 
 const emojiShortcodes: ReadonlyArray<readonly [string, string]> = [

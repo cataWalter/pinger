@@ -171,7 +171,7 @@ func (s *AppService) initializeAccounts(dataDir, mediaCacheDir string) error {
 	s.accountRegistry = registry
 	s.accountClients = clients
 	s.activeAccountID = activeID
-	s.accountDataDir = dataDir
+	s.dataDir = dataDir
 	s.accountMediaCacheDir = mediaCacheDir
 	s.accountMu.Unlock()
 	s.clientMu.Lock()
@@ -208,6 +208,16 @@ func accountSummary(id string, client *matrix.Client) AccountSummary {
 			Verified:    !client.NeedsVerification(),
 		},
 	}
+}
+
+func (s *AppService) Accounts() []AccountSummary {
+	s.accountMu.RLock()
+	registry := s.accountRegistry
+	s.accountMu.RUnlock()
+	if registry == nil {
+		return []AccountSummary{}
+	}
+	return registry.All()
 }
 
 func (s *AppService) currentClient() *matrix.Client {
@@ -254,6 +264,7 @@ func (s *AppService) startAccountEventPump(accountID string, client *matrix.Clie
 	s.workers.Add(1)
 	go func() {
 		defer s.workers.Done()
+		wasConnected := false
 		for {
 			select {
 			case <-s.ctx.Done():
@@ -268,6 +279,11 @@ func (s *AppService) startAccountEventPump(accountID string, client *matrix.Clie
 						Str("detail", update.Error).
 						Msg("Matrix update reported an error")
 				}
+				connected := update.ConnectionState == matrix.StateConnected
+				if connected && !wasConnected {
+					s.triggerRelationshipDecay()
+				}
+				wasConnected = connected
 				if s.currentAccountID() == accountID {
 					mapped := mapUpdate(update, s.preferenceValuesForAccount(accountID))
 					tagRooms(mapped.Rooms, accountID)

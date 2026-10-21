@@ -16,6 +16,7 @@ export const SYSTEM_THEME_NAME = 'System default'
 export const themes: ThemeDefinition[] = [
   { name: 'Light', id: 'light', mode: 'light', bubbleColor: '#236b52' },
   { name: 'Dark', id: 'dark', mode: 'dark', bubbleColor: '#236b52' },
+  { name: 'VS Code', id: 'vs-code', mode: 'dark', bubbleColor: '#264f78' },
   { name: 'OLED black', id: 'oled-black', mode: 'dark', bubbleColor: '#236b52' },
   { name: 'Bosco', id: 'bosco', mode: 'light', bubbleColor: '#276d4b' },
   { name: 'Rosa', id: 'rosa', mode: 'light', bubbleColor: '#ad3f60' },

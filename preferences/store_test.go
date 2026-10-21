@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -17,6 +18,30 @@ func TestValidateHideImagesAndVideosPreference(t *testing.T) {
 	}
 	if err := Validate(key, "true"); err == nil {
 		t.Fatal("Validate() accepted a non-boolean value")
+	}
+}
+
+func TestValidateIncognitoPreference(t *testing.T) {
+	const key = "privacy.incognito"
+	for _, value := range []bool{true, false} {
+		if err := Validate(key, value); err != nil {
+			t.Errorf("Validate(%q, %t) error = %v", key, value, err)
+		}
+	}
+	if err := Validate(key, "true"); err == nil {
+		t.Fatal("Validate() accepted a non-boolean Incognito preference")
+	}
+}
+
+func TestValidateBusyModePreference(t *testing.T) {
+	const key = "busy_mode.enabled"
+	for _, value := range []bool{true, false} {
+		if err := Validate(key, value); err != nil {
+			t.Errorf("Validate(%q, %t) error = %v", key, value, err)
+		}
+	}
+	if err := Validate(key, "true"); err == nil {
+		t.Fatal("Validate() accepted a non-boolean busy-mode preference")
 	}
 }
 
@@ -36,7 +61,7 @@ func TestValidateMessageBookmarkPreference(t *testing.T) {
 }
 
 func TestValidateAppearanceThemePreference(t *testing.T) {
-	validThemes := []string{"System default", "Light", "Dark", "OLED black", "Bosco", "Rosa", "Dracula", "Midnight", "Slate", "Solarized", "Sepia"}
+	validThemes := []string{"System default", "Light", "Dark", "VS Code", "OLED black", "Bosco", "Rosa", "Dracula", "Midnight", "Slate", "Solarized", "Sepia"}
 	for _, theme := range validThemes {
 		if err := Validate("appearance.theme", theme); err != nil {
 			t.Errorf("Validate(appearance.theme, %q) error = %v", theme, err)
@@ -53,6 +78,42 @@ func TestValidateAITranscriptionModelPreference(t *testing.T) {
 	}
 	if err := Validate("ai.transcription_model", true); err == nil {
 		t.Fatal("Validate() accepted a non-string transcription model")
+	}
+}
+
+func TestValidateGhostwriterPreferences(t *testing.T) {
+	for _, endpoint := range []string{"", "http://localhost:11434", "http://127.0.0.1:8080", "http://[::1]:8080"} {
+		if err := Validate("ghostwriter.endpoint", endpoint); err != nil {
+			t.Errorf("Validate(ghostwriter.endpoint, %q) error = %v", endpoint, err)
+		}
+	}
+	for _, endpoint := range []string{"https://localhost:11434", "http://example.com:11434", "http://localhost:11434/v1"} {
+		if err := Validate("ghostwriter.endpoint", endpoint); err == nil {
+			t.Errorf("Validate(ghostwriter.endpoint, %q) accepted a non-local URL", endpoint)
+		}
+	}
+	if err := Validate("ghostwriter.enabled", true); err != nil {
+		t.Fatalf("Validate(ghostwriter.enabled) error = %v", err)
+	}
+	for _, provider := range []string{"ollama", "openai-compatible"} {
+		if err := Validate("ghostwriter.provider", provider); err != nil {
+			t.Errorf("Validate(ghostwriter.provider, %q) error = %v", provider, err)
+		}
+	}
+	if err := Validate("ghostwriter.provider", "remote"); err == nil {
+		t.Fatal("Validate(ghostwriter.provider) accepted an unsupported provider")
+	}
+	if err := Validate("ghostwriter.model", strings.Repeat("x", 161)); err == nil {
+		t.Fatal("Validate(ghostwriter.model) accepted an overlong model name")
+	}
+}
+
+func TestValidateRelationshipHealthPreference(t *testing.T) {
+	if err := Validate("relationship_health.enabled", true); err != nil {
+		t.Fatalf("Validate(relationship_health.enabled) error = %v", err)
+	}
+	if err := Validate("relationship_health.enabled", "true"); err == nil {
+		t.Fatal("Validate() accepted a non-boolean relationship-health preference")
 	}
 }
 
@@ -259,6 +320,18 @@ func TestNotificationAllowedUsesCategoryAndRoomPreferences(t *testing.T) {
 	}
 	if NotificationAllowed(nil, "!group:example.org", NotificationCategoryGroup) {
 		t.Fatal("group notification should default to disabled")
+	}
+}
+
+func TestValidateRoomToneGuardPreference(t *testing.T) {
+	if err := Validate("room.tone_guard.!room:example.org", true); err != nil {
+		t.Fatalf("Validate(room tone guard) error = %v", err)
+	}
+	if err := Validate("room.tone_guard.!room:example.org", "true"); err == nil {
+		t.Fatal("Validate(room tone guard) accepted a non-boolean value")
+	}
+	if err := Validate("room.tone_guard.", true); err == nil {
+		t.Fatal("Validate(room tone guard) accepted a missing room ID")
 	}
 }
 
