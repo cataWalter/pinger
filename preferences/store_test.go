@@ -117,6 +117,25 @@ func TestValidateRelationshipHealthPreference(t *testing.T) {
 	}
 }
 
+func TestValidateEmoticonReplacements(t *testing.T) {
+	const key = "emoji.emoticon_replacements"
+	if err := Validate(key, `[[":)","😎"],[":shrug:","🤷"]]`); err != nil {
+		t.Fatalf("Validate(valid emoticon replacements) error = %v", err)
+	}
+	for _, value := range []any{
+		true,
+		"{",
+		`[[":)"]]`,
+		`[[" :) ","🙂"]]`,
+		`[[":)","🙂"],[":)","🙁"]]`,
+		`[[":)","🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂"]]`,
+	} {
+		if err := Validate(key, value); err == nil {
+			t.Errorf("Validate(%s, %#v) unexpectedly succeeded", key, value)
+		}
+	}
+}
+
 func TestValidateRoomAIAgents(t *testing.T) {
 	key := "room.ai_agents.!room:example.org"
 	validAgent := struct {

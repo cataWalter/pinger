@@ -45,6 +45,7 @@ export function findSnippetMatch(value: string, caret: number, snippets: Snippet
 export function findSnippetBoundaryMatch(value: string, caret: number, snippets: Snippet[]): SnippetBoundaryMatch | null {
   const previousCharacter = value[caret - 1] ?? ''
   const delimiter = /[\s.,!?;:)}\]]/.test(previousCharacter) ? previousCharacter : ''
+  if (!delimiter) return null
   const match = findSnippetMatch(value, caret - delimiter.length, snippets)
   if (!match || match.end !== caret - delimiter.length) return null
   const snippet = matchingSnippets(snippets, match).find((candidate) =>

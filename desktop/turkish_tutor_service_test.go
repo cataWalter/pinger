@@ -87,3 +87,50 @@ func TestParseTutorAnalysisValidatesStructuredOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestParseTutorAnalysisFindsWrappedJSONAndDefaultsTextToInsert(t *testing.T) {
+	response := "Here is the analysis:\n```json\n" + `{"detected_language":"it","translation":"Merhaba.","morpheme_breakdown":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}],"grammar_rule":"Turkish uses vowel harmony."}` + "\n```\n"
+	analysis, err := parseTutorAnalysis(response, "Ciao.")
+	if err != nil {
+		t.Fatalf("parseTutorAnalysis() error = %v", err)
+	}
+	if analysis.OriginalText != "Ciao." || analysis.CorrectedText != "Merhaba." || analysis.TextToInsert != "Merhaba." {
+		t.Fatalf("normalized analysis = %+v", analysis)
+	}
+}
+
+func TestAnalyzeTurkishTutorRetriesMalformedResponse(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages  []AIMessage `json:"messages"`
+			MaxTokens int         `json:"max_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		requestCount++
+		content := "The response was truncated: {"
+		if requestCount == 2 {
+			if request.MaxTokens != turkishTutorRetryMaxTokens || !strings.Contains(request.Messages[1].Content, "Re-analyze the original source text") {
+				t.Errorf("unexpected retry request: %+v", request)
+			}
+			content = `{"detected_language":"it","corrected_text":"Merhaba.","translation":"Merhaba.","morpheme_breakdown":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}],"grammar_rule":"Turkish uses vowel harmony.","text_to_insert":"Merhaba."}`
+		}
+		response := map[string]any{"choices": []any{
+			map[string]any{"message": map[string]string{"content": content}},
+		}}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	analysis, err := analyzeTurkishTutor(context.Background(), server.Client(), server.URL, "tutor-model", "Ciao.")
+	if err != nil {
+		t.Fatalf("analyzeTurkishTutor() error = %v", err)
+	}
+	if requestCount != 2 || analysis.TextToInsert != "Merhaba." {
+		t.Fatalf("requests = %d, analysis = %+v", requestCount, analysis)
+	}
+}

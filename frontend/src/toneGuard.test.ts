@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { countDraftWords, hasHighTensionCue, isOffHours, parseToneAssessment, shouldCheckToneGuard } from './toneGuard'
+import { describe, expect, it, vi } from 'vitest'
+import { countDraftWords, hasHighTensionCue, isOffHours, parseToneAssessment, raceWithToneGuardDeadline, shouldCheckToneGuard, TONE_GUARD_TIMEOUT_MS } from './toneGuard'
 
 describe('Tone Guard helpers', () => {
   it('checks long drafts and exempts greetings and single emoji messages', () => {
@@ -20,6 +20,17 @@ describe('Tone Guard helpers', () => {
     expect(hasHighTensionCue('You never listen when I explain the issue.')).toBe(true)
     expect(shouldCheckToneGuard('I disagree.', false, late, [])).toBe(true)
     expect(shouldCheckToneGuard('I disagree.', false, afternoon, ['You never listen when I explain the issue.'])).toBe(true)
+  })
+
+  it('fails open when the local classifier does not answer before the deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const result = raceWithToneGuardDeadline(new Promise<string>(() => {}))
+      await vi.advanceTimersByTimeAsync(TONE_GUARD_TIMEOUT_MS)
+      await expect(result).resolves.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('parses strict classifier JSON and rejects incomplete unsafe results', () => {

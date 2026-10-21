@@ -79,6 +79,16 @@ func TestEventBatcherDeduplicatesReceiptsAndPreservesRoomUpdates(t *testing.T) {
 	if len(update.Notifications) != 1 || len(update.TimelineChangedRoomID) != 1 {
 		t.Fatalf("update metadata was not preserved: %+v", update)
 	}
+	roomsDeltaEvent := <-emissions
+	if roomsDeltaEvent.eventName != roomsDeltaEventName {
+		t.Fatalf("room delta event name = %q, want %q", roomsDeltaEvent.eventName, roomsDeltaEventName)
+	}
+	if len(roomsDeltaEvent.payload.RoomStateDeltas) != 1 || roomsDeltaEvent.payload.RoomStateDeltas[0].Update.Rooms[0].Name != "General" {
+		t.Fatalf("typed room delta payload = %+v", roomsDeltaEvent.payload)
+	}
+	if len(roomsDeltaEvent.payload.NewMessages) != 0 || len(roomsDeltaEvent.payload.ReadReceipts) != 0 || len(roomsDeltaEvent.payload.TypingUpdates) != 0 {
+		t.Fatalf("room delta event included unrelated batch data: %+v", roomsDeltaEvent.payload)
+	}
 	if cap(batcher.buffer.NewMessages) != defaultEventBatchMaximumSize {
 		t.Fatalf("reusable message buffer capacity = %d, want %d", cap(batcher.buffer.NewMessages), defaultEventBatchMaximumSize)
 	}

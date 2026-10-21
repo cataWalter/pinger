@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"strings"
 )
 
 //go:embed tray.png
@@ -30,28 +31,53 @@ func trayIcons() trayIconVariants {
 		}
 	}
 
+	lightMode := recolorTrayIconForLightMode(source)
 	darkMode := recolorTrayIconForDarkMode(source)
 	return trayIconVariants{
-		normal:         baseTrayIcon,
-		unread:         trayIconWithUnreadBadge(source),
+		normal:         encodeTrayIcon(lightMode),
+		unread:         trayIconWithUnreadBadge(lightMode),
 		darkMode:       encodeTrayIcon(darkMode),
 		darkModeUnread: trayIconWithUnreadBadge(darkMode),
 	}
 }
 
+func trayIconUsesDarkVariant(theme string, systemDark bool) bool {
+	switch strings.ToLower(strings.TrimSpace(theme)) {
+	case "light", "bosco", "rosa", "solarized", "sepia":
+		return false
+	case "dark", "vs code", "oled black", "dracula", "midnight", "slate":
+		return true
+	default:
+		return systemDark
+	}
+}
+
+func recolorTrayIconForLightMode(source image.Image) *image.NRGBA {
+	return recolorTrayIcon(source, color.NRGBA{A: 255})
+}
+
 func recolorTrayIconForDarkMode(source image.Image) *image.NRGBA {
+	return recolorTrayIcon(source, color.NRGBA{R: 245, G: 247, B: 245, A: 255})
+}
+
+func recolorTrayIcon(source image.Image, tint color.NRGBA) *image.NRGBA {
 	bounds := source.Bounds()
-	darkMode := image.NewNRGBA(bounds)
+	icon := image.NewNRGBA(bounds)
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			pixel := color.NRGBAModel.Convert(source.At(x, y)).(color.NRGBA)
-			if pixel.A > 0 && pixel.R <= 24 && pixel.G <= 24 && pixel.B <= 24 {
-				pixel.R, pixel.G, pixel.B = 245, 247, 245
+			if !isTrayMarkPixel(pixel) {
+				continue
 			}
-			darkMode.SetNRGBA(x, y, pixel)
+			tint.A = pixel.R
+			icon.SetNRGBA(x, y, tint)
 		}
 	}
-	return darkMode
+	return icon
+}
+
+func isTrayMarkPixel(pixel color.NRGBA) bool {
+	return pixel.A > 0 && pixel.R > pixel.G && pixel.G > 0 && pixel.G*2 >= pixel.R && pixel.B*2 < pixel.G
 }
 
 func trayIconWithUnreadBadge(source image.Image) []byte {

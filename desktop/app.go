@@ -166,7 +166,11 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 	tray := app.SystemTray.New()
 	var trayHasUnread atomic.Bool
 	var trayDarkMode atomic.Bool
-	trayDarkMode.Store(app.Env.IsDarkMode())
+	trayThemePreference := func() string {
+		theme, _ := service.preferenceValues()["appearance.theme"].(string)
+		return theme
+	}
+	trayDarkMode.Store(trayIconUsesDarkVariant(trayThemePreference(), app.Env.IsDarkMode()))
 	setTrayIcon := func() {
 		if trayDarkMode.Load() {
 			if trayHasUnread.Load() {
@@ -188,7 +192,7 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 		if event.Context() == nil {
 			return
 		}
-		trayDarkMode.Store(event.Context().IsDarkMode())
+		trayDarkMode.Store(trayIconUsesDarkVariant(trayThemePreference(), event.Context().IsDarkMode()))
 		setTrayIcon()
 	})
 	tray.OnClick(func() {
@@ -348,6 +352,10 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 		app.Event.Emit(contactDossierEventName, update)
 	}
 	service.startPreferencePump(func(state Snapshot) {
+		if theme, ok := state.Preferences["appearance.theme"].(string); ok {
+			trayDarkMode.Store(trayIconUsesDarkVariant(theme, app.Env.IsDarkMode()))
+			setTrayIcon()
+		}
 		app.Event.Emit(preferencesUpdateEventName, state)
 	})
 	service.startScheduledJobWorker()

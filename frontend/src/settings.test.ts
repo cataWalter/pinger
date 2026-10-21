@@ -14,6 +14,7 @@ describe('settings search', () => {
     expect(searchSettings('busy mode').map((entry) => entry.id)).toContain('notifications.busy-mode')
     expect(searchSettings('ghostwriter').map((entry) => entry.id)).toContain('integrations.ghostwriter')
     expect(searchSettings('localhost').map((entry) => entry.id)).toContain('integrations.ghostwriter-endpoint')
+    expect(searchSettings('keep in touch').map((entry) => entry.id)).toContain('integrations.relationship-health')
   })
 
   it('ignores the case of the query', () => {

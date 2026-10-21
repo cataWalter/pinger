@@ -32,6 +32,8 @@ const harness = vi.hoisted(() => ({
     RelationshipHealth: vi.fn(),
     ContactDossier: vi.fn(),
     RefreshContactDossier: vi.fn(),
+    LinkRelationshipContact: vi.fn(),
+    UnlinkRelationshipContact: vi.fn(),
     RelationshipDecayContacts: vi.fn(),
     SetRelationshipTier: vi.fn(),
     SnoozeRelationshipDecay: vi.fn(),
@@ -76,6 +78,12 @@ vi.mock('@wailsio/runtime', () => ({
       return () => harness.eventHandlers.delete(name)
     }),
   },
+}))
+
+vi.mock('emoji-picker-react', () => ({
+  default: ({ onEmojiClick }: { onEmojiClick: (emojiData: { emoji: string }) => void }) => (
+    <button type="button" aria-label="grinning face" onClick={() => onEmojiClick({ emoji: '😀' })}>😀</button>
+  ),
 }))
 
 vi.mock('../bindings/mychat/desktop', () => ({
@@ -209,6 +217,8 @@ describe('settings storage, integrations, help, and about', () => {
     harness.service.RelationshipHealth.mockResolvedValue({ roomId: room.id, accountId: snapshot.activeAccountId, error: '' })
     harness.service.ContactDossier.mockResolvedValue({ accountId: 'primary', roomId: room.id, contactId: room.id, displayName: room.name, tier: 'NONE', linkedChannels: ['Matrix'], enabled: true, analyzing: false, insufficientData: true, keyFacts: [], lastRecap: '', unresolvedCommitments: [], updatedAt: 0, error: '' })
     harness.service.RefreshContactDossier.mockResolvedValue({ accountId: 'primary', roomId: room.id, contactId: room.id, displayName: room.name, tier: 'NONE', linkedChannels: ['Matrix'], enabled: true, analyzing: true, insufficientData: false, keyFacts: [], lastRecap: '', unresolvedCommitments: [], updatedAt: 0, error: '' })
+    harness.service.LinkRelationshipContact.mockResolvedValue({})
+    harness.service.UnlinkRelationshipContact.mockResolvedValue({})
     harness.service.RelationshipDecayContacts.mockResolvedValue({ accountId: 'primary', enabled: false, contacts: [] })
     harness.service.SetRelationshipTier.mockResolvedValue(undefined)
     harness.service.SnoozeRelationshipDecay.mockResolvedValue(undefined)
@@ -295,6 +305,16 @@ describe('settings storage, integrations, help, and about', () => {
     expect(harness.service.Ghostwriter).not.toHaveBeenCalled()
   })
 
+  it('opts into Keep in Touch reminders from Integrations', async () => {
+    const user = await openSettingsTab('Integrations')
+    const enabled = screen.getByRole('checkbox', { name: 'Enable relationship health and Keep in Touch' }) as HTMLInputElement
+
+    expect(enabled.checked).toBe(false)
+    expect(screen.getByText(/Suggestions stay as drafts/)).toBeTruthy()
+    await user.click(enabled)
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('relationship_health.enabled', true))
+  })
+
   it('lists per-chat storage and clears matching cached media after confirmation', async () => {
     confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     harness.service.RoomStorageUsage
@@ -367,6 +387,28 @@ describe('settings storage, integrations, help, and about', () => {
     await user.click(screen.getByLabelText('Enable single-key shortcuts (R, J, K and the answered key)'))
     await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('shortcuts.single_keys', false))
     expect(await screen.findByText(/Single-key shortcuts are off/)).toBeTruthy()
+  })
+
+  it('filters keyboard shortcuts by action and key combination', async () => {
+    const user = await openSettingsTab('Keyboard')
+    const search = screen.getByRole('searchbox', { name: 'Search keyboard shortcuts' })
+
+    await user.type(search, 'Turkish Tutor')
+    expect(screen.getByText('Analyze draft with Turkish Tutor')).toBeTruthy()
+    expect(screen.queryByText('Quick switch rooms')).toBeNull()
+
+    await user.clear(search)
+    await user.type(search, 'Ctrl / ⌘ + K')
+    expect(screen.getByText('Quick switch rooms')).toBeTruthy()
+    expect(screen.queryByText('Analyze draft with Turkish Tutor')).toBeNull()
+  })
+
+  it('reports when no keyboard shortcut matches the search', async () => {
+    const user = await openSettingsTab('Keyboard')
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search keyboard shortcuts' }), 'zzzzz')
+    expect(await screen.findByText(/No shortcuts match/)).toBeTruthy()
+    expect(screen.queryByText('Quick switch rooms')).toBeNull()
   })
 
   it('searches settings across tabs and jumps to the matching setting', async () => {
@@ -461,6 +503,18 @@ describe('settings storage, integrations, help, and about', () => {
     await waitFor(() => expect(composer.value).toBe('Thanks for the update! I appreciate it.'))
   })
 
+  it('expands an exact snippet with Enter without sending the message', async () => {
+    render(<App />)
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: ';thanks', selectionStart: 7, selectionEnd: 7 } })
+    expect(await screen.findByRole('listbox', { name: 'Text snippet suggestions' })).toBeTruthy()
+
+    fireEvent.keyDown(composer, { key: 'Enter' })
+
+    await waitFor(() => expect(composer.value).toBe('Thanks for the update! I appreciate it.'))
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
   it('creates, edits, and deletes local text snippets from settings', async () => {
     const user = userEvent.setup()
     render(<App />)
@@ -478,6 +532,12 @@ describe('settings storage, integrations, help, and about', () => {
     await user.click(within(manager).getByRole('button', { name: 'Save snippet' }))
     expect(await within(manager).findByText('Away reply')).toBeTruthy()
     expect(JSON.parse(window.localStorage.getItem(SNIPPETS_STORAGE_KEY) ?? '{}').snippets).toHaveLength(4)
+    const search = within(manager).getByRole('searchbox', { name: 'Search snippets' })
+    await user.type(search, 'Away reply')
+    const savedSnippets = within(manager).getByRole('list', { name: 'Saved text snippets' })
+    expect(await within(savedSnippets).findByText('Away reply')).toBeTruthy()
+    expect(within(savedSnippets).queryByText('Say thanks')).toBeNull()
+    await user.clear(search)
 
     await user.click(within(manager).getByRole('button', { name: 'Edit snippet Away reply' }))
     await user.clear(within(manager).getByLabelText('Snippet title'))
@@ -490,6 +550,25 @@ describe('settings storage, integrations, help, and about', () => {
     await user.click(within(manager).getByRole('button', { name: 'Delete snippet Out of office' }))
     expect(within(manager).queryByText('Out of office')).toBeNull()
     expect(JSON.parse(window.localStorage.getItem(SNIPPETS_STORAGE_KEY) ?? '{}').snippets).toHaveLength(3)
+  })
+
+  it('inserts snippet variables at the content caret', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('tab', { name: 'Keyboard' }))
+    await user.click(screen.getByRole('button', { name: 'Manage text snippets' }))
+    const manager = await screen.findByRole('dialog', { name: 'Text snippets' })
+    await user.click(within(manager).getByRole('button', { name: 'New snippet' }))
+
+    const content = within(manager).getByLabelText('Snippet content') as HTMLTextAreaElement
+    fireEvent.change(content, { target: { value: 'Call me ', selectionStart: 8, selectionEnd: 8 } })
+    content.setSelectionRange(8, 8)
+    await user.click(within(manager).getByRole('button', { name: '+ Insert {date}' }))
+    await waitFor(() => expect(content.value).toBe('Call me {date}'))
+    await user.click(within(manager).getByRole('button', { name: '+ Insert {cursor}' }))
+    await waitFor(() => expect(content.value).toBe('Call me {date}{cursor}'))
+    expect(content.selectionStart).toBe(content.value.length)
   })
 
   it('imports snippet JSON and merges matching shortcuts into local storage', async () => {
@@ -566,6 +645,16 @@ describe('room history updates', () => {
     harness.service.SendNotification.mockResolvedValue(false)
     harness.service.AIComplete.mockResolvedValue('')
     harness.service.CheckMessageTone.mockResolvedValue(JSON.stringify({ is_hostile_or_unprofessional: false, severity: 'LOW', tone_tags: [], calmer_alternative: '' }))
+    harness.tutorService.Analyze.mockResolvedValue({
+      detected_language: 'it',
+      original_text: 'Ciao, come stai?',
+      corrected_text: 'Merhaba, nasılsın?',
+      translation: 'Ciao, come stai?',
+      has_grammar_errors: false,
+      morpheme_breakdown: [{ word: 'nasılsın', breakdown: 'nasıl-sın -> come-sei', meaning: 'how are you' }],
+      grammar_rule: 'The second-person ending follows vowel harmony.',
+      text_to_insert: 'Merhaba, nasılsın?',
+    })
     harness.service.Ghostwriter.mockResolvedValue([])
     harness.service.TestAIEndpoint.mockResolvedValue(undefined)
 
@@ -601,6 +690,28 @@ describe('room history updates', () => {
     expect(screen.queryByRole('complementary', { name: 'Contact dossier' })).toBeNull()
   })
 
+  it('links and unlinks direct chats in the contact dossier', async () => {
+    const linked = { accountId: 'primary', roomId: room.id, contactId: 'contact', displayName: room.name, tier: 'VIP', linkedChannels: ['Matrix', 'WA'], linkedRoomIds: [room.id, secondRoom.id], enabled: true, analyzing: false, insufficientData: false, keyFacts: ['Location: Berlin'], lastRecap: 'They discussed the move. They plan to meet soon.', unresolvedCommitments: [], updatedAt: 1, error: '' }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, { ...secondRoom, bridge: 'WA' }] })
+    harness.service.ContactDossier
+      .mockResolvedValueOnce({ ...linked, linkedRoomIds: [room.id] })
+      .mockResolvedValueOnce(linked)
+      .mockResolvedValueOnce({ ...linked, linkedRoomIds: [room.id] })
+    const user = userEvent.setup()
+    render(<App />)
+    await screen.findByText('latest message')
+    await user.click(screen.getByRole('button', { name: 'Show contact dossier' }))
+
+    const hud = await screen.findByRole('complementary', { name: 'Contact dossier' })
+    await user.selectOptions(within(hud).getByRole('combobox', { name: 'Chat to link' }), secondRoom.id)
+    await user.click(within(hud).getByRole('button', { name: /Link chat/ }))
+    await waitFor(() => expect(harness.service.LinkRelationshipContact).toHaveBeenCalledWith(room.id, secondRoom.id))
+    expect(await within(hud).findByText('Second room')).toBeTruthy()
+
+    await user.click(within(hud).getByRole('button', { name: 'Unlink Second room' }))
+    await waitFor(() => expect(harness.service.UnlinkRelationshipContact).toHaveBeenCalledWith(secondRoom.id))
+  })
+
   it('shows active relationship alerts in the sidebar drawer', async () => {
     const contact = {
       contactId: '@alex:example.org',
@@ -617,10 +728,10 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    const shortcut = await screen.findByRole('button', { name: /Relationships/ })
+    const shortcut = await screen.findByRole('button', { name: /Keep in Touch/ })
     expect(shortcut.textContent).toContain('1')
     await user.click(shortcut)
-    expect(await screen.findByRole('dialog', { name: 'Relationships' })).toBeTruthy()
+    expect(await screen.findByRole('dialog', { name: 'Keep in Touch' })).toBeTruthy()
     expect(screen.getByText('Ask Alex how the new role is going.')).toBeTruthy()
   })
 
@@ -643,7 +754,7 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(await screen.findByRole('button', { name: /Relationships/ }))
+    await user.click(await screen.findByRole('button', { name: /Keep in Touch/ }))
     await user.selectOptions(screen.getByRole('combobox', { name: 'Relationship tier for Alex' }), 'VIP')
     await waitFor(() => expect(harness.service.SetRelationshipTier).toHaveBeenCalledWith(room.id, 'VIP'))
     await user.click(screen.getByRole('button', { name: 'Snooze for a week' }))
@@ -667,8 +778,8 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(await screen.findByRole('button', { name: /Relationships/ }))
-    await user.click(screen.getByRole('button', { name: 'Draft message' }))
+    await user.click(await screen.findByRole('button', { name: /Keep in Touch/ }))
+    await user.click(screen.getByRole('button', { name: 'Send Nudge' }))
     const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
     await waitFor(() => expect(composer.value).toBe(contact.nudge))
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
@@ -692,8 +803,8 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(await screen.findByRole('button', { name: /Relationships/ }))
-    await user.click(screen.getByRole('button', { name: 'Draft message' }))
+    await user.click(await screen.findByRole('button', { name: /Keep in Touch/ }))
+    await user.click(screen.getByRole('button', { name: 'Send Nudge' }))
     const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
     await waitFor(() => expect(composer.value).toBe(contact.nudge))
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
@@ -1119,7 +1230,7 @@ describe('room history updates', () => {
 
     expect(harness.tutorService.Analyze).toHaveBeenCalledWith('latest message')
     const dialog = await screen.findByRole('dialog', { name: 'Analyze message' })
-    expect(within(dialog).getByText('The second-person ending follows vowel harmony.')).toBeTruthy()
+    expect(await within(dialog).findByText('The second-person ending follows vowel harmony.')).toBeTruthy()
     expect(within(dialog).queryByRole('button', { name: 'Replace draft with Turkish' })).toBeNull()
   })
 
@@ -2542,6 +2653,51 @@ describe('room history updates', () => {
     expect(container.querySelector('.room-list .room-button')).toBeTruthy()
   })
 
+  it('includes archived rooms in inbox search results', async () => {
+    const user = userEvent.setup()
+    const archivedRoom = { ...secondRoom, name: 'Archived project' }
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [room, archivedRoom],
+      preferences: { [`room.archived.primary.${archivedRoom.id}`]: true },
+    })
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.type(screen.getByRole('textbox', { name: 'Find a room' }), 'Archived')
+
+    expect(container.querySelectorAll('.room-list .room-button')).toHaveLength(1)
+    expect(container.querySelector('.room-list .room-button')?.textContent).toContain('Archived project')
+  })
+
+  it('restores archived rooms to the inbox when their latest event changes', async () => {
+    const user = userEvent.setup()
+    const archivedRoom = { ...room, lastEventId: '$before-archive-update' }
+    const archiveKey = `room.archived.primary.${archivedRoom.id}`
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { [archiveKey]: true } })
+    const { container } = render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Archived rooms' }))
+    expect(container.querySelector('.room-list .room-button')).toBeTruthy()
+    act(() => {
+      harness.eventHandlers.get('matrix:update')?.({
+        data: {
+          rooms: [{ ...archivedRoom, lastEventId: '$after-archive-update', lastEventAt: archivedRoom.lastEventAt + 1 }],
+          timelineChangedRoomId: [archivedRoom.id],
+          initialSyncComplete: true,
+          needsVerification: false,
+          connectionState: 'connected',
+        },
+      })
+    })
+
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(archiveKey, false))
+    await waitFor(() => expect(container.querySelector('.room-list .room-button')).toBeNull())
+    await user.click(screen.getByRole('button', { name: 'All' }))
+    expect(container.querySelector('.room-list .room-button')).toBeTruthy()
+  })
+
   it('archives all currently read rooms', async () => {
     const user = userEvent.setup()
     const { container } = render(<App />)
@@ -2587,6 +2743,27 @@ describe('room history updates', () => {
       expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(`room.archived.primary.${staleRoom.id}`, true)
     })
     expect(container.querySelector('.room-list .room-button')?.textContent).toContain(currentRoom.name)
+  })
+
+  it('automatically archives inactive rooms using the selected age', async () => {
+    const user = userEvent.setup()
+    const staleRoom = { ...secondRoom, lastEventAt: Date.now() - 45 * 24 * 60 * 60 * 1000 }
+    const currentRoom = { ...room, lastEventAt: Date.now() }
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [currentRoom, staleRoom],
+      preferences: { 'archive.older_than_days': '90' },
+    })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Inactive room age' }), '30')
+    await user.click(screen.getByRole('checkbox', { name: 'Automatically archive inactive rooms' }))
+
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('archive.older_than_days', '30'))
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('archive.automatic', true))
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(`room.archived.primary.${staleRoom.id}`, true))
   })
 
   it('navigates to the next unread room after an explicit mark-read action', async () => {
@@ -3100,6 +3277,23 @@ describe('room history updates', () => {
     expect(composer.value).toBe('private draft')
   })
 
+  it('toggles hiding images and videos with Cmd+Shift+I without losing the draft', async () => {
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'keep this draft' } })
+    composer.focus()
+
+    fireEvent.keyDown(composer, { key: 'i', metaKey: true, shiftKey: true })
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('appearance.hide_images_and_videos', true))
+    expect(composer.value).toBe('keep this draft')
+
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('appearance.hide_images_and_videos', false))
+    expect(composer.value).toBe('keep this draft')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
   it('opens keyboard help and focuses room search with unmodified shortcuts', async () => {
     const user = userEvent.setup()
     const { container } = render(<App />)
@@ -3381,6 +3575,50 @@ describe('room history updates', () => {
 
     expect(composer.value).toBe('Hi 🙂')
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('replaces emoticons as you type by default', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.type(composer, 'Hi :) <3')
+
+    expect(composer.value).toBe('Hi 🙂 ❤️')
+  })
+
+  it('inserts a picked emoji at the current selection without sending', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.type(composer, 'ab')
+    composer.setSelectionRange(1, 1)
+    await user.click(screen.getByRole('button', { name: 'Emoji picker' }))
+
+    const picker = await screen.findByRole('dialog', { name: 'Choose an emoji' })
+    await user.click(await within(picker).findByRole('button', { name: /grinning face/i }))
+
+    await waitFor(() => expect(composer.value).toBe('a😀b'))
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('saves a custom emoji replacement and uses it while typing', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('tab', { name: 'Keyboard' }))
+
+    await user.click(screen.getByRole('button', { name: 'Add mapping' }))
+    await user.type(screen.getByRole('textbox', { name: 'Symbol for replacement 1' }), ':)')
+    await user.type(screen.getByRole('textbox', { name: 'Emoji for replacement 1' }), '😎')
+    await user.click(screen.getByRole('button', { name: 'Save mappings' }))
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('emoji.emoticon_replacements', '[[":)","😎"]]'))
+
+    await user.click(screen.getByRole('button', { name: 'Close settings' }))
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.type(composer, ':)')
+    expect(composer.value).toBe('😎')
   })
 
   it('holds a concerning draft and sends the calmer alternative', async () => {

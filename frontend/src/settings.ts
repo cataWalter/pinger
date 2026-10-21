@@ -88,7 +88,8 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'keyboard.spellcheck', tab: 'Keyboard', title: 'Spellcheck messages', description: 'Check spelling while you type.', keywords: 'spellcheck spell check' },
   { id: 'keyboard.formatting-toolbar', tab: 'Keyboard', title: 'Show formatting toolbar', description: 'Show bold, italic and link controls.', keywords: 'formatting toolbar bold italic' },
   { id: 'keyboard.emoji-autocomplete', tab: 'Keyboard', title: 'Suggest emoji for :shortcodes:', description: 'Complete :shortcodes: as you type.', keywords: 'emoji autocomplete shortcode' },
-  { id: 'keyboard.emoticon-replacement', tab: 'Keyboard', title: 'Replace emoticons as you type', description: 'Turn :-) into an emoji in the composer and when sending.', keywords: 'emoticon emoji replace' },
+  { id: 'keyboard.emoticon-replacement', tab: 'Keyboard', title: 'Replace emoticons as you type', description: 'Turn :-) into an emoji while typing and when sending. On by default.', keywords: 'emoticon emoji replace' },
+  { id: 'keyboard.custom-emoticon-replacements', tab: 'Keyboard', title: 'Custom emoji replacements', description: 'Choose which emoji a text symbol becomes.', keywords: 'emoticon emoji custom mapping symbol', anchor: '#emoticon-replacement-editor' },
   { id: 'keyboard.copy-timestamp', tab: 'Keyboard', title: 'Include timestamps when copying messages', description: 'Add the time to copied text.', keywords: 'clipboard copy timestamp' },
   { id: 'keyboard.arrow-up-focus', tab: 'Keyboard', title: 'Use Up to focus the message list when the composer is empty', description: 'Move focus to the timeline with the Up arrow.', keywords: 'up arrow focus timeline composer' },
   { id: 'keyboard.single-keys', tab: 'Keyboard', title: 'Enable single-key shortcuts (R, J, K and the answered key)', description: 'Reply, navigate and mark rooms without modifiers.', keywords: 'single key shortcuts r j k' },
@@ -124,6 +125,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'integrations.ghostwriter-provider', tab: 'Integrations', title: 'Ghostwriter provider', description: 'Choose Ollama or an OpenAI-compatible local server.', keywords: 'ollama llama.cpp local provider', anchor: '.ghostwriter-settings select' },
   { id: 'integrations.ghostwriter-endpoint', tab: 'Integrations', title: 'Ghostwriter local endpoint', description: 'Must use localhost or a loopback IP address.', keywords: 'ghostwriter endpoint localhost privacy', anchor: '.ghostwriter-settings input[type="url"]' },
   { id: 'integrations.ghostwriter-model', tab: 'Integrations', title: 'Ghostwriter model', description: 'Model loaded by Ollama or your local server.', keywords: 'ghostwriter model qwen llama gguf', anchor: '.ghostwriter-settings input[type="text"]' },
+  { id: 'integrations.relationship-health', tab: 'Integrations', title: 'Keep in Touch reminders', description: 'Generate local relationship check-ins and contextual follow-up drafts.', keywords: 'keep in touch relationship health decay follow-up reminders local', anchor: '.relationship-health-settings .setting-toggle' },
   { id: 'integrations.networks', tab: 'Integrations', title: 'Detected chat networks', description: 'Bridged networks found in your chats.', keywords: 'bridges whatsapp telegram signal integration', anchor: '.integration-status' },
 
   { id: 'help.keyboard', tab: 'Help', title: 'Keyboard shortcuts', description: 'A quick tour of the shortcuts Pinger uses.', keywords: 'help shortcuts' },

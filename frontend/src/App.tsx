@@ -50,20 +50,24 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
+import EmojiPicker from 'emoji-picker-react'
 import { AppService, GhostwriterMode as GhostwriterRequestMode, TurkishTutorService } from '../bindings/mychat/desktop'
 import type { AIMessage, Device, GhostSuggestion as GhostwriterSuggestion, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, RelationshipDecayContact, RelationshipDecaySnapshot, RelationshipHealthPoint, RelationshipHealthSnapshot, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, TutorAnalysis, UpdateStatus } from '../bindings/mychat/desktop/models.js'
 import { createBusyReplyForLanguage, detectBusyReplyLanguage, ENGLISH_BUSY_REPLY_TEMPLATE, hasBusyReplyTemplate } from './busyMode'
-import { emojiQueryAt, insertEmoji, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, wrapSelection, type EmojiQuery } from './composerText'
+import { emojiQueryAt, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, wrapSelection, type EmojiQuery, type EmoticonReplacement } from './composerText'
 import { fuzzyScore } from './fuzzy'
 import { appendGhostCompletion, ghostwriterDefaultEndpoints, isGhostCommandDraft, isLoopbackEndpoint, parseGhostCommand, type GhostwriterProvider } from './ghostwriter'
-import { SYSTEM_THEME_NAME, defaultBubbleColorForTheme, findThemeByName, themeIdForPreference, themes as appearanceThemes } from './themes'
+import { SYSTEM_THEME_NAME, defaultBubbleColorForTheme, findThemeByName, themeIdForPreference, themeModeForPreference, themes as appearanceThemes } from './themes'
 import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
-import { expandSnippetContent, findSnippetBoundaryMatch, findSnippetMatch, matchingSnippets, type SnippetMatch } from './snippetExpander'
-import { createSnippetID, loadSnippets, mergeImportedSnippets, parseSnippetImport, saveSnippets, serializeSnippets, type Snippet, type SnippetDraft } from './snippets'
+import { SnippetPopover } from './SnippetPopover'
+import { loadSnippets, saveSnippets, type Snippet } from './snippets'
+import { useSnippetExpander } from './useSnippetExpander'
 import { ChatTranslationResponseError, EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, boundedTranscript, buildAgentPrompt, buildChatTranslationPrompt, buildConversationAnalysisPrompt, buildExplainPrompt, buildReplyPrompt, buildRewritePrompt, buildTopicInsightsPrompt, parseChatAgents, parseChatTranslationResponse, serializeChatAgents, splitChatTranslationBatches, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage } from './aiPrompts'
-import { parseToneAssessment, shouldCheckToneGuard, TONE_GUARD_SYSTEM_PROMPT, type ToneAssessment } from './toneGuard'
+import { parseToneAssessment, raceWithToneGuardDeadline, shouldCheckToneGuard, TONE_GUARD_SYSTEM_PROMPT, type ToneAssessment } from './toneGuard'
 import { matrixMediaURL, matrixMXCMediaURL } from './ChatMediaRenderer'
 import { useMatrixBatch } from './useMatrixBatch'
+import { DialogSurface } from './DialogSurface'
+import { SnippetSettingsModal } from './SnippetSettingsModal'
 import ContactHUD from './ContactHUD'
 const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
 
@@ -106,7 +110,6 @@ type ToneGuardHold = {
   source: ToneGuardSource
   mentionBindings: { token: string; userID: string }[]
 }
-type SnippetUndo = { roomID: string; originalText: string; expandedText: string; originalCaret: number; pendingCaret: number; expandedCaret: number }
 type ScheduledDraft =
   | { kind: 'message'; roomID: string; text: string; replyToEventID?: string; replyToSender?: string; replyToPreview?: string }
   | { kind: 'reminder'; roomID: string; eventID: string; text: string; archiveAfter?: boolean }
@@ -118,36 +121,6 @@ const MEDIA_GALLERY_FILTERS: { value: MediaGalleryFilter; label: string }[] = [
   { value: 'audio', label: 'Audio' },
   { value: 'files', label: 'Files' },
 ]
-
-function textareaCaretPoint(textarea: HTMLTextAreaElement, position: number) {
-  const bounds = textarea.getBoundingClientRect()
-  const computed = window.getComputedStyle(textarea)
-  const mirror = document.createElement('div')
-  const properties = [
-    'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant', 'letter-spacing', 'word-spacing',
-    'line-height', 'text-transform', 'text-indent', 'padding-top', 'padding-right', 'padding-bottom',
-    'padding-left', 'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
-    'tab-size', 'direction',
-  ]
-  mirror.style.position = 'fixed'
-  mirror.style.left = `${bounds.left - textarea.scrollLeft}px`
-  mirror.style.top = `${bounds.top - textarea.scrollTop}px`
-  mirror.style.width = `${bounds.width}px`
-  mirror.style.boxSizing = 'border-box'
-  mirror.style.whiteSpace = 'pre-wrap'
-  mirror.style.overflowWrap = 'break-word'
-  mirror.style.visibility = 'hidden'
-  mirror.style.overflow = 'hidden'
-  for (const property of properties) mirror.style.setProperty(property, computed.getPropertyValue(property))
-  const marker = document.createElement('span')
-  marker.textContent = '\u200b'
-  mirror.append(document.createTextNode(textarea.value.slice(0, position)), marker)
-  document.body.append(mirror)
-  const markerBounds = marker.getBoundingClientRect()
-  const lineHeight = Number.parseFloat(computed.lineHeight) || Number.parseFloat(computed.fontSize) * 1.55 || 20
-  mirror.remove()
-  return { left: markerBounds.left, top: markerBounds.top, lineHeight }
-}
 
 function mediaGalleryCategory(message: Message): Exclude<MediaGalleryFilter, 'all'> {
   if (message.mediaMime.startsWith('audio/') || message.mediaType === 'm.audio') return 'audio'
@@ -637,79 +610,6 @@ const chatWallpapers = [
   { name: 'Rose', swatch: 'linear-gradient(135deg, #f1e5e8, #f5efe4)' },
 ] as const
 
-type DialogSurfaceProps = {
-  children: React.ReactNode
-  className: string
-  role?: 'dialog' | 'alertdialog'
-  labelledBy?: string
-  label?: string
-  onClose: () => void
-  onClick?: React.MouseEventHandler<HTMLElement>
-}
-
-function DialogSurface({ children, className, role = 'dialog', labelledBy, label, onClose, onClick }: DialogSurfaceProps) {
-  const dialogRef = useRef<HTMLElement>(null)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
-
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (!dialog) return
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const focusableSelector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    const firstFocusable = dialog.querySelector<HTMLElement>(focusableSelector)
-      ; (firstFocusable ?? dialog).focus()
-
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      const openDialogs = document.querySelectorAll<HTMLElement>('[aria-modal="true"]')
-      if (openDialogs[openDialogs.length - 1] !== dialog) return
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onCloseRef.current()
-        return
-      }
-      if (event.key !== 'Tab') return
-
-      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
-      if (focusable.length === 0) {
-        event.preventDefault()
-        dialog.focus()
-        return
-      }
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      if (previousFocus?.isConnected) previousFocus.focus()
-    }
-  }, [])
-
-  return (
-    <section
-      ref={dialogRef}
-      className={className}
-      role={role}
-      aria-modal="true"
-      aria-labelledby={labelledBy}
-      aria-label={label}
-      tabIndex={-1}
-      onClick={onClick}
-    >
-      {children}
-    </section>
-  )
-}
-
 function formatTime(timestamp: number, use24Hour = false) {
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: !use24Hour }).format(new Date(timestamp))
 }
@@ -916,10 +816,6 @@ function App() {
   const loadingOlderRef = useRef(false)
   const [composeText, setComposeText] = useState('')
   const [snippets, setSnippets] = useState<Snippet[]>(() => loadSnippets())
-  const [snippetMatch, setSnippetMatch] = useState<SnippetMatch | null>(null)
-  const [snippetActiveIndex, setSnippetActiveIndex] = useState(0)
-  const [snippetCaret, setSnippetCaret] = useState<number | null>(null)
-  const [snippetMenuPosition, setSnippetMenuPosition] = useState<{ left: number; top: number; above: boolean } | null>(null)
   const [ghostwriterChips, setGhostwriterChips] = useState<GhostwriterChipState | null>(null)
   const [ghostwriterChipRetryRevision, setGhostwriterChipRetryRevision] = useState(0)
   const [ghostwriterCompletion, setGhostwriterCompletion] = useState<GhostwriterCompletionState | null>(null)
@@ -945,6 +841,7 @@ function App() {
   const [mentionEnd, setMentionEnd] = useState(0)
   const [mentionQuery, setMentionQuery] = useState('')
   const [emojiMatch, setEmojiMatch] = useState<EmojiQuery | null>(null)
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
   const [emojiActiveIndex, setEmojiActiveIndex] = useState(0)
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0)
   const [replyTarget, setReplyTarget] = useState<Message | null>(null)
@@ -1039,14 +936,13 @@ function App() {
   const markRoomAnsweredRef = useRef<(roomID: string) => Promise<void>>(async () => { })
   const preferencesRef = useRef<PreferenceValues>({})
   const setPreferenceRef = useRef<(key: string, value: boolean | string) => Promise<boolean>>(async () => false)
+  const automaticArchiveInFlightRef = useRef(false)
   const roomsRef = useRef<Room[]>([])
   const roomSelectionAnchorRef = useRef('')
   const messagesRef = useRef<Message[]>([])
   const composeTextRef = useRef('')
-  const snippetsRef = useRef(snippets)
-  const snippetUndoRef = useRef<SnippetUndo | null>(null)
-  const snippetExpansionRequestRef = useRef(0)
-  const snippetCaretPlacementRef = useRef<{ text: string; caret: number } | null>(null)
+  const composerEmojiControlRef = useRef<HTMLDivElement>(null)
+  const composerEmojiSelectionRef = useRef({ start: 0, end: 0 })
   const selectedRoomIDRef = useRef(selectedRoomID)
   selectedRoomIDRef.current = selectedRoomID
   const pendingRelationshipNudgeRef = useRef<{ roomID: string; draft: string } | null>(null)
@@ -1174,6 +1070,7 @@ function App() {
   const singleKeyShortcuts = preferenceBoolean(preferences, 'shortcuts.single_keys', true)
   const hideDeletedMessages = preferenceBoolean(preferences, 'appearance.hide_deleted_messages')
   const busyModeEnabled = preferenceBoolean(preferences, 'busy_mode.enabled')
+  const automaticArchiveEnabled = preferenceBoolean(preferences, 'archive.automatic')
   const visibleMessages = useMemo(() => hideDeletedMessages ? messages.filter((message) => !message.redacted) : messages, [messages, hideDeletedMessages])
   preferencesRef.current = preferences
   roomsRef.current = rooms
@@ -1410,7 +1307,7 @@ function App() {
     return scopedRooms.filter((room) => {
       const matchesQuery = !query || `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query)
       const archived = preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
-      const matchesArchive = roomScope === 'archived' ? archived : !archived
+      const matchesArchive = roomScope === 'archived' ? archived : !archived || Boolean(query)
       const matchesRefinements = (!roomRefinements.unanswered || room.unanswered)
         && (!roomRefinements.favorite || room.favorite)
       return matchesQuery && matchesArchive && matchesRefinements
@@ -1598,10 +1495,19 @@ function App() {
       event.stopPropagation()
       void setPreferenceRef.current('privacy.incognito', !preferenceBoolean(preferencesRef.current, 'privacy.incognito'))
     }
+    const handleHideImagesShortcut = (event: globalThis.KeyboardEvent) => {
+      if (!event.metaKey && !event.ctrlKey) return
+      if (!event.shiftKey || event.altKey || event.repeat || event.isComposing || event.key.toLowerCase() !== 'i') return
+      event.preventDefault()
+      event.stopPropagation()
+      void setPreferenceRef.current('appearance.hide_images_and_videos', !preferenceBoolean(preferencesRef.current, 'appearance.hide_images_and_videos'))
+    }
 
     window.addEventListener('keydown', handleIncognitoShortcut)
+    window.addEventListener('keydown', handleHideImagesShortcut)
     return () => {
       window.removeEventListener('keydown', handleIncognitoShortcut)
+      window.removeEventListener('keydown', handleHideImagesShortcut)
     }
   }, [])
 
@@ -1812,6 +1718,7 @@ function App() {
     setLeaveConfirmOpen(false)
     setMentionBindings([])
     setMentionStart(-1)
+    setEmojiPickerOpen(false)
     setTypingUsers([])
     setComposeText(draftsRef.current.get(selectedRoomID) ?? '')
     stickToBottomRef.current = true
@@ -1831,6 +1738,25 @@ function App() {
       })
     }
   }, [selectedRoomID])
+
+  useEffect(() => {
+    if (!emojiPickerOpen) return
+    function handlePointerDown(event: PointerEvent) {
+      if (event.target instanceof Node && composerEmojiControlRef.current?.contains(event.target)) return
+      setEmojiPickerOpen(false)
+    }
+    function handleEscape(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setEmojiPickerOpen(false)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [emojiPickerOpen])
 
   useEffect(() => {
     if (!quickSwitcherOpen) return
@@ -1875,6 +1801,7 @@ function App() {
     let active = true
     const applyMatrixUpdate = (update: MatrixUpdate) => {
       if (!active) return
+      const previousRooms = roomsRef.current
       const nextTypingUsers = update.typingUsers?.[selectedRoomRef.current] ?? []
       setSnapshot((current) => {
         if (!current) return current
@@ -1903,6 +1830,13 @@ function App() {
       setTypingUsers((current) => current.length === nextTypingUsers.length && current.every((user, index) => user === nextTypingUsers[index])
         ? current
         : nextTypingUsers)
+      for (const roomID of update.timelineChangedRoomId ?? []) {
+        const updatedRoom = (update.rooms ?? []).find((room) => room.id === roomID)
+        const previousRoom = previousRooms.find((room) => room.id === roomID)
+        if (!updatedRoom?.lastEventId || !previousRoom || updatedRoom.lastEventId === previousRoom.lastEventId) continue
+        const key = archivedPreferenceKey(roomID, updatedRoom.accountId)
+        if (preferenceBoolean(preferencesRef.current, key)) void setPreference(key, false)
+      }
       if (preferenceBoolean(preferencesRef.current, 'busy_mode.enabled')) {
         for (const roomID of update.timelineChangedRoomId ?? []) {
           const room = (update.rooms ?? []).find((candidate) => candidate.id === roomID) ?? roomsRef.current.find((candidate) => candidate.id === roomID)
@@ -2569,6 +2503,20 @@ function App() {
     if (archivedRoomIDs.has(selectedRoomID)) showRoom(nextRoomAfterArchive(archivedRoomIDs))
   }
 
+  useEffect(() => {
+    if (!automaticArchiveEnabled) return
+    const runArchive = () => {
+      if (automaticArchiveInFlightRef.current) return
+      automaticArchiveInFlightRef.current = true
+      void archiveInactiveRooms().finally(() => {
+        automaticArchiveInFlightRef.current = false
+      })
+    }
+    runArchive()
+    const timer = window.setInterval(runArchive, 60 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [automaticArchiveEnabled, preferences, rooms, selectedRoomID, snapshot?.activeAccountId])
+
   function openRoomContextMenu(roomID: string, x: number, y: number) {
     const menuWidth = 232
     const menuHeight = selectedRoomIDs.includes(roomID) && selectedRoomIDs.length > 1 ? 232 : 200
@@ -3187,11 +3135,11 @@ function App() {
       toneGuardCheckRef.current = true
       setToneGuardChecking(true)
       try {
-        const response = await AppService.CheckMessageTone([
+        const response = await raceWithToneGuardDeadline(AppService.CheckMessageTone([
           { role: 'system', content: TONE_GUARD_SYSTEM_PROMPT },
           { role: 'user', content: JSON.stringify({ draft: message.text, recent_incoming_messages: incomingMessages }) },
-        ])
-        const assessment = parseToneAssessment(response)
+        ]))
+        const assessment = response === null ? null : parseToneAssessment(response)
         if (assessment?.is_hostile_or_unprofessional && assessment.severity !== 'LOW') {
           const hold: ToneGuardHold = {
             message: { ...message },
@@ -3512,7 +3460,8 @@ function App() {
       }
       return
     }
-    const text = (preferenceBoolean(preferences, 'emoji.replace_emoticons') ? replaceEmoticons(composeText) : composeText).trim()
+    const customReplacements = parseCustomEmoticonReplacements(preferenceString(preferences, 'emoji.emoticon_replacements', ''))
+    const text = (preferenceBoolean(preferences, 'emoji.replace_emoticons', true) ? replaceEmoticons(composeText, customReplacements) : composeText).trim()
     if (!roomID || !text || busy || ghostwriterDraftBusy) return
     const mentionUserIDs = [...new Set(mentionBindings.filter(({ token }) => text.includes(token)).map(({ userID }) => userID))]
     if (!editTarget && undoSendSeconds > 0) {
@@ -3759,41 +3708,26 @@ function App() {
     && composeText.slice(emojiMatch.start, emojiMatch.end).toLowerCase() === `:${emojiMatch.query}`
     ? suggestEmoji(emojiMatch.query)
     : []
-  const snippetOptions = snippetMatch ? matchingSnippets(snippets, snippetMatch) : []
-  const snippetMenuVisible = snippetOptions.length > 0
+  const snippetExpander = useSnippetExpander({
+    value: composeText,
+    snippets,
+    roomID: selectedRoomID,
+    inputRef: composerInputRef,
+    setValue: setComposeDraft,
+    onExpanded: () => {
+      setEmojiMatch(null)
+      setMentionStart(-1)
+    },
+    onUndo: (value, caret) => {
+      updateMentionQuery(value, caret)
+      updateEmojiQuery(value, caret)
+    },
+  })
+  const snippetOptions = snippetExpander.suggestions
+  const snippetMatch = snippetExpander.match
+  const snippetMenuVisible = snippetExpander.visible
     && !(mentionStart >= 0 && mentionOptions.length > 0)
     && emojiOptions.length === 0
-
-  useLayoutEffect(() => {
-    if (!snippetMenuVisible) return
-    const textarea = composerInputRef.current
-    if (!textarea) return
-    const caret = snippetCaret ?? textarea.selectionStart
-    const point = textareaCaretPoint(textarea, caret)
-    const panelWidth = Math.min(360, window.innerWidth - 16)
-    const left = Math.max(8, Math.min(point.left, window.innerWidth - panelWidth - 8))
-    const menuHeight = Math.min(250, 42 + snippetOptions.length * 52)
-    const below = point.top + point.lineHeight + menuHeight + 4 <= window.innerHeight - 8
-    setSnippetMenuPosition({
-      left,
-      top: below ? point.top + point.lineHeight + 4 : Math.max(8, point.top - 8),
-      above: !below,
-    })
-  }, [snippetMenuVisible, snippetCaret, composeText, snippetOptions.length])
-
-  useLayoutEffect(() => {
-    const placement = snippetCaretPlacementRef.current
-    if (!placement) return
-    if (composeText !== placement.text) {
-      snippetCaretPlacementRef.current = null
-      return
-    }
-    const textarea = composerInputRef.current
-    if (!textarea) return
-    snippetCaretPlacementRef.current = null
-    textarea.focus()
-    textarea.setSelectionRange(placement.caret, placement.caret)
-  }, [composeText])
 
   function updateMentionQuery(value: string, cursor: number) {
     const match = /(^|\s)@([^\s@]*)$/.exec(value.slice(0, cursor))
@@ -3834,12 +3768,6 @@ function App() {
   function updateEmojiQuery(value: string, cursor: number) {
     setEmojiMatch(emojiQueryAt(value, cursor))
     setEmojiActiveIndex(0)
-  }
-
-  function updateSnippetQuery(value: string, cursor: number) {
-    setSnippetMatch(findSnippetMatch(value, cursor, snippetsRef.current))
-    setSnippetCaret(cursor)
-    setSnippetActiveIndex(0)
   }
 
   const aiEndpoint = preferenceString(preferences, 'ai.endpoint', '')
@@ -4199,54 +4127,8 @@ function App() {
   }
 
   function updateSnippets(next: Snippet[]) {
-    snippetsRef.current = next
     setSnippets(next)
     saveSnippets(next)
-    setSnippetMatch(null)
-  }
-
-  function expandSnippet(snippet: Snippet, match: SnippetMatch, delimiter = '') {
-    const originalText = composeTextRef.current
-    if (originalText.slice(match.start, match.end).toLocaleLowerCase() !== match.shortcut.toLocaleLowerCase()) return
-    const roomID = selectedRoomIDRef.current
-    const requestID = ++snippetExpansionRequestRef.current
-    const applyExpansion = (clipboardText: string) => {
-      const input = composerInputRef.current
-      if (requestID !== snippetExpansionRequestRef.current
-        || composeTextRef.current !== originalText
-        || selectedRoomIDRef.current !== roomID
-        || (input && input.selectionStart !== match.end + delimiter.length)) return
-
-      const expanded = expandSnippetContent(snippet.content, clipboardText)
-      const nextText = originalText.slice(0, match.start)
-        + expanded.text
-        + delimiter
-        + originalText.slice(match.end + delimiter.length)
-      const caret = match.start + expanded.cursorPosition + (expanded.hasCursor ? 0 : delimiter.length)
-      snippetUndoRef.current = {
-        roomID,
-        originalText,
-        expandedText: nextText,
-        originalCaret: match.end,
-        pendingCaret: match.end + delimiter.length,
-        expandedCaret: caret,
-      }
-      snippetCaretPlacementRef.current = { text: nextText, caret }
-      setComposeDraft(nextText)
-      setSnippetMatch(null)
-      setEmojiMatch(null)
-      setMentionStart(-1)
-    }
-
-    if (snippet.content.includes('{clipboard}') && navigator.clipboard?.readText) {
-      try {
-        void navigator.clipboard.readText().then(applyExpansion).catch(() => applyExpansion(''))
-      } catch {
-        applyExpansion('')
-      }
-    } else {
-      applyExpansion('')
-    }
   }
 
   function applyGhostwriterSuggestion(suggestion: GhostwriterSuggestion) {
@@ -4300,6 +4182,32 @@ function App() {
     })
   }
 
+  function toggleComposerEmojiPicker() {
+    const input = composerInputRef.current
+    const valueLength = composeTextRef.current.length
+    const start = Math.max(0, Math.min(input?.selectionStart ?? valueLength, valueLength))
+    const end = Math.max(start, Math.min(input?.selectionEnd ?? start, valueLength))
+    composerEmojiSelectionRef.current = { start, end }
+    setEmojiPickerOpen((open) => !open)
+  }
+
+  function insertPickedEmoji(emoji: string) {
+    const currentText = composeTextRef.current
+    const start = Math.min(composerEmojiSelectionRef.current.start, currentText.length)
+    const end = Math.max(start, Math.min(composerEmojiSelectionRef.current.end, currentText.length))
+    const nextText = currentText.slice(0, start) + emoji + currentText.slice(end)
+    const caret = start + emoji.length
+    setComposeDraft(nextText)
+    setEmojiPickerOpen(false)
+    setEmojiMatch(null)
+    requestAnimationFrame(() => {
+      const input = composerInputRef.current
+      if (!input) return
+      input.focus()
+      input.setSelectionRange(caret, caret)
+    })
+  }
+
   function applyFormatting(marker: string) {
     const input = composerInputRef.current
     const start = input?.selectionStart ?? composeText.length
@@ -4334,27 +4242,11 @@ function App() {
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== 'Backspace') snippetExpansionRequestRef.current++
-    const pendingSnippetUndo = snippetUndoRef.current
-    const canUndoSnippet = pendingSnippetUndo !== null
-      && event.key === 'Backspace'
-      && pendingSnippetUndo.roomID === selectedRoomIDRef.current
-      && composeTextRef.current === pendingSnippetUndo.expandedText
-      && event.currentTarget.selectionStart === event.currentTarget.selectionEnd
-      && (event.currentTarget.selectionStart === pendingSnippetUndo.pendingCaret
-        || event.currentTarget.selectionStart === pendingSnippetUndo.expandedCaret)
-    if (canUndoSnippet && pendingSnippetUndo) {
-      event.preventDefault()
-      snippetUndoRef.current = null
-      snippetExpansionRequestRef.current++
-      snippetCaretPlacementRef.current = { text: pendingSnippetUndo.originalText, caret: pendingSnippetUndo.originalCaret }
-      setComposeDraft(pendingSnippetUndo.originalText)
-      updateMentionQuery(pendingSnippetUndo.originalText, pendingSnippetUndo.originalCaret)
-      updateEmojiQuery(pendingSnippetUndo.originalText, pendingSnippetUndo.originalCaret)
-      updateSnippetQuery(pendingSnippetUndo.originalText, pendingSnippetUndo.originalCaret)
-      return
-    }
-    if (pendingSnippetUndo) snippetUndoRef.current = null
+    const snippetHandled = snippetExpander.handleKeyDown(
+      event,
+      !(mentionStart >= 0 && mentionOptions.length > 0) && emojiOptions.length === 0,
+    )
+    if (snippetHandled) return
     if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 't') {
       event.preventDefault()
       void analyzeWithTurkishTutor(composeText, 'draft')
@@ -4406,28 +4298,6 @@ function App() {
       if (event.key === 'Escape') {
         event.preventDefault()
         setEmojiMatch(null)
-        return
-      }
-    }
-    if (snippetMenuVisible && snippetMatch) {
-      if (event.key === 'ArrowDown') {
-        event.preventDefault()
-        setSnippetActiveIndex((index) => (index + 1) % snippetOptions.length)
-        return
-      }
-      if (event.key === 'ArrowUp') {
-        event.preventDefault()
-        setSnippetActiveIndex((index) => (index - 1 + snippetOptions.length) % snippetOptions.length)
-        return
-      }
-      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
-        event.preventDefault()
-        expandSnippet(snippetOptions[snippetActiveIndex] ?? snippetOptions[0], snippetMatch)
-        return
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        setSnippetMatch(null)
         return
       }
     }
@@ -4597,7 +4467,7 @@ function App() {
         </div>
         <button className="relationship-shortcut" type="button" onClick={() => { setRelationshipDecayError(''); setRelationshipsOpen(true) }}>
           <HeartHandshake size={15} />
-          <span>Relationships</span>
+          <span>Keep in Touch</span>
           {relationshipDecayAlertCount > 0 && <span className="relationship-alert-count" aria-label={`${relationshipDecayAlertCount} check-ins due`}>{relationshipDecayAlertCount}</span>}
         </button>
         <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : 'ROOMS'}</span><span className="room-section-actions">{roomScope !== 'archived' && <button className="room-archive-all" type="button" aria-label="Archive all read rooms" title="Archive all read rooms" disabled={readRoomCount === 0} onClick={() => void archiveAllReadRooms()}><Archive size={13} /></button>}{filteredRooms.length.toString().padStart(2, '0')}</span></div>
@@ -4971,10 +4841,9 @@ function App() {
               onChange={(event) => {
                 const rawValue = event.currentTarget.value
                 const rawCursor = event.currentTarget.selectionStart
-                snippetUndoRef.current = null
-                snippetExpansionRequestRef.current++
-                const converted = preferenceBoolean(preferencesRef.current, 'emoji.replace_emoticons')
-                  ? replaceEmoticonsAtCursor(rawValue, rawCursor)
+                const customReplacements = parseCustomEmoticonReplacements(preferenceString(preferencesRef.current, 'emoji.emoticon_replacements', ''))
+                const converted = preferenceBoolean(preferencesRef.current, 'emoji.replace_emoticons', true)
+                  ? replaceEmoticonsAtCursor(rawValue, rawCursor, customReplacements)
                   : { text: rawValue, cursor: rawCursor }
                 const value = converted.text
                 if (value !== rawValue) {
@@ -4996,15 +4865,13 @@ function App() {
                   : current.filter(({ token }) => value.includes(token)))
                 updateMentionQuery(value, converted.cursor)
                 updateEmojiQuery(value, converted.cursor)
-                updateSnippetQuery(value, converted.cursor)
-                const boundaryMatch = findSnippetBoundaryMatch(value, converted.cursor, snippetsRef.current)
-                if (boundaryMatch) expandSnippet(boundaryMatch.snippet, boundaryMatch.match, boundaryMatch.delimiter)
+                snippetExpander.handleChange(value, converted.cursor)
               }}
               onKeyDown={handleComposerKeyDown}
-              onClick={(event) => updateSnippetQuery(event.currentTarget.value, event.currentTarget.selectionStart)}
+              onClick={(event) => snippetExpander.handleClick(event.currentTarget.value, event.currentTarget.selectionStart)}
               onKeyUp={(event) => {
                 if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
-                  updateSnippetQuery(event.currentTarget.value, event.currentTarget.selectionStart)
+                  snippetExpander.handleKeyUp(event.currentTarget.value, event.currentTarget.selectionStart)
                 }
               }}
               onPaste={handleComposerPaste}
@@ -5014,34 +4881,19 @@ function App() {
               placeholder={selectedRoom ? `Message ${selectedRoom.name || selectedRoom.id}` : 'Select a room to start'}
               aria-label="Message"
               aria-controls={snippetMenuVisible ? 'snippet-suggestions' : undefined}
-              aria-activedescendant={snippetMenuVisible ? `snippet-option-${snippetActiveIndex}` : undefined}
+              aria-activedescendant={snippetMenuVisible ? `snippet-option-${snippetExpander.activeIndex}` : undefined}
               disabled={!selectedRoom || busy || voiceCaptureStatus !== null}
               rows={1}
             />
-            {snippetMenuVisible && snippetMatch && <div
-              id="snippet-suggestions"
-              className={`snippet-menu${snippetMenuPosition?.above ? ' is-above' : ''}`}
-              role="listbox"
-              aria-label="Text snippet suggestions"
-              style={snippetMenuPosition ? { left: snippetMenuPosition.left, top: snippetMenuPosition.top } : undefined}
-            >
-              <div className="snippet-menu-heading">Text snippets</div>
-              {snippetOptions.map((snippet, index) => <button
-                key={snippet.id}
-                id={`snippet-option-${index}`}
-                className={`snippet-option${index === snippetActiveIndex ? ' is-active' : ''}`}
-                type="button"
-                role="option"
-                aria-selected={index === snippetActiveIndex}
-                onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setSnippetActiveIndex(index)}
-                onClick={() => expandSnippet(snippet, snippetMatch)}
-              >
-                <span className="snippet-option-title"><strong>{snippet.title}</strong><code>{snippet.prefix}{snippet.trigger}</code></span>
-                <small>{snippet.category || 'Uncategorized'}</small>
-                <span className="snippet-option-preview">{expandSnippetContent(snippet.content).text}</span>
-              </button>)}
-            </div>}
+            {snippetMenuVisible && snippetMatch && <SnippetPopover
+              inputRef={composerInputRef}
+              value={composeText}
+              caret={snippetExpander.caret}
+              snippets={snippetOptions}
+              activeIndex={snippetExpander.activeIndex}
+              onActiveIndexChange={snippetExpander.setActiveIndex}
+              onSelect={snippetExpander.select}
+            />}
           </div>
           {toneGuardChecking && <p className="tone-guard-checking" role="status">Checking this draft on your local model…</p>}
           {renderToneGuardPrompt('composer')}
@@ -5057,6 +4909,20 @@ function App() {
             <div className="composer-tools">
               <IconTooltip label={aiEnabled ? 'Turkish Tutor · Ctrl+Shift+T' : 'Turkish Tutor · set up a local AI endpoint'}><button className="composer-tutor-button" type="button" aria-label="Analyze draft with Turkish Tutor" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => void analyzeWithTurkishTutor(composeText, 'draft')}><Languages size={14} /><span>Tutor</span></button></IconTooltip>
               <IconTooltip label="Attach file"><button className="icon-button" type="button" aria-label="Attach file" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onClick={() => attachmentInputRef.current?.click()}><Paperclip size={15} /></button></IconTooltip>
+              <div className="composer-emoji-control" ref={composerEmojiControlRef}>
+                <IconTooltip label="Choose an emoji"><button className="icon-button" type="button" aria-label="Emoji picker" aria-haspopup="dialog" aria-expanded={emojiPickerOpen} disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onMouseDown={(event) => event.preventDefault()} onClick={toggleComposerEmojiPicker}><Smile size={15} /></button></IconTooltip>
+                {emojiPickerOpen && <div className="composer-emoji-popover" role="dialog" aria-label="Choose an emoji">
+                  <EmojiPicker
+                    className="composer-emoji-picker-widget"
+                    colorScheme={themeModeForPreference(themePreference, systemPrefersDark)}
+                    width="100%"
+                    height={360}
+                    autoFocusSearch
+                    previewConfig={{ showPreview: false }}
+                    onEmojiClick={(emojiData) => insertPickedEmoji(emojiData.emoji)}
+                  />
+                </div>}
+              </div>
               <IconTooltip label={voiceCaptureStatus === 'recording' ? 'Stop and send voice note' : 'Record voice note'}><button className="icon-button" type="button" aria-label={voiceCaptureStatus === 'recording' ? 'Stop and send voice note' : 'Record voice note'} aria-pressed={voiceCaptureStatus === 'recording'} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing'} onClick={() => voiceCaptureStatus === 'recording' ? stopVoiceNoteRecording() : void startVoiceNoteRecording()}>{voiceCaptureStatus === 'recording' ? <Square size={15} /> : <Mic size={15} />}</button></IconTooltip>
               <IconTooltip label={askAILabel}><button className="icon-button" type="button" aria-label="Ask AI about the composer text" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={askAI}><Sparkles size={15} /></button></IconTooltip>
               <IconTooltip label={aiEnabled ? 'Summarize chat' : 'Summarize · unavailable'}><button className="icon-button" type="button" aria-label="Summarize recent messages" disabled={!selectedRoom || busy || !aiEnabled || messages.length === 0} onClick={summarizeRoom}><FileText size={15} /></button></IconTooltip>
@@ -5078,7 +4944,7 @@ function App() {
           </div>
         </form>
           </div>
-          {contactHUDOpen && selectedRoom?.direct && <ContactHUD accountID={snapshot?.activeAccountId ?? ''} roomID={selectedRoom.id} onClose={() => setContactHUDOpen(false)} />}
+          {contactHUDOpen && selectedRoom?.direct && <ContactHUD accountID={snapshot?.activeAccountId ?? ''} roomID={selectedRoom.id} rooms={rooms.filter((room) => isActiveAccountRoom(room) && room.direct)} onClose={() => setContactHUDOpen(false)} />}
         </div>
       </section>
       {forwardingMessage && <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setForwardingMessage(null) }}>
@@ -5232,8 +5098,8 @@ function App() {
       {relationshipsOpen && <div className="room-info-scrim" role="presentation" onClick={() => setRelationshipsOpen(false)}>
         <DialogSurface className="room-info-dialog relationship-dialog" labelledBy="relationships-title" onClose={() => setRelationshipsOpen(false)} onClick={(event) => event.stopPropagation()}>
           <header className="room-info-header">
-            <div><span className="eyebrow">LOCAL CHECK-INS</span><h2 id="relationships-title">Relationships</h2></div>
-            <button className="icon-button" type="button" aria-label="Close relationships" onClick={() => setRelationshipsOpen(false)}><X size={16} /></button>
+            <div><span className="eyebrow">LOCAL CHECK-INS</span><h2 id="relationships-title">Keep in Touch</h2></div>
+            <button className="icon-button" type="button" aria-label="Close Keep in Touch" onClick={() => setRelationshipsOpen(false)}><X size={16} /></button>
           </header>
           <div className="room-info-content relationship-list" aria-live="polite">
             {relationshipDecayError && <p className="room-info-state is-error" role="alert">{relationshipDecayError}</p>}
@@ -5259,7 +5125,7 @@ function App() {
                 <span className="relationship-last-contact">{contact.lastInteractionTimestamp > 0 ? `Last interaction ${new Date(contact.lastInteractionTimestamp).toLocaleDateString()}` : 'No interactions recorded'}</span>
                 {contact.nudge && <p className="relationship-nudge">{contact.nudge}</p>}
                 <div className="relationship-contact-actions">
-                  {contact.nudge && contactRoom && <button className="settings-command" type="button" onClick={() => draftRelationshipNudge(contact)}><Pencil size={14} />Draft message</button>}
+                  {contact.nudge && contactRoom && <button className="settings-command" type="button" onClick={() => draftRelationshipNudge(contact)}><Pencil size={14} />Send Nudge</button>}
                   {contact.alerted && <button className="settings-command" type="button" disabled={busy} onClick={() => void snoozeRelationshipContact(contact)}><Clock3 size={14} />Snooze for a week</button>}
                 </div>
               </article>
@@ -6319,13 +6185,11 @@ function SettingsDialog({
   const [logoutBusy, setLogoutBusy] = useState(false)
   const [notificationPermission, setNotificationPermission] = useState('unsupported')
   const [searchQuery, setSearchQuery] = useState('')
+  const [shortcutSearchQuery, setShortcutSearchQuery] = useState('')
+  const [customEmoticonDraft, setCustomEmoticonDraft] = useState<EmoticonReplacement[]>(() => parseCustomEmoticonReplacements(preferenceString(preferences, 'emoji.emoticon_replacements', '')))
+  const [customEmoticonStatus, setCustomEmoticonStatus] = useState('')
   const [searchTarget, setSearchTarget] = useState<{ entry: SettingsEntry; nonce: number } | null>(null)
   const [snippetManagerOpen, setSnippetManagerOpen] = useState(false)
-  const [snippetDraft, setSnippetDraft] = useState<SnippetDraft | null>(null)
-  const [snippetEditingID, setSnippetEditingID] = useState('')
-  const [snippetEditorError, setSnippetEditorError] = useState('')
-  const [snippetManagerError, setSnippetManagerError] = useState('')
-  const [snippetManagerStatus, setSnippetManagerStatus] = useState('')
   const searchInputRef = useRef<HTMLInputElement>(null)
   const settingsPanelRef = useRef<HTMLDivElement>(null)
   const searchNonceRef = useRef(0)
@@ -6333,6 +6197,72 @@ function SettingsDialog({
   const searchResults = useMemo(() => searchSettings(searchQuery), [searchQuery])
   const searchResultsByTab = useMemo(() => groupSettingsByTab(searchResults), [searchResults])
   const searchActive = searchQuery.trim().length > 0
+  const keyboardShortcuts: [string, string][] = [
+    ['Ctrl / ⌘ + K', 'Quick switch rooms'],
+    ['Ctrl / ⌘ + F', 'Search this room'],
+    ['Ctrl / ⌘ + ,', 'Open settings'],
+    ['/ or Ctrl / ⌘ + Shift + S', 'Focus room search'],
+    ['Alt + ↑ / ↓', 'Switch rooms'],
+    ['Ctrl / ⌘ + Shift + ↑ / ↓', 'Switch needs-reply rooms'],
+    ['Ctrl / ⌘ + 1–9', 'Switch to a visible room'],
+    ['Ctrl / ⌘ + Alt + 1–9', 'Switch Matrix accounts'],
+    ['Ctrl / ⌘ + + / -', 'Adjust app zoom'],
+    ['Ctrl / ⌘ + 0', 'Reset app zoom'],
+    ['Ctrl / ⌘ + Shift + P', 'Toggle Incognito blur'],
+    ['Ctrl / ⌘ + Shift + I', 'Toggle hiding images and videos'],
+    ['Ctrl + Shift + T', 'Analyze draft with Turkish Tutor'],
+    ['Ctrl / ⌘ + Shift + A', 'Show all rooms'],
+    ['Ctrl / ⌘ + Shift + U', 'Show needs-reply rooms'],
+    ['Ctrl / ⌘ + Shift + L', 'Jump to latest messages'],
+    ['↑ / ↓ / Home / End', 'Navigate the room list'],
+    ['Shift + F10', 'Open room actions'],
+    ['↑ / ↓ or J / K', 'Navigate the focused timeline'],
+    ['Home / End', 'Focus first / latest message'],
+    ['R', 'Reply to the focused message'],
+    [answeredShortcut, 'Mark room answered'],
+    ['Ctrl / ⌘ + Z', 'Undo mark answered'],
+    ['Escape', 'Close search or dialog'],
+    ['?', 'Open keyboard shortcuts'],
+    ['Tab / Shift + Tab', 'Move between controls'],
+    [preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter' : 'Enter', 'Send message'],
+    ['Shift + Enter', 'Add a line in the composer'],
+  ]
+  const normalizedShortcutSearch = shortcutSearchQuery.trim().toLocaleLowerCase()
+  const filteredKeyboardShortcuts = keyboardShortcuts.filter(([keys, description]) =>
+    `${keys} ${description}`.toLocaleLowerCase().includes(normalizedShortcutSearch))
+
+  function updateCustomEmoticon(index: number, part: 0 | 1, value: string) {
+    setCustomEmoticonDraft((current) => current.map((pair, pairIndex) => {
+      if (pairIndex !== index) return pair
+      const updated: [string, string] = [pair[0], pair[1]]
+      updated[part] = value
+      return updated
+    }))
+    setCustomEmoticonStatus('')
+  }
+
+  async function saveCustomEmoticons() {
+    const replacements = customEmoticonDraft.map(([symbol, emoji]) => [symbol.trim(), emoji.trim()] as EmoticonReplacement)
+    const symbols = replacements.map(([symbol]) => symbol)
+    const invalid = replacements.some(([symbol, emoji]) =>
+      !symbol || !emoji || /\s/.test(symbol) || /\s/.test(emoji) || [...symbol].length > 16 || [...emoji].length > 16)
+    if (invalid || replacements.length > 64 || new Set(symbols).size !== symbols.length) {
+      setCustomEmoticonStatus('Use unique symbols and one non-empty emoji per row, with no spaces.')
+      return
+    }
+    const saved = await onPreferenceChange('emoji.emoticon_replacements', JSON.stringify(replacements))
+    setCustomEmoticonStatus(saved ? 'Custom emoji replacements saved.' : 'Could not save custom emoji replacements.')
+  }
+
+  async function resetCustomEmoticons() {
+    const saved = await onPreferenceChange('emoji.emoticon_replacements', '[]')
+    if (!saved) {
+      setCustomEmoticonStatus('Could not restore built-in emoji replacements.')
+      return
+    }
+    setCustomEmoticonDraft([])
+    setCustomEmoticonStatus('Built-in emoji replacements restored.')
+  }
 
   function revealSetting(entry: SettingsEntry) {
     searchNonceRef.current += 1
@@ -6343,113 +6273,6 @@ function SettingsDialog({
 
   function closeSnippetManager() {
     setSnippetManagerOpen(false)
-    setSnippetDraft(null)
-    setSnippetEditingID('')
-    setSnippetEditorError('')
-  }
-
-  function editSnippet(snippet?: Snippet) {
-    setSnippetEditingID(snippet?.id ?? '')
-    setSnippetDraft(snippet
-      ? { prefix: snippet.prefix, trigger: snippet.trigger, title: snippet.title, content: snippet.content, category: snippet.category ?? '' }
-      : { prefix: ';', trigger: '', title: '', content: '', category: '' })
-    setSnippetEditorError('')
-    setSnippetManagerError('')
-  }
-
-  function saveSnippetDraft(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!snippetDraft) return
-    const prefix = snippetDraft.prefix.trim()
-    const trigger = snippetDraft.trigger.trim()
-    const title = snippetDraft.title.trim()
-    const content = snippetDraft.content
-    const category = snippetDraft.category?.trim() ?? ''
-    if (!prefix || prefix.length > 8 || /\s/.test(prefix)) {
-      setSnippetEditorError('Use a prefix of 1 to 8 characters with no spaces.')
-      return
-    }
-    if (!trigger || trigger.length > 64 || /\s/.test(trigger)) {
-      setSnippetEditorError('Use a one-word trigger of up to 64 characters.')
-      return
-    }
-    if (!title || title.length > 100 || !content.trim() || content.length > 10000) {
-      setSnippetEditorError('Add a title and non-empty content of up to 10,000 characters.')
-      return
-    }
-    const duplicate = snippets.some((snippet) => snippet.id !== snippetEditingID
-      && snippet.prefix.toLocaleLowerCase() === prefix.toLocaleLowerCase()
-      && snippet.trigger.toLocaleLowerCase() === trigger.toLocaleLowerCase())
-    if (duplicate) {
-      setSnippetEditorError('A snippet already uses that prefix and trigger.')
-      return
-    }
-    const existing = snippets.find((snippet) => snippet.id === snippetEditingID)
-    const nextSnippet: Snippet = {
-      id: existing?.id ?? createSnippetID(),
-      prefix,
-      trigger,
-      title,
-      content,
-      ...(category ? { category } : {}),
-      createdAt: existing?.createdAt ?? Date.now(),
-    }
-    onSnippetsChange(existing
-      ? snippets.map((snippet) => snippet.id === existing.id ? nextSnippet : snippet)
-      : [...snippets, nextSnippet])
-    setSnippetDraft(null)
-    setSnippetEditingID('')
-    setSnippetEditorError('')
-    setSnippetManagerError('')
-    setSnippetManagerStatus('Snippet saved.')
-  }
-
-  function deleteSnippet(snippet: Snippet) {
-    onSnippetsChange(snippets.filter((candidate) => candidate.id !== snippet.id))
-    if (snippetEditingID === snippet.id) {
-      setSnippetDraft(null)
-      setSnippetEditingID('')
-    }
-    setSnippetManagerStatus('Snippet deleted.')
-    setSnippetManagerError('')
-  }
-
-  function exportSnippetFile() {
-    try {
-      const file = new Blob([serializeSnippets(snippets)], { type: 'application/json' })
-      const url = URL.createObjectURL(file)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = 'pinger-snippets.json'
-      link.click()
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-      setSnippetManagerStatus('Snippets exported.')
-      setSnippetManagerError('')
-    } catch {
-      setSnippetManagerError('Could not create the snippets download.')
-      setSnippetManagerStatus('')
-    }
-  }
-
-  async function importSnippetFile(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0]
-    event.currentTarget.value = ''
-    if (!file) return
-    if (file.size > 2 * 1024 * 1024) {
-      setSnippetManagerError('Snippet files must be smaller than 2 MiB.')
-      setSnippetManagerStatus('')
-      return
-    }
-    try {
-      const imported = parseSnippetImport(await file.text())
-      const next = mergeImportedSnippets(snippets, imported)
-      onSnippetsChange(next)
-      setSnippetManagerStatus(`Imported ${imported.length} snippet${imported.length === 1 ? '' : 's'}.`)
-      setSnippetManagerError('')
-    } catch (importError) {
-      setSnippetManagerError(describeError(importError))
-      setSnippetManagerStatus('')
-    }
   }
 
   useEffect(() => {
@@ -6807,6 +6630,7 @@ function SettingsDialog({
                   <option value="none">Clear selection</option>
                 </select>
               </label>
+              <PreferenceToggle label="Automatically archive inactive rooms" checked={preferenceBoolean(preferences, 'archive.automatic')} onChange={(value) => onPreferenceChange('archive.automatic', value)} />
               <label className="setting-row"><span><strong>Inactive room age</strong><small>Archive rooms without activity for this long.</small></span>
                 <select aria-label="Inactive room age" value={preferenceString(preferences, 'archive.older_than_days', '90')} onChange={(event) => onPreferenceChange('archive.older_than_days', event.target.value)}>
                   {['30', '60', '90', '180', '365'].map((days) => <option key={days} value={days}>{days} days</option>)}
@@ -6975,7 +6799,28 @@ function SettingsDialog({
               <PreferenceToggle label="Spellcheck messages" checked={preferenceBoolean(preferences, 'composer.spellcheck', true)} onChange={(value) => onPreferenceChange('composer.spellcheck', value)} />
               <PreferenceToggle label="Show formatting toolbar" checked={preferenceBoolean(preferences, 'composer.formatting_toolbar')} onChange={(value) => onPreferenceChange('composer.formatting_toolbar', value)} />
               <PreferenceToggle label="Suggest emoji for :shortcodes:" checked={preferenceBoolean(preferences, 'emoji.autocomplete')} onChange={(value) => onPreferenceChange('emoji.autocomplete', value)} />
-              <PreferenceToggle label="Replace emoticons as you type" checked={preferenceBoolean(preferences, 'emoji.replace_emoticons')} onChange={(value) => onPreferenceChange('emoji.replace_emoticons', value)} />
+              <PreferenceToggle label="Replace emoticons as you type" checked={preferenceBoolean(preferences, 'emoji.replace_emoticons', true)} onChange={(value) => onPreferenceChange('emoji.replace_emoticons', value)} />
+              <div className="emoticon-replacement-editor" id="emoticon-replacement-editor">
+                <div>
+                  <strong>Custom emoji replacements</strong>
+                  <p className="settings-note">Add a symbol and emoji pair. Custom pairs override built-in faces such as `:)`.</p>
+                </div>
+                {customEmoticonDraft.length === 0 && <p className="settings-note">No custom replacements.</p>}
+                {customEmoticonDraft.map(([symbol, emoji], index) => (
+                  <div className="emoticon-replacement-row" key={index}>
+                    <label><span>Symbol</span><input type="text" maxLength={16} value={symbol} aria-label={`Symbol for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 0, event.target.value)} /></label>
+                    <span className="emoticon-replacement-arrow" aria-hidden="true">→</span>
+                    <label><span>Emoji</span><input type="text" maxLength={16} value={emoji} aria-label={`Emoji for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 1, event.target.value)} /></label>
+                    <button type="button" className="icon-button" aria-label={`Remove replacement ${index + 1}`} title="Remove replacement" onClick={() => { setCustomEmoticonDraft((current) => current.filter((_, pairIndex) => pairIndex !== index)); setCustomEmoticonStatus('') }}><Trash2 size={14} /></button>
+                  </div>
+                ))}
+                <div className="emoticon-replacement-actions">
+                  <button className="settings-command" type="button" disabled={customEmoticonDraft.length >= 64} onClick={() => { setCustomEmoticonDraft((current) => [...current, ['', '']]); setCustomEmoticonStatus('') }}><Plus size={14} />Add mapping</button>
+                  <button className="settings-command" type="button" onClick={() => void saveCustomEmoticons()}><Check size={14} />Save mappings</button>
+                  <button className="settings-command" type="button" onClick={() => void resetCustomEmoticons()}><RotateCcw size={14} />Reset built-ins</button>
+                </div>
+                {customEmoticonStatus && <p className="settings-note" role="status">{customEmoticonStatus}</p>}
+              </div>
               <PreferenceToggle label="Include timestamps when copying messages" checked={preferenceBoolean(preferences, 'clipboard.copy_timestamp')} onChange={(value) => onPreferenceChange('clipboard.copy_timestamp', value)} />
               <PreferenceToggle label="Use Up to focus the message list when the composer is empty" checked={preferenceBoolean(preferences, 'composer.arrow_up_focus_timeline')} onChange={(value) => onPreferenceChange('composer.arrow_up_focus_timeline', value)} />
               <PreferenceToggle label="Enable single-key shortcuts (R, J, K and the answered key)" checked={preferenceBoolean(preferences, 'shortcuts.single_keys', true)} onChange={(value) => onPreferenceChange('shortcuts.single_keys', value)} />
@@ -6983,44 +6828,39 @@ function SettingsDialog({
               <label className="setting-row"><span><strong>Mark answered shortcut</strong><small>Use one letter to mark the selected room answered.</small></span>
                 <input className="shortcut-input" type="text" maxLength={1} value={preferenceString(preferences, 'shortcuts.mark_answered', 'E')} aria-label="Mark answered shortcut" onChange={(event) => { const value = event.target.value.toUpperCase(); if (value) onPreferenceChange('shortcuts.mark_answered', value) }} />
               </label>
-              <button className="settings-command" type="button" onClick={() => { setSnippetManagerOpen(true); setSnippetManagerStatus(''); setSnippetManagerError('') }}><FileText size={15} />Manage text snippets</button>
+              <button className="settings-command" type="button" onClick={() => setSnippetManagerOpen(true)}><FileText size={15} />Manage text snippets</button>
               <p className="settings-note">Expand personal shortcuts while composing. Snippets are stored on this device.</p>
+              <div className="settings-search shortcut-search">
+                <Search size={15} />
+                <input
+                  type="search"
+                  value={shortcutSearchQuery}
+                  placeholder="Find a shortcut"
+                  aria-label="Search keyboard shortcuts"
+                  spellCheck={false}
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  onChange={(event) => setShortcutSearchQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Escape' || !shortcutSearchQuery) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    setShortcutSearchQuery('')
+                  }}
+                />
+                {shortcutSearchQuery && (
+                  <button type="button" className="icon-button" aria-label="Clear shortcut search" title="Clear search" onClick={() => setShortcutSearchQuery('')}><X size={14} /></button>
+                )}
+              </div>
               <dl className="keyboard-shortcut-list" aria-label="Keyboard shortcuts">
-                {[
-                  ['Ctrl / ⌘ + K', 'Quick switch rooms'],
-                  ['Ctrl / ⌘ + F', 'Search this room'],
-                  ['Ctrl / ⌘ + ,', 'Open settings'],
-                  ['/ or Ctrl / ⌘ + Shift + S', 'Focus room search'],
-                  ['Alt + ↑ / ↓', 'Switch rooms'],
-                  ['Ctrl / ⌘ + Shift + ↑ / ↓', 'Switch needs-reply rooms'],
-                  ['Ctrl / ⌘ + 1–9', 'Switch to a visible room'],
-                  ['Ctrl / ⌘ + Alt + 1–9', 'Switch Matrix accounts'],
-                  ['Ctrl / ⌘ + + / -', 'Adjust app zoom'],
-                  ['Ctrl / ⌘ + 0', 'Reset app zoom'],
-                  ['Ctrl / ⌘ + Shift + P', 'Toggle Incognito blur'],
-                  ['Ctrl + Shift + T', 'Analyze draft with Turkish Tutor'],
-                  ['Ctrl / ⌘ + Shift + A', 'Show all rooms'],
-                  ['Ctrl / ⌘ + Shift + U', 'Show needs-reply rooms'],
-                  ['Ctrl / ⌘ + Shift + L', 'Jump to latest messages'],
-                  ['↑ / ↓ / Home / End', 'Navigate the room list'],
-                  ['Shift + F10', 'Open room actions'],
-                  ['↑ / ↓ or J / K', 'Navigate the focused timeline'],
-                  ['Home / End', 'Focus first / latest message'],
-                  ['R', 'Reply to the focused message'],
-                  [answeredShortcut, 'Mark room answered'],
-                  ['Ctrl / ⌘ + Z', 'Undo mark answered'],
-                  ['Escape', 'Close search or dialog'],
-                  ['?', 'Open keyboard shortcuts'],
-                  ['Tab / Shift + Tab', 'Move between controls'],
-                  [preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter' : 'Enter', 'Send message'],
-                  ['Shift + Enter', 'Add a line in the composer'],
-                ].map(([keys, description]) => (
+                {filteredKeyboardShortcuts.map(([keys, description]) => (
                   <div className="keyboard-shortcut-row" key={description}>
                     <dt>{description}</dt>
                     <dd><kbd>{keys}</kbd></dd>
                   </div>
                 ))}
               </dl>
+              {normalizedShortcutSearch && filteredKeyboardShortcuts.length === 0 && <p className="settings-note" role="status">No shortcuts match “{shortcutSearchQuery.trim()}”.</p>}
             </div>
           )}
           {tab === 'History' && (
@@ -7113,6 +6953,15 @@ function SettingsDialog({
                 model={preferenceString(preferences, 'ghostwriter.model', '')}
                 onSave={onPreferenceChange}
               />
+              <section className="ai-settings-form relationship-health-settings">
+                <h4>Keep in Touch</h4>
+                <p className="settings-note">Uses recent direct-chat messages for tracked contacts with your configured local Ghostwriter model. Requests are restricted to localhost. Suggestions stay as drafts; no message is sent automatically.</p>
+                <PreferenceToggle
+                  label="Enable relationship health and Keep in Touch"
+                  checked={preferenceBoolean(preferences, 'relationship_health.enabled')}
+                  onChange={(enabled) => void onPreferenceChange('relationship_health.enabled', enabled)}
+                />
+              </section>
               <div className="integration-status" aria-label="Detected chat networks">
                 {chatNetworks.map(({ code, name }) => {
                   const count = rooms.filter((room) => room.bridge === code).length
@@ -7144,54 +6993,12 @@ function SettingsDialog({
         </div>
       </DialogSurface>
     </div>
-    {snippetManagerOpen && <div className="room-info-scrim snippet-manager-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSnippetManager() }}>
-      <DialogSurface className="room-info-dialog snippet-manager-dialog" labelledBy="snippet-manager-title" onClose={closeSnippetManager} onClick={(event) => event.stopPropagation()}>
-        <header className="room-info-header">
-          <div><span className="eyebrow">COMPOSER</span><h2 id="snippet-manager-title">Text snippets</h2></div>
-          <button className="icon-button" type="button" aria-label="Close text snippets" title="Close text snippets" onClick={closeSnippetManager}><X size={16} /></button>
-        </header>
-        <div className="snippet-manager-content">
-          <div className="snippet-manager-toolbar">
-            <button className="settings-command" type="button" onClick={() => editSnippet()}><Plus size={14} />New snippet</button>
-            <button className="settings-command" type="button" disabled={snippets.length === 0} onClick={exportSnippetFile}><Download size={14} />Export JSON</button>
-            <label className="settings-command file-command"><Upload size={14} />Import JSON<input type="file" accept=".json,application/json" aria-label="Import snippets" onChange={(event) => void importSnippetFile(event)} /></label>
-          </div>
-          {snippetManagerError && <p className="settings-error" role="alert">{snippetManagerError}</p>}
-          {snippetManagerStatus && <p className="settings-note" role="status">{snippetManagerStatus}</p>}
-          {snippetDraft && <form className="snippet-manager-editor" onSubmit={saveSnippetDraft}>
-            <h3>{snippetEditingID ? 'Edit snippet' : 'New snippet'}</h3>
-            <div className="snippet-manager-fields">
-              <label className="snippet-manager-field"><span>Prefix</span><input aria-label="Snippet prefix" value={snippetDraft.prefix} maxLength={8} onChange={(event) => setSnippetDraft((current) => current ? { ...current, prefix: event.target.value } : current)} /></label>
-              <label className="snippet-manager-field"><span>Trigger</span><input aria-label="Snippet trigger" value={snippetDraft.trigger} maxLength={64} onChange={(event) => setSnippetDraft((current) => current ? { ...current, trigger: event.target.value } : current)} /></label>
-              <label className="snippet-manager-field"><span>Title</span><input aria-label="Snippet title" value={snippetDraft.title} maxLength={100} onChange={(event) => setSnippetDraft((current) => current ? { ...current, title: event.target.value } : current)} /></label>
-              <label className="snippet-manager-field"><span>Category</span><input aria-label="Snippet category" value={snippetDraft.category ?? ''} maxLength={40} onChange={(event) => setSnippetDraft((current) => current ? { ...current, category: event.target.value } : current)} /></label>
-            </div>
-            <label className="snippet-manager-field"><span>Content</span><textarea aria-label="Snippet content" value={snippetDraft.content} maxLength={10000} rows={5} onChange={(event) => setSnippetDraft((current) => current ? { ...current, content: event.target.value } : current)} /></label>
-            <p className="settings-note">Variables: {'{date}'}, {'{time}'}, {'{clipboard}'}, and {'{cursor}'}.</p>
-            {snippetEditorError && <p className="settings-error" role="alert">{snippetEditorError}</p>}
-            <div className="snippet-manager-actions">
-              <button className="settings-command" type="button" onClick={() => { setSnippetDraft(null); setSnippetEditingID(''); setSnippetEditorError('') }}>Cancel</button>
-              <button className="settings-command is-primary" type="submit">{snippetEditingID ? 'Save changes' : 'Save snippet'}</button>
-            </div>
-          </form>}
-          <ul className="snippet-manager-list" aria-label="Saved text snippets">
-            {snippets.map((snippet) => <li className="snippet-manager-item" key={snippet.id}>
-              <div className="snippet-manager-item-top">
-                <div><strong>{snippet.title}</strong><code>{snippet.prefix}{snippet.trigger}</code></div>
-                <div className="snippet-manager-item-actions">
-                  <button className="icon-button" type="button" aria-label={`Edit snippet ${snippet.title}`} title="Edit snippet" onClick={() => editSnippet(snippet)}><Pencil size={14} /></button>
-                  <button className="icon-button" type="button" aria-label={`Delete snippet ${snippet.title}`} title="Delete snippet" onClick={() => deleteSnippet(snippet)}><Trash2 size={14} /></button>
-                </div>
-              </div>
-              <p>{snippet.content}</p>
-              <small>{snippet.category || 'Uncategorized'}</small>
-            </li>)}
-            {snippets.length === 0 && <li className="snippet-manager-empty">No snippets saved.</li>}
-          </ul>
-        </div>
-        <footer className="room-info-footer"><button className="settings-command" type="button" onClick={closeSnippetManager}>Close</button></footer>
-      </DialogSurface>
-    </div>}
+    {snippetManagerOpen && <SnippetSettingsModal
+      open
+      snippets={snippets}
+      onSnippetsChange={onSnippetsChange}
+      onClose={closeSnippetManager}
+    />}
     </>
   )
 }

@@ -746,6 +746,9 @@ func (s *AppService) SetBooleanPreference(key string, value bool) error {
 	if key == "window.menu_bar_icon" && s.setMenuBarIcon != nil {
 		s.setMenuBarIcon(value)
 	}
+	if key == "relationship_health.enabled" {
+		s.triggerRelationshipDecay()
+	}
 	return nil
 }
 

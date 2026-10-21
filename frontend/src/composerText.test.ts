@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { emojiQueryAt, insertEmoji, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, wrapSelection } from './composerText'
+import { emojiQueryAt, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, wrapSelection } from './composerText'
 
 describe('replaceEmoticons', () => {
   it('replaces whole-word emoticons', () => {
@@ -14,6 +14,11 @@ describe('replaceEmoticons', () => {
   it('skips inline code spans', () => {
     expect(replaceEmoticons('use `:)` but not :)')).toBe('use `:)` but not 🙂')
   })
+
+  it('supports custom mappings that override built-in emoticons', () => {
+    const custom = [[':)', '😎'], [':shrug:', '🤷']] as const
+    expect(replaceEmoticons(':) :shrug:', custom)).toBe('😎 🤷')
+  })
 })
 
 describe('replaceEmoticonsAtCursor', () => {
@@ -27,6 +32,16 @@ describe('replaceEmoticonsAtCursor', () => {
 
   it('does not convert emoticons inside inline code', () => {
     expect(replaceEmoticonsAtCursor('use `:)`', 8)).toEqual({ text: 'use `:)`', cursor: 8 })
+  })
+
+  it('converts a custom mapping at the caret', () => {
+    expect(replaceEmoticonsAtCursor(':shrug:', 7, [[':shrug:', '🤷']])).toEqual({ text: '🤷', cursor: 2 })
+  })
+})
+
+describe('parseCustomEmoticonReplacements', () => {
+  it('parses valid pairs and ignores malformed mappings', () => {
+    expect(parseCustomEmoticonReplacements('[["<3","😍"],[" ","🙂"],["bad",""]]')).toEqual([['<3', '😍']])
   })
 })
 

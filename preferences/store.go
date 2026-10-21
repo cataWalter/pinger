@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -549,6 +550,8 @@ func Validate(key string, value any) error {
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("preference %q must be a string", key)
 		}
+	case "emoji.emoticon_replacements":
+		return validateEmoticonReplacements(value)
 	case "ai.translate_language":
 		language, ok := value.(string)
 		if !ok {
@@ -652,6 +655,39 @@ func Validate(key string, value any) error {
 		}
 	default:
 		return fmt.Errorf("unknown preference %q", key)
+	}
+	return nil
+}
+
+func validateEmoticonReplacements(value any) error {
+	const maxBytes, maxEntries, maxRunes = 8192, 64, 16
+	serialized, ok := value.(string)
+	if !ok || len(serialized) > maxBytes {
+		return errors.New("emoji.emoticon_replacements must be a JSON string of at most 8192 bytes")
+	}
+	var replacements [][]string
+	if err := json.Unmarshal([]byte(serialized), &replacements); err != nil {
+		return fmt.Errorf("invalid emoticon replacement JSON: %w", err)
+	}
+	if len(replacements) > maxEntries {
+		return fmt.Errorf("emoticon replacements may contain at most %d pairs", maxEntries)
+	}
+	seen := make(map[string]struct{}, len(replacements))
+	for _, pair := range replacements {
+		if len(pair) != 2 {
+			return errors.New("each emoticon replacement must contain a symbol and emoji")
+		}
+		symbol, emoji := pair[0], pair[1]
+		if symbol == "" || strings.TrimSpace(symbol) != symbol || strings.IndexFunc(symbol, unicode.IsSpace) >= 0 || utf8.RuneCountInString(symbol) > maxRunes {
+			return errors.New("emoticon symbols must contain 1 to 16 non-space characters")
+		}
+		if emoji == "" || strings.TrimSpace(emoji) != emoji || strings.IndexFunc(emoji, unicode.IsSpace) >= 0 || utf8.RuneCountInString(emoji) > maxRunes {
+			return errors.New("emoticon replacements must contain 1 to 16 non-space characters")
+		}
+		if _, duplicate := seen[symbol]; duplicate {
+			return errors.New("emoticon replacement symbols must be unique")
+		}
+		seen[symbol] = struct{}{}
 	}
 	return nil
 }

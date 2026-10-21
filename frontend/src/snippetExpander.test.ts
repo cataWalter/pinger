@@ -29,6 +29,11 @@ describe('snippet expansion', () => {
       snippet: { trigger: 'meet' },
       delimiter: ',',
     })
+    expect(findSnippetBoundaryMatch(';meet ', 6, snippets)).toMatchObject({
+      match: { start: 0, end: 5, shortcut: ';meet' },
+      delimiter: ' ',
+    })
+    expect(findSnippetBoundaryMatch(';meet', 5, snippets)).toBeNull()
     expect(findSnippetBoundaryMatch(';mee ', 6, snippets)).toBeNull()
   })
 

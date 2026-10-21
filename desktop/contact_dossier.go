@@ -45,6 +45,7 @@ type ContactDossierSnapshot struct {
 	DisplayName           string   `json:"displayName"`
 	Tier                  string   `json:"tier"`
 	LinkedChannels        []string `json:"linkedChannels"`
+	LinkedRoomIDs         []string `json:"linkedRoomIds"`
 	Enabled               bool     `json:"enabled"`
 	Analyzing             bool     `json:"analyzing"`
 	InsufficientData      bool     `json:"insufficientData"`
@@ -125,6 +126,7 @@ func contactDossierSnapshot(accountID, roomID, contactID string, roomIDs []strin
 	snapshot.ContactID = contactID
 	snapshot.Enabled = enabled
 	snapshot.LinkedChannels = linkedDossierChannels(client, roomIDs)
+	snapshot.LinkedRoomIDs = append([]string(nil), roomIDs...)
 	snapshot.KeyFacts = []string{}
 	snapshot.UnresolvedCommitments = []string{}
 	if err := store.db.QueryRow(`SELECT display_name, tier FROM contacts WHERE contact_id = ?`, contactID).Scan(&snapshot.DisplayName, &snapshot.Tier); err != nil {
@@ -447,7 +449,7 @@ func (s *AppService) emitContactDossierResult(accountID, roomID, contactID strin
 		if resultError == nil {
 			resultError = err
 		}
-		snapshot = ContactDossierSnapshot{AccountID: accountID, RoomID: roomID, ContactID: contactID, Enabled: enabled, KeyFacts: []string{}, UnresolvedCommitments: []string{}}
+		snapshot = ContactDossierSnapshot{AccountID: accountID, RoomID: roomID, ContactID: contactID, Enabled: enabled, LinkedChannels: []string{}, LinkedRoomIDs: []string{}, KeyFacts: []string{}, UnresolvedCommitments: []string{}}
 	}
 	snapshot.Analyzing = analyzing
 	snapshot.InsufficientData = insufficient

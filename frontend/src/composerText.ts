@@ -1,7 +1,7 @@
 // Pure helpers for composer text transforms: emoticon replacement, emoji
 // shortcode autocomplete, and Markdown wrapping for the formatting toolbar.
 
-const emoticonReplacements = new Map<string, string>([
+export const defaultEmoticonReplacements: ReadonlyArray<readonly [string, string]> = [
   [':)', '🙂'],
   [':-)', '🙂'],
   [':(', '🙁'],
@@ -18,25 +18,64 @@ const emoticonReplacements = new Map<string, string>([
   ['<3', '❤️'],
   ['xD', '😆'],
   ['XD', '😆'],
-])
+]
+
+export type EmoticonReplacement = readonly [string, string]
+
+export function parseCustomEmoticonReplacements(serialized: string): EmoticonReplacement[] {
+  if (!serialized.trim()) return []
+  try {
+    const parsed: unknown = JSON.parse(serialized)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((entry): entry is [string, string] =>
+      Array.isArray(entry)
+      && entry.length === 2
+      && typeof entry[0] === 'string'
+      && typeof entry[1] === 'string'
+      && isValidEmoticonReplacement(entry[0], entry[1]))
+  } catch {
+    return []
+  }
+}
+
+function isValidEmoticonReplacement(symbol: string, emoji: string) {
+  return symbol.trim() === symbol
+    && emoji.trim() === emoji
+    && !/\s/.test(symbol)
+    && !/\s/.test(emoji)
+    && [...symbol].length > 0
+    && [...symbol].length <= 16
+    && [...emoji].length > 0
+    && [...emoji].length <= 16
+}
+
+function emoticonReplacementMap(customReplacements: ReadonlyArray<EmoticonReplacement>) {
+  const replacements = new Map(defaultEmoticonReplacements)
+  for (const [symbol, emoji] of customReplacements) {
+    if (isValidEmoticonReplacement(symbol, emoji)) replacements.set(symbol, emoji)
+  }
+  return replacements
+}
 
 // Replaces whole-word emoticons outside of inline code spans. Matching is
 // token-based so text such as URLs is left alone.
-function replaceEmoticonsInSegment(segment: string) {
+function replaceEmoticonsInSegment(segment: string, replacements: ReadonlyMap<string, string>) {
   return segment
     .split(/(\s+)/)
-    .map((token) => emoticonReplacements.get(token) ?? token)
+    .map((token) => replacements.get(token) ?? token)
     .join('')
 }
 
-export function replaceEmoticons(text: string): string {
+export function replaceEmoticons(text: string, customReplacements: ReadonlyArray<EmoticonReplacement> = []): string {
+  const replacements = emoticonReplacementMap(customReplacements)
   return text
     .split(/(`[^`]*`)/)
-    .map((segment, index) => index % 2 === 1 ? segment : replaceEmoticonsInSegment(segment))
+    .map((segment, index) => index % 2 === 1 ? segment : replaceEmoticonsInSegment(segment, replacements))
     .join('')
 }
 
-export function replaceEmoticonsAtCursor(text: string, cursor: number) {
+export function replaceEmoticonsAtCursor(text: string, cursor: number, customReplacements: ReadonlyArray<EmoticonReplacement> = []) {
+  const replacements = emoticonReplacementMap(customReplacements)
   const position = Math.max(0, Math.min(cursor, text.length))
   const segments = text.split(/(`[^`]*`)/)
   let sourceOffset = 0
@@ -49,9 +88,9 @@ export function replaceEmoticonsAtCursor(text: string, cursor: number) {
       output += segment
     } else {
       if (position >= sourceOffset && position <= end) {
-        outputCursor = output.length + replaceEmoticonsInSegment(segment.slice(0, position - sourceOffset)).length
+        outputCursor = output.length + replaceEmoticonsInSegment(segment.slice(0, position - sourceOffset), replacements).length
       }
-      output += replaceEmoticonsInSegment(segment)
+      output += replaceEmoticonsInSegment(segment, replacements)
     }
     sourceOffset = end
   }

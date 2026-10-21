@@ -8,6 +8,7 @@ import (
 
 const (
 	batchUpdateEventName           = "matrix:batch_update"
+	roomsDeltaEventName            = "matrix:rooms_delta"
 	defaultEventBatchFlushInterval = 50 * time.Millisecond
 	defaultEventBatchMaximumSize   = 100
 )
@@ -217,6 +218,9 @@ func (b *EventBatcher) Flush() {
 	b.mu.Unlock()
 
 	emit(batchUpdateEventName, payload)
+	if len(payload.RoomStateDeltas) > 0 {
+		emit(roomsDeltaEventName, BatchedPayload{RoomStateDeltas: payload.RoomStateDeltas})
+	}
 	if flushAgain {
 		b.requestFlush()
 	}
