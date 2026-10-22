@@ -65,6 +65,8 @@ const harness = vi.hoisted(() => ({
     ClearCachedMedia: vi.fn(),
     AppVersion: vi.fn(),
     CheckForUpdates: vi.fn(),
+    Devices: vi.fn(),
+    RevokeDevice: vi.fn(),
   },
   tutorService: {
     Analyze: vi.fn(),
@@ -214,6 +216,8 @@ describe('settings storage, integrations, help, and about', () => {
     harness.service.ScheduledJobs.mockResolvedValue([])
     harness.service.SetActiveRoom.mockResolvedValue(undefined)
     harness.service.SetRoomUnanswered.mockResolvedValue(undefined)
+    harness.service.Devices.mockResolvedValue([])
+    harness.service.RevokeDevice.mockResolvedValue(undefined)
     harness.service.RelationshipHealth.mockResolvedValue({ roomId: room.id, accountId: snapshot.activeAccountId, error: '' })
     harness.service.ContactDossier.mockResolvedValue({ accountId: 'primary', roomId: room.id, contactId: room.id, displayName: room.name, tier: 'NONE', linkedChannels: ['Matrix'], enabled: true, analyzing: false, insufficientData: true, keyFacts: [], lastRecap: '', unresolvedCommitments: [], updatedAt: 0, error: '' })
     harness.service.RefreshContactDossier.mockResolvedValue({ accountId: 'primary', roomId: room.id, contactId: room.id, displayName: room.name, tier: 'NONE', linkedChannels: ['Matrix'], enabled: true, analyzing: true, insufficientData: false, keyFacts: [], lastRecap: '', unresolvedCommitments: [], updatedAt: 0, error: '' })
@@ -257,6 +261,26 @@ describe('settings storage, integrations, help, and about', () => {
     await user.click(screen.getByRole('tab', { name }))
     return user
   }
+
+  it('revokes a device after password confirmation', async () => {
+    const device = {
+      id: 'OLDDEVICE',
+      displayName: 'Old laptop',
+      lastSeenIp: '',
+      lastSeenAt: 0,
+      current: false,
+    }
+    harness.service.Devices.mockResolvedValue([device])
+    const user = await openSettingsTab('Devices')
+    expect(await screen.findByText('Old laptop')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Revoke' }))
+    await user.type(screen.getByLabelText('Account password'), 'matrix-password')
+    await user.click(screen.getByRole('button', { name: 'Revoke device' }))
+
+    await waitFor(() => expect(harness.service.RevokeDevice).toHaveBeenCalledWith('OLDDEVICE', 'matrix-password'))
+    expect(screen.queryByText('Old laptop')).toBeNull()
+  })
 
 
   it('opens About and Settings from native application menu events', async () => {
@@ -475,6 +499,23 @@ describe('settings storage, integrations, help, and about', () => {
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Settings search results' })).toBeNull())
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy()
+  })
+
+  it('formats selected composer text from the formatting toolbar', async () => {
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'composer.formatting_toolbar': true } })
+    render(<App />)
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'say hello', selectionStart: 4, selectionEnd: 9 } })
+
+    const boldButton = await screen.findByRole('button', { name: 'Bold' })
+    fireEvent.mouseDown(boldButton)
+    fireEvent.click(boldButton)
+
+    await waitFor(() => expect(composer.value).toBe('say **hello**'))
+    await waitFor(() => {
+      expect(composer.selectionStart).toBe(6)
+      expect(composer.selectionEnd).toBe(11)
+    })
   })
 
   it('expands a snippet at the caret and restores its shortcut with Backspace', async () => {
@@ -2069,6 +2110,18 @@ describe('room history updates', () => {
     expect(document.querySelector('.conversation-room-avatar')).toBeTruthy()
   })
 
+  it('ignores the retired compact message layout preference', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'appearance.compact': true } })
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    expect(container.querySelector('.app-shell')?.hasAttribute('data-compact')).toBe(false)
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('tab', { name: 'Appearance' }))
+    expect(screen.queryByRole('checkbox', { name: 'Compact message layout' })).toBeNull()
+  })
+
   it('honors the spellcheck preference in the message composer', async () => {
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'composer.spellcheck': false } })
     render(<App />)
@@ -2403,9 +2456,10 @@ describe('room history updates', () => {
     expect(container.querySelector('[data-event-id="$latest"] .message-meta time')).toBeNull()
   })
 
-  it('shows only the time in message headers, or the date for messages older than 24 hours', async () => {
+  it.each([false, true])('shows date and time in message headers with 24-hour clock preference %s', async (use24Hour) => {
     const recent = Date.now() - 5 * 60_000
     const old = Date.now() - 2 * 24 * 60 * 60_000
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'appearance.time_24_hour': use24Hour } })
     harness.service.History.mockResolvedValue({
       messages: [message('$old', 'older message', old), message('$latest', 'latest message', recent)],
       before: 50,
@@ -2416,10 +2470,15 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
     const oldMeta = container.querySelector('[data-event-id="$old"] .message-meta')
     const latestMeta = container.querySelector('[data-event-id="$latest"] .message-meta')
+    const formatDateTime = (timestamp: number) => new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'short',
+      timeStyle: 'short',
+      hour12: !use24Hour,
+    }).format(new Date(timestamp))
     expect(oldMeta?.querySelector('strong')).toBeNull()
-    expect(oldMeta?.textContent).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(old)))
+    expect(oldMeta?.textContent).toBe(formatDateTime(old))
     expect(latestMeta?.querySelector('strong')).toBeNull()
-    expect(latestMeta?.textContent).toBe(new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(recent)))
+    expect(latestMeta?.textContent).toBe(formatDateTime(recent))
   })
 
   it('clears the previous timeline while the selected chat history loads', async () => {
@@ -2469,8 +2528,9 @@ describe('room history updates', () => {
       await within(timeline).findByText('message from yesterday')
 
       const expectedDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(yesterday))
+      const expectedDateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short', hour12: true }).format(new Date(yesterday))
       expect(container.querySelector('.room-button[title="Test room"] .room-meta time')?.textContent).toBe(expectedDate)
-      expect(timeline.querySelector('[data-event-id="$yesterday"] .message-meta time')?.textContent).toBe(expectedDate)
+      expect(timeline.querySelector('[data-event-id="$yesterday"] .message-meta time')?.textContent).toBe(expectedDateTime)
       expect(timeline.querySelector('.day-divider')?.textContent).toBe('Yesterday')
     } finally {
       vi.useRealTimers()
@@ -3189,6 +3249,7 @@ describe('room history updates', () => {
 
   it('controls room previews, unread counts, and chat-list density independently', async () => {
     const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'sidebar.transparent': true } })
     const { container } = render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Settings' }))
@@ -3198,6 +3259,8 @@ describe('room history updates', () => {
     await user.click(screen.getByLabelText('Compact chat list'))
 
     const appShell = container.querySelector('.app-shell')
+    expect(container.querySelector('.sidebar')?.classList.contains('is-transparent')).toBe(false)
+    expect(screen.queryByRole('checkbox', { name: 'Transparent sidebar' })).toBeNull()
     await waitFor(() => {
       expect(appShell?.getAttribute('data-room-previews')).toBe('false')
       expect(appShell?.getAttribute('data-unread-counts')).toBe('false')

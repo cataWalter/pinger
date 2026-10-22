@@ -44,6 +44,62 @@ func TestMessageFromEvent(t *testing.T) {
 	}
 }
 
+func TestPasswordUIASessionRequiresSinglePasswordStage(t *testing.T) {
+	passwordFlow := func(stages ...any) *mautrix.RespError {
+		return &mautrix.RespError{
+			ErrCode: "M_UNAUTHORIZED",
+			ExtraData: map[string]any{
+				"session": "uia-session",
+				"flows":   []any{map[string]any{"stages": stages}},
+			},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		apiError *mautrix.RespError
+		want     bool
+	}{
+		{name: "password flow", apiError: passwordFlow(string(mautrix.AuthTypePassword)), want: true},
+		{name: "multi-stage flow", apiError: passwordFlow(string(mautrix.AuthTypePassword), "m.login.recaptcha")},
+		{name: "different flow", apiError: passwordFlow("m.login.sso")},
+		{name: "wrong error", apiError: &mautrix.RespError{ErrCode: "M_FORBIDDEN", ExtraData: map[string]any{"session": "uia-session", "flows": []any{map[string]any{"stages": []any{string(mautrix.AuthTypePassword)}}}}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			session, ok := passwordUIASession(test.apiError)
+			if ok != test.want {
+				t.Fatalf("password UIAA supported = %t, want %t", ok, test.want)
+			}
+			if ok && session != "uia-session" {
+				t.Fatalf("UIAA session = %q, want %q", session, "uia-session")
+			}
+		})
+	}
+}
+
+func TestPasswordUIAAAuthUsesMatrixUserField(t *testing.T) {
+	payload, err := json.Marshal(passwordUIAAAuth{
+		Type:     mautrix.AuthTypePassword,
+		User:     "@me:example.org",
+		Password: "secret",
+		Session:  "uia-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var auth map[string]string
+	if err = json.Unmarshal(payload, &auth); err != nil {
+		t.Fatal(err)
+	}
+	if auth["type"] != string(mautrix.AuthTypePassword) || auth["user"] != "@me:example.org" || auth["password"] != "secret" || auth["session"] != "uia-session" {
+		t.Fatalf("unexpected password UIAA payload: %s", payload)
+	}
+	if _, ok := auth["identifier"]; ok {
+		t.Fatalf("password UIAA payload must not use the login identifier field: %s", payload)
+	}
+}
+
 func TestEnrichReplyPreviewFromStoredEvent(t *testing.T) {
 	client, err := New(filepath.Join(t.TempDir(), "profile", "matrix.db"))
 	if err != nil {

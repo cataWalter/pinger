@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	cryptorand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -102,6 +103,29 @@ func (r *accountRegistry) SetActive(id string) error {
 	return r.saveOrRestore(previous)
 }
 
+func (r *accountRegistry) UpsertAndActivate(account AccountSummary) error {
+	if account.ID == "" || account.Profile.UserID == "" {
+		return errors.New("account ID and Matrix user ID are required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	previous := r.data
+	r.data.Accounts = append([]AccountSummary(nil), r.data.Accounts...)
+	updated := false
+	for index := range r.data.Accounts {
+		if r.data.Accounts[index].ID == account.ID {
+			r.data.Accounts[index] = account
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		r.data.Accounts = append(r.data.Accounts, account)
+	}
+	r.data.ActiveAccountID = account.ID
+	return r.saveOrRestore(previous)
+}
+
 func accountDatabasePath(dataDir, accountID string) (string, error) {
 	if accountID == primaryAccountID {
 		return filepath.Join(dataDir, "matrix.db"), nil
@@ -111,6 +135,14 @@ func accountDatabasePath(dataDir, accountID string) (string, error) {
 		return "", fmt.Errorf("invalid account ID %q", accountID)
 	}
 	return filepath.Join(dataDir, "accounts", accountID, "matrix.db"), nil
+}
+
+func newAccountID() (string, error) {
+	var id [16]byte
+	if _, err := cryptorand.Read(id[:]); err != nil {
+		return "", fmt.Errorf("generate account ID: %w", err)
+	}
+	return hex.EncodeToString(id[:]), nil
 }
 
 func (s *AppService) initializeAccounts(dataDir, mediaCacheDir string) error {
@@ -218,6 +250,152 @@ func (s *AppService) Accounts() []AccountSummary {
 		return []AccountSummary{}
 	}
 	return registry.All()
+}
+
+func (s *AppService) accountClient(accountID string) (*matrix.Client, error) {
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
+	if client := s.accountClients[accountID]; client != nil {
+		return client, nil
+	}
+	registry := s.accountRegistry
+	if registry == nil {
+		return nil, errors.New("account registry is unavailable")
+	}
+	var stored *AccountSummary
+	for _, account := range registry.All() {
+		if account.ID == accountID {
+			stored = &account
+			break
+		}
+	}
+	if stored == nil {
+		return nil, fmt.Errorf("account %q is not registered", accountID)
+	}
+	databasePath, err := accountDatabasePath(s.dataDir, accountID)
+	if err != nil {
+		return nil, err
+	}
+	client, err := matrix.New(databasePath)
+	if err != nil {
+		return nil, fmt.Errorf("open account %s: %w", accountID, err)
+	}
+	if s.accountMediaCacheDir != "" {
+		client.SetMediaCacheDir(filepath.Join(s.accountMediaCacheDir, accountID))
+	}
+	if client.IsLoggedIn() && stored.Profile.UserID != "" {
+		actualUserID := client.Profile().UserID
+		if actualUserID != stored.Profile.UserID {
+			client.Close()
+			return nil, fmt.Errorf("account %s database belongs to %s, not %s", accountID, actualUserID, stored.Profile.UserID)
+		}
+	}
+	if s.accountClients == nil {
+		s.accountClients = make(map[string]*matrix.Client)
+	}
+	s.accountClients[accountID] = client
+	return client, nil
+}
+
+func (s *AppService) AccountRooms() []Room {
+	rooms := []Room{}
+	for _, account := range s.Accounts() {
+		client, err := s.accountClient(account.ID)
+		if err != nil {
+			logging.For("service").Warn().Err(err).Msg("could not open Matrix account for inbox")
+			continue
+		}
+		if !client.IsLoggedIn() {
+			continue
+		}
+		s.startAccountEventPump(account.ID, client)
+		s.startAccountSync(account.ID, client)
+		if err = client.WaitForCache(s.ctx); err != nil {
+			if s.ctx.Err() == nil {
+				logging.For("service").Warn().Err(err).Str("account_id", account.ID).Msg("could not load Matrix account cache for inbox")
+			}
+			continue
+		}
+		accountRooms := mapRoomsWithPreferences(client.Rooms(), s.preferenceValuesForAccount(account.ID))
+		tagRooms(accountRooms, account.ID)
+		rooms = append(rooms, accountRooms...)
+	}
+	return rooms
+}
+
+func (s *AppService) SwitchAccount(accountID string) (Snapshot, error) {
+	client, err := s.accountClient(accountID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if !client.IsLoggedIn() {
+		return Snapshot{}, fmt.Errorf("account %q is not logged in", accountID)
+	}
+	s.accountMu.RLock()
+	registry := s.accountRegistry
+	s.accountMu.RUnlock()
+	if registry == nil {
+		return Snapshot{}, errors.New("account registry is unavailable")
+	}
+	if err = registry.SetActive(accountID); err != nil {
+		return Snapshot{}, err
+	}
+	s.accountMu.Lock()
+	s.activeAccountID = accountID
+	s.accountMu.Unlock()
+	s.clientMu.Lock()
+	s.client = client
+	s.clientMu.Unlock()
+	s.startAccountEventPump(accountID, client)
+	s.startAccountSync(accountID, client)
+	return s.Snapshot()
+}
+
+func (s *AppService) AddAccount(homeserver, username, password string) (Snapshot, error) {
+	s.accountMu.RLock()
+	registry := s.accountRegistry
+	dataDir := s.dataDir
+	mediaCacheDir := s.accountMediaCacheDir
+	s.accountMu.RUnlock()
+	if registry == nil {
+		return Snapshot{}, errors.New("account registry is unavailable")
+	}
+	accountID, err := newAccountID()
+	if err != nil {
+		return Snapshot{}, err
+	}
+	databasePath, err := accountDatabasePath(dataDir, accountID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	client, err := matrix.New(databasePath)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("create account database: %w", err)
+	}
+	if mediaCacheDir != "" {
+		client.SetMediaCacheDir(filepath.Join(mediaCacheDir, accountID))
+	}
+	if err = client.Login(s.ctx, homeserver, username, password); err != nil {
+		client.Close()
+		return Snapshot{}, err
+	}
+	if err = registry.UpsertAndActivate(accountSummary(accountID, client)); err != nil {
+		client.Close()
+		return Snapshot{}, err
+	}
+	s.accountMu.Lock()
+	if s.accountClients == nil {
+		s.accountClients = make(map[string]*matrix.Client)
+	}
+	s.accountClients[accountID] = client
+	s.activeAccountID = accountID
+	s.accountMu.Unlock()
+	s.clientMu.Lock()
+	s.client = client
+	s.clientMu.Unlock()
+	s.startAccountEventPump(accountID, client)
+	s.startAccountSync(accountID, client)
+	return s.Snapshot()
 }
 
 func (s *AppService) currentClient() *matrix.Client {

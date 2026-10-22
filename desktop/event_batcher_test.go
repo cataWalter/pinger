@@ -159,9 +159,22 @@ func TestEventBatcherConcurrentEnqueueIsRaceSafe(t *testing.T) {
 		}(worker)
 	}
 	workersDone.Wait()
-	batcher.Flush()
+	want := int64(workers * eventsPerWorker)
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for emitted.Load() < want {
+		batcher.Flush()
+		if emitted.Load() >= want {
+			break
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("emitted messages = %d, want %d", emitted.Load(), want)
+		default:
+		}
+	}
 
-	if got, want := emitted.Load(), int64(workers*eventsPerWorker); got != want {
+	if got := emitted.Load(); got != want {
 		t.Fatalf("emitted messages = %d, want %d", got, want)
 	}
 }

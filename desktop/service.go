@@ -556,8 +556,8 @@ func (s *AppService) Devices() ([]Device, error) {
 	return mapped, nil
 }
 
-func (s *AppService) RevokeDevice(deviceID string) error {
-	return s.currentClient().RevokeDevice(s.ctx, deviceID)
+func (s *AppService) RevokeDevice(deviceID, password string) error {
+	return s.currentClient().RevokeDevice(s.ctx, deviceID, password)
 }
 
 func (s *AppService) sendAttachment(ctx context.Context, roomID, filename string, data []byte, voiceNote bool, durationMilliseconds int64) error {

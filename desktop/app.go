@@ -163,6 +163,14 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 	}
 
 	icons := trayIcons()
+	if runtime.GOOS == "linux" {
+		linuxIcons, iconErr := linuxTrayIcons()
+		if iconErr != nil {
+			log.Printf("prepare Linux tray icons: %v", iconErr)
+		} else {
+			icons = linuxIcons
+		}
+	}
 	tray := app.SystemTray.New()
 	var trayHasUnread atomic.Bool
 	var trayDarkMode atomic.Bool

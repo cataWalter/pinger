@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { emojiQueryAt, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, wrapSelection } from './composerText'
+import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, wrapSelection } from './composerText'
 
 describe('replaceEmoticons', () => {
   it('replaces whole-word emoticons', () => {
@@ -79,5 +79,27 @@ describe('wrapSelection', () => {
 
   it('inserts paired markers at a collapsed caret', () => {
     expect(wrapSelection('ab', 1, 1, '`')).toEqual({ text: 'a``b', selectionStart: 2, selectionEnd: 2 })
+  })
+})
+
+describe('formatComposerText', () => {
+  it('wraps inline formatting and creates an editable link', () => {
+    expect(formatComposerText('say hi', 4, 6, 'bold')).toEqual({ text: 'say **hi**', selectionStart: 6, selectionEnd: 8 })
+    expect(formatComposerText('visit', 0, 5, 'link')).toEqual({ text: '[visit](url)', selectionStart: 1, selectionEnd: 6 })
+  })
+
+  it('inserts a link placeholder when no text is selected', () => {
+    expect(formatComposerText('hello ', 6, 6, 'link')).toEqual({ text: 'hello [link text](url)', selectionStart: 7, selectionEnd: 16 })
+  })
+
+  it('formats all touched lines as lists and quotes', () => {
+    expect(formatComposerText('alpha\nbeta\nomega', 0, 10, 'bulletList').text).toBe('- alpha\n- beta\nomega')
+    expect(formatComposerText('alpha\nbeta', 0, 10, 'numberedList').text).toBe('1. alpha\n2. beta')
+    expect(formatComposerText('alpha\nbeta', 0, 10, 'quote').text).toBe('> alpha\n> beta')
+  })
+
+  it('adds a heading to the first touched line and fences selected code lines', () => {
+    expect(formatComposerText('alpha\nbeta', 0, 10, 'heading').text).toBe('## alpha\nbeta')
+    expect(formatComposerText('before\nalpha\nbeta\nafter', 7, 17, 'codeBlock').text).toBe('before\n```\nalpha\nbeta\n```\nafter')
   })
 })

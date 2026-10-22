@@ -3,6 +3,7 @@ package desktop
 import (
 	"bytes"
 	_ "embed"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -18,6 +19,63 @@ type trayIconVariants struct {
 	unread         []byte
 	darkMode       []byte
 	darkModeUnread []byte
+}
+
+func linuxTrayIcons() (trayIconVariants, error) {
+	source, err := png.Decode(bytes.NewReader(baseTrayIcon))
+	if err != nil {
+		return trayIconVariants{}, fmt.Errorf("decode base tray icon: %w", err)
+	}
+	bounds := source.Bounds()
+	markBounds := image.Rectangle{Min: bounds.Max, Max: bounds.Min}
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			pixel := color.NRGBAModel.Convert(source.At(x, y)).(color.NRGBA)
+			if !isTrayMarkPixel(pixel) {
+				continue
+			}
+			if x < markBounds.Min.X {
+				markBounds.Min.X = x
+			}
+			if y < markBounds.Min.Y {
+				markBounds.Min.Y = y
+			}
+			if x+1 > markBounds.Max.X {
+				markBounds.Max.X = x + 1
+			}
+			if y+1 > markBounds.Max.Y {
+				markBounds.Max.Y = y + 1
+			}
+		}
+	}
+	if markBounds.Empty() {
+		return trayIconVariants{}, fmt.Errorf("base tray icon has no gold mark")
+	}
+
+	const iconSize = 64
+	const padding = 10
+	contentSize := iconSize - padding*2
+	markWidth, markHeight := contentSize, contentSize
+	if markBounds.Dx() > markBounds.Dy() {
+		markHeight = max(1, markBounds.Dy()*contentSize/markBounds.Dx())
+	} else {
+		markWidth = max(1, markBounds.Dx()*contentSize/markBounds.Dy())
+	}
+	icon := image.NewNRGBA(image.Rect(0, 0, iconSize, iconSize))
+	offsetX, offsetY := (iconSize-markWidth)/2, (iconSize-markHeight)/2
+	for y := 0; y < markHeight; y++ {
+		for x := 0; x < markWidth; x++ {
+			sourceX := markBounds.Min.X + x*markBounds.Dx()/markWidth
+			sourceY := markBounds.Min.Y + y*markBounds.Dy()/markHeight
+			pixel := color.NRGBAModel.Convert(source.At(sourceX, sourceY)).(color.NRGBA)
+			if isTrayMarkPixel(pixel) {
+				icon.SetNRGBA(offsetX+x, offsetY+y, pixel)
+			}
+		}
+	}
+	normal := encodeTrayIcon(icon)
+	unread := trayIconWithUnreadBadge(icon)
+	return trayIconVariants{normal: normal, unread: unread, darkMode: normal, darkModeUnread: unread}, nil
 }
 
 func trayIcons() trayIconVariants {
@@ -84,11 +142,16 @@ func trayIconWithUnreadBadge(source image.Image) []byte {
 	bounds := source.Bounds()
 	badged := image.NewRGBA(bounds)
 	draw.Draw(badged, bounds, source, bounds.Min, draw.Src)
-	centerX, centerY := bounds.Min.X+bounds.Dx()-40, bounds.Min.Y+44
-	for y := centerY - 18; y <= centerY+18; y++ {
-		for x := centerX - 18; x <= centerX+18; x++ {
+	centerX := bounds.Min.X + bounds.Dx()*27/32
+	centerY := bounds.Min.Y + bounds.Dy()*11/64
+	radius := min(bounds.Dx(), bounds.Dy()) * 18 / 256
+	if radius < 3 {
+		radius = 3
+	}
+	for y := centerY - radius; y <= centerY+radius; y++ {
+		for x := centerX - radius; x <= centerX+radius; x++ {
 			dx, dy := x-centerX, y-centerY
-			if dx*dx+dy*dy <= 18*18 {
+			if dx*dx+dy*dy <= radius*radius {
 				badged.Set(x, y, color.NRGBA{R: 239, G: 68, B: 68, A: 255})
 			}
 		}

@@ -1095,7 +1095,7 @@ func (c *Client) Devices(ctx context.Context) ([]Device, error) {
 	return devices, nil
 }
 
-func (c *Client) RevokeDevice(ctx context.Context, deviceID string) error {
+func (c *Client) RevokeDevice(ctx context.Context, deviceID, password string) error {
 	if strings.TrimSpace(deviceID) == "" {
 		return errors.New("Matrix device ID is empty")
 	}
@@ -1107,10 +1107,67 @@ func (c *Client) RevokeDevice(ctx context.Context, deviceID string) error {
 		return err
 	}
 	defer finish()
-	if err = c.engine.Client.DeleteDevice(ctx, id.DeviceID(deviceID), &mautrix.ReqDeleteDevice[any]{}); err != nil {
+	deleteRequest := &mautrix.ReqDeleteDevice[any]{}
+	if err = c.engine.Client.DeleteDevice(ctx, id.DeviceID(deviceID), deleteRequest); err == nil {
+		return nil
+	}
+	var apiError *mautrix.RespError
+	if !errors.As(err, &apiError) {
+		return fmt.Errorf("revoke Matrix device %q: %w", deviceID, err)
+	}
+	session, supported := passwordUIASession(apiError)
+	if !supported {
+		return fmt.Errorf("revoke Matrix device %q: %w", deviceID, err)
+	}
+	if password == "" {
+		return errors.New("Matrix account password is required to revoke another device")
+	}
+	passwordAuth := passwordUIAAAuth{
+		Type:     mautrix.AuthTypePassword,
+		User:     c.Profile().UserID,
+		Password: password,
+		Session:  session,
+	}
+	deleteRequest.Auth = passwordAuth
+	if err = c.engine.Client.DeleteDevice(ctx, id.DeviceID(deviceID), deleteRequest); err != nil {
 		return fmt.Errorf("revoke Matrix device %q: %w", deviceID, err)
 	}
 	return nil
+}
+
+type passwordUIAAAuth struct {
+	Type     mautrix.AuthType `json:"type"`
+	User     string           `json:"user"`
+	Password string           `json:"password"`
+	Session  string           `json:"session"`
+}
+
+func passwordUIASession(apiError *mautrix.RespError) (string, bool) {
+	if apiError == nil || apiError.ErrCode != "M_UNAUTHORIZED" {
+		return "", false
+	}
+	session, ok := apiError.ExtraData["session"].(string)
+	if !ok || session == "" {
+		return "", false
+	}
+	flows, ok := apiError.ExtraData["flows"].([]any)
+	if !ok {
+		return "", false
+	}
+	for _, rawFlow := range flows {
+		flow, ok := rawFlow.(map[string]any)
+		if !ok {
+			continue
+		}
+		stages, ok := flow["stages"].([]any)
+		if !ok || len(stages) != 1 {
+			continue
+		}
+		if stage, ok := stages[0].(string); ok && stage == string(mautrix.AuthTypePassword) {
+			return session, true
+		}
+	}
+	return "", false
 }
 
 func (c *Client) Start(ctx context.Context) error {

@@ -159,3 +159,55 @@ export function wrapSelection(value: string, start: number, end: number, marker:
     selectionEnd: end + marker.length,
   }
 }
+
+export type ComposerFormat = 'bold' | 'italic' | 'strikethrough' | 'inlineCode' | 'link' | 'heading' | 'bulletList' | 'numberedList' | 'quote' | 'codeBlock'
+
+function composerLineRange(value: string, start: number, end: number) {
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1
+  const contentEnd = end > start && value[end - 1] === '\n' ? end - 1 : end
+  const nextBreak = value.indexOf('\n', contentEnd)
+  return { lineStart, lineEnd: nextBreak < 0 ? value.length : nextBreak }
+}
+
+export function formatComposerText(value: string, start: number, end: number, format: ComposerFormat) {
+  const safeStart = Math.max(0, Math.min(start, value.length))
+  const safeEnd = Math.max(safeStart, Math.min(end, value.length))
+  const selected = value.slice(safeStart, safeEnd)
+
+  if (format === 'bold') return wrapSelection(value, safeStart, safeEnd, '**')
+  if (format === 'italic') return wrapSelection(value, safeStart, safeEnd, '_')
+  if (format === 'strikethrough') return wrapSelection(value, safeStart, safeEnd, '~~')
+  if (format === 'inlineCode' && !selected.includes('\n')) return wrapSelection(value, safeStart, safeEnd, '`')
+  if (format === 'link') {
+    const label = selected || 'link text'
+    const replacement = `[${label}](url)`
+    return {
+      text: value.slice(0, safeStart) + replacement + value.slice(safeEnd),
+      selectionStart: safeStart + 1,
+      selectionEnd: safeStart + 1 + label.length,
+    }
+  }
+
+  const { lineStart, lineEnd } = composerLineRange(value, safeStart, safeEnd)
+  const lines = value.slice(lineStart, lineEnd)
+  if (format === 'codeBlock' || format === 'inlineCode') {
+    const replacement = `\`\`\`\n${lines}\n\`\`\``
+    return {
+      text: value.slice(0, lineStart) + replacement + value.slice(lineEnd),
+      selectionStart: lineStart + 4,
+      selectionEnd: lineStart + 4 + lines.length,
+    }
+  }
+
+  const formattedLines = lines.split('\n').map((line, index) => {
+    if (format === 'heading') return `${index === 0 ? '## ' : ''}${line}`
+    if (format === 'bulletList') return `- ${line}`
+    if (format === 'numberedList') return `${index + 1}. ${line}`
+    return `> ${line}`
+  }).join('\n')
+  return {
+    text: value.slice(0, lineStart) + formattedLines + value.slice(lineEnd),
+    selectionStart: lineStart,
+    selectionEnd: lineStart + formattedLines.length,
+  }
+}

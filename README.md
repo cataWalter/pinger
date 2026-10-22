@@ -69,7 +69,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 **Appearance**
 
 - System default plus ten themes — Light, Dark, OLED black, Bosco, Rosa, Dracula, Midnight, Slate, Solarized, Sepia — each with its own default outgoing-message color, plus independent accent palettes and chat wallpapers.
-- Font size (Small/Medium/Large), app zoom 75–125% (`Ctrl`/`⌘` + `+` / `-` / `0`), compact message layout, compact chat list, transparent sidebar, room previews, unread badges, network labels for bridged chats, favorite placement (top of list or star only), message animations, 24-hour or relative timestamps, optional hiding of media and deleted messages, balanced line wrapping, and a pointer cursor on clickable controls.
+- Font size (Small/Medium/Large), app zoom 75–125% (`Ctrl`/`⌘` + `+` / `-` / `0`), compact chat list, room previews, unread badges, network labels for bridged chats, favorite placement (top of list or star only), message animations, 24-hour or relative timestamps, optional hiding of media and deleted messages, balanced line wrapping, and a pointer cursor on clickable controls.
 
 **System tray & notifications**
 

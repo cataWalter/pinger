@@ -46,4 +46,11 @@ describe('settings search', () => {
     expect(new Set(ids).size).toBe(ids.length)
     for (const entry of settingsEntries) expect(SETTINGS_TABS).toContain(entry.tab)
   })
+
+  it('keeps compact chat-list settings without exposing compact message layout', () => {
+    const ids = settingsEntries.map((entry) => entry.id)
+    expect(ids).not.toContain('appearance.compact')
+    expect(ids).toContain('appearance.compact-chat-list')
+    expect(ids).not.toContain('appearance.transparent-sidebar')
+  })
 })

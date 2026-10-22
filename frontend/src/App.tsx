@@ -7,12 +7,14 @@ import {
   ArrowUpRight,
   Archive,
   ArchiveRestore,
+  Bold,
   ChevronDown,
   Bell,
   BellOff,
   BellRing,
   Check,
   Clock3,
+  Code,
   CircleAlert,
   CircleDot,
   Copy,
@@ -39,22 +41,29 @@ import {
   Download,
   EyeOff,
   HardDrive,
+  Heading1,
   HeartHandshake,
   Images,
+  Italic,
+  Link,
+  List,
+  ListOrdered,
   LogOut,
   Mic,
   PanelRight,
   Plus,
+  Quote,
   Upload,
   Square,
+  Strikethrough,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
 import EmojiPicker from 'emoji-picker-react'
 import { AppService, GhostwriterMode as GhostwriterRequestMode, TurkishTutorService } from '../bindings/mychat/desktop'
-import type { AIMessage, Device, GhostSuggestion as GhostwriterSuggestion, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, RelationshipDecayContact, RelationshipDecaySnapshot, RelationshipHealthPoint, RelationshipHealthSnapshot, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, TutorAnalysis, UpdateStatus } from '../bindings/mychat/desktop/models.js'
+import type { AIMessage, Device, GhostSuggestion as GhostwriterSuggestion, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, RelationshipDecayContact, RelationshipDecaySnapshot, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, TutorAnalysis, UpdateStatus } from '../bindings/mychat/desktop/models.js'
 import { createBusyReplyForLanguage, detectBusyReplyLanguage, ENGLISH_BUSY_REPLY_TEMPLATE, hasBusyReplyTemplate } from './busyMode'
-import { emojiQueryAt, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, wrapSelection, type EmojiQuery, type EmoticonReplacement } from './composerText'
+import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, type ComposerFormat, type EmojiQuery, type EmoticonReplacement } from './composerText'
 import { fuzzyScore } from './fuzzy'
 import { appendGhostCompletion, ghostwriterDefaultEndpoints, isGhostCommandDraft, isLoopbackEndpoint, parseGhostCommand, type GhostwriterProvider } from './ghostwriter'
 import { SYSTEM_THEME_NAME, defaultBubbleColorForTheme, findThemeByName, themeIdForPreference, themeModeForPreference, themes as appearanceThemes } from './themes'
@@ -647,7 +656,11 @@ function formatTimelineTime(timestamp: number, preferences: PreferenceValues) {
     if (Math.abs(minutes) < 60) return relative.format(minutes, 'minute')
     return relative.format(Math.round(minutes / 60), 'hour')
   }
-  return formatTimeOrDate(timestamp, preferenceBoolean(preferences, 'appearance.time_24_hour'))
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    hour12: !preferenceBoolean(preferences, 'appearance.time_24_hour'),
+  }).format(new Date(timestamp))
 }
 
 function formatBytes(bytes: number) {
@@ -825,12 +838,6 @@ function App() {
   const [toneGuardHold, setToneGuardHold] = useState<ToneGuardHold | null>(null)
   const [toneGuardChecking, setToneGuardChecking] = useState(false)
   const [toneGuardResolving, setToneGuardResolving] = useState(false)
-    const [relationshipHealth, setRelationshipHealth] = useState<RelationshipHealthSnapshot | null>(null)
-    const [relationshipHealthLoading, setRelationshipHealthLoading] = useState(false)
-    const [relationshipHealthTargetRoomID, setRelationshipHealthTargetRoomID] = useState('')
-    const [relationshipHealthActionBusy, setRelationshipHealthActionBusy] = useState(false)
-    const [relationshipHealthActionError, setRelationshipHealthActionError] = useState('')
-    const [relationshipHealthLoadError, setRelationshipHealthLoadError] = useState('')
   const [relationshipDecay, setRelationshipDecay] = useState<RelationshipDecaySnapshot | null>(null)
   const [relationshipsOpen, setRelationshipsOpen] = useState(false)
   const [relationshipDecayBusy, setRelationshipDecayBusy] = useState('')
@@ -947,10 +954,6 @@ function App() {
   selectedRoomIDRef.current = selectedRoomID
   const pendingRelationshipNudgeRef = useRef<{ roomID: string; draft: string } | null>(null)
   const ghostwriterSelectedRoomRef = useRef('')
-    const relationshipHealthSelectedRoomRef = useRef('')
-    const relationshipHealthAccountRef = useRef('')
-    const relationshipHealthEnabledRef = useRef(false)
-    const relationshipHealthRequestRef = useRef(0)
   const ghostwriterChipEventRef = useRef('')
   const ghostwriterChipRequestRef = useRef(0)
   const ghostwriterAutocompleteRequestRef = useRef(0)
@@ -1050,11 +1053,6 @@ function App() {
   ), [messages, selectedRoom?.avatar, selectedRoomID, historyRoomIDRef.current])
   const typingStatus = formatTypingStatus(typingUsers, roomMembers, messages, selectedRoom?.direct ? selectedRoom.name : '')
   const preferences = snapshot?.preferences ?? {}
-    const relationshipHealthEnabled = preferenceBoolean(preferences, 'relationship_health.enabled')
-    const currentRelationshipHealth = relationshipHealth?.roomId === selectedRoomID
-      && relationshipHealth?.accountId === snapshot?.activeAccountId
-      ? relationshipHealth
-      : null
   const currentRelationshipDecay = relationshipDecay?.accountId === snapshot?.activeAccountId ? relationshipDecay : null
   const relationshipDecayContacts = currentRelationshipDecay?.contacts ?? []
   const relationshipDecayAlertCount = relationshipDecayContacts.filter((contact) => contact.alerted).length
@@ -1077,64 +1075,8 @@ function App() {
   messagesRef.current = messages
   composeTextRef.current = composeText
   ghostwriterSelectedRoomRef.current = selectedRoomID
-    relationshipHealthSelectedRoomRef.current = selectedRoomID
-    relationshipHealthAccountRef.current = snapshot?.activeAccountId ?? ''
-    relationshipHealthEnabledRef.current = relationshipHealthEnabled
   currentUserIDRef.current = snapshot?.profile.userId ?? ''
   currentDisplayNameRef.current = snapshot?.profile.displayName ?? ''
-
-  useEffect(() => {
-    const roomID = selectedRoom?.direct ? selectedRoom.id : ''
-    const accountID = snapshot?.activeAccountId ?? ''
-    const requestID = ++relationshipHealthRequestRef.current
-    setRelationshipHealth(null)
-    setRelationshipHealthLoadError('')
-    setRelationshipHealthActionError('')
-    setRelationshipHealthActionBusy(false)
-    if (!roomID || !accountID) {
-      setRelationshipHealthLoading(false)
-      return
-    }
-    setRelationshipHealthLoading(true)
-    void AppService.RelationshipHealth(roomID)
-      .then((health) => {
-        if (requestID !== relationshipHealthRequestRef.current
-          || relationshipHealthSelectedRoomRef.current !== roomID
-          || relationshipHealthAccountRef.current !== accountID
-          || health.accountId !== accountID) return
-        setRelationshipHealth(health)
-        setRelationshipHealthLoadError(health.error)
-      })
-      .catch((healthError: unknown) => {
-        if (requestID === relationshipHealthRequestRef.current
-          && relationshipHealthSelectedRoomRef.current === roomID
-          && relationshipHealthAccountRef.current === accountID) {
-          setRelationshipHealthLoadError(describeError(healthError))
-        }
-      })
-      .finally(() => {
-        if (requestID === relationshipHealthRequestRef.current
-          && relationshipHealthSelectedRoomRef.current === roomID
-          && relationshipHealthAccountRef.current === accountID) setRelationshipHealthLoading(false)
-      })
-    return () => {
-      if (relationshipHealthRequestRef.current === requestID) relationshipHealthRequestRef.current++
-    }
-  }, [selectedRoom?.direct, selectedRoom?.id, snapshot?.activeAccountId])
-
-  useEffect(() => {
-    const unsubscribe = Events.On('relationship-health:update', (event: any) => {
-      const health = event.data as RelationshipHealthSnapshot | undefined
-      if (!health
-        || !relationshipHealthEnabledRef.current
-        || health.accountId !== relationshipHealthAccountRef.current
-        || health.roomId !== relationshipHealthSelectedRoomRef.current) return
-      setRelationshipHealth(health)
-      setRelationshipHealthLoadError(health.error)
-      setRelationshipHealthLoading(false)
-    })
-    return unsubscribe
-  }, [])
 
   useEffect(() => {
     const accountID = snapshot?.activeAccountId
@@ -4208,11 +4150,11 @@ function App() {
     })
   }
 
-  function applyFormatting(marker: string) {
+  function applyFormatting(format: ComposerFormat) {
     const input = composerInputRef.current
     const start = input?.selectionStart ?? composeText.length
     const end = input?.selectionEnd ?? composeText.length
-    const result = wrapSelection(composeText, start, end, marker)
+    const result = formatComposerText(composeText, start, end, format)
     setComposeDraft(result.text)
     requestAnimationFrame(() => {
       const target = composerInputRef.current
@@ -4421,7 +4363,6 @@ function App() {
       data-theme={themeChoice}
       data-mobile-pane={mobilePane}
       data-incognito={preferenceBoolean(preferences, 'privacy.incognito')}
-      data-compact={preferenceBoolean(preferences, 'appearance.compact')}
       data-message-animations={preferenceBoolean(preferences, 'appearance.message_animations', true)}
       data-font-size={preferenceString(preferences, 'appearance.font_size', 'Medium').toLowerCase()}
       data-wallpaper={preferenceString(preferences, 'appearance.chat_wallpaper', 'None').toLowerCase()}
@@ -4441,7 +4382,7 @@ function App() {
         '--green-soft': accentPalette.soft,
       } as React.CSSProperties}
     >
-      <aside className={`sidebar ${preferenceBoolean(preferences, 'sidebar.transparent') ? 'is-transparent' : ''}`}>
+      <aside className="sidebar">
         <label className="room-search">
           <Search size={16} />
           <input ref={roomSearchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a room" aria-label="Find a room" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
@@ -4900,10 +4841,16 @@ function App() {
           {ghostwriterDraftStatus && <p className="ghostwriter-composer-status" role="status">{ghostwriterDraftStatus}</p>}
           {ghostwriterAutocompleteStatus === 'offline' && <p className="ghostwriter-composer-status" role="status">Local autocomplete unavailable. Check that the model is running.</p>}
           {preferenceBoolean(preferences, 'composer.formatting_toolbar') && <div className="composer-format-toolbar" role="toolbar" aria-label="Formatting">
-            <button className="composer-format-button" type="button" aria-label="Bold" title="Bold" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('**')}><strong>B</strong></button>
-            <button className="composer-format-button" type="button" aria-label="Italic" title="Italic" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('_')}><em>I</em></button>
-            <button className="composer-format-button" type="button" aria-label="Inline code" title="Inline code" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('`')}><code>{'</>'}</code></button>
-            <button className="composer-format-button" type="button" aria-label="Strikethrough" title="Strikethrough" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('~~')}><s>S</s></button>
+            <button className="composer-format-button" type="button" aria-label="Bold" title="Bold" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bold')}><Bold size={15} /></button>
+            <button className="composer-format-button" type="button" aria-label="Italic" title="Italic" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('italic')}><Italic size={15} /></button>
+            <button className="composer-format-button" type="button" aria-label="Strikethrough" title="Strikethrough" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('strikethrough')}><Strikethrough size={15} /></button>
+            <button className="composer-format-button" type="button" aria-label="Inline code" title="Inline code" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('inlineCode')}><Code size={15} /></button>
+            <button className="composer-format-button" type="button" aria-label="Insert link" title="Insert link" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('link')}><Link size={15} /></button>
+            <button className="composer-format-button" type="button" aria-label="Heading" title="Heading" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('heading')}><Heading1 size={15} /></button>
+            <button className="composer-format-button" type="button" aria-label="Bulleted list" title="Bulleted list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bulletList')}><List size={15} /></button>
+            <button className="composer-format-button" type="button" aria-label="Numbered list" title="Numbered list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('numberedList')}><ListOrdered size={15} /></button>
+            <button className="composer-format-button" type="button" aria-label="Quote" title="Quote" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('quote')}><Quote size={15} /></button>
+            <button className="composer-format-button" type="button" aria-label="Code block" title="Code block" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('codeBlock')}><Code size={15} /></button>
           </div>}
           <div className="composer-footer">
             <div className="composer-tools">
@@ -6166,6 +6113,9 @@ function SettingsDialog({
   const [devices, setDevices] = useState<Device[]>([])
   const [devicesLoading, setDevicesLoading] = useState(false)
   const [devicesError, setDevicesError] = useState('')
+  const [deviceRevokeID, setDeviceRevokeID] = useState('')
+  const [deviceRevokePassword, setDeviceRevokePassword] = useState('')
+  const [deviceRevokeBusy, setDeviceRevokeBusy] = useState(false)
   const [scheduleSuggestionsDraft, setScheduleSuggestionsDraft] = useState(preferenceString(preferences, 'schedule.suggestions_minutes', '5,15,60'))
   const [scheduleSuggestionsError, setScheduleSuggestionsError] = useState('')
   const [scheduleSendDelayDraft, setScheduleSendDelayDraft] = useState(preferenceString(preferences, 'schedule.default_send_minutes', '5'))
@@ -6375,13 +6325,24 @@ function SettingsDialog({
   }, [tab])
 
   async function revokeDevice(device: Device) {
-    if (!window.confirm(`Revoke ${device.displayName || device.id}?`)) return
+    setDeviceRevokeBusy(true)
+    setDevicesError('')
     try {
-      await AppService.RevokeDevice(device.id)
+      await AppService.RevokeDevice(device.id, deviceRevokePassword)
       setDevices((current) => current.filter((item) => item.id !== device.id))
+      setDeviceRevokeID('')
     } catch (revokeError) {
       setDevicesError(describeError(revokeError))
+    } finally {
+      setDeviceRevokePassword('')
+      setDeviceRevokeBusy(false)
     }
+  }
+
+  function cancelDeviceRevoke() {
+    setDeviceRevokeID('')
+    setDeviceRevokePassword('')
+    setDevicesError('')
   }
 
   async function refreshStorage() {
@@ -6703,11 +6664,9 @@ function SettingsDialog({
                 </div>
               </div>
               <PreferenceToggle label="Use pointer cursor on clickable controls" checked={preferenceBoolean(preferences, 'appearance.pointer_cursor', true)} onChange={(value) => onPreferenceChange('appearance.pointer_cursor', value)} />
-              <PreferenceToggle label="Compact message layout" checked={preferenceBoolean(preferences, 'appearance.compact')} onChange={(value) => onPreferenceChange('appearance.compact', value)} />
               <PreferenceToggle label="Show room previews" checked={preferenceBoolean(preferences, 'sidebar.show_previews', true)} onChange={(value) => onPreferenceChange('sidebar.show_previews', value)} />
               <PreferenceToggle label="Show unread counts" checked={preferenceBoolean(preferences, 'sidebar.show_unread_counts', true)} onChange={(value) => onPreferenceChange('sidebar.show_unread_counts', value)} />
               <PreferenceToggle label="Compact chat list" checked={preferenceBoolean(preferences, 'sidebar.compact_chat_list')} onChange={(value) => onPreferenceChange('sidebar.compact_chat_list', value)} />
-              <PreferenceToggle label="Transparent sidebar" checked={preferenceBoolean(preferences, 'sidebar.transparent')} onChange={(value) => onPreferenceChange('sidebar.transparent', value)} />
               <PreferenceToggle label="Show network labels in the chat list" checked={preferenceBoolean(preferences, 'sidebar.network_icons')} onChange={(value) => onPreferenceChange('sidebar.network_icons', value)} />
               <label className="setting-row"><span><strong>Favorite chats</strong><small>List favorite rooms first, or only mark them with a star.</small></span>
                 <select aria-label="Favorite chats" value={preferenceString(preferences, 'sidebar.pinned_style', 'Top of list')} onChange={(event) => onPreferenceChange('sidebar.pinned_style', event.target.value)}>
@@ -6902,7 +6861,14 @@ function SettingsDialog({
               {devices.map((device) => (
                 <article className="device-row" key={device.id}>
                   <div><strong>{device.displayName || '(unnamed device)'}</strong><span>{device.id}{device.current ? ' · this device' : ''}</span><small>{device.lastSeenAt > 0 ? `Last active ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(device.lastSeenAt))}` : device.lastSeenIp || 'Last active time unavailable'}</small></div>
-                  {!device.current && <button className="settings-command is-danger" type="button" onClick={() => void revokeDevice(device)}>Revoke</button>}
+                  {!device.current && (deviceRevokeID === device.id ? (
+                    <form className="logout-confirm device-revoke-confirm" aria-label={`Confirm revoking ${device.displayName || device.id}`} onSubmit={(event) => { event.preventDefault(); void revokeDevice(device) }}>
+                      <span>Enter your Matrix account password to revoke this device.</span>
+                      <label className="security-field"><span>Account password</span><input aria-label="Account password" type="password" autoComplete="current-password" required value={deviceRevokePassword} onChange={(event) => setDeviceRevokePassword(event.target.value)} /></label>
+                      <button type="button" disabled={deviceRevokeBusy} onClick={cancelDeviceRevoke}>Cancel</button>
+                      <button className="is-danger" type="submit" disabled={deviceRevokeBusy}>{deviceRevokeBusy ? 'Revoking…' : 'Revoke device'}</button>
+                    </form>
+                  ) : <button className="settings-command is-danger" type="button" onClick={() => { setDevicesError(''); setDeviceRevokePassword(''); setDeviceRevokeID(device.id) }}>Revoke</button>)}
                 </article>
               ))}
             </div>
