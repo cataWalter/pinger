@@ -61,7 +61,7 @@ import {
 } from 'lucide-react'
 import EmojiPicker from 'emoji-picker-react'
 import { AppService, GhostwriterMode as GhostwriterRequestMode, TurkishTutorService } from '../bindings/mychat/desktop'
-import type { AIMessage, Device, GhostSuggestion as GhostwriterSuggestion, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, RelationshipDecayContact, RelationshipDecaySnapshot, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, TutorAnalysis, UpdateStatus } from '../bindings/mychat/desktop/models.js'
+import type { AIMessage, AppBuildInfo, Device, GhostSuggestion as GhostwriterSuggestion, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, RelationshipDecayContact, RelationshipDecaySnapshot, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, TutorAnalysis, UpdateStatus } from '../bindings/mychat/desktop/models.js'
 import { createBusyReplyForLanguage, detectBusyReplyLanguage, ENGLISH_BUSY_REPLY_TEMPLATE, hasBusyReplyTemplate } from './busyMode'
 import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, type ComposerFormat, type EmojiQuery, type EmoticonReplacement } from './composerText'
 import { fuzzyScore } from './fuzzy'
@@ -105,6 +105,7 @@ type PreferenceValues = NonNullable<Snapshot['preferences']>
 type RoomScope = 'all' | 'archived'
 type RoomRefinements = { unanswered: boolean; favorite: boolean }
 type PendingSend = { roomID: string; text: string; replyTo: Message | null; mentionUserIDs: string[]; mentionBindings: { token: string; userID: string }[]; timer: number }
+type PendingSendPreview = { roomID: string; text: string }
 type MessageMenuItem = { key: string; label: string; ariaLabel: string; icon: ReactElement; danger?: boolean; disabled?: boolean; separatorBefore?: boolean; run: () => void }
 type AIAcceptAction = { kind: 'none' } | { kind: 'draft' | 'rewrite' } | { kind: 'reply'; target: Message }
 type AIPanel = { title: string; busy: boolean; result: string; error: string; acceptAction: AIAcceptAction; status?: string }
@@ -494,6 +495,10 @@ function timelineMessageID(message: Message) {
 
 function isOwnMessage(message: Message, currentUserID: string) {
   return message.own || Boolean(message.sender && message.sender === currentUserID)
+}
+
+function isNeedsReplyRoom(room: Room, pendingRoomID = '') {
+  return room.unanswered && room.id !== pendingRoomID && (room.direct || room.bridge === 'IG')
 }
 
 const TimelineMessageList = memo(function TimelineMessageList({
@@ -924,7 +929,9 @@ function App() {
   const [password, setPassword] = useState('')
   const [recoveryKey, setRecoveryKey] = useState('')
   const [busy, setBusy] = useState(false)
-  const [pendingSendPreview, setPendingSendPreview] = useState<string | null>(null)
+  const [pendingSendPreview, setPendingSendPreview] = useState<PendingSendPreview | null>(null)
+  const [pendingSendDeadline, setPendingSendDeadline] = useState<number | null>(null)
+  const [pendingSendCountdown, setPendingSendCountdown] = useState(0)
   const [autoPlayNextMessageId, setAutoPlayNextMessageId] = useState<string | null>(null)
   const [voiceCaptureStatus, setVoiceCaptureStatus] = useState<'recording' | 'processing' | null>(null)
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([])
@@ -1006,6 +1013,13 @@ function App() {
     if (undoToastTimerRef.current !== null) window.clearTimeout(undoToastTimerRef.current)
     if (scheduledNoticeTimerRef.current !== null) window.clearTimeout(scheduledNoticeTimerRef.current)
   }, [])
+  useEffect(() => {
+    if (pendingSendDeadline === null) return
+    const updateCountdown = () => setPendingSendCountdown(Math.max(0, Math.ceil((pendingSendDeadline - Date.now()) / 1000)))
+    updateCountdown()
+    const timer = window.setInterval(updateCountdown, 250)
+    return () => window.clearInterval(timer)
+  }, [pendingSendDeadline])
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const voiceRecorderRef = useRef<MediaRecorder | null>(null)
   const voiceChunksRef = useRef<Blob[]>([])
@@ -1070,6 +1084,7 @@ function App() {
   const busyModeEnabled = preferenceBoolean(preferences, 'busy_mode.enabled')
   const automaticArchiveEnabled = preferenceBoolean(preferences, 'archive.automatic')
   const visibleMessages = useMemo(() => hideDeletedMessages ? messages.filter((message) => !message.redacted) : messages, [messages, hideDeletedMessages])
+  const roomPendingSend = pendingSendPreview?.roomID === selectedRoomID ? pendingSendPreview : null
   preferencesRef.current = preferences
   roomsRef.current = rooms
   messagesRef.current = messages
@@ -1097,7 +1112,7 @@ function App() {
 
   useEffect(() => {
     const accountID = snapshot?.activeAccountId
-    const unsubscribe = Events.On('relationship-decay:update', (event: any) => {
+    const unsubscribe = Events.On('relationship-decay:update', (event: { data: unknown }) => {
       const decay = event.data as RelationshipDecaySnapshot | undefined
       if (!decay || decay.accountId !== accountID) return
       setRelationshipDecay(decay)
@@ -1250,7 +1265,7 @@ function App() {
       const matchesQuery = !query || `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query)
       const archived = preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
       const matchesArchive = roomScope === 'archived' ? archived : !archived || Boolean(query)
-      const matchesRefinements = (!roomRefinements.unanswered || room.unanswered)
+      const matchesRefinements = (!roomRefinements.unanswered || isNeedsReplyRoom(room, pendingSendPreview?.roomID))
         && (!roomRefinements.favorite || room.favorite)
       return matchesQuery && matchesArchive && matchesRefinements
     }).sort((left, right) => {
@@ -1259,10 +1274,10 @@ function App() {
         : 0
       return favoriteOrder || compareRoomActivity(left, right, today)
     })
-  }, [scopedRooms, search, preferences, roomScope, roomRefinements])
+  }, [scopedRooms, search, preferences, roomScope, roomRefinements, pendingSendPreview?.roomID])
   const selectedRoomListIndex = filteredRooms.findIndex((room) => room.id === selectedRoomID && isActiveAccountRoom(room))
   const quickSwitcherRooms = useMemo(() => rankQuickSwitcherRooms(rooms, quickSwitcherQuery), [rooms, quickSwitcherQuery])
-  const unansweredCount = useMemo(() => scopedRooms.filter((room) => room.unanswered && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences])
+  const unansweredCount = useMemo(() => scopedRooms.filter((room) => isNeedsReplyRoom(room, pendingSendPreview?.roomID) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences, pendingSendPreview?.roomID])
   const readRoomCount = useMemo(() => rooms.filter((room) => room.unread === 0 && !room.markedUnread && !preferenceBoolean(preferences, archivedPreferenceKey(room.id))).length, [rooms, preferences])
   const contextMenuRooms = roomContextMenu
     ? (selectedRoomIDs.includes(roomContextMenu.roomID) ? selectedRoomIDs : [roomContextMenu.roomID])
@@ -1621,7 +1636,7 @@ function App() {
       pinTimelineToBottom(timeline)
       if (!roomSwitchRef.current || historyRoomIDRef.current === selectedRoomID) roomSwitchRef.current = false
     }
-  }, [messages, selectedRoomID])
+  }, [messages, pendingSendPreview, selectedRoomID])
 
   // Media, fonts, and composer or banner changes resize the timeline without changing `messages`.
   // Re-pin to the newest message after each resize while the reader is following the conversation.
@@ -1638,7 +1653,7 @@ function App() {
     observer.disconnect()
     observer.observe(timeline)
     for (const child of Array.from(timeline.children)) observer.observe(child)
-  }, [messages, selectedRoomID])
+  }, [messages, pendingSendPreview, selectedRoomID])
 
   useEffect(() => {
     return () => {
@@ -1828,10 +1843,10 @@ function App() {
       }
     }
     matrixUpdateHandlerRef.current = applyMatrixUpdate
-    const unsubscribe = Events.On('matrix:update', (event: any) => {
+    const unsubscribe = Events.On('matrix:update', (event: { data: unknown }) => {
       applyMatrixUpdate(event.data as MatrixUpdate)
     })
-    const unsubscribePreferences = Events.On('preferences:update', (event: any) => {
+    const unsubscribePreferences = Events.On('preferences:update', (event: { data: unknown }) => {
       if (!active) return
       const state = event.data as Snapshot | undefined
       if (!state) return
@@ -1841,7 +1856,7 @@ function App() {
         return (state.rooms ?? [])[0]?.id || ''
       })
     })
-    const unsubscribeHostError = Events.On('matrix:host-error', (event: any) => {
+    const unsubscribeHostError = Events.On('matrix:host-error', (event: { data: unknown }) => {
       const message = (event.data as { error?: string } | undefined)?.error
       if (active && message) setError(message)
     })
@@ -1858,19 +1873,19 @@ function App() {
     const unsubscribeMenuSearch = Events.On('application-menu:search', () => {
       if (active) setSearchOpen(true)
     })
-    const unsubscribeNotificationOpenRoom = Events.On('notification:open-room', (event: any) => {
+    const unsubscribeNotificationOpenRoom = Events.On('notification:open-room', (event: { data: unknown }) => {
       const roomID = event.data as string | undefined
       if (active && roomID) {
         window.focus()
         showRoom(roomID)
       }
     })
-    const unsubscribeAttachmentSent = Events.On('matrix:attachment-sent', (event: any) => {
+    const unsubscribeAttachmentSent = Events.On('matrix:attachment-sent', (event: { data: unknown }) => {
       if (active && event.data === selectedRoomRef.current) {
         setHistoryRevision((revision) => revision + 1)
       }
     })
-    const unsubscribeScheduledReminder = Events.On('scheduler:reminder', (event: any) => {
+    const unsubscribeScheduledReminder = Events.On('scheduler:reminder', (event: { data: unknown }) => {
       if (!active) return
       const reminder = event.data as ScheduledJob
       const roomName = roomsRef.current.find((room) => room.id === reminder.roomId)?.name || reminder.roomId
@@ -2758,7 +2773,7 @@ function App() {
   }
 
   function selectRoomByOffset(direction: number, unansweredOnly = false) {
-    const availableRooms = filteredRooms.filter((room) => !unansweredOnly || room.unanswered)
+    const availableRooms = filteredRooms.filter((room) => !unansweredOnly || isNeedsReplyRoom(room, pendingSendPreview?.roomID))
     if (availableRooms.length === 0) return
     const currentIndex = availableRooms.findIndex((room) => room.id === selectedRoomRef.current && isActiveAccountRoom(room))
     const nextIndex = currentIndex < 0
@@ -3060,6 +3075,7 @@ function App() {
   }
 
   const undoSendSeconds = Number(preferenceString(preferences, 'composer.undo_send_seconds', '0')) || 0
+  const undoSendEnabled = preferenceBoolean(preferences, 'composer.undo_send_enabled', undoSendSeconds > 0)
 
   async function dispatchMessage(
     message: Pick<PendingSend, 'roomID' | 'text' | 'replyTo' | 'mentionUserIDs'>,
@@ -3330,6 +3346,8 @@ function App() {
     clearTimeout(pending.timer)
     pendingSendRef.current = null
     setPendingSendPreview(null)
+    setPendingSendDeadline(null)
+    setPendingSendCountdown(0)
     try {
       const sent = await dispatchMessage(pending, { source: 'queued', mentionBindings: pending.mentionBindings })
       if (!sent) {
@@ -3350,6 +3368,8 @@ function App() {
     clearTimeout(pending.timer)
     pendingSendRef.current = null
     setPendingSendPreview(null)
+    setPendingSendDeadline(null)
+    setPendingSendCountdown(0)
     restorePendingSend(pending)
   }
 
@@ -3406,17 +3426,20 @@ function App() {
     const text = (preferenceBoolean(preferences, 'emoji.replace_emoticons', true) ? replaceEmoticons(composeText, customReplacements) : composeText).trim()
     if (!roomID || !text || busy || ghostwriterDraftBusy) return
     const mentionUserIDs = [...new Set(mentionBindings.filter(({ token }) => text.includes(token)).map(({ userID }) => userID))]
-    if (!editTarget && undoSendSeconds > 0) {
+    if (!editTarget && undoSendEnabled && undoSendSeconds > 0) {
       void flushPendingSend()
       const timer = window.setTimeout(() => void flushPendingSend(), undoSendSeconds * 1000)
       pendingSendRef.current = { roomID, text, replyTo: replyTarget, mentionUserIDs, mentionBindings, timer }
-      setPendingSendPreview(text)
+      setPendingSendPreview({ roomID, text })
+      setPendingSendDeadline(Date.now() + undoSendSeconds * 1000)
+      setPendingSendCountdown(undoSendSeconds)
       setError('')
       draftsRef.current.delete(roomID)
       if (selectedRoomRef.current === roomID) setComposeText('')
       setMentionBindings([])
       setMentionStart(-1)
       setReplyTarget(null)
+      stickToBottomRef.current = true
       return
     }
     setBusy(true)
@@ -3718,7 +3741,7 @@ function App() {
     ? 'Ask AI · unavailable'
     : !selectedRoom
       ? 'Select a room first'
-      : Boolean(editTarget)
+      : editTarget
         ? 'Finish editing first'
         : busy
           ? 'Wait until sending finishes'
@@ -4679,7 +4702,7 @@ function App() {
         }}>
           {!selectedRoom && <div className="timeline-empty"><MessageCircleMore size={25} /><span>Select a room</span></div>}
           {selectedRoom && loadingHistory && messages.length === 0 && <div className="timeline-empty"><span className="loading-mark" />Loading messages</div>}
-          {selectedRoom && !loadingHistory && visibleMessages.length === 0 && <div className="timeline-empty"><MessageCircleMore size={25} /><span>{messages.length > 0 ? 'Deleted messages are hidden' : hasOlder ? 'No messages in the past 24 hours' : 'No messages yet'}</span></div>}
+          {selectedRoom && !loadingHistory && visibleMessages.length === 0 && !roomPendingSend && <div className="timeline-empty"><MessageCircleMore size={25} /><span>{messages.length > 0 ? 'Deleted messages are hidden' : hasOlder ? 'No messages in the past 24 hours' : 'No messages yet'}</span></div>}
           {selectedRoom && hasOlder && (
             <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={loadOlderMessages} disabled={loadingOlder}>
               {loadingOlder ? <><span className="loading-mark" />Loading older messages</> : 'Load older messages'}
@@ -4698,6 +4721,19 @@ function App() {
             canUseTranscriptAsDraft={!editTarget}
             actionsRef={timelineMessageActionsRef}
           />
+          {roomPendingSend && <article className="message-row is-own is-first is-last is-tail is-queued-message" role="group" aria-label="Message queued">
+            <div className="message-body-wrap">
+              <Suspense fallback={<div className="message-body">{roomPendingSend.text}</div>}>
+                <MarkdownMessage body={roomPendingSend.text} />
+              </Suspense>
+              <div className="queued-message-controls">
+                <span className="queued-message-countdown">Sending in {pendingSendCountdown}s</span>
+                <button className="queued-message-undo" type="button" aria-label="Undo send" title={`Undo send; sends in ${pendingSendCountdown} seconds`} onClick={cancelPendingSend}>
+                  <RotateCcw size={13} /><span>Undo send</span>
+                </button>
+              </div>
+            </div>
+          </article>}
           {chatTranslation?.roomID === selectedRoomID && <div className="chat-translation-status">
             {chatTranslation.busy && chatTranslation.targetMessageIDs.length === 0 && <p role="status">{chatTranslation.status}</p>}
             {chatTranslation.error && <>
@@ -4769,10 +4805,6 @@ function App() {
               setMentionStart(-1)
             }}><X size={14} /></button>
           </div>}
-          {pendingSendPreview !== null && <div className="composer-context is-queued" role="status">
-            <div className="composer-context-copy"><strong>Message queued</strong><small>{pendingSendPreview.length > 80 ? `${pendingSendPreview.slice(0, 80)}…` : pendingSendPreview}</small></div>
-            <button className="composer-context-link" type="button" title="Cancel the queued message" onClick={cancelPendingSend}>Undo send</button>
-          </div>}
           <div className="composer-input-wrap">
             {ghostwriterEnabled && ghostwriterInlineSuffix && <div ref={ghostwriterPreviewRef} className="ghostwriter-inline-preview" aria-hidden="true"><span className="ghostwriter-inline-draft">{composeText}</span><span className="ghostwriter-inline-suffix">{ghostwriterInlineSuffix}</span></div>}
             <textarea
@@ -4841,16 +4873,16 @@ function App() {
           {ghostwriterDraftStatus && <p className="ghostwriter-composer-status" role="status">{ghostwriterDraftStatus}</p>}
           {ghostwriterAutocompleteStatus === 'offline' && <p className="ghostwriter-composer-status" role="status">Local autocomplete unavailable. Check that the model is running.</p>}
           {preferenceBoolean(preferences, 'composer.formatting_toolbar') && <div className="composer-format-toolbar" role="toolbar" aria-label="Formatting">
-            <button className="composer-format-button" type="button" aria-label="Bold" title="Bold" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bold')}><Bold size={15} /></button>
-            <button className="composer-format-button" type="button" aria-label="Italic" title="Italic" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('italic')}><Italic size={15} /></button>
-            <button className="composer-format-button" type="button" aria-label="Strikethrough" title="Strikethrough" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('strikethrough')}><Strikethrough size={15} /></button>
-            <button className="composer-format-button" type="button" aria-label="Inline code" title="Inline code" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('inlineCode')}><Code size={15} /></button>
-            <button className="composer-format-button" type="button" aria-label="Insert link" title="Insert link" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('link')}><Link size={15} /></button>
-            <button className="composer-format-button" type="button" aria-label="Heading" title="Heading" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('heading')}><Heading1 size={15} /></button>
-            <button className="composer-format-button" type="button" aria-label="Bulleted list" title="Bulleted list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bulletList')}><List size={15} /></button>
-            <button className="composer-format-button" type="button" aria-label="Numbered list" title="Numbered list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('numberedList')}><ListOrdered size={15} /></button>
-            <button className="composer-format-button" type="button" aria-label="Quote" title="Quote" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('quote')}><Quote size={15} /></button>
-            <button className="composer-format-button" type="button" aria-label="Code block" title="Code block" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('codeBlock')}><Code size={15} /></button>
+            <IconTooltip label="Bold text"><button className="icon-button" type="button" aria-label="Bold" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bold')}><Bold size={15} /></button></IconTooltip>
+            <IconTooltip label="Italic text"><button className="icon-button" type="button" aria-label="Italic" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('italic')}><Italic size={15} /></button></IconTooltip>
+            <IconTooltip label="Strikethrough text"><button className="icon-button" type="button" aria-label="Strikethrough" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('strikethrough')}><Strikethrough size={15} /></button></IconTooltip>
+            <IconTooltip label="Inline code"><button className="icon-button" type="button" aria-label="Inline code" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('inlineCode')}><Code size={15} /></button></IconTooltip>
+            <IconTooltip label="Insert link"><button className="icon-button" type="button" aria-label="Insert link" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('link')}><Link size={15} /></button></IconTooltip>
+            <IconTooltip label="Format as heading"><button className="icon-button" type="button" aria-label="Heading" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('heading')}><Heading1 size={15} /></button></IconTooltip>
+            <IconTooltip label="Start a bulleted list"><button className="icon-button" type="button" aria-label="Bulleted list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bulletList')}><List size={15} /></button></IconTooltip>
+            <IconTooltip label="Start a numbered list"><button className="icon-button" type="button" aria-label="Numbered list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('numberedList')}><ListOrdered size={15} /></button></IconTooltip>
+            <IconTooltip label="Format as quote"><button className="icon-button" type="button" aria-label="Quote" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('quote')}><Quote size={15} /></button></IconTooltip>
+            <IconTooltip label="Insert a code block"><button className="icon-button" type="button" aria-label="Code block" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('codeBlock')}><Code size={15} /></button></IconTooltip>
           </div>}
           <div className="composer-footer">
             <div className="composer-tools">
@@ -5871,6 +5903,7 @@ function ChatStorageSettings() {
 
 function AboutPinger() {
   const [version, setVersion] = useState('')
+  const [buildInfo, setBuildInfo] = useState<AppBuildInfo | null>(null)
   const [update, setUpdate] = useState<UpdateStatus | null>(null)
   const [checking, setChecking] = useState(false)
   const [updateError, setUpdateError] = useState('')
@@ -5880,6 +5913,9 @@ function AboutPinger() {
     AppService.AppVersion()
       .then((value) => { if (active) setVersion(value) })
       .catch(() => { if (active) setVersion('unknown') })
+    AppService.AppBuildInfo()
+      .then((value) => { if (active) setBuildInfo(value) })
+      .catch(() => { if (active) setBuildInfo({ commit: 'unknown', buildDate: 'unknown' }) })
     return () => { active = false }
   }, [])
 
@@ -5897,9 +5933,12 @@ function AboutPinger() {
   }
 
   const published = update?.publishedAt ? Date.parse(update.publishedAt) : NaN
+  const commit = buildInfo?.commit
+    ? buildInfo.commit === 'unknown' ? 'unknown' : buildInfo.commit.slice(0, 7)
+    : 'Loading…'
   return (
     <>
-      <div className="account-details"><span>Application</span><strong>Pinger</strong><span>Version</span><strong>{version || 'Loading…'}</strong><span>Matrix engine</span><strong>gomuks</strong><span>License</span><strong>AGPL-3.0-or-later</strong></div>
+      <div className="account-details"><span>Application</span><strong>Pinger</strong><span>Version</span><strong>{version || 'Loading…'}</strong><span>Commit</span><strong>{commit}</strong><span>Build date</span><strong>{buildInfo?.buildDate || 'Loading…'}</strong><span>Matrix engine</span><strong>gomuks</strong><span>License</span><strong>AGPL-3.0-or-later</strong></div>
       <button className="settings-command" type="button" disabled={checking} onClick={() => void checkForUpdates()}>{checking ? 'Checking…' : 'Check for updates'}</button>
       {updateError && <p className="settings-error" role="alert">{updateError}</p>}
       {update && (
@@ -6118,6 +6157,8 @@ function SettingsDialog({
   const [deviceRevokeBusy, setDeviceRevokeBusy] = useState(false)
   const [scheduleSuggestionsDraft, setScheduleSuggestionsDraft] = useState(preferenceString(preferences, 'schedule.suggestions_minutes', '5,15,60'))
   const [scheduleSuggestionsError, setScheduleSuggestionsError] = useState('')
+  const [archiveAgeDraft, setArchiveAgeDraft] = useState(preferenceString(preferences, 'archive.older_than_days', '90'))
+  const [archiveAgeError, setArchiveAgeError] = useState('')
   const [scheduleSendDelayDraft, setScheduleSendDelayDraft] = useState(preferenceString(preferences, 'schedule.default_send_minutes', '5'))
   const [scheduleReminderDelayDraft, setScheduleReminderDelayDraft] = useState(preferenceString(preferences, 'schedule.default_reminder_minutes', '60'))
   const [scheduleSendDelayError, setScheduleSendDelayError] = useState('')
@@ -6250,6 +6291,18 @@ function SettingsDialog({
     setDraft(value)
     setError('')
     void onPreferenceChange(key, value)
+  }
+
+  function saveArchiveAge(draft: string) {
+    const days = Number(draft)
+    if (!Number.isInteger(days) || days < 1 || days > 3650) {
+      setArchiveAgeError('Use a whole number from 1 to 3650 days.')
+      return
+    }
+    const value = String(days)
+    setArchiveAgeDraft(value)
+    setArchiveAgeError('')
+    void onPreferenceChange('archive.older_than_days', value)
   }
 
   useEffect(() => {
@@ -6501,7 +6554,7 @@ function SettingsDialog({
                 }}
                 onKeyDown={(event) => {
                   const currentIndex = tabs.indexOf(item)
-                  let nextIndex = currentIndex
+                  let nextIndex: number
                   if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % tabs.length
                   else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
                   else if (event.key === 'Home') nextIndex = 0
@@ -6593,10 +6646,9 @@ function SettingsDialog({
               </label>
               <PreferenceToggle label="Automatically archive inactive rooms" checked={preferenceBoolean(preferences, 'archive.automatic')} onChange={(value) => onPreferenceChange('archive.automatic', value)} />
               <label className="setting-row"><span><strong>Inactive room age</strong><small>Archive rooms without activity for this long.</small></span>
-                <select aria-label="Inactive room age" value={preferenceString(preferences, 'archive.older_than_days', '90')} onChange={(event) => onPreferenceChange('archive.older_than_days', event.target.value)}>
-                  {['30', '60', '90', '180', '365'].map((days) => <option key={days} value={days}>{days} days</option>)}
-                </select>
+                <input type="number" min="1" max="3650" step="1" value={archiveAgeDraft} aria-label="Inactive room age" aria-invalid={Boolean(archiveAgeError)} onChange={(event) => { setArchiveAgeDraft(event.target.value); setArchiveAgeError('') }} onBlur={() => saveArchiveAge(archiveAgeDraft)} />
               </label>
+              {archiveAgeError && <p className="form-error" role="alert">{archiveAgeError}</p>}
               <button className="settings-command" type="button" onClick={() => void onArchiveInactiveRooms()}><Archive size={15} />Archive inactive rooms</button>
               <label className="setting-row"><span><strong>Voice-note microphone</strong><small>Choose the input used for recording.</small></span>
                 <select value={selectedAudioInputDeviceId} aria-label="Voice-note microphone" onChange={(event) => onPreferenceChange('audio.input_device', event.target.value)}>
@@ -6749,9 +6801,22 @@ function SettingsDialog({
             <div className="settings-section">
               <h3>Keyboard</h3>
               <PreferenceToggle label="Use Ctrl + Enter to send" checked={preferenceBoolean(preferences, 'composer.ctrl_enter')} onChange={(value) => onPreferenceChange('composer.ctrl_enter', value)} />
-              <label className="setting-row"><span><strong>Undo send window</strong><small>Hold a sent message briefly so it can be undone.</small></span>
-                <select aria-label="Undo send window" value={preferenceString(preferences, 'composer.undo_send_seconds', '0')} onChange={(event) => onPreferenceChange('composer.undo_send_seconds', event.target.value)}>
-                  <option value="0">Off</option>
+              <PreferenceToggle label="Enable undo send" checked={preferenceBoolean(preferences, 'composer.undo_send_enabled', Number(preferenceString(preferences, 'composer.undo_send_seconds', '0')) > 0)} onChange={(enabled) => {
+                if (!enabled) {
+                  void onPreferenceChange('composer.undo_send_enabled', false)
+                  return
+                }
+                const seconds = Number(preferenceString(preferences, 'composer.undo_send_seconds', '0')) || 0
+                if (seconds === 0) {
+                  void onPreferenceChange('composer.undo_send_seconds', '5').then((saved) => {
+                    if (saved) void onPreferenceChange('composer.undo_send_enabled', true)
+                  })
+                } else {
+                  void onPreferenceChange('composer.undo_send_enabled', true)
+                }
+              }} />
+              <label className="setting-row"><span><strong>Undo send window</strong><small>Time to cancel a message before it is sent.</small></span>
+                <select aria-label="Undo send window" disabled={!preferenceBoolean(preferences, 'composer.undo_send_enabled', Number(preferenceString(preferences, 'composer.undo_send_seconds', '0')) > 0)} value={Number(preferenceString(preferences, 'composer.undo_send_seconds', '0')) > 0 ? preferenceString(preferences, 'composer.undo_send_seconds', '5') : '5'} onChange={(event) => onPreferenceChange('composer.undo_send_seconds', event.target.value)}>
                   {['5', '10', '20', '30'].map((seconds) => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
                 </select>
               </label>

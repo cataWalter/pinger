@@ -10,7 +10,7 @@ CONFIG="./build/config.yml"
 if [[ "$PLATFORM" == "Darwin" ]]; then
   CONFIG="./build/darwin/dev-config.yml"
 elif [[ "$PLATFORM" == MINGW* || "$PLATFORM" == MSYS* || "$PLATFORM" == CYGWIN* ]]; then
-  MINGW_BIN="$REPO_ROOT/toolchain/mingw64/bin"
+  MINGW_BIN="$REPO_ROOT/tools/msys64/ucrt64/bin"
   if [[ -x "$MINGW_BIN/gcc.exe" ]]; then
     export PATH="$MINGW_BIN:$PATH"
     export CC=gcc

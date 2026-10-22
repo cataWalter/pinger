@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
-	"strings"
 	"sync"
 
 	sharedpreferences "mychat/preferences"
@@ -123,67 +121,4 @@ func (s *PreferenceStore) saveLocked() error {
 
 func validatePreference(key string, value any) error {
 	return sharedpreferences.Validate(key, value)
-}
-
-// validEmojiList accepts 1 to 6 space-separated tokens, each up to 32 bytes.
-func validEmojiList(value any) bool {
-	text, ok := value.(string)
-	if !ok {
-		return false
-	}
-	fields := strings.Fields(text)
-	if len(fields) < 1 || len(fields) > 6 {
-		return false
-	}
-	for _, field := range fields {
-		if len(field) > 32 {
-			return false
-		}
-	}
-	return true
-}
-
-func validScheduleSuggestions(value any) bool {
-	text, ok := value.(string)
-	if !ok {
-		return false
-	}
-	parts := strings.Split(text, ",")
-	if len(parts) < 1 || len(parts) > 6 {
-		return false
-	}
-	seen := make(map[int]struct{}, len(parts))
-	for _, part := range parts {
-		minutes, err := strconv.Atoi(strings.TrimSpace(part))
-		if err != nil || minutes < 1 || minutes > 10080 {
-			return false
-		}
-		if _, duplicate := seen[minutes]; duplicate {
-			return false
-		}
-		seen[minutes] = struct{}{}
-	}
-	return true
-}
-
-func validScheduleDelay(value any) bool {
-	text, ok := value.(string)
-	if !ok {
-		return false
-	}
-	minutes, err := strconv.Atoi(text)
-	return err == nil && minutes >= 1 && minutes <= 10080
-}
-
-func oneOf(value any, options ...string) bool {
-	text, ok := value.(string)
-	if !ok {
-		return false
-	}
-	for _, option := range options {
-		if text == option {
-			return true
-		}
-	}
-	return false
 }

@@ -8846,36 +8846,6 @@ day-divider::after,
   padding: 4px 0 8px;
 }
 
-.composer-format-button {
-  display: inline-grid;
-  width: 32px;
-  height: 30px;
-  padding: 0;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: var(--canvas-warm);
-  color: var(--ink-soft);
-  cursor: pointer;
-  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
-}
-
-.composer-format-button:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--green-soft);
-  color: var(--ink);
-}
-
-.composer-format-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.composer-format-button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 .mention-menu.emoji-menu .mention-option span {
   margin-right: 4px;
 }
@@ -9066,6 +9036,52 @@ day-divider::after,
 
 .app-shell[data-theme='vs-code'] .conversation-header {
   background: rgba(37, 37, 38, 0.96);
+}
+
+.message-row.is-queued-message .message-body {
+  border-style: dashed;
+}
+
+.queued-message-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.queued-message-countdown {
+  font-variant-numeric: tabular-nums;
+}
+
+.queued-message-undo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 4px 8px;
+  color: var(--ink-soft);
+  background: var(--canvas-warm);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.queued-message-undo:hover,
+.queued-message-undo:focus-visible {
+  background: var(--line-soft);
+  border-color: var(--muted);
+}
+
+.queued-message-undo:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
 }
 
 .conversation-workspace {

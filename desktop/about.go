@@ -12,9 +12,12 @@ import (
 	"time"
 )
 
-// AppVersion is the version shown on the About page. main assigns it from its
-// Version variable; release builds can set that with -ldflags "-X main.Version=...".
-var AppVersion = "dev"
+// AppVersion, AppCommit, and AppBuildDate are populated from main's linker variables.
+var (
+	AppVersion   = "dev"
+	AppCommit    = "unknown"
+	AppBuildDate = "unknown"
+)
 
 const (
 	latestReleaseURL = "https://api.github.com/repos/cataWalter/pinger/releases/latest"
@@ -40,9 +43,28 @@ type githubRelease struct {
 	PublishedAt string `json:"published_at"`
 }
 
+type AppBuildInfo struct {
+	Commit    string `json:"commit"`
+	BuildDate string `json:"buildDate"`
+}
+
 // AppVersion returns the build version for the About page.
 func (s *AppService) AppVersion() string {
 	return AppVersion
+}
+
+func (s *AppService) AppBuildInfo() AppBuildInfo {
+	return AppBuildInfo{
+		Commit:    buildInfoValue(AppCommit),
+		BuildDate: buildInfoValue(AppBuildDate),
+	}
+}
+
+func buildInfoValue(value string) string {
+	if value = strings.TrimSpace(value); value == "" {
+		return "unknown"
+	}
+	return value
 }
 
 // CheckForUpdates queries the latest published GitHub release. It is only called from

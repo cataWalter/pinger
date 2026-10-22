@@ -8,7 +8,7 @@ import ChatMediaRenderer, { matrixMXCMediaURL } from './ChatMediaRenderer'
 import { SNIPPETS_STORAGE_KEY } from './snippets'
 
 const harness = vi.hoisted(() => ({
-  eventHandlers: new Map<string, (event: { data: any }) => void>(),
+  eventHandlers: new Map<string, (event: { data: unknown }) => void>(),
   markdownRenderCount: 0,
   service: {
     Snapshot: vi.fn(),
@@ -64,6 +64,7 @@ const harness = vi.hoisted(() => ({
     RoomStorageUsage: vi.fn(),
     ClearCachedMedia: vi.fn(),
     AppVersion: vi.fn(),
+    AppBuildInfo: vi.fn(),
     CheckForUpdates: vi.fn(),
     Devices: vi.fn(),
     RevokeDevice: vi.fn(),
@@ -75,7 +76,7 @@ const harness = vi.hoisted(() => ({
 
 vi.mock('@wailsio/runtime', () => ({
   Events: {
-    On: vi.fn((name: string, handler: (event: { data: any }) => void) => {
+    On: vi.fn((name: string, handler: (event: { data: unknown }) => void) => {
       harness.eventHandlers.set(name, handler)
       return () => harness.eventHandlers.delete(name)
     }),
@@ -199,10 +200,13 @@ function renderGhostwriterComposer() {
 
 describe('settings storage, integrations, help, and about', () => {
   let confirmSpy: { mockRestore: () => void; } | undefined
+  let snippetDownloadClickSpy: { mockRestore: () => void; } | undefined
 
   afterEach(() => {
     confirmSpy?.mockRestore()
     confirmSpy = undefined
+    snippetDownloadClickSpy?.mockRestore()
+    snippetDownloadClickSpy = undefined
     cleanup()
     vi.unstubAllGlobals()
     window.localStorage.removeItem(SNIPPETS_STORAGE_KEY)
@@ -240,6 +244,7 @@ describe('settings storage, integrations, help, and about', () => {
     harness.service.RoomStorageUsage.mockResolvedValue([])
     harness.service.ClearCachedMedia.mockResolvedValue({ files: 0, bytes: 0 })
     harness.service.AppVersion.mockResolvedValue('1.0.0')
+    harness.service.AppBuildInfo.mockResolvedValue({ commit: 'abcdef0123456789', buildDate: '2026-10-22T12:00:00Z' })
     harness.service.CheckForUpdates.mockResolvedValue({ currentVersion: '1.0.0', latestVersion: '', releaseUrl: 'https://github.com/cataWalter/pinger/releases', publishedAt: '', releaseNotes: '', updateAvailable: false, message: 'Pinger is up to date.' })
     harness.service.Ghostwriter.mockResolvedValue([])
     harness.tutorService.Analyze.mockResolvedValue({
@@ -381,6 +386,8 @@ describe('settings storage, integrations, help, and about', () => {
     const user = await openSettingsTab('About')
 
     expect(await screen.findByText('1.0.0')).toBeTruthy()
+    expect(await screen.findByText('abcdef0')).toBeTruthy()
+    expect(screen.getByText('2026-10-22T12:00:00Z')).toBeTruthy()
     expect(harness.service.CheckForUpdates).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Check for updates' }))
 
@@ -398,6 +405,14 @@ describe('settings storage, integrations, help, and about', () => {
     expect(screen.queryByRole('link', { name: 'View release' })).toBeNull()
   })
 
+  it('shows unknown build metadata when the metadata service fails', async () => {
+    harness.service.AppBuildInfo.mockRejectedValueOnce(new Error('Metadata unavailable'))
+    await openSettingsTab('About')
+
+    const aboutDetails = screen.getByText('Application').parentElement
+    await waitFor(() => expect(within(aboutDetails!).getAllByText('unknown')).toHaveLength(2))
+  })
+
   it('links the help center to the keyboard and storage settings', async () => {
     const user = await openSettingsTab('Help')
 
@@ -411,6 +426,27 @@ describe('settings storage, integrations, help, and about', () => {
     await user.click(screen.getByLabelText('Enable single-key shortcuts (R, J, K and the answered key)'))
     await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('shortcuts.single_keys', false))
     expect(await screen.findByText(/Single-key shortcuts are off/)).toBeTruthy()
+  })
+
+  it('toggles undo send and enables its delay selector', async () => {
+    const user = await openSettingsTab('Keyboard')
+    const toggle = screen.getByRole('checkbox', { name: 'Enable undo send' }) as HTMLInputElement
+    const windowSelector = screen.getByRole('combobox', { name: 'Undo send window' }) as HTMLSelectElement
+
+    expect(toggle.checked).toBe(false)
+    expect(windowSelector.disabled).toBe(true)
+    await user.click(toggle)
+
+    await waitFor(() => {
+      expect(harness.service.SetStringPreference).toHaveBeenCalledWith('composer.undo_send_seconds', '5')
+      expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('composer.undo_send_enabled', true)
+    })
+    expect(toggle.checked).toBe(true)
+    expect(windowSelector.disabled).toBe(false)
+
+    await user.click(toggle)
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('composer.undo_send_enabled', false))
+    expect(windowSelector.disabled).toBe(true)
   })
 
   it('filters keyboard shortcuts by action and key combination', async () => {
@@ -508,6 +544,8 @@ describe('settings storage, integrations, help, and about', () => {
     fireEvent.change(composer, { target: { value: 'say hello', selectionStart: 4, selectionEnd: 9 } })
 
     const boldButton = await screen.findByRole('button', { name: 'Bold' })
+    expect(boldButton.classList.contains('icon-button')).toBe(true)
+    expect(boldButton.parentElement?.getAttribute('data-tooltip')).toBe('Bold text')
     fireEvent.mouseDown(boldButton)
     fireEvent.click(boldButton)
 
@@ -635,6 +673,37 @@ describe('settings storage, integrations, help, and about', () => {
     const saved = JSON.parse(window.localStorage.getItem(SNIPPETS_STORAGE_KEY) ?? '{}').snippets
     expect(saved).toHaveLength(3)
     expect(saved.find((snippet: { trigger: string }) => snippet.trigger === 'thanks').content).toBe('Thanks for letting me know.')
+  })
+
+  it('exports snippets and reports download and import errors', async () => {
+    const user = userEvent.setup()
+    const NativeURL = URL
+    const createObjectURL = vi.fn(() => 'blob:snippets')
+    vi.stubGlobal('URL', class TestURL extends NativeURL {
+      static createObjectURL = createObjectURL
+      static revokeObjectURL = vi.fn()
+    })
+    snippetDownloadClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('tab', { name: 'Keyboard' }))
+    await user.click(screen.getByRole('button', { name: 'Manage text snippets' }))
+    const manager = await screen.findByRole('dialog', { name: 'Text snippets' })
+
+    await user.click(within(manager).getByRole('button', { name: 'Export JSON' }))
+    expect(createObjectURL).toHaveBeenCalledWith(expect.objectContaining({ type: 'application/json' }))
+    expect(snippetDownloadClickSpy).toHaveBeenCalledOnce()
+    expect(within(manager).getByRole('status').textContent).toBe('Snippets exported.')
+
+    createObjectURL.mockImplementation(() => { throw new Error('download blocked') })
+    await user.click(within(manager).getByRole('button', { name: 'Export JSON' }))
+    expect(within(manager).getByRole('alert').textContent).toBe('Could not create the snippets download.')
+
+    const invalidFile = new File(['{broken'], 'snippets.json', { type: 'application/json' })
+    await user.upload(within(manager).getByLabelText('Import snippets'), invalidFile)
+    expect((await within(manager).findByRole('alert')).textContent).toContain('not valid JSON')
+    expect(within(manager).queryByRole('status')).toBeNull()
   })
 })
 
@@ -1992,8 +2061,9 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     const favoriteDirect = { ...secondRoom, name: 'Favorite direct', unread: 2, favorite: true }
     const favoriteGroup: Room = { ...room, id: '!group:example.org', name: 'Favorite project', direct: false, favorite: true, unread: 1, unanswered: true }
+    const favoriteInstagramDM: Room = { ...room, id: '!instagram:example.org', name: 'Favorite Instagram DM', bridge: 'IG', direct: false, favorite: true, unanswered: true }
     const unreadDirect: Room = { ...room, id: '!unread:example.org', name: 'Unread direct', unread: 1 }
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, favoriteDirect, favoriteGroup, unreadDirect] })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, favoriteDirect, favoriteGroup, favoriteInstagramDM, unreadDirect] })
     render(<App />)
 
     await screen.findByText('latest message')
@@ -2004,11 +2074,14 @@ describe('room history updates', () => {
     const unreadDirectButton = within(roomList).getByRole('button', { name: /Unread direct/ })
     expect(unreadDirectButton.querySelector('.unread-count')?.textContent).toBe('1')
     expect(unreadDirectButton.querySelector('.unread-dot')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Needs reply' }).querySelector('.filter-count')?.textContent).toBe('2')
 
     await user.click(screen.getByRole('button', { name: 'Needs reply' }))
     await user.click(screen.getByRole('button', { name: 'Favorite rooms' }))
     await user.type(screen.getByRole('textbox', { name: 'Find a room' }), 'Favorite')
-    expect(within(roomList).getByRole('button', { name: /Favorite project/ })).toBeTruthy()
+    expect(within(roomList).queryByRole('button', { name: /Favorite project/ })).toBeNull()
+    expect(within(roomList).getByRole('button', { name: /Favorite direct/ })).toBeTruthy()
+    expect(within(roomList).getByRole('button', { name: /Favorite Instagram DM/ })).toBeTruthy()
     expect(within(roomList).queryByRole('button', { name: /Unread direct/ })).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Needs reply' }))
@@ -2016,6 +2089,7 @@ describe('room history updates', () => {
     await user.clear(screen.getByRole('textbox', { name: 'Find a room' }))
     expect(within(roomList).getByRole('button', { name: /Favorite direct/ })).toBeTruthy()
     expect(within(roomList).getByRole('button', { name: /Favorite project/ })).toBeTruthy()
+    expect(within(roomList).getByRole('button', { name: /Favorite Instagram DM/ })).toBeTruthy()
   })
 
   it('labels each room filter with an icon', async () => {
@@ -2787,15 +2861,18 @@ describe('room history updates', () => {
 
   it('archives rooms older than the selected age after marking unread rooms read', async () => {
     const user = userEvent.setup()
-    const staleRoom = { ...room, unread: 1, lastEventId: '$stale', lastEventAt: Date.now() - 100 * 24 * 60 * 60 * 1000 }
+    const staleRoom = { ...room, unread: 1, lastEventId: '$stale', lastEventAt: Date.now() - 20 * 24 * 60 * 60 * 1000 }
     const currentRoom = { ...secondRoom, lastEventAt: Date.now() }
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [staleRoom, currentRoom] })
     const { container } = render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Inactive room age' }), '30')
-    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('archive.older_than_days', '30'))
+    const ageInput = screen.getByRole('spinbutton', { name: 'Inactive room age' })
+    await user.clear(ageInput)
+    await user.type(ageInput, '7')
+    await user.tab()
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('archive.older_than_days', '7'))
     await user.click(screen.getByRole('button', { name: 'Archive inactive rooms' }))
 
     await waitFor(() => {
@@ -2818,7 +2895,10 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Inactive room age' }), '30')
+    const ageInput = screen.getByRole('spinbutton', { name: 'Inactive room age' })
+    await user.clear(ageInput)
+    await user.type(ageInput, '30')
+    await user.tab()
     await user.click(screen.getByRole('checkbox', { name: 'Automatically archive inactive rooms' }))
 
     await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('archive.older_than_days', '30'))
@@ -3510,6 +3590,18 @@ describe('room history updates', () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Message' })))
   })
 
+  it('shows all previous versions in the edited-message tooltip', async () => {
+    harness.service.History.mockResolvedValueOnce({
+      messages: [{ ...message('$edited', 'current version', Date.now()), edited: true, editHistory: ['original version', 'first edit'] }],
+      before: 0,
+      hasMore: false,
+    })
+    render(<App />)
+
+    expect(await screen.findByText('current version')).toBeTruthy()
+    expect(screen.getByText('edited (2 prior)').getAttribute('title')).toBe('original version\nfirst edit')
+  })
+
   it('schedules a composer draft for a future time', async () => {
     const user = userEvent.setup()
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'schedule.default_send_minutes': '30' } })
@@ -3532,18 +3624,24 @@ describe('room history updates', () => {
   it('holds a sent message until the undo window is cancelled', async () => {
     const user = userEvent.setup()
     harness.service.SendMessage.mockClear()
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'composer.undo_send_seconds': '5' } })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [{ ...room, unread: 1, unanswered: true }], preferences: { 'composer.undo_send_seconds': '5' } })
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
+    const needsReplyButton = screen.getByRole('button', { name: 'Needs reply' })
+    expect(needsReplyButton.querySelector('.filter-count')?.textContent).toBe('1')
     const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
     await user.type(composer, 'undo this')
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    expect(await screen.findByText('Message queued')).toBeTruthy()
+    expect(await screen.findByRole('group', { name: 'Message queued' })).toBeTruthy()
+    await waitFor(() => expect(needsReplyButton.querySelector('.filter-count')).toBeNull())
+    expect(screen.getByText('undo this')).toBeTruthy()
+    expect(screen.getByText('Sending in 5s')).toBeTruthy()
     expect(composer.value).toBe('')
     await user.click(screen.getByRole('button', { name: 'Undo send' }))
 
     expect(composer.value).toBe('undo this')
+    await waitFor(() => expect(needsReplyButton.querySelector('.filter-count')?.textContent).toBe('1'))
     expect(screen.queryByText('Message queued')).toBeNull()
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
@@ -3559,12 +3657,29 @@ describe('room history updates', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
       expect(harness.service.SendMessage).not.toHaveBeenCalled()
       await act(async () => {
-        vi.advanceTimersByTime(5000)
+        vi.advanceTimersByTime(1000)
+      })
+      expect(screen.getByText('Sending in 4s')).toBeTruthy()
+      await act(async () => {
+        vi.advanceTimersByTime(4000)
       })
       expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, 'send after window')
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('sends immediately when undo send is disabled', async () => {
+    const user = userEvent.setup()
+    harness.service.SendMessage.mockClear()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'composer.undo_send_seconds': '5', 'composer.undo_send_enabled': false } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'send immediately')
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, 'send immediately'))
+    expect(screen.queryByRole('group', { name: 'Message queued' })).toBeNull()
   })
 
   it('puts the tail on the final message in an outgoing group', async () => {

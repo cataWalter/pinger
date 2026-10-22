@@ -33,6 +33,24 @@ tasks:
     cmds:
       - task: "darwin:run"
 
+  build:linux:
+    summary: Builds the Linux executable on Linux
+    platforms: [linux]
+    deps:
+      - task: common:build:frontend
+    cmds:
+      - mkdir -p bin
+      - go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o bin/pinger .
+
+  build:windows:
+    summary: Builds the Windows executable on Windows
+    platforms: [windows]
+    deps:
+      - task: common:build:frontend
+    cmds:
+      - powershell -NoProfile -Command "New-Item -ItemType Directory -Force bin | Out-Null"
+      - go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o bin/pinger.exe .
+
   dev:
     summary: Runs the application in development mode
     cmds:

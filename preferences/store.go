@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -501,7 +502,7 @@ func Validate(key string, value any) error {
 	}
 	switch key {
 	case "appearance.compact", "appearance.hide_deleted_messages", "appearance.hide_images_and_videos", "appearance.message_animations", "appearance.pointer_cursor", "appearance.show_avatars", "appearance.show_timestamps", "appearance.time_24_hour", "appearance.relative_timestamps",
-		"clipboard.copy_timestamp", "composer.arrow_up_focus_timeline", "composer.ctrl_enter", "composer.spellcheck", "notifications.enabled", "notifications.only_when_unfocused", "notifications.sound",
+		"clipboard.copy_timestamp", "composer.arrow_up_focus_timeline", "composer.ctrl_enter", "composer.spellcheck", "composer.undo_send_enabled", "notifications.enabled", "notifications.only_when_unfocused", "notifications.sound",
 		"sidebar.compact_chat_list", "sidebar.show_previews", "sidebar.show_unread_counts", "window.minimize_to_tray", "window.room_details_visible", "window.sidebar_visible", "system.launch_at_startup", "voice.autoplay_next",
 		"notifications.direct", "notifications.mentions", "notifications.group", "notifications.otp_immediate", "notifications.otp_copy", "sidebar.transparent", "sidebar.network_icons", "reactions.quick_enabled", "window.start_minimized", "window.quit_on_close", "window.menu_bar_icon", "downloads.ask_each_time", "appearance.balanced_text", "composer.formatting_toolbar", "emoji.autocomplete", "emoji.replace_emoticons", "privacy.incognito", "busy_mode.enabled", "ghostwriter.enabled", "relationship_health.enabled", "archive.automatic":
 		if _, ok := value.(bool); !ok {
@@ -637,8 +638,8 @@ func Validate(key string, value any) error {
 			return errors.New("archive.next_room has an unsupported value")
 		}
 	case "archive.older_than_days":
-		if !oneOf(value, "30", "60", "90", "180", "365") {
-			return errors.New("archive.older_than_days has an unsupported value")
+		if !validArchiveAgeDays(value) {
+			return errors.New("archive.older_than_days must be a whole number from 1 to 3650")
 		}
 	case "inbox.after_read":
 		if !oneOf(value, "stay", "next_visible", "next_unread", "none") {
@@ -805,4 +806,13 @@ func validScheduleDelay(value any) bool {
 	}
 	minutes, err := time.ParseDuration(text + "m")
 	return err == nil && minutes >= time.Minute && minutes <= 10080*time.Minute
+}
+
+func validArchiveAgeDays(value any) bool {
+	text, ok := value.(string)
+	if !ok {
+		return false
+	}
+	days, err := strconv.Atoi(text)
+	return err == nil && days >= 1 && days <= 3650
 }

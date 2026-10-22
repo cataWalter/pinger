@@ -63,8 +63,9 @@ type SlidingSyncManager struct {
 	activeSubscriptions map[id.RoomID]SlidingSyncRoomSubscription
 	priorityRooms       map[id.RoomID]struct{}
 
-	positionReset atomic.Bool
-	syncFailures  atomic.Uint32
+	positionReset      atomic.Bool
+	syncFailures       atomic.Uint32
+	slidingUnsupported atomic.Bool
 }
 
 func NewSlidingSyncManager(homeserverURL *url.URL, config SlidingSyncConfig) (*SlidingSyncManager, error) {
@@ -114,6 +115,7 @@ func newSlidingSyncConnID() string {
 
 // Attach redirects mautrix's existing sync loop to MSC3575, preserving gomuks'
 // response processing, cancellation, and reconnect backoff without a second loop.
+// Servers that do not expose the endpoint are switched to standard /sync.
 func (m *SlidingSyncManager) Attach(client *mautrix.Client) error {
 	if client == nil || client.Client == nil {
 		return errors.New("Sliding Sync cannot attach to an uninitialized Matrix client")
@@ -279,6 +281,9 @@ func (transport *slidingSyncTransport) CloseIdleConnections() {
 }
 
 func (m *SlidingSyncManager) roundTrip(request *http.Request, base http.RoundTripper) (*http.Response, error) {
+	if m.slidingUnsupported.Load() {
+		return m.legacySync(request, base)
+	}
 	requestContext, cancel := context.WithCancelCause(request.Context())
 	requestID := m.requestID.Add(1)
 	m.requestMu.Lock()
@@ -309,13 +314,18 @@ func (m *SlidingSyncManager) roundTrip(request *http.Request, base http.RoundTri
 			}
 			return nil, err
 		}
+		if response.StatusCode == http.StatusNotFound {
+			_ = response.Body.Close()
+			m.slidingUnsupported.Store(true)
+			return m.legacySync(request, base)
+		}
 		if response.StatusCode >= http.StatusBadRequest {
 			body, readErr := readSlidingSyncBody(response.Body)
 			_ = response.Body.Close()
 			if readErr != nil {
 				return slidingSyncErrorResponse(request, http.StatusBadGateway, readErr.Error()), nil
 			}
-			if pos != "" && attempt == 0 && invalidSlidingSyncPosition(response.StatusCode, body) {
+			if attempt == 0 && pos != "" && invalidSlidingSyncPosition(response.StatusCode, body) {
 				m.positionReset.Store(true)
 				m.state.ResetPosition()
 				pos = ""
@@ -429,6 +439,22 @@ func invalidSlidingSyncPosition(statusCode int, body []byte) bool {
 		(strings.Contains(description, "position") || strings.Contains(description, "pos ") || strings.Contains(description, "token"))
 }
 
+// legacySync forwards a standard /sync request. A stored token can come from Sliding Sync,
+// which standard sync rejects, so a rejected token restarts from an initial sync.
+func (m *SlidingSyncManager) legacySync(request *http.Request, base http.RoundTripper) (*http.Response, error) {
+	response, err := base.RoundTrip(request)
+	if err != nil || response.StatusCode != http.StatusBadRequest || request.URL.Query().Get("since") == "" {
+		return response, err
+	}
+	_ = response.Body.Close()
+	fresh := request.Clone(request.Context())
+	query := fresh.URL.Query()
+	query.Del("since")
+	fresh.URL.RawQuery = query.Encode()
+	m.positionReset.Store(true)
+	return base.RoundTrip(fresh)
+}
+
 func (m *SlidingSyncManager) emptySyncResponse(request *http.Request, pos string) *http.Response {
 	body, _ := json.Marshal(&mautrix.RespSync{NextBatch: pos})
 	return slidingSyncHTTPResponse(request, make(http.Header), body)
@@ -500,12 +526,12 @@ type slidingSyncStore struct {
 	inner mautrix.SyncStore
 }
 
-func (store slidingSyncStore) SaveFilterID(context.Context, id.UserID, string) error {
-	return nil
+func (store slidingSyncStore) SaveFilterID(ctx context.Context, userID id.UserID, filterID string) error {
+	return store.inner.SaveFilterID(ctx, userID, filterID)
 }
 
-func (store slidingSyncStore) LoadFilterID(context.Context, id.UserID) (string, error) {
-	return "msc3575-transport", nil
+func (store slidingSyncStore) LoadFilterID(ctx context.Context, userID id.UserID) (string, error) {
+	return store.inner.LoadFilterID(ctx, userID)
 }
 
 func (store slidingSyncStore) SaveNextBatch(ctx context.Context, userID id.UserID, nextBatch string) error {

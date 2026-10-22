@@ -61,7 +61,6 @@ type SearchPage struct {
 const eventBufferSize = 256
 const timelinePageSize = 100
 const defaultInitialHistoryLimit = 100
-const maxReactedEvents = 200
 
 // Reconnect backoff bounds used when (re)starting Matrix sync after a failure.
 const (
@@ -236,7 +235,6 @@ type Client struct {
 	notifiedEvents       map[string]struct{}
 	pendingTimelineRooms map[string]struct{}
 	dismissedEvents      map[string]string
-	reactedEvents        map[string]map[string]struct{}
 	syncReady            bool
 	connectionState      ConnectionState
 	mediaCacheDir        string
@@ -308,7 +306,6 @@ func NewWithLogOutput(databasePath string, logOutput io.Writer) (*Client, error)
 		notifiedEvents:       make(map[string]struct{}),
 		pendingTimelineRooms: make(map[string]struct{}),
 		dismissedEvents:      make(map[string]string),
-		reactedEvents:        make(map[string]map[string]struct{}),
 		mediaCacheDir:        defaultMediaCacheDir(dataDir),
 	}
 	client.lifecycleCtx, client.lifecycleCancel = context.WithCancel(context.Background())
@@ -832,6 +829,9 @@ func (c *Client) HistoryPageWithLimit(ctx context.Context, roomID string, before
 				skippedEventTypes[events[i].GetType().Type]++
 			}
 		}
+	}
+	if err := c.populateEditHistories(ctx, roomID, events, messages); err != nil {
+		log.Printf("read Matrix edit history for room %s: %v", roomID, err)
 	}
 	if parsedTimelineEvents == 0 {
 		for _, evt := range events {
@@ -1504,24 +1504,6 @@ func (c *Client) React(ctx context.Context, roomID, eventID, emoji string) error
 		return fmt.Errorf("send Matrix reaction: %w", err)
 	}
 	c.mu.Lock()
-	if c.reactedEvents == nil {
-		c.reactedEvents = make(map[string]map[string]struct{})
-	}
-	roomReactions := c.reactedEvents[roomID]
-	if roomReactions == nil {
-		roomReactions = make(map[string]struct{})
-		c.reactedEvents[roomID] = roomReactions
-	}
-	roomReactions[eventID+"\x00"+emoji] = struct{}{}
-	// Bound memory use: reactions are hints only, refreshed from sync data.
-	if len(roomReactions) > maxReactedEvents {
-		for key := range roomReactions {
-			delete(roomReactions, key)
-			if len(roomReactions) <= maxReactedEvents {
-				break
-			}
-		}
-	}
 	if messages, ok := c.local[roomID]; ok {
 		for key, message := range messages {
 			if message.ID != eventID {
@@ -1537,29 +1519,6 @@ func (c *Client) React(ctx context.Context, roomID, eventID, emoji string) error
 	c.mu.Unlock()
 	c.publishTimeline([]string{roomID}, "")
 	return nil
-}
-
-// hasReacted reports whether the local user reacted with emoji to an event (best effort).
-func (c *Client) hasReacted(roomID, eventID, emoji string) bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.hasReactedLocked(roomID, eventID, emoji)
-}
-
-func (c *Client) hasReactedLocked(roomID, eventID, emoji string) bool {
-	if roomReactions, ok := c.reactedEvents[roomID]; ok {
-		if _, reacted := roomReactions[eventID+"\x00"+emoji]; reacted {
-			return true
-		}
-	}
-	if messages, ok := c.local[roomID]; ok {
-		for _, message := range messages {
-			if message.ID == eventID && message.Reacted[emoji] {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (c *Client) RedactMessage(ctx context.Context, roomID, eventID string) error {
@@ -2863,9 +2822,7 @@ func mediaDuration(info *event.FileInfo) int {
 	return int(info.Duration)
 }
 
-// editHistory reports prior edit sources when available. gomuks only stores
-// the current edit source, so this is a placeholder that surfaces "(edited)"
-// detail when the SDK exposes more history in the future.
+// editHistory is a fallback for callers that don't batch-load replacement events.
 // mapSendError converts the database send marker into a user-facing error.
 // gomuks stores the transient "not sent" marker on every fresh local event and
 // (upstream) never clears it on success, so it must not surface as an error.
@@ -2905,13 +2862,122 @@ func isEditedEvent(evt *database.Event) bool {
 }
 
 func editHistory(evt *database.Event) []string {
-	if !isEditedEvent(evt) {
+	if !isEditedEvent(evt) || evt.RedactedBy != "" {
 		return nil
 	}
-	if local := evt.LocalContent; local != nil && strings.TrimSpace(local.EditSource) != "" {
-		return []string{strings.TrimSpace(local.EditSource)}
+	if source := editVersionSource(evt, false); source != "" {
+		return []string{source}
 	}
 	return nil
+}
+
+func (c *Client) populateEditHistories(ctx context.Context, roomID string, events []*database.Event, messages []Message) error {
+	originals := make(map[id.EventID]*database.Event)
+	eventIDs := make([]id.EventID, 0, len(events))
+	messageIndexes := make(map[id.EventID]int, len(messages))
+	for index := range messages {
+		messageIndexes[id.EventID(messages[index].ID)] = index
+	}
+	for _, evt := range events {
+		if evt == nil || evt.ID == "" || evt.RedactedBy != "" {
+			continue
+		}
+		if _, ok := messageIndexes[evt.ID]; !ok {
+			continue
+		}
+		originals[evt.ID] = evt
+		eventIDs = append(eventIDs, evt.ID)
+	}
+	if len(eventIDs) == 0 {
+		return nil
+	}
+	sort.Slice(eventIDs, func(i, j int) bool { return eventIDs[i] < eventIDs[j] })
+
+	editRowsByOriginal, err := c.engine.DB.Event.GetEditRowIDs(ctx, id.RoomID(roomID), eventIDs...)
+	if err != nil {
+		return err
+	}
+	editRowIDs := make([]database.EventRowID, 0)
+	for _, eventID := range eventIDs {
+		editRowIDs = append(editRowIDs, editRowsByOriginal[eventID]...)
+	}
+	if len(editRowIDs) == 0 {
+		return nil
+	}
+	editEvents, err := c.engine.DB.Event.GetByRowIDs(ctx, editRowIDs...)
+	if err != nil {
+		return err
+	}
+	editsByOriginal := make(map[id.EventID][]*database.Event)
+	for _, edit := range editEvents {
+		if edit == nil || edit.RelationType != event.RelReplace || edit.RedactedBy != "" {
+			continue
+		}
+		editsByOriginal[edit.RelatesTo] = append(editsByOriginal[edit.RelatesTo], edit)
+	}
+	for eventID, original := range originals {
+		if index, ok := messageIndexes[eventID]; ok {
+			edits := editsByOriginal[eventID]
+			messages[index].Edited = len(edits) > 0
+			messages[index].EditHistory = editHistoryWithEvents(original, edits)
+		}
+	}
+	return nil
+}
+
+func editHistoryWithEvents(evt *database.Event, edits []*database.Event) []string {
+	if evt == nil || evt.RedactedBy != "" || len(edits) == 0 {
+		return nil
+	}
+	versions := make([]string, 0, len(edits)+1)
+	if source := editVersionSource(evt, false); source != "" {
+		versions = append(versions, source)
+	}
+	orderedEdits := append([]*database.Event(nil), edits...)
+	sort.SliceStable(orderedEdits, func(i, j int) bool {
+		if orderedEdits[i].Timestamp.Time.Equal(orderedEdits[j].Timestamp.Time) {
+			return orderedEdits[i].RowID < orderedEdits[j].RowID
+		}
+		return orderedEdits[i].Timestamp.Time.Before(orderedEdits[j].Timestamp.Time)
+	})
+	for _, edit := range orderedEdits {
+		if source := editVersionSource(edit, true); source != "" {
+			versions = append(versions, source)
+		}
+	}
+	if len(orderedEdits) > 0 && editVersionSource(orderedEdits[len(orderedEdits)-1], true) != "" {
+		versions = versions[:len(versions)-1]
+	}
+	return versions
+}
+
+func editVersionSource(evt *database.Event, replacement bool) string {
+	if evt == nil {
+		return ""
+	}
+	if evt.LocalContent != nil && strings.TrimSpace(evt.LocalContent.EditSource) != "" {
+		return evt.LocalContent.EditSource
+	}
+	content := evt.Decrypted
+	if content == nil {
+		content = evt.Content
+	}
+	if replacement {
+		var editContent struct {
+			NewContent json.RawMessage `json:"m.new_content"`
+		}
+		if err := json.Unmarshal(content, &editContent); err != nil || len(editContent.NewContent) == 0 {
+			return ""
+		}
+		content = editContent.NewContent
+	}
+	var messageContent struct {
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal(content, &messageContent); err != nil {
+		return ""
+	}
+	return messageContent.Body
 }
 
 func (c *Client) storeLocalMessage(roomID string, message Message) {
@@ -2970,15 +3036,6 @@ func (c *Client) currentUserID() string {
 		return ""
 	}
 	return string(c.engine.Account.UserID)
-}
-
-func (c *Client) removeLocalMessage(roomID string, evt *database.Event) {
-	if evt == nil {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.removeLocalMessageLocked(roomID, evt)
 }
 
 func (c *Client) removeLocalMessageLocked(roomID string, evt *database.Event) {

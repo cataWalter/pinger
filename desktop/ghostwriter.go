@@ -743,10 +743,3 @@ func clipGhostwriterText(text string, maxRunes int) string {
 	}
 	return string(runes[:maxRunes-1]) + "…"
 }
-
-func ghostwriterTimeoutMessage(err error) error {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return errors.New("local model took too long; try a smaller or warmer model")
-	}
-	return err
-}

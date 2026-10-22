@@ -212,15 +212,6 @@ func (s *AppService) initializeAccounts(dataDir, mediaCacheDir string) error {
 	return nil
 }
 
-func anyLoggedInAccount(clients map[string]*matrix.Client) bool {
-	for _, client := range clients {
-		if client.IsLoggedIn() {
-			return true
-		}
-	}
-	return false
-}
-
 func closeAccountClientMap(clients map[string]*matrix.Client) {
 	for _, client := range clients {
 		client.Close()

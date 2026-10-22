@@ -40,13 +40,22 @@ jobs:
         run: |
           npm ci
           npm run test
+          npm run lint
           npm run build
 
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install chromium
+
+      - name: Browser smoke test
+        working-directory: frontend
+        run: npm run test:browser
+
       - name: Test
-        run: go test -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences
+        run: go test -tags "sqlite_fts5 goolm" ./...
 
       - name: Vet
-        run: go vet -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences
+        run: go vet -tags "sqlite_fts5 goolm" ./...
 
       - name: Build
         run: go build -tags "sqlite_fts5 goolm" .

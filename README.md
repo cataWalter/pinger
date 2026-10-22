@@ -156,7 +156,7 @@ Targets macOS 12+, Windows x64 (WebView2 Runtime), and Linux x64.
 - Wails CLI **v3.0.0-beta.30** (must match `go.mod`):
   `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30`
 - macOS: Xcode Command Line Tools (`xcode-select --install`)
-- Windows: [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+- Windows: [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) and MinGW-w64 GCC for CGO (MSYS2 UCRT64 is supported; `gcc` must be on `PATH` or under `tools/msys64/ucrt64/bin`)
 - Linux: GTK4 and WebKitGTK 6 development libraries (required by Wails on Linux)
 
 Two Go build tags are used throughout: `sqlite_fts5` is required (SQLite full-text search), and `goolm` selects mautrix-go's pure-Go Olm implementation (no libolm needed).
@@ -177,7 +177,7 @@ open bin/Pinger.app
 - The equivalent Task command is `task package:go`.
 - Matrix sync events are handled off the UI thread and delivered to the React interface through Wails runtime events.
 
-`go build` creates a plain executable and cannot carry the macOS bundle metadata needed for a stable Finder, Dock, tray, and Notification Center identity. Use the signed app bundle for native notifications.
+`go build` creates a plain executable and cannot carry the macOS bundle metadata needed for a stable Finder, Dock, tray, and Notification Center identity. Use the app bundle for native notifications. The bundle is ad-hoc signed for local identity; this is not Developer ID signing or notarization.
 
 ### Live development
 
@@ -186,6 +186,8 @@ wails3 task dev
 ```
 
 Hot-reloads the frontend via Vite and rebuilds the Go app on change.
+
+For a native executable without the desktop installer, run `wails3 task build:linux` on Linux or `wails3 task build:windows` on Windows. These write to `bin/`; Windows builds require MinGW-w64 GCC on `PATH`. The Windows ZIP and Linux DEB/AppImage installers are produced by manually dispatching the release workflow; local builds do not create those installer formats.
 
 ## Project structure
 
@@ -209,20 +211,27 @@ Build the frontend before compiling Go. The same checks run in CI on every push 
 
 ```sh
 npm --prefix frontend ci
+npm --prefix frontend exec -- playwright install chromium
 npm --prefix frontend test
+npm --prefix frontend run test:browser
+npm --prefix frontend run lint
 npm --prefix frontend run build
-go test -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences
-go vet -tags "sqlite_fts5 goolm" ./desktop ./matrix ./migration ./preferences
+go test -tags "sqlite_fts5 goolm" ./...
+go vet -tags "sqlite_fts5 goolm" ./...
 go build -tags "sqlite_fts5 goolm" .
 ```
 
+Frontend performance regression coverage currently checks render counts, including that composer typing does not rerender timeline Markdown. It does not establish wall-clock or memory baselines for large histories.
+
 ## Releases
 
-Pushing a `v*` tag runs the release workflow, which builds universal (arm64 + amd64) macOS binaries on `macos-latest`, x64 Windows binaries on `windows-latest`, and x64 Linux binaries on `ubuntu-latest`, then publishes a GitHub Release. Manually dispatching the workflow uploads the same packages as workflow artifacts without publishing a release.
+Pushing a `v*` tag runs the release workflow, which builds universal (arm64 + amd64) macOS binaries on `macos-latest`, x64 Windows binaries on `windows-latest`, and x64 Linux binaries on `ubuntu-24.04`, then publishes a GitHub Release. Manually dispatching the workflow uploads the same packages as workflow artifacts without publishing a release.
+
+The committed `package-lock.json` makes npm the canonical package manager for CI and release builds. The root Taskfile also has optional Bun, pnpm, and Yarn adapters for local use, but those paths are not covered by CI and have no committed lockfiles.
 
 | Artifact | Contents |
 | --- | --- |
-| `Pinger-<version>-macos-universal.dmg` | Signed app + `/Applications` symlink |
+| `Pinger-<version>-macos-universal.dmg` | Ad-hoc-signed, not notarized app + `/Applications` symlink |
 | `Pinger-<version>-windows-amd64.zip` | `pinger.exe` with embedded icon and manifest |
 | `Pinger-<version>-linux-amd64.deb` | Debian package for Linux x64 |
 | `Pinger-<version>-linux-amd64.AppImage` | Portable AppImage for Linux x64 |

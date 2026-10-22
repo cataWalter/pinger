@@ -162,12 +162,12 @@ func TestPreferenceStoreAcceptsArchiveAgePreference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"30", "60", "90", "180", "365"} {
+	for _, value := range []string{"1", "7", "30", "90", "365", "3650"} {
 		if err = store.Set("archive.older_than_days", value); err != nil {
 			t.Errorf("Set(archive.older_than_days, %q) error = %v", value, err)
 		}
 	}
-	for _, value := range []string{"0", "7", "366", "3650", "thirty"} {
+	for _, value := range []string{"0", "-1", "1.5", "3651", "thirty"} {
 		if err = store.Set("archive.older_than_days", value); err == nil {
 			t.Errorf("Set(archive.older_than_days, %q) unexpectedly succeeded", value)
 		}
@@ -197,6 +197,11 @@ func TestPreferenceStoreAcceptsUndoSendWindow(t *testing.T) {
 	for _, value := range []string{"0", "5", "10", "20", "30"} {
 		if err = store.Set("composer.undo_send_seconds", value); err != nil {
 			t.Errorf("Set(composer.undo_send_seconds, %q) error = %v", value, err)
+		}
+	}
+	for _, enabled := range []bool{true, false} {
+		if err = store.Set("composer.undo_send_enabled", enabled); err != nil {
+			t.Errorf("Set(composer.undo_send_enabled, %t) error = %v", enabled, err)
 		}
 	}
 	if err = store.Set("composer.undo_send_seconds", "15"); err == nil {
@@ -337,7 +342,7 @@ func TestPreferenceStoreRejectsInvalidWrites(t *testing.T) {
 		{key: "history.initial_messages", value: "12"},
 		{key: "schedule.suggestions_minutes", value: "5,5"},
 		{key: "archive.next_room", value: "random"},
-		{key: "archive.older_than_days", value: "14"},
+		{key: "archive.older_than_days", value: "3651"},
 		{key: "inbox.after_read", value: "random"},
 		{key: "unknown.key", value: true},
 	}

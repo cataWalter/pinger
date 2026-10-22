@@ -28,6 +28,9 @@ coverage.out
 
 # IDE & editors
 .vscode/
+!.vscode/
+.vscode/*
+!.vscode/tasks.json
 .idea/
 *.swp
 .*.swp

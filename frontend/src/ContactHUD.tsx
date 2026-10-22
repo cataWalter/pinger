@@ -40,7 +40,7 @@ export default function ContactHUD({ accountID, roomID, rooms, onClose }: Contac
     setLinkingRoomID('')
     setActionError('')
     setLinkTargetID('')
-    const unsubscribe = Events.On('contact-dossier:update', (event: any) => {
+    const unsubscribe = Events.On('contact-dossier:update', (event: { data: unknown }) => {
       const next = event.data as ContactDossierSnapshot | undefined
       if (!next || next.accountId !== accountID || next.roomId !== roomID) return
       receivedUpdate = true

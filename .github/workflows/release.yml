@@ -400,8 +400,11 @@ jobs:
           cp dist/icons/1024.png "$appdir/usr/share/pixmaps/pinger.png"
           cp dist/icons/1024.png "$appdir/pinger.png"
 
-          wget -c "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" \
-            -O dist/appimagetool
+          curl --fail --location --retry 3 \
+            "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage" \
+            -o dist/appimagetool
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  dist/appimagetool" \
+            | sha256sum --check --status
           chmod +x dist/appimagetool
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 dist/appimagetool "$appdir" \
             "dist/Pinger-${VERSION}-linux-amd64.AppImage"

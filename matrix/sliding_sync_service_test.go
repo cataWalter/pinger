@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +88,125 @@ func TestSlidingSyncTransportPostsRequestAndTranslatesResponse(t *testing.T) {
 	}
 	if manager.State().Pos != "new-position" {
 		t.Fatalf("stored position = %q", manager.State().Pos)
+	}
+}
+
+func TestSlidingSyncTransportFallsBackToStandardSync(t *testing.T) {
+	homeserver, err := url.Parse("https://matrix.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewSlidingSyncManager(homeserver, SlidingSyncConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requestedPaths []string
+	base := slidingSyncRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestedPaths = append(requestedPaths, request.URL.Path)
+		if request.URL.Path == "/_matrix/client/unstable/org.matrix.msc3575/sync" {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"errcode":"M_UNRECOGNIZED","error":"Unrecognized request"}`)),
+				Request:    request,
+			}, nil
+		}
+		if request.URL.Path != "/_matrix/client/v3/sync" {
+			t.Fatalf("unexpected standard sync request path: %s", request.URL.Path)
+		}
+		if got := request.URL.Query().Get("since"); got != "stored-token" {
+			t.Fatalf("standard sync since = %q", got)
+		}
+		if got := request.URL.Query().Get("filter"); got != "real-filter" {
+			t.Fatalf("standard sync filter = %q", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"next_batch":"legacy-token","rooms":{}}`)),
+			Request:    request,
+		}, nil
+	})
+	legacyRequest, err := http.NewRequest(http.MethodGet, "https://matrix.example/_matrix/client/v3/sync?since=stored-token&filter=real-filter", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &slidingSyncTransport{manager: manager, base: base}
+	for range 2 {
+		response, err := transport.RoundTrip(legacyRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var syncResponse mautrix.RespSync
+		err = json.NewDecoder(response.Body).Decode(&syncResponse)
+		_ = response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if syncResponse.NextBatch != "legacy-token" {
+			t.Fatalf("standard sync next batch = %q", syncResponse.NextBatch)
+		}
+	}
+	want := []string{"/_matrix/client/unstable/org.matrix.msc3575/sync", "/_matrix/client/v3/sync", "/_matrix/client/v3/sync"}
+	if !slices.Equal(requestedPaths, want) {
+		t.Fatalf("requested paths = %#v, want %#v", requestedPaths, want)
+	}
+}
+
+func TestSlidingSyncTransportRestartsWhenStandardTokenIsRejected(t *testing.T) {
+	homeserver, _ := url.Parse("https://matrix.example")
+	manager, err := NewSlidingSyncManager(homeserver, SlidingSyncConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sinceValues []string
+	base := slidingSyncRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/_matrix/client/unstable/org.matrix.msc3575/sync" {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"errcode":"M_UNRECOGNIZED","error":"Unrecognized request"}`)),
+				Request:    request,
+			}, nil
+		}
+		since := request.URL.Query().Get("since")
+		sinceValues = append(sinceValues, since)
+		if since != "" {
+			return &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"errcode":"M_UNKNOWN","error":"Invalid stream token"}`)),
+				Request:    request,
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"next_batch":"fresh-token","rooms":{}}`)),
+			Request:    request,
+		}, nil
+	})
+	legacyRequest, err := http.NewRequest(http.MethodGet, "https://matrix.example/_matrix/client/v3/sync?since=stored-token", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := (&slidingSyncTransport{manager: manager, base: base}).RoundTrip(legacyRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if len(sinceValues) != 2 || sinceValues[0] != "stored-token" || sinceValues[1] != "" {
+		t.Fatalf("since retry sequence = %#v", sinceValues)
+	}
+	if !manager.positionReset.Load() {
+		t.Fatal("syncer was not notified to process the response as a fresh sync")
+	}
+	var syncResponse mautrix.RespSync
+	if err = json.NewDecoder(response.Body).Decode(&syncResponse); err != nil {
+		t.Fatal(err)
+	}
+	if syncResponse.NextBatch != "fresh-token" {
+		t.Fatalf("fresh next batch = %q", syncResponse.NextBatch)
 	}
 }
 
@@ -217,17 +337,19 @@ func TestSlidingSyncViewportChangeRestartsLongPoll(t *testing.T) {
 	}
 }
 
-func TestSlidingSyncStoreSkipsLegacyFilterCreation(t *testing.T) {
-	store := slidingSyncStore{inner: &mautrix.MemorySyncStore{
-		Filters:   make(map[id.UserID]string),
-		NextBatch: make(map[id.UserID]string),
-	}}
-	filterID, err := store.LoadFilterID(context.Background(), "@user:example.org")
+func TestSlidingSyncStoreDelegatesFilterID(t *testing.T) {
+	store := slidingSyncStore{inner: mautrix.NewMemorySyncStore()}
+	ctx := context.Background()
+	userID := id.UserID("@user:example.org")
+	if err := store.SaveFilterID(ctx, userID, "real-filter"); err != nil {
+		t.Fatal(err)
+	}
+	filterID, err := store.LoadFilterID(ctx, userID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filterID == "" {
-		t.Fatal("Sliding Sync should not create a legacy /sync filter")
+	if filterID != "real-filter" {
+		t.Fatalf("filter ID = %q, want the stored filter", filterID)
 	}
 }
 

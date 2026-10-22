@@ -82,6 +82,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'notifications.sound-effects', tab: 'Notifications', title: 'Sound effects', description: 'Play a short sound when a message is sent.', keywords: 'sound effects sent message' },
 
   { id: 'keyboard.ctrl-enter', tab: 'Keyboard', title: 'Use Ctrl + Enter to send', description: 'Send a message with Ctrl + Enter.', keywords: 'send enter composer' },
+  { id: 'keyboard.undo-send-enabled', tab: 'Keyboard', title: 'Enable undo send', description: 'Keep outgoing messages in the timeline briefly so they can be cancelled before sending.', keywords: 'undo send cancel message toggle queued' },
   { id: 'keyboard.undo-send', tab: 'Keyboard', title: 'Undo send window', description: 'Hold a sent message briefly so it can be undone.', keywords: 'undo send seconds' },
   { id: 'keyboard.spellcheck', tab: 'Keyboard', title: 'Spellcheck messages', description: 'Check spelling while you type.', keywords: 'spellcheck spell check' },
   { id: 'keyboard.formatting-toolbar', tab: 'Keyboard', title: 'Show formatting toolbar', description: 'Show bold, italic and link controls.', keywords: 'formatting toolbar bold italic' },

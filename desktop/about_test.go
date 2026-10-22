@@ -8,6 +8,25 @@ import (
 	"testing"
 )
 
+func TestAppBuildInfoUsesInjectedValuesAndUnknownFallbacks(t *testing.T) {
+	previousCommit, previousBuildDate := AppCommit, AppBuildDate
+	t.Cleanup(func() {
+		AppCommit, AppBuildDate = previousCommit, previousBuildDate
+	})
+	service := &AppService{}
+	AppCommit = "0123456789abcdef"
+	AppBuildDate = "2026-10-22T12:00:00Z"
+	if got := service.AppBuildInfo(); got.Commit != AppCommit || got.BuildDate != AppBuildDate {
+		t.Fatalf("build info = %+v, want linker values", got)
+	}
+
+	AppCommit = " "
+	AppBuildDate = ""
+	if got := service.AppBuildInfo(); got.Commit != "unknown" || got.BuildDate != "unknown" {
+		t.Fatalf("build info fallback = %+v, want unknown values", got)
+	}
+}
+
 func TestIsNewerVersionComparesDottedVersions(t *testing.T) {
 	cases := []struct {
 		latest, current string

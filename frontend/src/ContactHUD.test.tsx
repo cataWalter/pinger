@@ -5,7 +5,7 @@ import type { ContactDossierSnapshot, Room } from '../bindings/mychat/desktop/mo
 import ContactHUD from './ContactHUD'
 
 const harness = vi.hoisted(() => ({
-  eventHandlers: new Map<string, (event: { data: any }) => void>(),
+  eventHandlers: new Map<string, (event: { data: unknown }) => void>(),
   service: {
     ContactDossier: vi.fn(),
     RefreshContactDossier: vi.fn(),
@@ -14,7 +14,7 @@ const harness = vi.hoisted(() => ({
 
 vi.mock('@wailsio/runtime', () => ({
   Events: {
-    On: vi.fn((name: string, handler: (event: { data: any }) => void) => {
+    On: vi.fn((name: string, handler: (event: { data: unknown }) => void) => {
       harness.eventHandlers.set(name, handler)
       return () => harness.eventHandlers.delete(name)
     }),

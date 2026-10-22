@@ -39,6 +39,8 @@ func main() {
 		Msg("starting Pinger")
 
 	desktop.AppVersion = Version
+	desktop.AppCommit = Commit
+	desktop.AppBuildDate = BuildDate
 
 	// A previous instance may still hold the data files when Pinger is restarted.
 	desktop.WaitForPreviousInstance()
