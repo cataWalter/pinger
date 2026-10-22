@@ -952,6 +952,9 @@ function App() {
   const setPreferenceRef = useRef<(key: string, value: boolean | string) => Promise<boolean>>(async () => false)
   const automaticArchiveInFlightRef = useRef(false)
   const roomsRef = useRef<Room[]>([])
+  const activeAccountIDRef = useRef('primary')
+  const matrixSyncReadyRef = useRef(false)
+  const restoringArchivedRoomsRef = useRef(new Set<string>())
   const roomSelectionAnchorRef = useRef('')
   const messagesRef = useRef<Message[]>([])
   const composeTextRef = useRef('')
@@ -1067,6 +1070,8 @@ function App() {
   ), [messages, selectedRoom?.avatar, selectedRoomID, historyRoomIDRef.current])
   const typingStatus = formatTypingStatus(typingUsers, roomMembers, messages, selectedRoom?.direct ? selectedRoom.name : '')
   const preferences = snapshot?.preferences ?? {}
+  if (snapshot?.syncReady) matrixSyncReadyRef.current = true
+  if (snapshot?.activeAccountId) activeAccountIDRef.current = snapshot.activeAccountId
   const currentRelationshipDecay = relationshipDecay?.accountId === snapshot?.activeAccountId ? relationshipDecay : null
   const relationshipDecayContacts = currentRelationshipDecay?.contacts ?? []
   const relationshipDecayAlertCount = relationshipDecayContacts.filter((contact) => contact.alerted).length
@@ -1759,6 +1764,8 @@ function App() {
     const applyMatrixUpdate = (update: MatrixUpdate) => {
       if (!active) return
       const previousRooms = roomsRef.current
+      const wasSyncReady = matrixSyncReadyRef.current
+      if (update.initialSyncComplete) matrixSyncReadyRef.current = true
       const nextTypingUsers = update.typingUsers?.[selectedRoomRef.current] ?? []
       setSnapshot((current) => {
         if (!current) return current
@@ -1787,12 +1794,18 @@ function App() {
       setTypingUsers((current) => current.length === nextTypingUsers.length && current.every((user, index) => user === nextTypingUsers[index])
         ? current
         : nextTypingUsers)
-      for (const roomID of update.timelineChangedRoomId ?? []) {
-        const updatedRoom = (update.rooms ?? []).find((room) => room.id === roomID)
-        const previousRoom = previousRooms.find((room) => room.id === roomID)
-        if (!updatedRoom?.lastEventId || !previousRoom || updatedRoom.lastEventId === previousRoom.lastEventId) continue
-        const key = archivedPreferenceKey(roomID, updatedRoom.accountId)
-        if (preferenceBoolean(preferencesRef.current, key)) void setPreference(key, false)
+      if (wasSyncReady && update.initialSyncComplete) {
+        for (const updatedRoom of update.rooms ?? []) {
+          const previousRoom = previousRooms.find((room) => room.id === updatedRoom.id)
+          if (!previousRoom || !updatedRoom.lastEventId || updatedRoom.lastEventId === previousRoom.lastEventId) continue
+          const accountID = updatedRoom.accountId || activeAccountIDRef.current
+          const key = `room.archived.${accountID}.${updatedRoom.id}`
+          if (!preferenceBoolean(preferencesRef.current, key) || restoringArchivedRoomsRef.current.has(key)) continue
+          setRoomScope('all')
+          restoringArchivedRoomsRef.current.add(key)
+          void setPreferenceRef.current(key, false)
+            .finally(() => restoringArchivedRoomsRef.current.delete(key))
+        }
       }
       if (preferenceBoolean(preferencesRef.current, 'busy_mode.enabled')) {
         for (const roomID of update.timelineChangedRoomId ?? []) {
@@ -4327,15 +4340,6 @@ function App() {
           <div className="auth-side-grid" />
           <div className="auth-side-bottom"><span>PINGER</span><span>01 / 01</span></div>
         </div>
-      </main>
-    )
-  }
-
-  if (snapshot.needsVerification && !snapshot.syncReady && snapshot.connectionState !== 'offline') {
-    return (
-      <main className="boot-screen">
-        <div className="boot-mark"><ShieldCheck size={20} /></div>
-        <span>Checking device verification…</span>
       </main>
     )
   }

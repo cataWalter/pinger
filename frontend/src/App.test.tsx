@@ -2804,7 +2804,10 @@ describe('room history updates', () => {
     expect(container.querySelector('.room-list .room-button')?.textContent).toContain('Archived project')
   })
 
-  it('restores archived rooms to the inbox when their latest event changes', async () => {
+  it.each([
+    ['incoming', '@alice:example.org'],
+    ['outgoing', '@me:example.org'],
+  ])('restores archived rooms to the inbox after an %s message', async (_direction, sender) => {
     const user = userEvent.setup()
     const archivedRoom = { ...room, lastEventId: '$before-archive-update' }
     const archiveKey = `room.archived.primary.${archivedRoom.id}`
@@ -2817,7 +2820,7 @@ describe('room history updates', () => {
     act(() => {
       harness.eventHandlers.get('matrix:update')?.({
         data: {
-          rooms: [{ ...archivedRoom, lastEventId: '$after-archive-update', lastEventAt: archivedRoom.lastEventAt + 1 }],
+          rooms: [{ ...archivedRoom, lastEventId: '$after-archive-update', lastEventSender: sender, lastEventAt: archivedRoom.lastEventAt + 1 }],
           timelineChangedRoomId: [archivedRoom.id],
           initialSyncComplete: true,
           needsVerification: false,
@@ -2827,9 +2830,35 @@ describe('room history updates', () => {
     })
 
     await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(archiveKey, false))
-    await waitFor(() => expect(container.querySelector('.room-list .room-button')).toBeNull())
-    await user.click(screen.getByRole('button', { name: 'All' }))
-    expect(container.querySelector('.room-list .room-button')).toBeTruthy()
+    await waitFor(() => expect(container.querySelector('.room-list .room-button')?.textContent).toContain('Test room'))
+  })
+
+  it('keeps archived rooms archived when initial sync loads their history', async () => {
+    const archivedRoom = { ...room, lastEventId: '$before-sync' }
+    const archiveKey = `room.archived.primary.${archivedRoom.id}`
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      syncReady: false,
+      rooms: [archivedRoom],
+      preferences: { [archiveKey]: true },
+    })
+    const { container } = render(<App />)
+
+    expect(await screen.findByRole('button', { name: 'Archived rooms' })).toBeTruthy()
+    act(() => {
+      harness.eventHandlers.get('matrix:update')?.({
+        data: {
+          rooms: [{ ...archivedRoom, lastEventId: '$historical-event' }],
+          timelineChangedRoomId: [archivedRoom.id],
+          initialSyncComplete: true,
+          needsVerification: false,
+          connectionState: 'connected',
+        },
+      })
+    })
+
+    expect(harness.service.SetBooleanPreference).not.toHaveBeenCalledWith(archiveKey, false)
+    expect(container.querySelector('.room-list .room-button')).toBeNull()
   })
 
   it('archives all currently read rooms', async () => {
@@ -3220,12 +3249,11 @@ describe('room history updates', () => {
     }
   })
 
-  it('waits for initial sync before showing a recovery key form', async () => {
+  it('shows the recovery key form while initial sync is pending', async () => {
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, needsVerification: true, syncReady: false })
     render(<App />)
 
-    expect(await screen.findByText('Checking device verification…')).toBeTruthy()
-    expect(screen.queryByRole('heading', { name: 'Verify this device' })).toBeNull()
+    expect(await screen.findByRole('heading', { name: 'Verify this device' })).toBeTruthy()
 
     act(() => {
       harness.eventHandlers.get('matrix:update')?.({

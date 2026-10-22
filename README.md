@@ -159,6 +159,10 @@ Targets macOS 12+, Windows x64 (WebView2 Runtime), and Linux x64.
 - Windows: [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) and MinGW-w64 GCC for CGO (MSYS2 UCRT64 is supported; `gcc` must be on `PATH` or under `tools/msys64/ucrt64/bin`)
 - Linux: GTK4 and WebKitGTK 6 development libraries (required by Wails on Linux)
 
+On Linux, the GTK4 desktop shell resolves the application icon through its desktop entry. The DEB and AppImage releases include a matching `fi.mau.pinger` desktop entry and Pinger icon; use the installed launcher (or integrate the AppImage with your desktop) for the correct shell icon.
+
+On Windows, CGO requires MinGW-w64 GCC with its runtime files (`crt2.o` and `libm.a`). The launchers first check for a working repository-local compiler in `toolchain/mingw64/bin` and add its adjacent target-runtime and MSYS DLL directories to `PATH`, then check `tools/msys64/ucrt64/bin`, the standard `C:\msys64` location, and `PATH`. If you need to install MSYS2, open its **UCRT64** terminal (not Git Bash), then run `pacman -Syu` followed by `pacman -S --needed mingw-w64-ucrt-x86_64-gcc` (reopen the terminal and run `pacman -Su` first if the update asks you to). Toolchain directories are git-ignored and are not committed.
+
 Two Go build tags are used throughout: `sqlite_fts5` is required (SQLite full-text search), and `goolm` selects mautrix-go's pure-Go Olm implementation (no libolm needed).
 
 ### Build and run
@@ -186,6 +190,10 @@ wails3 task dev
 ```
 
 Hot-reloads the frontend via Vite and rebuilds the Go app on change.
+
+The Windows launcher checks that GCC can locate both `crt2.o` and `libm.a` before starting and limits Go build parallelism to reduce memory use during the initial build. If the app is signed in but its encryption device is unverified, Pinger shows the recovery-key form immediately while Matrix performs its initial sync.
+
+Application logs use timestamped, colored console output and include a component and severity. The default level is `info`; set `PINGER_LOG_LEVEL=debug` to include detailed Matrix-engine diagnostics. In Git Bash, for example, run `PINGER_LOG_LEVEL=debug bash scripts/dev.sh`; in PowerShell, run `$env:PINGER_LOG_LEVEL="debug"; node scripts/dev.mjs`. Debug output from Matrix dependencies can include server URLs and account identifiers, so review and redact it before sharing.
 
 For a native executable without the desktop installer, run `wails3 task build:linux` on Linux or `wails3 task build:windows` on Windows. These write to `bin/`; Windows builds require MinGW-w64 GCC on `PATH`. The Windows ZIP and Linux DEB/AppImage installers are produced by manually dispatching the release workflow; local builds do not create those installer formats.
 
