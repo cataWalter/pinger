@@ -124,15 +124,6 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 	service.emitReminder = func(reminder ScheduledJob) {
 		app.Event.Emit(scheduledReminderEventName, reminder)
 	}
-	service.emitGhostwriterStream = func(chunk GhostwriterStreamEvent) {
-		app.Event.Emit(ghostwriterStreamEventName, chunk)
-	}
-	service.emitLocalAIChatStream = func(chunk LocalAIChatStreamEvent) {
-		app.Event.Emit(localAIChatStreamEventName, chunk)
-	}
-	service.emitAIStream = func(chunk AIStreamEvent) {
-		app.Event.Emit(aiStreamEventName, chunk)
-	}
 	service.setAutostart = func(enabled bool) error {
 		if enabled {
 			return app.Autostart.Enable()
@@ -359,6 +350,9 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 		}
 		eventBatcher.EnqueueUpdate(update)
 	})
+	service.emitRelationshipHealth = func(update RelationshipHealthSnapshot) {
+		app.Event.Emit(relationshipHealthEventName, update)
+	}
 	service.emitRelationshipDecay = func(update RelationshipDecaySnapshot) {
 		app.Event.Emit(relationshipDecayEventName, update)
 	}

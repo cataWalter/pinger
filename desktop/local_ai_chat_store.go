@@ -78,7 +78,9 @@ func (s *localAIChatStore) initialize() error {
 }
 
 func (s *localAIChatStore) list() ([]LocalAIChatSummary, error) {
-	rows, err := s.db.Query(`SELECT chat_id, title, agent_id, updated_at FROM local_ai_chats ORDER BY updated_at DESC, chat_id`)
+	rows, err := s.db.Query(`SELECT c.chat_id, c.title, c.agent_id, c.updated_at,
+		COALESCE((SELECT substr(m.content, 1, 160) FROM local_ai_chat_messages m WHERE m.chat_id = c.chat_id ORDER BY m.seq DESC LIMIT 1), '')
+		FROM local_ai_chats c ORDER BY c.updated_at DESC, c.chat_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list local AI chats: %w", err)
 	}
@@ -86,7 +88,7 @@ func (s *localAIChatStore) list() ([]LocalAIChatSummary, error) {
 	chats := make([]LocalAIChatSummary, 0)
 	for rows.Next() {
 		var chat LocalAIChatSummary
-		if err := rows.Scan(&chat.ID, &chat.Title, &chat.AgentID, &chat.UpdatedAt); err != nil {
+		if err := rows.Scan(&chat.ID, &chat.Title, &chat.AgentID, &chat.UpdatedAt, &chat.Preview); err != nil {
 			return nil, fmt.Errorf("read local AI chat: %w", err)
 		}
 		chats = append(chats, chat)

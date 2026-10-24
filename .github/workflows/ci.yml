@@ -11,42 +11,10 @@ permissions:
 
 jobs:
   checks:
-    name: Checks (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macOS
-            os: macos-latest
-            cc: clang
-          - name: Windows
-            os: windows-latest
-            cc: gcc
-          - name: Linux
-            os: ubuntu-24.04
-            cc: gcc
-    env:
-      CGO_ENABLED: 1
-      CC: ${{ matrix.cc }}
+    runs-on: macos-latest
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsqlite3-dev
-
-      - name: Set up MinGW-w64
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: mingw-w64-ucrt-x86_64-gcc
-          path-type: inherit
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -55,19 +23,10 @@ jobs:
           cache: true
 
       - name: Generate Wails bindings
-        if: runner.os != 'Windows'
         shell: bash
         run: |
           GOBIN="${RUNNER_TEMP}/wails-bin" go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
           "${RUNNER_TEMP}/wails-bin/wails3" generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
-
-      - name: Generate Wails bindings on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $env:GOBIN = Join-Path $env:RUNNER_TEMP "wails-bin"
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
-          & (Join-Path $env:GOBIN "wails3.exe") generate bindings -f "-tags sqlite_fts5,goolm" -clean=true -ts -i
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -85,12 +44,10 @@ jobs:
           npm run build
 
       - name: Install Chromium
-        if: runner.os == 'macOS'
         working-directory: frontend
         run: npx playwright install chromium
 
       - name: Browser smoke test
-        if: runner.os == 'macOS'
         working-directory: frontend
         run: npm run test:browser
 

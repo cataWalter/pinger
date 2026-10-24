@@ -3,6 +3,7 @@ package desktop
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,38 @@ func TestLocalAIChatStoreListsMostRecentlyUpdatedFirst(t *testing.T) {
 	}
 	if len(chats) != 2 || chats[0].ID != older.ID || chats[1].ID != newer.ID {
 		t.Fatalf("chats order = %+v", chats)
+	}
+}
+
+func TestLocalAIChatStoreListPreviewsLatestMessage(t *testing.T) {
+	store, _ := openTestLocalAIChatStore(t)
+	empty, err := store.create("", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := store.create("", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.appendMessage(chat.ID, LocalAIChatMessage{Role: "user", Content: "First"}, 3); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.appendMessage(chat.ID, LocalAIChatMessage{Role: "assistant", Content: strings.Repeat("a", 200)}, 4); err != nil {
+		t.Fatal(err)
+	}
+	chats, err := store.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previews := make(map[string]string, len(chats))
+	for _, summary := range chats {
+		previews[summary.ID] = summary.Preview
+	}
+	if previews[empty.ID] != "" {
+		t.Fatalf("empty chat preview = %q, want empty", previews[empty.ID])
+	}
+	if got := previews[chat.ID]; got != strings.Repeat("a", 160) {
+		t.Fatalf("preview = %d characters, want the latest message cut to 160", len([]rune(got)))
 	}
 }
 

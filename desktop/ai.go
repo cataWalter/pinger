@@ -12,7 +12,10 @@ import (
 	"net/http"
 	"net/textproto"
 	"net/url"
+	"os"
+	"os/exec"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,36 +23,31 @@ import (
 )
 
 const (
-	aiCompletionTimeout    = 3 * time.Minute
+	aiCompletionTimeout    = 60 * time.Second
 	aiToneGuardTimeout     = 1200 * time.Millisecond
+	aiToneGuardMaxTokens   = 192
 	aiHealthTimeout        = 10 * time.Second
 	aiTranscriptionTimeout = 5 * time.Minute
+	aiTranscodeTimeout     = 2 * time.Minute
 	aiMaxAudioBytes        = 50 << 20
 	aiMaxResponseBytes     = 4 << 20
 )
 
-// AIImage is one base64-encoded image attached to a chat turn. Data excludes any data URL prefix.
-type AIImage struct {
-	MediaType string `json:"mediaType"`
-	Data      string `json:"data"`
-}
+// aiFFmpegFallbackPaths covers Homebrew installs when the app is launched outside a shell with Homebrew on PATH.
+var aiFFmpegFallbackPaths = []string{"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"}
 
 // AIMessage is one chat turn sent to the local model.
 type AIMessage struct {
-	Role    string    `json:"role"`
-	Content string    `json:"content"`
-	Images  []AIImage `json:"images,omitempty"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 type aiChatRequest struct {
-	Model              string            `json:"model,omitempty"`
-	Messages           []aiOpenAIMessage `json:"messages"`
-	Stream             bool              `json:"stream"`
-	Temperature        *float64          `json:"temperature,omitempty"`
-	MaxTokens          int               `json:"max_tokens,omitempty"`
-	Stop               []string          `json:"stop,omitempty"`
-	ResponseFormat     json.RawMessage   `json:"response_format,omitempty"`
-	ChatTemplateKwargs map[string]any    `json:"chat_template_kwargs,omitempty"`
+	Model       string      `json:"model,omitempty"`
+	Messages    []AIMessage `json:"messages"`
+	Stream      bool        `json:"stream"`
+	Temperature *float64    `json:"temperature,omitempty"`
+	MaxTokens   int         `json:"max_tokens,omitempty"`
 }
 
 type aiChatResponse struct {
@@ -71,67 +69,68 @@ type aiTranscriptionResponse struct {
 }
 
 func validateAIEndpoint(raw string) error {
-	return sharedpreferences.ValidateAIEndpoint(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return errors.New("AI endpoint must be an http or https URL")
+	}
+	return nil
 }
 
-func doAIRequest(client *http.Client, endpoint string, request *http.Request) (*http.Response, error) {
-	baseURL, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("parse AI endpoint: %w", err)
-	}
-	if client == nil {
-		client = http.DefaultClient
-	}
-	clientCopy := *client
-	previousCheckRedirect := client.CheckRedirect
-	clientCopy.CheckRedirect = func(request *http.Request, via []*http.Request) error {
-		if !sameAIOrigin(baseURL, request.URL) {
-			return errors.New("AI endpoint redirect changed origin")
-		}
-		if previousCheckRedirect != nil {
-			return previousCheckRedirect(request, via)
-		}
-		if len(via) >= 10 {
-			return errors.New("stopped after 10 redirects")
-		}
-		return nil
-	}
-	return clientCopy.Do(request)
-}
-
-func sameAIOrigin(first, second *url.URL) bool {
-	return strings.EqualFold(first.Scheme, second.Scheme) &&
-		strings.EqualFold(first.Hostname(), second.Hostname()) && aiEndpointPort(first) == aiEndpointPort(second)
-}
-
-func aiEndpointPort(endpoint *url.URL) string {
-	if port := endpoint.Port(); port != "" {
-		return port
-	}
-	if strings.EqualFold(endpoint.Scheme, "https") {
-		return "443"
-	}
-	return "80"
-}
-
-// aiChatCompletion posts a non-streaming request to an OpenAI-compatible chat endpoint such as llama-server.
+// aiChatCompletion posts to an OpenAI-compatible chat endpoint such as llama-server.
 func aiChatCompletion(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage) (string, error) {
-	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiCompletionTimeout, aiCompletionOptions{}, nil)
+	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiCompletionTimeout, nil, 0)
 }
 
-// aiChatCompletionWithOptions runs one OpenAI-compatible chat request. When onChunk is set, the reply is streamed.
-func aiChatCompletionWithOptions(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, timeout time.Duration, options aiCompletionOptions, onChunk func(string)) (string, error) {
+func aiChatCompletionWithOptions(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, timeout time.Duration, temperature *float64, maxTokens int) (string, error) {
+	if err := validateAIEndpoint(endpoint); err != nil {
+		return "", err
+	}
+	if len(messages) == 0 {
+		return "", errors.New("AI request has no messages")
+	}
+	body, err := json.Marshal(aiChatRequest{Model: model, Messages: messages, Stream: false, Temperature: temperature, MaxTokens: maxTokens})
+	if err != nil {
+		return "", fmt.Errorf("encode AI request: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return aiProviderCompletion(ctx, client, GhostwriterProviderOpenAICompatible, endpoint, model, messages, options, onChunk)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+"/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("create AI request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("contact AI endpoint: %w", err)
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, aiMaxResponseBytes))
+	if err != nil {
+		return "", fmt.Errorf("read AI response: %w", err)
+	}
+	var parsed aiChatResponse
+	decodeErr := json.Unmarshal(data, &parsed)
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		if decodeErr == nil && parsed.Error != nil && parsed.Error.Message != "" {
+			return "", fmt.Errorf("AI endpoint returned %d: %s", response.StatusCode, parsed.Error.Message)
+		}
+		return "", fmt.Errorf("AI endpoint returned %d", response.StatusCode)
+	}
+	if decodeErr != nil {
+		return "", fmt.Errorf("decode AI response: %w", decodeErr)
+	}
+	if len(parsed.Choices) == 0 {
+		return "", errors.New("AI endpoint returned no choices")
+	}
+	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
 }
 
-// aiToneGuardCompletion classifies a draft on a loopback endpoint only, so the draft never leaves the machine.
-func aiToneGuardCompletion(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, options aiCompletionOptions) (string, error) {
+func aiToneGuardCompletion(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage) (string, error) {
 	if err := sharedpreferences.ValidateLocalHTTPEndpoint(endpoint); err != nil {
 		return "", fmt.Errorf("Tone Guard requires a localhost HTTP endpoint: %w", err)
 	}
-	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiToneGuardTimeout, options, nil)
+	temperature := 0.1
+	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiToneGuardTimeout, &temperature, aiToneGuardMaxTokens)
 }
 
 func aiAudioTranscription(ctx context.Context, client *http.Client, endpoint, model, filename, contentType string, audio []byte) (string, error) {
@@ -192,7 +191,7 @@ func aiAudioTranscription(ctx context.Context, client *http.Client, endpoint, mo
 		return "", fmt.Errorf("create transcription request: %w", err)
 	}
 	request.Header.Set("Content-Type", writer.FormDataContentType())
-	response, err := doAIRequest(client, endpoint, request)
+	response, err := client.Do(request)
 	if err != nil {
 		return "", fmt.Errorf("contact AI transcription endpoint: %w", err)
 	}
@@ -230,7 +229,7 @@ func aiHealthCheck(ctx context.Context, client *http.Client, endpoint string) er
 	if err != nil {
 		return fmt.Errorf("create health request: %w", err)
 	}
-	response, err := doAIRequest(client, endpoint, request)
+	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("contact AI endpoint: %w", err)
 	}
@@ -251,7 +250,7 @@ func (s *AppService) aiEndpointSettings() (string, string, error) {
 	endpoint, _ := preferences["ai.endpoint"].(string)
 	model, _ := preferences["ai.model"].(string)
 	if endpoint == "" {
-		return "", "", errors.New("set an AI endpoint in Settings > AI")
+		return "", "", errors.New("set an AI endpoint in Settings > Integrations")
 	}
 	return endpoint, model, nil
 }
@@ -263,58 +262,102 @@ func (s *AppService) aiContext() context.Context {
 	return context.Background()
 }
 
-// AIComplete sends chat messages to the configured endpoint and returns the full reply.
-// When requestID is set, reply deltas are emitted as ai:stream events so the answer can be shown while it is generated.
-// temperature and maxTokens are chosen by the caller from the AI feature settings; zero maxTokens means no explicit limit.
-func (s *AppService) AIComplete(messages []AIMessage, requestID string, temperature float64, maxTokens int) (string, error) {
+// aiIsWAV reports whether audio starts with a RIFF/WAVE header.
+func aiIsWAV(audio []byte) bool {
+	return len(audio) >= 12 && string(audio[0:4]) == "RIFF" && string(audio[8:12]) == "WAVE"
+}
+
+// aiIsMP3 reports whether audio starts with an ID3 tag or an MPEG Layer III frame sync.
+// ADTS AAC frames share the 0xFF sync byte, so the layer bits must be non-zero.
+func aiIsMP3(audio []byte) bool {
+	if len(audio) >= 3 && string(audio[0:3]) == "ID3" {
+		return true
+	}
+	return len(audio) >= 2 && audio[0] == 0xFF && audio[1]&0xE0 == 0xE0 && (audio[1]>>1)&0x03 != 0
+}
+
+// aiPrepareTranscriptionAudio converts audio the local endpoint cannot decode into 16 kHz mono WAV.
+// llama-server decodes only WAV and MP3, so Matrix voice messages in Ogg, M4A, or WebM are converted with ffmpeg.
+// Empty or oversized audio is returned unchanged so aiAudioTranscription reports its usual errors.
+func aiPrepareTranscriptionAudio(ctx context.Context, audio []byte, filename, contentType string) ([]byte, string, string, error) {
+	if len(audio) == 0 || len(audio) > aiMaxAudioBytes || aiIsWAV(audio) || aiIsMP3(audio) {
+		return audio, filename, contentType, nil
+	}
+	converted, err := aiConvertAudioToWAV(ctx, audio)
+	if err != nil {
+		return nil, "", "", err
+	}
+	base := path.Base(strings.TrimSpace(filename))
+	if base == "." || base == "/" {
+		base = "audio"
+	}
+	filename = strings.TrimSuffix(base, path.Ext(base)) + ".wav"
+	return converted, filename, "audio/wav", nil
+}
+
+func aiFFmpegPath() (string, error) {
+	if found, err := exec.LookPath("ffmpeg"); err == nil {
+		return found, nil
+	}
+	for _, candidate := range aiFFmpegFallbackPaths {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+	return "", errors.New("this voice message format needs ffmpeg to transcribe; install it with 'brew install ffmpeg'")
+}
+
+func aiConvertAudioToWAV(ctx context.Context, audio []byte) ([]byte, error) {
+	ffmpeg, err := aiFFmpegPath()
+	if err != nil {
+		return nil, err
+	}
+	workDir, err := os.MkdirTemp("", "gomuks-transcription-*")
+	if err != nil {
+		return nil, fmt.Errorf("create transcription workspace: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+	// ffmpeg reads MP4-family files more reliably from a seekable file than from a pipe.
+	inputPath := filepath.Join(workDir, "input")
+	outputPath := filepath.Join(workDir, "output.wav")
+	if err := os.WriteFile(inputPath, audio, 0o600); err != nil {
+		return nil, fmt.Errorf("write audio for conversion: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, aiTranscodeTimeout)
+	defer cancel()
+	var stderr bytes.Buffer
+	command := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", inputPath, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", outputPath)
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return nil, fmt.Errorf("convert voice message for transcription: %s", detail)
+	}
+	converted, err := os.ReadFile(outputPath)
+	if err != nil {
+		return nil, fmt.Errorf("read converted voice message: %w", err)
+	}
+	return converted, nil
+}
+
+// AIComplete sends chat messages to the configured local endpoint and returns the reply text.
+func (s *AppService) AIComplete(messages []AIMessage) (string, error) {
 	endpoint, model, err := s.aiEndpointSettings()
 	if err != nil {
 		return "", err
 	}
-	options, err := aiRunOptions(temperature, maxTokens)
-	if err != nil {
-		return "", err
-	}
-	return s.runAIStream(requestID, func(ctx context.Context, onChunk func(string)) (string, error) {
-		return aiChatCompletionWithOptions(ctx, aiHTTPClient, endpoint, model, messages, aiCompletionTimeout, options, onChunk)
-	})
-}
-
-// AICancel stops the AI request with requestID and reports whether it was running.
-func (s *AppService) AICancel(requestID string) bool {
-	return s.aiRuns.cancel(requestID)
-}
-
-// runAIStream runs one AI call tracked under requestID. Deltas are emitted as ai:stream events when requestID is set.
-func (s *AppService) runAIStream(requestID string, run func(ctx context.Context, onChunk func(string)) (string, error)) (string, error) {
-	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
-	defer release()
-	var onChunk func(string)
-	if requestID != "" {
-		onChunk = func(text string) {
-			if s.emitAIStream != nil {
-				s.emitAIStream(AIStreamEvent{RequestID: requestID, Text: text})
-			}
-		}
-	}
-	result, err := run(ctx, onChunk)
-	if err != nil && ctx.Err() == context.Canceled {
-		return "", errAIRunStopped
-	}
-	return result, err
+	return aiChatCompletion(s.aiContext(), aiHTTPClient, endpoint, model, messages)
 }
 
 // CheckMessageTone classifies a draft using only a local loopback AI endpoint.
-func (s *AppService) CheckMessageTone(messages []AIMessage, temperature float64, maxTokens int) (string, error) {
+func (s *AppService) CheckMessageTone(messages []AIMessage) (string, error) {
 	endpoint, model, err := s.aiEndpointSettings()
 	if err != nil {
 		return "", err
 	}
-	options, err := aiRunOptions(temperature, maxTokens)
-	if err != nil {
-		return "", err
-	}
-	return aiToneGuardCompletion(s.aiContext(), ghostwriterHTTPClient, endpoint, model, messages, options)
+	return aiToneGuardCompletion(s.aiContext(), ghostwriterHTTPClient, endpoint, model, messages)
 }
 
 // AITranscribeMedia transcribes cached Matrix audio with the configured OpenAI-compatible endpoint.
@@ -331,6 +374,10 @@ func (s *AppService) AITranscribeMedia(mxcURI, filename, contentType string) (st
 	audio, err := s.currentClient().CachedMediaBytes(s.aiContext(), mxcURI)
 	if err != nil {
 		return "", fmt.Errorf("load audio from Matrix: %w", err)
+	}
+	audio, filename, contentType, err = aiPrepareTranscriptionAudio(s.aiContext(), audio, filename, contentType)
+	if err != nil {
+		return "", err
 	}
 	return aiAudioTranscription(s.aiContext(), aiHTTPClient, endpoint, transcriptionModel, filename, contentType, audio)
 }

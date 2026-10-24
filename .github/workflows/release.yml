@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   test:
@@ -128,7 +128,6 @@ jobs:
           </dict>
           </plist>
           EOF
-          cp LICENSE "dist/Pinger.app/Contents/Resources/LICENSE"
           codesign --force --deep --sign - "dist/Pinger.app"
           codesign --verify --deep --strict "dist/Pinger.app"
 
@@ -140,7 +139,6 @@ jobs:
           # app can be dragged into place in Finder.
           gui_stage="$(mktemp -d)"
           cp -R "dist/Pinger.app" "$gui_stage/"
-          cp README.md LICENSE "$gui_stage/"
           ln -s /Applications "$gui_stage/Applications"
           hdiutil create \
             -volname "Pinger" \
@@ -230,7 +228,7 @@ jobs:
           $ldflags = "-s -w -H windowsgui -X main.Version=$env:VERSION -X main.Commit=$env:GITHUB_SHA -X main.BuildDate=$env:BUILD_DATE"
           go build -tags "sqlite_fts5 goolm" -trimpath -buildvcs=false "-ldflags=$ldflags" -o dist/pinger.exe .
           Remove-Item rsrc_windows_amd64.syso
-          Compress-Archive -LiteralPath dist/pinger.exe, README.md, LICENSE -DestinationPath "dist/Pinger-$($env:VERSION)-windows-amd64.zip"
+          Compress-Archive -LiteralPath dist/pinger.exe -DestinationPath "dist/Pinger-$($env:VERSION)-windows-amd64.zip"
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -357,7 +355,7 @@ jobs:
           done
           cp dist/icons/1024.png "$stage/usr/share/pixmaps/pinger.png"
 
-          cp README.md LICENSE "$stage/usr/share/doc/pinger/"
+          cp README.md "$stage/usr/share/doc/pinger/"
 
           dpkg-deb --root-owner-group --build "$stage" \
             "dist/Pinger-${VERSION}-linux-amd64.deb"
@@ -368,8 +366,7 @@ jobs:
         run: |
           appdir="$(mktemp -d)/pinger.AppDir"
           mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" \
-            "$appdir/usr/share/icons/hicolor" "$appdir/usr/share/pixmaps" \
-            "$appdir/usr/share/doc/pinger"
+            "$appdir/usr/share/icons/hicolor" "$appdir/usr/share/pixmaps"
 
           cat > "$appdir/AppRun" <<'EOF'
           #!/bin/sh
@@ -402,7 +399,6 @@ jobs:
           done
           cp dist/icons/1024.png "$appdir/usr/share/pixmaps/pinger.png"
           cp dist/icons/1024.png "$appdir/pinger.png"
-          cp README.md LICENSE "$appdir/usr/share/doc/pinger/"
 
           curl --fail --location --retry 3 \
             "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage" \
@@ -429,8 +425,6 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [build, build-windows, build-linux]
     runs-on: macos-latest
-    permissions:
-      contents: write
     steps:
       - name: Download platform artifacts
         uses: actions/download-artifact@v4

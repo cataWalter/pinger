@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createBusyReply, detectBusyReplyLanguage, detectConversationLanguage, hasBusyReplyTemplate } from './busyMode'
+import { createBusyReply, detectBusyReplyLanguage, hasBusyReplyTemplate } from './busyMode'
 
 describe('busy replies', () => {
   it('detects the majority language from the latest ten messages', () => {
@@ -23,16 +23,6 @@ describe('busy replies', () => {
 
     expect(language).toBe('ces')
     expect(hasBusyReplyTemplate(language)).toBe(false)
-  })
-
-  it('returns a display name for the detected conversation language', () => {
-    expect(detectConversationLanguage([
-      'Günaydınnn',
-      'Daha iyiyim',
-      'Çok mu yoruldun dün?',
-      'bugün telefonda konuşalım mı',
-    ])).toBe('Turkish')
-    expect(detectConversationLanguage(['', '👍'])).toBe('')
   })
 
   it('falls back to English when the chat has no detectable text', () => {

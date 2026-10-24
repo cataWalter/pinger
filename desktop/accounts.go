@@ -1,7 +1,6 @@
 package desktop
 
 import (
-	"context"
 	cryptorand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-	"time"
 
 	"mychat/logging"
 	"mychat/matrix"
@@ -369,10 +367,12 @@ func (s *AppService) AddAccount(homeserver, username, password string) (Snapshot
 		client.SetMediaCacheDir(filepath.Join(mediaCacheDir, accountID))
 	}
 	if err = client.Login(s.ctx, homeserver, username, password); err != nil {
-		return Snapshot{}, errors.Join(err, rollbackNewAccount(s.ctx, client, accountID, databasePath, mediaCacheDir))
+		client.Close()
+		return Snapshot{}, err
 	}
 	if err = registry.UpsertAndActivate(accountSummary(accountID, client)); err != nil {
-		return Snapshot{}, errors.Join(err, rollbackNewAccount(s.ctx, client, accountID, databasePath, mediaCacheDir))
+		client.Close()
+		return Snapshot{}, err
 	}
 	s.accountMu.Lock()
 	if s.accountClients == nil {
@@ -387,30 +387,6 @@ func (s *AppService) AddAccount(homeserver, username, password string) (Snapshot
 	s.startAccountEventPump(accountID, client)
 	s.startAccountSync(accountID, client)
 	return s.Snapshot()
-}
-
-func rollbackNewAccount(ctx context.Context, client *matrix.Client, accountID, databasePath, mediaCacheDir string) error {
-	var cleanupErrors []error
-	if client.IsLoggedIn() {
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		logoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		if err := client.Logout(logoutCtx); err != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("revoke incomplete Matrix session: %w", err))
-		}
-		cancel()
-	}
-	client.Close()
-	if err := os.RemoveAll(filepath.Dir(databasePath)); err != nil {
-		cleanupErrors = append(cleanupErrors, fmt.Errorf("remove incomplete account data: %w", err))
-	}
-	if mediaCacheDir != "" {
-		if err := os.RemoveAll(filepath.Join(mediaCacheDir, accountID)); err != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("remove incomplete account media cache: %w", err))
-		}
-	}
-	return errors.Join(cleanupErrors...)
 }
 
 func (s *AppService) currentClient() *matrix.Client {

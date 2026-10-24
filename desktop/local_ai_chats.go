@@ -24,12 +24,13 @@ const (
 
 var localAIChatIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-// LocalAIChatSummary describes one saved local AI chat in the sidebar.
+// LocalAIChatSummary describes one saved local AI chat in the chat list.
 type LocalAIChatSummary struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
 	AgentID   string `json:"agentId"`
 	UpdatedAt int64  `json:"updatedAt"`
+	Preview   string `json:"preview"`
 }
 
 // LocalAIChatAttachment is one file attached to a saved chat turn. Text attachments carry their contents, images carry base64 data, and other files keep only metadata.

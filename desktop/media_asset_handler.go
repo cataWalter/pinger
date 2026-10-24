@@ -30,7 +30,7 @@ type mediaAssetHandler struct {
 	currentClient    func() mediaAssetSource
 	exportRoomKeysFn func(context.Context, string) ([]byte, error)
 	importRoomKeysFn func(context.Context, string, []byte) (RoomKeyImportResult, error)
-	sendAttachmentFn func(context.Context, string, string, []byte, bool, bool, int64) error
+	sendAttachmentFn func(context.Context, string, string, []byte, bool, int64) error
 }
 
 func newMediaAssetHandler(service *AppService) http.Handler {
@@ -124,7 +124,7 @@ func (handler mediaAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("Accept-Ranges", "bytes")
 	http.ServeContent(w, r, eventID, info.ModTime(), file)
 }
@@ -232,20 +232,11 @@ func (handler mediaAssetHandler) uploadAttachment(w http.ResponseWriter, r *http
 		http.Error(w, "invalid voice-note flag", http.StatusBadRequest)
 		return
 	}
-	videoMessage, err := strconv.ParseBool(r.URL.Query().Get("videoMessage"))
-	if err != nil && r.URL.Query().Get("videoMessage") != "" {
-		http.Error(w, "invalid video-message flag", http.StatusBadRequest)
-		return
-	}
-	if voiceNote && videoMessage {
-		http.Error(w, "an upload cannot be both a voice note and a video message", http.StatusBadRequest)
-		return
-	}
 	durationMilliseconds := int64(0)
 	if rawDuration := r.URL.Query().Get("durationMs"); rawDuration != "" {
 		durationMilliseconds, err = strconv.ParseInt(rawDuration, 10, 64)
 		if err != nil || durationMilliseconds < 0 {
-			http.Error(w, "invalid recording duration", http.StatusBadRequest)
+			http.Error(w, "invalid voice-note duration", http.StatusBadRequest)
 			return
 		}
 	}
@@ -269,7 +260,7 @@ func (handler mediaAssetHandler) uploadAttachment(w http.ResponseWriter, r *http
 		http.Error(w, "Matrix service unavailable", http.StatusInternalServerError)
 		return
 	}
-	if err = handler.sendAttachmentFn(r.Context(), roomID, safeDownloadName(filename), data, voiceNote, videoMessage, durationMilliseconds); err != nil {
+	if err = handler.sendAttachmentFn(r.Context(), roomID, safeDownloadName(filename), data, voiceNote, durationMilliseconds); err != nil {
 		log.Printf("send Matrix attachment to %q: %v", roomID, err)
 		http.Error(w, "attachment upload failed", http.StatusInternalServerError)
 		return

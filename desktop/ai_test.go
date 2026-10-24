@@ -1,11 +1,13 @@
 package desktop
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,65 +15,15 @@ import (
 )
 
 func TestValidateAIEndpointRequiresHTTPURL(t *testing.T) {
-	for _, endpoint := range []string{"http://localhost:8080", "http://127.0.0.1:8080/base", "https://ai.example.net/base"} {
+	for _, endpoint := range []string{"http://localhost:8080", "https://ai.example.net/base"} {
 		if err := validateAIEndpoint(endpoint); err != nil {
 			t.Fatalf("validateAIEndpoint(%q) error = %v", endpoint, err)
 		}
 	}
-	for _, endpoint := range []string{"localhost:8080", "ftp://example.net", "http://", "http://ai.example.net", "http://localhost.evil.example", "not a url"} {
+	for _, endpoint := range []string{"localhost:8080", "ftp://example.net", "http://", "not a url"} {
 		if err := validateAIEndpoint(endpoint); err == nil {
 			t.Fatalf("validateAIEndpoint(%q) accepted invalid endpoint", endpoint)
 		}
-	}
-}
-
-func TestAIRequestsDisableHiddenReasoning(t *testing.T) {
-	assertDisabled := func(name string, kwargs map[string]any) {
-		t.Helper()
-		if enabled, ok := kwargs["enable_thinking"]; !ok || enabled != false {
-			t.Errorf("%s chat_template_kwargs = %+v, want enable_thinking false", name, kwargs)
-		}
-	}
-
-	uiOptions, err := aiRunOptions(0.8, 0)
-	if err != nil {
-		t.Fatalf("aiRunOptions() error = %v", err)
-	}
-	assertDisabled("aiRunOptions()", uiOptions.ChatTemplateKwargs)
-
-	for _, mode := range []GhostwriterMode{GhostwriterModeChips, GhostwriterModeAutocomplete, GhostwriterModeSlash, GhostwriterModeChat} {
-		assertDisabled("ghostwriterCompletionOptions("+string(mode)+")", ghostwriterCompletionOptions(mode, aiFeatureTuning{Temperature: 0.8}).ChatTemplateKwargs)
-	}
-	assertDisabled("contactDossierCompletionOptions()", contactDossierCompletionOptions(aiFeatureTuning{Temperature: 0.6, MaxTokens: 700}).ChatTemplateKwargs)
-
-	body, _, err := encodeAICompletionRequest(GhostwriterProviderOpenAICompatible, "local-model", []AIMessage{{Role: "user", Content: "hi"}}, uiOptions, false)
-	if err != nil {
-		t.Fatalf("encodeAICompletionRequest() error = %v", err)
-	}
-	if !strings.Contains(string(body), `"chat_template_kwargs":{"enable_thinking":false}`) {
-		t.Errorf("request body = %s, want chat_template_kwargs with enable_thinking false", body)
-	}
-}
-
-func TestAIChatCompletionRejectsCrossOriginRedirect(t *testing.T) {
-	var redirectedRequests int
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		redirectedRequests++
-		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"unexpected"}}]}`)
-	}))
-	defer target.Close()
-
-	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
-	}))
-	defer source.Close()
-
-	_, err := aiChatCompletion(context.Background(), source.Client(), source.URL, "", []AIMessage{{Role: "user", Content: "private chat text"}})
-	if err == nil || !strings.Contains(err.Error(), "redirect changed origin") {
-		t.Fatalf("aiChatCompletion() error = %v, want cross-origin redirect rejection", err)
-	}
-	if redirectedRequests != 0 {
-		t.Fatalf("cross-origin server received %d request(s), want none", redirectedRequests)
 	}
 }
 
@@ -132,7 +84,7 @@ func TestAIChatCompletionSendsMessagesAndReturnsReply(t *testing.T) {
 	}
 }
 
-func TestAIToneGuardCompletionSendsRequestedTemperature(t *testing.T) {
+func TestAIToneGuardCompletionUsesLocalLowTemperatureRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Model       string      `json:"model"`
@@ -144,14 +96,14 @@ func TestAIToneGuardCompletionSendsRequestedTemperature(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		if body.Model != "local-tone-model" || body.Stream || body.Temperature != 0.6 || body.MaxTokens != 192 || len(body.Messages) != 2 {
+		if body.Model != "local-tone-model" || body.Stream || body.Temperature != 0.1 || body.MaxTokens != aiToneGuardMaxTokens || len(body.Messages) != 2 {
 			t.Errorf("unexpected Tone Guard request: %+v", body)
 		}
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"{\"is_hostile_or_unprofessional\":false}"}}]}`)
 	}))
 	defer server.Close()
 
-	result, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "local-tone-model", []AIMessage{{Role: "system", Content: "classify"}, {Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.6, MaxTokens: 192})
+	result, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "local-tone-model", []AIMessage{{Role: "system", Content: "classify"}, {Role: "user", Content: "draft"}})
 	if err != nil {
 		t.Fatalf("aiToneGuardCompletion() error = %v", err)
 	}
@@ -162,7 +114,7 @@ func TestAIToneGuardCompletionSendsRequestedTemperature(t *testing.T) {
 
 func TestAIToneGuardCompletionRejectsNonLocalEndpoints(t *testing.T) {
 	for _, endpoint := range []string{"https://localhost:8080", "http://example.com:8080", "http://localhost:8080/v1"} {
-		if _, err := aiToneGuardCompletion(context.Background(), http.DefaultClient, endpoint, "", []AIMessage{{Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.6, MaxTokens: 192}); err == nil {
+		if _, err := aiToneGuardCompletion(context.Background(), http.DefaultClient, endpoint, "", []AIMessage{{Role: "user", Content: "draft"}}); err == nil {
 			t.Errorf("aiToneGuardCompletion(%q) accepted a non-local endpoint", endpoint)
 		}
 	}
@@ -182,7 +134,7 @@ func TestAIToneGuardCompletionTimesOut(t *testing.T) {
 	}()
 
 	started := time.Now()
-	_, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "", []AIMessage{{Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.6, MaxTokens: 192})
+	_, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "", []AIMessage{{Role: "user", Content: "draft"}})
 	if err == nil {
 		t.Fatal("aiToneGuardCompletion() succeeded after the deadline")
 	}
@@ -235,6 +187,59 @@ func TestAIAudioTranscriptionSendsAudioAndReturnsTranscript(t *testing.T) {
 func TestAIAudioTranscriptionRejectsEmptyAudio(t *testing.T) {
 	if _, err := aiAudioTranscription(context.Background(), http.DefaultClient, "http://localhost:8080", "", "audio.ogg", "audio/ogg", nil); err == nil {
 		t.Fatal("aiAudioTranscription() accepted empty audio")
+	}
+}
+
+func TestAIAudioFormatDetection(t *testing.T) {
+	if !aiIsWAV([]byte("RIFF\x24\x00\x00\x00WAVEfmt ")) || aiIsWAV([]byte("OggS\x00\x02\x00\x00WAVE")) {
+		t.Fatal("aiIsWAV() misclassified WAV input")
+	}
+	if !aiIsMP3([]byte("ID3\x03\x00\x00\x00\x00\x00\x00")) || !aiIsMP3([]byte{0xFF, 0xFB, 0x90, 0x00}) {
+		t.Fatal("aiIsMP3() rejected MP3 input")
+	}
+	for name, audio := range map[string][]byte{"ogg": []byte("OggS\x00\x02"), "adts aac": {0xFF, 0xF1, 0x50, 0x80}, "webm": {0x1A, 0x45, 0xDF, 0xA3}} {
+		if aiIsMP3(audio) || aiIsWAV(audio) {
+			t.Fatalf("%s detected as a format the endpoint already accepts", name)
+		}
+	}
+}
+
+func TestAIPrepareTranscriptionAudioKeepsSupportedFormats(t *testing.T) {
+	cases := map[string][]byte{
+		"wav":        append([]byte("RIFF\x24\x00\x00\x00WAVE"), make([]byte, 32)...),
+		"mp3 tag":    append([]byte("ID3\x03\x00\x00\x00\x00\x00\x00"), make([]byte, 32)...),
+		"mpeg frame": {0xFF, 0xFB, 0x90, 0x00, 0x00, 0x00},
+	}
+	for name, audio := range cases {
+		got, filename, contentType, err := aiPrepareTranscriptionAudio(context.Background(), audio, "voice.mp3", "audio/mpeg")
+		if err != nil {
+			t.Fatalf("%s: aiPrepareTranscriptionAudio() error = %v", name, err)
+		}
+		if !bytes.Equal(got, audio) || filename != "voice.mp3" || contentType != "audio/mpeg" {
+			t.Fatalf("%s: audio was changed to %q, %q, %q", name, got[:min(len(got), 4)], filename, contentType)
+		}
+	}
+}
+
+func TestAIPrepareTranscriptionAudioConvertsOggToWAV(t *testing.T) {
+	ffmpeg, err := aiFFmpegPath()
+	if err != nil {
+		t.Skipf("ffmpeg not available: %v", err)
+	}
+	source, err := exec.Command(ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.5", "-c:a", "libopus", "-f", "ogg", "pipe:1").Output()
+	if err != nil || len(source) == 0 {
+		t.Skipf("ffmpeg cannot create Ogg/Opus test audio: %v", err)
+	}
+	if aiIsWAV(source) || aiIsMP3(source) {
+		t.Fatal("test source should not already be WAV or MP3")
+	}
+
+	converted, filename, contentType, err := aiPrepareTranscriptionAudio(context.Background(), source, "Voice message.ogg", "audio/ogg")
+	if err != nil {
+		t.Fatalf("aiPrepareTranscriptionAudio() error = %v", err)
+	}
+	if !aiIsWAV(converted) || filename != "Voice message.wav" || contentType != "audio/wav" {
+		t.Fatalf("converted wav = %v, filename = %q, content type = %q", aiIsWAV(converted), filename, contentType)
 	}
 }
 

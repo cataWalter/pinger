@@ -60,6 +60,21 @@ func TestValidateMessageBookmarkPreference(t *testing.T) {
 	}
 }
 
+func TestValidateLocalAIChatFavoritePreference(t *testing.T) {
+	const key = "ai.local_chat.favorite.chat-1"
+	for _, value := range []bool{true, false} {
+		if err := Validate(key, value); err != nil {
+			t.Errorf("Validate(%q, %t) error = %v", key, value, err)
+		}
+	}
+	if err := Validate("ai.local_chat.favorite.", true); err == nil {
+		t.Fatal("Validate() accepted a local AI favorite without a chat ID")
+	}
+	if err := Validate(key, "true"); err == nil {
+		t.Fatal("Validate() accepted a non-boolean local AI favorite")
+	}
+}
+
 func TestValidateAppearanceThemePreference(t *testing.T) {
 	validThemes := []string{"System default", "Light", "Dark", "VS Code", "OLED black", "Bosco", "Rosa", "Dracula", "Midnight", "Slate", "Solarized", "Sepia"}
 	for _, theme := range validThemes {

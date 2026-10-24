@@ -91,8 +91,8 @@ import { DialogSurface } from './DialogSurface'
 import { SnippetSettingsModal } from './SnippetSettingsModal'
 import ContactHUD from './ContactHUD'
 import LocalAIChat from './LocalAIChat'
-import LocalAISidebar from './LocalAISidebar'
-import { useLocalAIChatList } from './localAIChats'
+import LocalAIAgentSettings from './LocalAIAgentSettings'
+import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIRoomID, LOCAL_AI_TITLE_CHARACTERS, useLocalAIChatList } from './localAIChats'
 const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
 
 type MatrixUpdate = {
@@ -117,7 +117,7 @@ type MatrixNotification = {
 }
 
 type PreferenceValues = NonNullable<Snapshot['preferences']>
-type RoomScope = 'all' | 'archived'
+type RoomScope = 'all' | 'archived' | 'local-ai'
 type RoomRefinements = { unanswered: boolean; needsReply: boolean; favorite: boolean }
 type OutgoingMessage = { roomID: string; text: string; replyTo: Message | null; mentionUserIDs: string[] }
 type MessageMenuItem = { key: string; label: string; ariaLabel: string; icon: ReactElement; danger?: boolean; disabled?: boolean; separatorBefore?: boolean; run: () => void }
@@ -881,7 +881,9 @@ function App() {
   const [localAIChatOpen, setLocalAIChatOpen] = useState(false)
   const [localAIChatId, setLocalAIChatId] = useState<string | null>(null)
   const [localAINewChatAgentId, setLocalAINewChatAgentId] = useState('')
-  const localAIChatList = useLocalAIChatList(localAIChatOpen)
+  const localAIChatList = useLocalAIChatList(true)
+  const [localAIRenameDraft, setLocalAIRenameDraft] = useState<string | null>(null)
+  const [localAIDeleteArmedID, setLocalAIDeleteArmedID] = useState('')
   const [mobilePane, setMobilePane] = useState<'rooms' | 'conversation'>('rooms')
   const [search, setSearch] = useState('')
   const [roomScope, setRoomScope] = useState<RoomScope>('all')
@@ -1107,7 +1109,7 @@ function App() {
     return () => { active = false }
   }, [])
 
-  const preferences = snapshot?.preferences ?? {}
+  const preferences = useMemo(() => snapshot?.preferences ?? {}, [snapshot?.preferences])
   const rooms = snapshot?.rooms ?? EMPTY_ROOMS
   const selectedRoom = useMemo(() => rooms.find((room) => room.id === selectedRoomID), [rooms, selectedRoomID])
   const selectedRoomAvatar = useMemo(() => selectedRoom?.avatar || (
@@ -1134,15 +1136,34 @@ function App() {
   const localAIAgentCandidate = localAIActiveChat ? localAIActiveChat.agentId : localAINewChatAgentId
   const localAIAgentId = localAIAgents.agents.some((agent) => agent.id === localAIAgentCandidate) ? localAIAgentCandidate : ''
 
-  function startLocalAIChat(agentID?: string) {
+  function startLocalAIChat() {
     setLocalAIChatId(null)
-    setLocalAINewChatAgentId(agentID ?? localAIAgents.defaultAgentId)
-    setMobilePane('conversation')
+    setLocalAINewChatAgentId(localAIAgents.defaultAgentId)
+    openLocalAIChatView()
   }
 
   function selectLocalAIChat(chatID: string) {
     setLocalAIChatId(chatID)
+    openLocalAIChatView()
+  }
+
+  // The private chat pane replaces the Matrix conversation, so the Matrix selection is cleared.
+  function openLocalAIChatView() {
+    if (selectedRoomRef.current) showRoom('')
+    setLocalAIChatOpen(true)
+    setLocalAIRenameDraft(null)
     setMobilePane('conversation')
+  }
+
+  async function saveLocalAIRename(draft: string) {
+    setLocalAIRenameDraft(null)
+    const title = draft.trim()
+    if (!localAIChatId || !title || title === localAIActiveChat?.title) return
+    try {
+      await renameLocalAIChat(localAIChatId, title)
+    } catch (renameError) {
+      setError(localAIErrorMessage(renameError, 'The chat could not be renamed.'))
+    }
   }
 
   async function renameLocalAIChat(chatID: string, title: string) {
@@ -1156,9 +1177,6 @@ function App() {
     localAIChatList.reload()
   }
 
-  function saveLocalAIAgents(collection: ChatAgentCollection) {
-    return setPreference('ai.local_agents', serializeChatAgents(collection))
-  }
   const appZoom = preferenceNumber(preferences, 'appearance.zoom', 100, 75, 125)
   const scheduleTimeSuggestions = parseTimeSuggestionMinutes(preferenceString(preferences, 'schedule.suggestions_minutes', '5,15,60'))
   const answeredShortcut = preferenceString(preferences, 'shortcuts.mark_answered', 'E').trim().toUpperCase() || 'E'
@@ -1294,13 +1312,17 @@ function App() {
     ? (crossAccountRooms.length > 0 ? [...rooms, ...crossAccountRooms] : rooms)
     : effectiveAccountScope === activeAccountID ? rooms : crossAccountRooms.filter((room) => room.accountId === effectiveAccountScope),
     [rooms, crossAccountRooms, effectiveAccountScope, activeAccountID])
+  const localAIRooms = useMemo(() => localAIChatList.chats.map((chat) => localAIChatToRoom(chat, preferenceBoolean(preferences, localAIFavoritePreference(chat.id)))), [localAIChatList.chats, preferences])
+  // Private model chats belong to no Matrix account, so they are hidden while the list is limited to one account.
+  const listRooms = useMemo(() => effectiveAccountScope === 'all' ? [...scopedRooms, ...localAIRooms] : scopedRooms, [scopedRooms, localAIRooms, effectiveAccountScope])
   const filteredRooms = useMemo(() => {
     const query = search.trim().toLowerCase()
     const today = Date.now()
-    return scopedRooms.filter((room) => {
+    return listRooms.filter((room) => {
       const matchesQuery = !query || `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query)
-      const archived = preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
-      const matchesArchive = roomScope === 'archived' ? archived : !archived || Boolean(query)
+      const localAI = isLocalAIRoomID(room.id)
+      const archived = !localAI && preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
+      const matchesArchive = roomScope === 'local-ai' ? localAI : roomScope === 'archived' ? archived : !archived || Boolean(query)
       const matchesRefinements = (!roomRefinements.unanswered || isUnansweredRoom(room))
         && (!roomRefinements.needsReply || isNeedsReplyRoom(room))
         && (!roomRefinements.favorite || room.favorite)
@@ -1311,8 +1333,10 @@ function App() {
         : 0
       return favoriteOrder || compareRoomActivity(left, right, today)
     })
-  }, [scopedRooms, search, preferences, roomScope, roomRefinements])
-  const selectedRoomListIndex = filteredRooms.findIndex((room) => room.id === selectedRoomID && isActiveAccountRoom(room))
+  }, [listRooms, search, preferences, roomScope, roomRefinements])
+  // The open private chat takes the highlight, because the Matrix selection is cleared while it is open.
+  const activeListRoomID = localAIChatOpen ? (localAIChatId ? localAIRoomID(localAIChatId) : '') : selectedRoomID
+  const selectedRoomListIndex = filteredRooms.findIndex((room) => room.id === activeListRoomID && isActiveAccountRoom(room))
   const quickSwitcherRooms = useMemo(() => rankQuickSwitcherRooms(rooms, quickSwitcherQuery), [rooms, quickSwitcherQuery])
   const needsReplyCount = useMemo(() => scopedRooms.filter((room) => isNeedsReplyRoom(room) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences])
   const readRoomCount = useMemo(() => rooms.filter((room) => room.unread === 0 && !room.markedUnread && !preferenceBoolean(preferences, archivedPreferenceKey(room.id))).length, [rooms, preferences])
@@ -1327,11 +1351,13 @@ function App() {
   const contextMenuHasUnread = contextMenuRooms.some((room) => room.unread > 0 || room.markedUnread)
   const contextMenuNeedsArchive = contextMenuRooms.some((room) => !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId)))
   const contextMenuNeedsFavorite = contextMenuRooms.some((room) => !room.favorite)
+  const contextMenuChatID = roomContextMenu ? localAIChatIDFromRoomID(roomContextMenu.roomID) : null
+  const contextMenuLocalAIRoom = contextMenuChatID === null ? null : localAIRooms.find((room) => room.id === roomContextMenu?.roomID) ?? null
   const scheduledJobCount = scheduledJobs.length
 
   roomButtonActionsRef.current = {
     onSelect: (room, index, event) => {
-      if (event.shiftKey && isActiveAccountRoom(room)) {
+      if (event.shiftKey && isActiveAccountRoom(room) && !isLocalAIRoomID(room.id)) {
         event.preventDefault()
         const anchorIndex = filteredRooms.findIndex((candidate) => candidate.id === roomSelectionAnchorRef.current)
         if (anchorIndex < 0) {
@@ -1341,7 +1367,7 @@ function App() {
         }
         const start = Math.min(anchorIndex, index)
         const end = Math.max(anchorIndex, index)
-        setSelectedRoomIDs(filteredRooms.slice(start, end + 1).filter(isActiveAccountRoom).map((candidate) => candidate.id))
+        setSelectedRoomIDs(filteredRooms.slice(start, end + 1).filter((candidate) => isActiveAccountRoom(candidate) && !isLocalAIRoomID(candidate.id)).map((candidate) => candidate.id))
         return
       }
       clearRoomSelection()
@@ -2466,9 +2492,10 @@ function App() {
   async function archiveInactiveRooms() {
     const ageDays = Number(preferenceString(preferences, 'archive.older_than_days', '90'))
     const cutoff = Date.now() - ageDays * 24 * 60 * 60 * 1000
-    const inactiveRooms = rooms.filter((room) => room.lastEventAt > 0
-      && room.lastEventAt < cutoff
-      && !preferenceBoolean(preferences, archivedPreferenceKey(room.id)))
+    const inactiveRooms = rooms.filter((room) => {
+      const activityAt = roomActivityAt(room)
+      return activityAt > 0 && activityAt < cutoff && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
+    })
     const archivedRoomIDs = new Set<string>()
     for (const room of inactiveRooms) {
       if ((room.unread > 0 || room.markedUnread) && room.lastEventId) {
@@ -2483,7 +2510,7 @@ function App() {
           continue
         }
       }
-      if (await setPreference(archivedPreferenceKey(room.id), true)) archivedRoomIDs.add(room.id)
+      if (await setPreference(archivedPreferenceKey(room.id, room.accountId), true)) archivedRoomIDs.add(room.id)
     }
     if (archivedRoomIDs.has(selectedRoomID)) showRoom(nextRoomAfterArchive(archivedRoomIDs))
   }
@@ -2505,10 +2532,11 @@ function App() {
   function openRoomContextMenu(roomID: string, x: number, y: number) {
     const menuWidth = 232
     const menuHeight = selectedRoomIDs.includes(roomID) && selectedRoomIDs.length > 1 ? 232 : 200
-    if (!selectedRoomIDs.includes(roomID)) {
+    if (!isLocalAIRoomID(roomID) && !selectedRoomIDs.includes(roomID)) {
       setSelectedRoomIDs([roomID])
       roomSelectionAnchorRef.current = roomID
     }
+    setLocalAIDeleteArmedID('')
     setMessageContextMenu(null)
     setRoomContextMenu({
       roomID,
@@ -2798,6 +2826,7 @@ function App() {
   }
 
   function showRoom(roomID: string) {
+    if (roomID) setLocalAIChatOpen(false)
     if (selectedRoomRef.current === roomID && historyRoomIDRef.current === roomID) {
       setHistoryRevision((revision) => revision + 1)
     }
@@ -2832,6 +2861,11 @@ function App() {
 
   // Rooms from other accounts switch to their account before opening.
   function openInboxRoom(room: Room) {
+    const chatID = localAIChatIDFromRoomID(room.id)
+    if (chatID !== null) {
+      selectLocalAIChat(chatID)
+      return
+    }
     setLocalAIChatOpen(false)
     if (isActiveAccountRoom(room)) showRoom(room.id)
     else void switchAccount(room.accountId, room.id)
@@ -2934,43 +2968,37 @@ function App() {
       }
       if (event.shiftKey && key === 'a') {
         event.preventDefault()
-        setLocalAIChatOpen(false)
         setRoomScope('all')
         setRoomRefinements({ unanswered: false, needsReply: false, favorite: false })
         return
       }
       if (event.shiftKey && key === 'h') {
         event.preventDefault()
-        setLocalAIChatOpen(false)
         setRoomScope('archived')
         setRoomRefinements({ unanswered: false, needsReply: false, favorite: false })
         return
       }
       if (event.shiftKey && key === 'r') {
         event.preventDefault()
-        setLocalAIChatOpen(false)
         setRoomScope('all')
         setRoomRefinements({ unanswered: true, needsReply: false, favorite: false })
         return
       }
       if (event.shiftKey && key === 'f') {
         event.preventDefault()
-        setLocalAIChatOpen(false)
         setRoomScope('all')
         setRoomRefinements({ unanswered: false, needsReply: false, favorite: true })
         return
       }
       if (event.shiftKey && key === 'u') {
         event.preventDefault()
-        setLocalAIChatOpen(false)
         setRoomScope('all')
         setRoomRefinements({ unanswered: false, needsReply: true, favorite: false })
         return
       }
       if (event.shiftKey && key === 'm') {
         event.preventDefault()
-        setLocalAIChatOpen(true)
-        setMobilePane('conversation')
+        startLocalAIChat()
         return
       }
       if (event.shiftKey && key === 'l') {
@@ -4451,121 +4479,137 @@ function App() {
       } as React.CSSProperties}
     >
       <aside className="sidebar">
-        {localAIChatOpen ? (
-          <LocalAISidebar
-            chats={localAIChatList.chats}
-            chatsError={localAIChatList.error}
-            agents={localAIAgents}
-            activeChatId={localAIChatId}
-            onNewChat={startLocalAIChat}
-            onSelectChat={selectLocalAIChat}
-            onRenameChat={renameLocalAIChat}
-            onDeleteChat={deleteLocalAIChat}
-            onSaveAgents={saveLocalAIAgents}
-            onReturnToMatrix={() => setLocalAIChatOpen(false)}
+        <>
+          <label className="room-search">
+            <Search size={16} />
+            <input ref={roomSearchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a room" aria-label="Find a room" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
+            {search && <button type="button" aria-label="Clear room search" onClick={() => setSearch('')}>×</button>}
+          </label>
+          <div className="room-filters" role="group" aria-label="Filter rooms">
+            {inboxAccountCount > 1 && (
+              <select className="room-account-filter" aria-label="Filter rooms by account" value={effectiveAccountScope} onChange={(event) => setInboxAccountScope(event.target.value)}>
+                <option value="all">All accounts</option>
+                {(snapshot?.accounts ?? []).map((account) => <option key={account.id} value={account.id}>{account.profile.displayName || account.profile.userId}</option>)}
+              </select>
+            )}
+            <div className="room-scope-filters" role="group" aria-label="Room visibility">
+              <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-pressed={roomScope === 'all'} aria-keyshortcuts="Control+Shift+A Meta+Shift+A" title="All rooms (Ctrl / ⌘ + Shift + A)" onClick={() => { setRoomScope('all') }}><MessageCircleMore size={13} /><span className="filter-label">All</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧A</kbd></button>
+              <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => { setRoomScope('archived'); setRoomRefinements({ unanswered: false, needsReply: false, favorite: false }) }}><Archive size={13} /><span className="filter-label">Archive</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧H</kbd></button>
+            </div>
+            <div className="room-refinement-filters" role="group" aria-label="Room categories">
+              <button type="button" className={roomRefinements.unanswered ? 'is-active' : ''} aria-label="Unanswered rooms" aria-pressed={roomRefinements.unanswered} aria-keyshortcuts="Control+Shift+R Meta+Shift+R" title="Unanswered rooms (Ctrl / ⌘ + Shift + R)" onClick={() => { setRoomRefinements((current) => ({ ...current, unanswered: !current.unanswered })) }}><Reply size={14} /><span className="filter-label">Unanswered</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧R</kbd></button>
+              <button type="button" className={roomRefinements.needsReply ? 'is-active' : ''} aria-label="Needs reply" aria-pressed={roomRefinements.needsReply} aria-keyshortcuts={`${answeredShortcut} Control+Shift+U Meta+Shift+U`} title={`Needs reply (Ctrl / ⌘ + Shift + U; ${answeredShortcut} marks answered)`} onClick={() => { setRoomRefinements((current) => ({ ...current, needsReply: !current.needsReply })) }} onKeyDown={(event) => handleMarkAnsweredKeyDown(event, selectedRoomID)}>
+                <CircleDot size={14} /><span className="filter-label">Needs reply</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧U</kbd>{needsReplyCount > 0 && <span className="filter-count">{needsReplyCount}</span>}
+              </button>
+              <button type="button" className={roomRefinements.favorite ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={roomRefinements.favorite} aria-keyshortcuts="Control+Shift+F Meta+Shift+F" title="Favorites (Ctrl / ⌘ + Shift + F)" onClick={() => { setRoomRefinements((current) => ({ ...current, favorite: !current.favorite })) }}><Star size={14} /><span className="filter-label">Favorites</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧F</kbd></button>
+              <button type="button" className={roomScope === 'local-ai' ? 'is-active' : ''} aria-label="Local AI chats" aria-pressed={roomScope === 'local-ai'} title="Private model chats" onClick={() => setRoomScope((current) => current === 'local-ai' ? 'all' : 'local-ai')}><Sparkles size={14} /><span className="filter-label">Local AI</span></button>
+            </div>
+          </div>
+          <button className="relationship-shortcut" type="button" onClick={() => { setRelationshipDecayError(''); setRelationshipsOpen(true) }}>
+            <HeartHandshake size={15} />
+            <span>Keep in Touch</span>
+            {relationshipDecayAlertCount > 0 && <span className="relationship-alert-count" aria-label={`${relationshipDecayAlertCount} check-ins due`}>{relationshipDecayAlertCount}</span>}
+          </button>
+          <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : roomScope === 'local-ai' ? 'AI CHATS' : 'ROOMS'}</span><span className="room-section-actions">{roomScope === 'all' && <button className="room-archive-all" type="button" aria-label="Archive all read rooms" title="Archive all read rooms" disabled={readRoomCount === 0} onClick={() => void archiveAllReadRooms()}><Archive size={13} /></button>}{roomScope === 'local-ai' && <button className="room-archive-all" type="button" aria-label="New private chat" title="New private chat (Ctrl / ⌘ + Shift + M)" onClick={() => startLocalAIChat()}><Plus size={13} /></button>}{filteredRooms.length.toString().padStart(2, '0')}</span></div>
+          <VirtualRoomList
+            listRef={roomListRef}
+            rooms={filteredRooms}
+            selectedRoomIndex={selectedRoomListIndex}
+            rowHeight={preferenceBoolean(preferences, 'sidebar.compact_chat_list') ? 46 : 62}
+            listCount={Math.max(filteredRooms.length, snapshot?.slidingSyncListCounts?.main ?? 0)}
+            rangeKey={snapshot?.activeAccountId ?? ''}
+            onVisibleRange={reportRoomListVisibleRange}
+            renderRoom={(room, index) => (
+              <RoomButton
+                key={`${room.accountId}:${room.id}`}
+                room={room}
+                index={index}
+                active={room.id === activeListRoomID && isActiveAccountRoom(room)}
+                needsReply={isNeedsReplyRoom(room)}
+                multiSelected={selectedRoomIDs.length > 1 && selectedRoomIDs.includes(room.id)}
+                lastMessageByMe={isLastMessageByCurrentUser(room)}
+                use24Hour={preferenceBoolean(preferences, 'appearance.time_24_hour')}
+                showNetwork={preferenceBoolean(preferences, 'sidebar.network_icons')}
+                showUnreadCounts={preferenceBoolean(preferences, 'sidebar.show_unread_counts', true)}
+                actionsRef={roomButtonActionsRef}
+              />
+            )}
+            emptyContent={filteredRooms.length === 0 && (
+              <div className="room-empty">{listRooms.length === 0 ? 'No rooms yet' : search ? 'No matching rooms' : roomScope === 'archived' ? 'No archived rooms' : roomScope === 'local-ai' ? 'No private model chats yet' : 'No rooms match these filters'}</div>
+            )}
           />
-        ) : <>
-        <label className="room-search">
-          <Search size={16} />
-          <input ref={roomSearchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a room" aria-label="Find a room" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
-          {search && <button type="button" aria-label="Clear room search" onClick={() => setSearch('')}>×</button>}
-        </label>
-        <div className="room-filters" role="group" aria-label="Filter rooms">
-          {inboxAccountCount > 1 && (
-            <select className="room-account-filter" aria-label="Filter rooms by account" value={effectiveAccountScope} onChange={(event) => setInboxAccountScope(event.target.value)}>
-              <option value="all">All accounts</option>
-              {(snapshot?.accounts ?? []).map((account) => <option key={account.id} value={account.id}>{account.profile.displayName || account.profile.userId}</option>)}
-            </select>
-          )}
-          <div className="room-scope-filters" role="group" aria-label="Room visibility">
-            <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-pressed={roomScope === 'all'} aria-keyshortcuts="Control+Shift+A Meta+Shift+A" title="All rooms (Ctrl / ⌘ + Shift + A)" onClick={() => { setLocalAIChatOpen(false); setRoomScope('all') }}><MessageCircleMore size={13} /><span className="filter-label">All</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧A</kbd></button>
-            <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => { setLocalAIChatOpen(false); setRoomScope('archived'); setRoomRefinements({ unanswered: false, needsReply: false, favorite: false }) }}><Archive size={13} /><span className="filter-label">Archive</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧H</kbd></button>
-          </div>
-          <div className="room-refinement-filters" role="group" aria-label="Room categories">
-            <button type="button" className={roomRefinements.unanswered ? 'is-active' : ''} aria-label="Unanswered rooms" aria-pressed={roomRefinements.unanswered} aria-keyshortcuts="Control+Shift+R Meta+Shift+R" title="Unanswered rooms (Ctrl / ⌘ + Shift + R)" onClick={() => { setLocalAIChatOpen(false); setRoomRefinements((current) => ({ ...current, unanswered: !current.unanswered })) }}><Reply size={14} /><span className="filter-label">Unanswered</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧R</kbd></button>
-            <button type="button" className={roomRefinements.needsReply ? 'is-active' : ''} aria-label="Needs reply" aria-pressed={roomRefinements.needsReply} aria-keyshortcuts={`${answeredShortcut} Control+Shift+U Meta+Shift+U`} title={`Needs reply (Ctrl / ⌘ + Shift + U; ${answeredShortcut} marks answered)`} onClick={() => { setLocalAIChatOpen(false); setRoomRefinements((current) => ({ ...current, needsReply: !current.needsReply })) }} onKeyDown={(event) => handleMarkAnsweredKeyDown(event, selectedRoomID)}>
-              <CircleDot size={14} /><span className="filter-label">Needs reply</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧U</kbd>{needsReplyCount > 0 && <span className="filter-count">{needsReplyCount}</span>}
+          {roomContextMenu && contextMenuChatID !== null && contextMenuLocalAIRoom && <div className="room-context-menu" role="menu" style={{ left: roomContextMenu.x, top: roomContextMenu.y }}>
+            <button type="button" role="menuitem" onClick={() => {
+              setRoomContextMenu(null)
+              selectLocalAIChat(contextMenuChatID)
+              // Seed the raw title so an untitled chat is not renamed to the "Untitled chat" placeholder.
+              setLocalAIRenameDraft(localAIChatList.chats.find((chat) => chat.id === contextMenuChatID)?.title ?? '')
+            }}>
+              <Pencil size={15} /><span>Rename chat</span>
             </button>
-            <button type="button" className={roomRefinements.favorite ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={roomRefinements.favorite} aria-keyshortcuts="Control+Shift+F Meta+Shift+F" title="Favorites (Ctrl / ⌘ + Shift + F)" onClick={() => { setLocalAIChatOpen(false); setRoomRefinements((current) => ({ ...current, favorite: !current.favorite })) }}><Star size={14} /><span className="filter-label">Favorites</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧F</kbd></button>
-            <button type="button" className={localAIChatOpen ? 'is-active' : ''} aria-label="Local AI chat" aria-pressed={localAIChatOpen} aria-keyshortcuts="Control+Shift+M Meta+Shift+M" title="Local AI chat (Ctrl / ⌘ + Shift + M)" onClick={() => { setLocalAIChatOpen(true); setMobilePane('conversation') }}><Sparkles size={14} /><span className="filter-label">Local AI</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧M</kbd></button>
-          </div>
-        </div>
-        <button className="relationship-shortcut" type="button" onClick={() => { setRelationshipDecayError(''); setRelationshipsOpen(true) }}>
-          <HeartHandshake size={15} />
-          <span>Keep in Touch</span>
-          {relationshipDecayAlertCount > 0 && <span className="relationship-alert-count" aria-label={`${relationshipDecayAlertCount} check-ins due`}>{relationshipDecayAlertCount}</span>}
-        </button>
-        <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : 'ROOMS'}</span><span className="room-section-actions">{roomScope !== 'archived' && <button className="room-archive-all" type="button" aria-label="Archive all read rooms" title="Archive all read rooms" disabled={readRoomCount === 0} onClick={() => void archiveAllReadRooms()}><Archive size={13} /></button>}{filteredRooms.length.toString().padStart(2, '0')}</span></div>
-        <VirtualRoomList
-          listRef={roomListRef}
-          rooms={filteredRooms}
-          selectedRoomIndex={selectedRoomListIndex}
-          rowHeight={preferenceBoolean(preferences, 'sidebar.compact_chat_list') ? 46 : 62}
-          listCount={Math.max(filteredRooms.length, snapshot?.slidingSyncListCounts?.main ?? 0)}
-          rangeKey={snapshot?.activeAccountId ?? ''}
-          onVisibleRange={reportRoomListVisibleRange}
-          renderRoom={(room, index) => (
-            <RoomButton
-              key={`${room.accountId}:${room.id}`}
-              room={room}
-              index={index}
-              active={room.id === selectedRoomID && isActiveAccountRoom(room)}
-              needsReply={isNeedsReplyRoom(room)}
-              multiSelected={selectedRoomIDs.length > 1 && selectedRoomIDs.includes(room.id)}
-              lastMessageByMe={isLastMessageByCurrentUser(room)}
-              use24Hour={preferenceBoolean(preferences, 'appearance.time_24_hour')}
-              showNetwork={preferenceBoolean(preferences, 'sidebar.network_icons')}
-              showUnreadCounts={preferenceBoolean(preferences, 'sidebar.show_unread_counts', true)}
-              actionsRef={roomButtonActionsRef}
-            />
-          )}
-          emptyContent={filteredRooms.length === 0 && (
-            <div className="room-empty">{scopedRooms.length === 0 ? 'No rooms yet' : search ? 'No matching rooms' : roomScope === 'archived' ? 'No archived rooms' : 'No rooms match these filters'}</div>
-          )}
-        />
-        {roomContextMenu && <div className="room-context-menu" role="menu" style={{ left: roomContextMenu.x, top: roomContextMenu.y }}>
-          {contextMenuIsBulk && <div className="room-context-menu-count">{contextMenuRooms.length} chats selected</div>}
-          {contextMenuNeedsReplyAddCount > 0 && <button type="button" role="menuitem" aria-keyshortcuts="N" title="Add to Needs reply (N)" onClick={() => void applyBulkRoomAction('needs-reply', contextMenuNeedsReplyRooms)}>
-            <Reply size={15} /><span>{contextMenuIsBulk ? `Add ${contextMenuNeedsReplyAddCount} to Needs reply` : 'Add to Needs reply'}</span><kbd aria-hidden="true">N</kbd>
-          </button>}
-          {contextMenuRooms.some((room) => room.unanswered) && <button type="button" role="menuitem" aria-keyshortcuts={answeredShortcut} onClick={() => contextMenuIsBulk ? void applyBulkRoomAction('answered', contextMenuRooms) : void markRoomAnswered(roomContextMenu.roomID)} onKeyDown={(event) => {
-            if (!contextMenuIsBulk) {
-              handleMarkAnsweredKeyDown(event, roomContextMenu.roomID)
-              return
-            }
-            if (event.altKey || event.ctrlKey || event.metaKey || event.key.toUpperCase() !== answeredShortcut) return
-            event.preventDefault()
-            event.stopPropagation()
-            void applyBulkRoomAction('answered', contextMenuRooms)
-          }}>
-            <Check size={15} /><span>{contextMenuIsBulk ? `Remove ${contextMenuRooms.length} from Needs reply` : 'Remove from Needs reply'}</span><kbd aria-hidden="true">{answeredShortcut}</kbd>
-          </button>}
-          {contextMenuRooms.length > 0 && <button type="button" role="menuitem" aria-keyshortcuts="U" title="Toggle room unread (U)" onClick={() => {
-            if (contextMenuIsBulk) void applyBulkRoomAction(contextMenuHasUnread ? 'read' : 'unread', contextMenuRooms)
-            else void (contextMenuHasUnread ? markRoomRead(roomContextMenu.roomID) : markRoomUnread(roomContextMenu.roomID))
-          }}>
-            {contextMenuHasUnread ? <><Check size={15} /><span>{contextMenuIsBulk ? `Mark ${contextMenuRooms.length} chats read` : 'Mark room read'}</span></> : <><CircleDot size={15} /><span>{contextMenuIsBulk ? `Mark ${contextMenuRooms.length} chats unread` : 'Mark room unread'}</span></>}<kbd aria-hidden="true">U</kbd>
-          </button>}
-          {contextMenuRooms.length > 0 && <button type="button" role="menuitem" aria-keyshortcuts="A" title="Archive or restore room (A)" onClick={() => {
-            if (contextMenuIsBulk) void applyBulkRoomAction(contextMenuNeedsArchive ? 'archive' : 'restore', contextMenuRooms)
-            else void setRoomArchived(roomContextMenu.roomID, contextMenuNeedsArchive)
-          }}>
-            {contextMenuNeedsArchive ? <Archive size={15} /> : <ArchiveRestore size={15} />}
-            <span>{contextMenuIsBulk ? `${contextMenuNeedsArchive ? 'Archive' : 'Restore'} ${contextMenuRooms.length} chats` : contextMenuNeedsArchive ? 'Archive room' : 'Restore room'}</span><kbd aria-hidden="true">A</kbd>
-          </button>}
-          {contextMenuRooms.length > 0 && <button type="button" role="menuitem" aria-keyshortcuts="F" title="Toggle favorite (F)" onClick={() => {
-            if (contextMenuIsBulk) void applyBulkRoomAction(contextMenuNeedsFavorite ? 'favorite' : 'unfavorite', contextMenuRooms)
-            else {
+            <button type="button" role="menuitem" onClick={() => {
               setRoomContextMenu(null)
               clearRoomSelection()
-              void setPreference(`room.favorite.${roomContextMenu.roomID}`, contextMenuNeedsFavorite)
-            }
-          }}>
-            <Star size={15} fill={contextMenuNeedsFavorite ? 'none' : 'currentColor'} />
-            <span>{contextMenuIsBulk ? `${contextMenuNeedsFavorite ? 'Add' : 'Remove'} ${contextMenuRooms.length} ${contextMenuNeedsFavorite ? 'to' : 'from'} Favorites` : contextMenuNeedsFavorite ? 'Add to Favorites' : 'Remove from Favorites'}</span><kbd aria-hidden="true">F</kbd>
-          </button>}
-        </div>}
-        </>}
+              void setPreference(localAIFavoritePreference(contextMenuChatID), !contextMenuLocalAIRoom.favorite)
+            }}>
+              <Star size={15} /><span>{contextMenuLocalAIRoom.favorite ? 'Remove from Favorites' : 'Add to Favorites'}</span>
+            </button>
+            <button type="button" role="menuitem" onClick={() => {
+              if (localAIDeleteArmedID !== contextMenuChatID) {
+                setLocalAIDeleteArmedID(contextMenuChatID)
+                return
+              }
+              setRoomContextMenu(null)
+              clearRoomSelection()
+              setLocalAIDeleteArmedID('')
+              void deleteLocalAIChat(contextMenuChatID)
+            }}>
+              <Trash2 size={15} /><span>{localAIDeleteArmedID === contextMenuChatID ? 'Confirm delete' : 'Delete chat'}</span>
+            </button>
+          </div>}
+          {roomContextMenu && contextMenuChatID === null && <div className="room-context-menu" role="menu" style={{ left: roomContextMenu.x, top: roomContextMenu.y }}>
+            {contextMenuIsBulk && <div className="room-context-menu-count">{contextMenuRooms.length} chats selected</div>}
+            {contextMenuNeedsReplyAddCount > 0 && <button type="button" role="menuitem" aria-keyshortcuts="N" title="Add to Needs reply (N)" onClick={() => void applyBulkRoomAction('needs-reply', contextMenuNeedsReplyRooms)}>
+              <Reply size={15} /><span>{contextMenuIsBulk ? `Add ${contextMenuNeedsReplyAddCount} to Needs reply` : 'Add to Needs reply'}</span><kbd aria-hidden="true">N</kbd>
+            </button>}
+            {contextMenuRooms.some((room) => room.unanswered) && <button type="button" role="menuitem" aria-keyshortcuts={answeredShortcut} onClick={() => contextMenuIsBulk ? void applyBulkRoomAction('answered', contextMenuRooms) : void markRoomAnswered(roomContextMenu.roomID)} onKeyDown={(event) => {
+              if (!contextMenuIsBulk) {
+                handleMarkAnsweredKeyDown(event, roomContextMenu.roomID)
+                return
+              }
+              if (event.altKey || event.ctrlKey || event.metaKey || event.key.toUpperCase() !== answeredShortcut) return
+              event.preventDefault()
+              event.stopPropagation()
+              void applyBulkRoomAction('answered', contextMenuRooms)
+            }}>
+              <Check size={15} /><span>{contextMenuIsBulk ? `Remove ${contextMenuRooms.length} from Needs reply` : 'Remove from Needs reply'}</span><kbd aria-hidden="true">{answeredShortcut}</kbd>
+            </button>}
+            {contextMenuRooms.length > 0 && <button type="button" role="menuitem" aria-keyshortcuts="U" title="Toggle room unread (U)" onClick={() => {
+              if (contextMenuIsBulk) void applyBulkRoomAction(contextMenuHasUnread ? 'read' : 'unread', contextMenuRooms)
+              else void (contextMenuHasUnread ? markRoomRead(roomContextMenu.roomID) : markRoomUnread(roomContextMenu.roomID))
+            }}>
+              {contextMenuHasUnread ? <><Check size={15} /><span>{contextMenuIsBulk ? `Mark ${contextMenuRooms.length} chats read` : 'Mark room read'}</span></> : <><CircleDot size={15} /><span>{contextMenuIsBulk ? `Mark ${contextMenuRooms.length} chats unread` : 'Mark room unread'}</span></>}<kbd aria-hidden="true">U</kbd>
+            </button>}
+            {contextMenuRooms.length > 0 && <button type="button" role="menuitem" aria-keyshortcuts="A" title="Archive or restore room (A)" onClick={() => {
+              if (contextMenuIsBulk) void applyBulkRoomAction(contextMenuNeedsArchive ? 'archive' : 'restore', contextMenuRooms)
+              else void setRoomArchived(roomContextMenu.roomID, contextMenuNeedsArchive)
+            }}>
+              {contextMenuNeedsArchive ? <Archive size={15} /> : <ArchiveRestore size={15} />}
+              <span>{contextMenuIsBulk ? `${contextMenuNeedsArchive ? 'Archive' : 'Restore'} ${contextMenuRooms.length} chats` : contextMenuNeedsArchive ? 'Archive room' : 'Restore room'}</span><kbd aria-hidden="true">A</kbd>
+            </button>}
+            {contextMenuRooms.length > 0 && <button type="button" role="menuitem" aria-keyshortcuts="F" title="Toggle favorite (F)" onClick={() => {
+              if (contextMenuIsBulk) void applyBulkRoomAction(contextMenuNeedsFavorite ? 'favorite' : 'unfavorite', contextMenuRooms)
+              else {
+                setRoomContextMenu(null)
+                clearRoomSelection()
+                void setPreference(`room.favorite.${roomContextMenu.roomID}`, contextMenuNeedsFavorite)
+              }
+            }}>
+              <Star size={15} fill={contextMenuNeedsFavorite ? 'none' : 'currentColor'} />
+              <span>{contextMenuIsBulk ? `${contextMenuNeedsFavorite ? 'Add' : 'Remove'} ${contextMenuRooms.length} ${contextMenuNeedsFavorite ? 'to' : 'from'} Favorites` : contextMenuNeedsFavorite ? 'Add to Favorites' : 'Remove from Favorites'}</span><kbd aria-hidden="true">F</kbd>
+            </button>}
+          </div>}
+        </>
         <div className="sidebar-profile">
           <button className="account-switcher-trigger" type="button" aria-label="Manage Matrix accounts" title="Manage Matrix accounts" onClick={() => { setAccountError(''); setAddingAccount(false); setAccountManagerOpen(true) }}>
             <Avatar uri={snapshot.profile.avatarUri} label={snapshot.profile.displayName || snapshot.profile.userId} className="profile-avatar" />
@@ -4589,11 +4633,17 @@ function App() {
           {preferenceBoolean(preferences, 'privacy.incognito') && <span className="content-blur-indicator" role="status" aria-label="Content blur is on" title="Content blur is on"><EyeOff size={14} /></span>}
           {localAIChatOpen ? (
             <>
-              <div className="conversation-title"><h2>{localAIActiveChat?.title || 'Local AI'}</h2><span>Private model chat</span></div>
-              <div className="conversation-actions">
-                <IconTooltip label="Return to Matrix">
-                  <button className="icon-button" type="button" aria-label="Return to Matrix" onClick={() => setLocalAIChatOpen(false)}><ArrowLeft size={16} /></button>
-                </IconTooltip>
+              <div className="conversation-title">
+                {localAIRenameDraft === null ? <h2>{localAIActiveChat?.title || 'Local AI'}</h2> : <input className="local-ai-title-input" aria-label="Chat title" value={localAIRenameDraft} maxLength={LOCAL_AI_TITLE_CHARACTERS} autoFocus onChange={(event) => setLocalAIRenameDraft(event.currentTarget.value)} onBlur={() => setLocalAIRenameDraft(null)} onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    setLocalAIRenameDraft(null)
+                  } else if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                    event.preventDefault()
+                    void saveLocalAIRename(event.currentTarget.value)
+                  }
+                }} />}
+                <span>Private model chat</span>
               </div>
             </>
           ) : selectedRoom ? (
@@ -4714,342 +4764,342 @@ function App() {
             onChatsChanged={localAIChatList.reload}
           />
           {localAIChatOpen ? null : <>
-          <div className="conversation-thread">
-        {(scheduledNotice || undoRoomID) && <div className="chat-notice-stack" aria-label="Notifications">
-          {scheduledNotice && <div className="scheduled-notice" role="status">
-            <BellRing size={16} />
-            <span>{scheduledNotice}</span>
-            <button type="button" title="Open reminders" onClick={openScheduledJobs}>View reminders</button>
-            <button className="icon-button" type="button" aria-label="Dismiss reminder notice" title="Dismiss reminder notice" onClick={clearScheduledNotice}><X size={15} /></button>
-          </div>}
-          {undoRoomID && <div className="triage-toast" role="status">
-            <Check className="triage-toast-icon" size={16} aria-hidden="true" />
-            <span>Marked {rooms.find((room) => room.id === undoRoomID)?.name || 'room'} answered</span>
-            <button type="button" onClick={() => void undoAnswered()}><RotateCcw size={14} />Undo</button>
-            <button className="icon-button" type="button" aria-label="Dismiss notification" title="Dismiss notification" onClick={clearUndoToast}><X size={15} /></button>
-          </div>}
-        </div>}
-
-        {searchOpen && (
-          <section className="message-search-panel" aria-label="Search messages across rooms">
-            <div className="message-search-heading">
-              <h3>Search messages</h3>
-              <button className="icon-button" type="button" aria-label="Close message search" title="Close search" onClick={closeMessageSearch}>
-                <X size={16} />
-              </button>
-            </div>
-            <form className="message-search-form" onSubmit={submitMessageSearch}>
-              <input
-                autoFocus
-                value={messageSearch}
-                onChange={(event) => setMessageSearch(event.target.value)}
-                placeholder="Search all chats"
-                aria-label="Search local message history"
-                spellCheck={false}
-                autoCorrect="off"
-                autoCapitalize="off"
-              />
-              <button className="search-submit" type="submit" aria-label="Search" title="Search messages" disabled={!messageSearch.trim() || searching}>
-                <Search size={16} />
-              </button>
-            </form>
-            <details className="message-search-filters">
-              <summary>Filters</summary>
-              <div className="message-search-filter-grid">
-                <label>
-                  <span>Chat</span>
-                  <select aria-label="Filter by room" value={searchRoomID} onChange={(event) => setSearchRoomID(event.target.value)}>
-                    <option value="">All chats</option>
-                    {rooms.map((room) => <option key={room.id} value={room.id}>{room.name || room.id}</option>)}
-                  </select>
-                </label>
-                <label>
-                  <span>Sender</span>
-                  <input aria-label="Filter by sender" value={searchSender} onChange={(event) => setSearchSender(event.target.value)} placeholder="@user:server" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
-                </label>
-                <label>
-                  <span>From</span>
-                  <input aria-label="Search from date" type="date" value={searchFrom} onChange={(event) => setSearchFrom(event.target.value)} />
-                </label>
-                <label>
-                  <span>To</span>
-                  <input aria-label="Search to date" type="date" value={searchTo} onChange={(event) => setSearchTo(event.target.value)} />
-                </label>
-              </div>
-            </details>
-            {searchStatus && <p className="message-search-status" role="status">{searchStatus}</p>}
-            <div className="message-search-results" aria-live="polite">
-              {searching && <div className="message-search-empty"><span className="loading-mark" />Searching local history</div>}
-              {!searching && searchResults.map((result, index) => {
-                const room = rooms.find((candidate) => candidate.id === result.roomID)
-                const message = result.message
-                return <button className="message-search-result" key={`${result.roomID}:${message.id || message.transactionId || index}`} type="button" aria-label={`Open message in ${room?.name || result.roomID}`} title={`Open message in ${room?.name || result.roomID}`} onClick={() => openSearchResult(result)}>
-                  <span className="message-search-room">{room?.name || result.roomID}{room?.bridge && <small>{room.bridge}</small>}</span>
-                  <div className="message-search-meta">
-                    <strong>{message.senderName || message.sender}</strong>
-                    {message.timestamp > 0 && <time>{new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(message.timestamp))}</time>}
-                  </div>
-                  <p>{message.body}</p>
-                </button>
-              })}
-              {!searching && searchNextBatch && <button className="message-search-more" type="button" onClick={() => void loadMoreSearchResults()}>Load more results</button>}
-            </div>
-          </section>
-        )}
-
-        {error && <div className="inline-error" role="alert"><CircleAlert size={15} />{error}<button aria-label="Dismiss error" title="Dismiss error" onClick={() => setError('')}>×</button></div>}
-
-        <div className="timeline" key={selectedRoomID} ref={timelineRef} role="region" aria-label="Message timeline" tabIndex={0} onKeyDown={handleTimelineKeyDown} onScroll={(event) => {
-          const element = event.currentTarget
-          const atPinnedPosition = pinnedScrollTopRef.current !== null && Math.abs(element.scrollTop - pinnedScrollTopRef.current) < 1
-          // Only a scroll away from the bottom that is not our own pin stops following the newest message.
-          if (isNearBottom(element)) stickToBottomRef.current = true
-          else if (!atPinnedPosition) stickToBottomRef.current = false
-          // Infinite scroll: reaching the top of the loaded history fetches the
-          // next older page. The refs keep a burst of scroll events from
-          // starting several fetches before `loadingOlder` commits.
-          if (hasOlderRef.current && !loadingOlderRef.current && isNearTop(element)) {
-            void loadOlderMessages()
-          }
-        }}>
-          {!selectedRoom && <div className="timeline-empty"><MessageCircleMore size={25} /><span>Select a room</span></div>}
-          {selectedRoom && loadingHistory && messages.length === 0 && <div className="timeline-empty"><span className="loading-mark" />Loading messages</div>}
-          {selectedRoom && !loadingHistory && visibleMessages.length === 0 && <div className="timeline-empty"><MessageCircleMore size={25} /><span>{messages.length > 0 ? 'Deleted messages are hidden' : hasOlder ? 'No messages in the past 24 hours' : 'No messages yet'}</span></div>}
-          {selectedRoom && hasOlder && (
-            <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={loadOlderMessages} disabled={loadingOlder}>
-              {loadingOlder ? <><span className="loading-mark" />Loading older messages</> : 'Load older messages'}
-            </button>
-          )}
-          <TimelineMessageList
-            messages={messages}
-            hideDeleted={preferenceBoolean(preferences, 'appearance.hide_deleted_messages')}
-            preferences={preferences}
-            currentUserID={snapshot?.profile.userId ?? ''}
-            selectedRoomID={selectedRoomID}
-            groupChat={Boolean(selectedRoom && !isDirectLikeRoom(selectedRoom))}
-            chatTranslation={chatTranslation?.roomID === selectedRoomID ? chatTranslation : null}
-            contextMessageID={messageContextMenu?.message.id || messageContextMenu?.message.transactionId || ''}
-            reactingMessageID={reactingMessageID}
-            autoPlayNextMessageId={autoPlayNextMessageId}
-            canUseTranscriptAsDraft={!editTarget}
-            actionsRef={timelineMessageActionsRef}
-          />
-          {chatTranslation?.roomID === selectedRoomID && <div className="chat-translation-status">
-            {chatTranslation.busy && <p role="status">{chatTranslation.status}</p>}
-            {chatTranslation.error && <>
-              <p role="alert">{chatTranslation.error}</p>
-              {chatTranslation.errorResponse !== null && <details className="chat-translation-response">
-                <summary>Show raw AI response</summary>
-                <pre>{chatTranslation.errorResponse || '(empty response)'}</pre>
-              </details>}
-            </>}
-          </div>}
-        </div>
-        {typingStatus && <div className="typing-indicator" aria-live="polite"><UsersRound size={13} />{typingStatus}</div>}
-        {messageContextMenu && <div className="message-context-scrim" aria-hidden="true">
-          <div className="message-context-scrim-panel message-context-scrim-top" style={{ height: messageContextMenu.targetBounds.top }} />
-          <div className="message-context-scrim-panel message-context-scrim-left" style={{ top: messageContextMenu.targetBounds.top, width: messageContextMenu.targetBounds.left, height: messageContextMenu.targetBounds.bottom - messageContextMenu.targetBounds.top }} />
-          <div className="message-context-scrim-panel message-context-scrim-right" style={{ left: messageContextMenu.targetBounds.right, top: messageContextMenu.targetBounds.top, height: messageContextMenu.targetBounds.bottom - messageContextMenu.targetBounds.top }} />
-          <div className="message-context-scrim-panel message-context-scrim-bottom" style={{ top: messageContextMenu.targetBounds.bottom }} />
-        </div>}
-        {messageContextMenu && <div className="message-context-menu" role="menu" aria-label="Message actions" style={{ left: messageContextMenu.x, top: messageContextMenu.y }}>
-          {messageContextMenuItems(messageContextMenu.message).map((item) => (
-            <Fragment key={item.key}>
-              {item.separatorBefore && <div className="message-context-separator" role="separator" />}
-              <button
-                type="button"
-                role="menuitem"
-                className={item.danger ? 'is-danger' : undefined}
-                aria-label={item.ariaLabel}
-                title={item.ariaLabel}
-                disabled={item.disabled}
-                onClick={() => { setMessageContextMenu(null); item.run() }}
-              >
-                {item.icon}<span>{item.label}</span>
-              </button>
-            </Fragment>
-          ))}
-        </div>}
-        <form className="composer" onSubmit={submitMessage}>
-          <input ref={attachmentInputRef} className="visually-hidden" type="file" aria-hidden="true" tabIndex={-1} onChange={(event) => void uploadAttachment(event)} />
-          {emojiOptions.length > 0 && <div className="mention-menu emoji-menu" role="listbox" aria-label="Emoji suggestions">
-            {emojiOptions.map(([name, emoji], index) => <button key={name} className={`mention-option ${index === emojiActiveIndex ? 'is-active' : ''}`} type="button" role="option" aria-selected={index === emojiActiveIndex} onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setEmojiActiveIndex(index)} onClick={() => applyEmojiSuggestion(emoji)}><span aria-hidden="true">{emoji}</span> :{name}:</button>)}
-          </div>}
-          {mentionOptions.length > 0 && <div className="mention-menu" role="listbox" aria-label="Mention someone">
-            {mentionOptions.map((member, index) => <button key={member.id} className={`mention-option ${index === mentionActiveIndex ? 'is-active' : ''}`} type="button" role="option" aria-selected={index === mentionActiveIndex} onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setMentionActiveIndex(index)} onClick={() => applyMention(member)}>
-              <span className="room-member-avatar">{initials(member.displayName || member.id)}</span><span><strong>{member.displayName || member.id}</strong><small>{member.id}</small></span>
-            </button>)}
-          </div>}
-          {composerContextMessage && <div className={`composer-context ${editTarget ? 'is-editing' : 'is-replying'}`}>
-            <span className="composer-context-icon" aria-hidden="true">{editTarget ? <Pencil size={15} /> : <Reply size={15} />}</span>
-            <div className="composer-context-copy">
-              <strong>{editTarget ? 'Editing message' : `Replying to ${replyTarget?.senderName || replyTarget?.sender}`}</strong>
-              <span title={composerContextMessage.body}>{composerContextMessage.body}</span>
-            </div>
-            <button className="composer-context-link" type="button" title="View message in the timeline" onClick={() => focusTimelineMessage(composerContextMessage.id)}>View message</button>
-            <button type="button" className="icon-button" aria-label="Cancel reply or edit" title="Cancel" onClick={() => {
-              const nextDraft = editTarget ? draftsRef.current.get(selectedRoomID) ?? '' : ''
-              if (!editTarget) draftsRef.current.delete(selectedRoomID)
-              setReplyTarget(null)
-              setEditTarget(null)
-              setComposeText(nextDraft)
-              setMentionBindings([])
-              setMentionStart(-1)
-            }}><X size={14} /></button>
-          </div>}
-          <div className="composer-input-wrap">
-            <textarea
-              ref={composerInputRef}
-              value={composeText}
-              spellCheck={preferenceBoolean(preferences, 'composer.spellcheck', true)}
-              onChange={(event) => {
-                const rawValue = event.currentTarget.value
-                const rawCursor = event.currentTarget.selectionStart
-                const customReplacements = parseCustomEmoticonReplacements(preferenceString(preferencesRef.current, 'emoji.emoticon_replacements', ''))
-                const converted = preferenceBoolean(preferencesRef.current, 'emoji.replace_emoticons', true)
-                  ? replaceEmoticonsAtCursor(rawValue, rawCursor, customReplacements)
-                  : { text: rawValue, cursor: rawCursor }
-                const value = converted.text
-                if (value !== rawValue) {
-                  requestAnimationFrame(() => {
-                    if (document.activeElement === composerInputRef.current) composerInputRef.current?.setSelectionRange(converted.cursor, converted.cursor)
-                  })
-                }
-                ghostwriterDraftRequestRef.current++
-                composeTextRef.current = value
-                setGhostwriterDraftBusy(false)
-                setGhostwriterDraftStatus('')
-                setComposeText(value)
-                if (!editTarget && selectedRoomID) {
-                  if (value) draftsRef.current.set(selectedRoomID, value)
-                  else draftsRef.current.delete(selectedRoomID)
-                }
-                setMentionBindings((current) => current.every(({ token }) => value.includes(token))
-                  ? current
-                  : current.filter(({ token }) => value.includes(token)))
-                updateMentionQuery(value, converted.cursor)
-                updateEmojiQuery(value, converted.cursor)
-                snippetExpander.handleChange(value, converted.cursor)
-              }}
-              onKeyDown={handleComposerKeyDown}
-              onClick={(event) => snippetExpander.handleClick(event.currentTarget.value, event.currentTarget.selectionStart)}
-              onKeyUp={(event) => {
-                if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
-                  snippetExpander.handleKeyUp(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
-              }}
-              onPaste={handleComposerPaste}
-              placeholder={selectedRoom ? `Message ${selectedRoom.name || selectedRoom.id}` : 'Select a room to start'}
-              aria-label="Message"
-              aria-controls={snippetMenuVisible ? 'snippet-suggestions' : undefined}
-              aria-activedescendant={snippetMenuVisible ? `snippet-option-${snippetExpander.activeIndex}` : undefined}
-              disabled={!selectedRoom || busy || voiceCaptureStatus !== null}
-              rows={1}
-            />
-            {snippetMenuVisible && snippetMatch && <SnippetPopover
-              inputRef={composerInputRef}
-              value={composeText}
-              caret={snippetExpander.caret}
-              snippets={snippetOptions}
-              activeIndex={snippetExpander.activeIndex}
-              onActiveIndexChange={snippetExpander.setActiveIndex}
-              onSelect={snippetExpander.select}
-            />}
-          </div>
-          {ghostwriterActive && ghostwriterRewriteText && <div className="ghostwriter-rewrite-preview" role="group" aria-label="Suggested draft edit">
-            <div className="ghostwriter-rewrite-copy">
-              <span className="ghostwriter-rewrite-label">Suggested edit</span>
-              <span className="ghostwriter-rewrite-text">{ghostwriterRewriteText}</span>
-            </div>
-            <button className="ghostwriter-rewrite-apply" type="button" disabled={ghostwriterAutocompleteStatus === 'loading'} onMouseDown={(event) => event.preventDefault()} onClick={acceptGhostwriterCompletion}>Replace draft</button>
-            <IconTooltip label="Dismiss suggestion"><button className="icon-button" type="button" aria-label="Dismiss draft suggestion" title="Dismiss suggestion" onMouseDown={(event) => event.preventDefault()} onClick={() => {
-              ghostwriterAutocompleteRequestRef.current++
-              ghostwriterStreamRequestRef.current = ''
-              setGhostwriterCompletion(null)
-              setGhostwriterAutocompleteStatus('idle')
-            }}><X size={14} /></button></IconTooltip>
-          </div>}
-          {ghostwriterDraftStatus && <p className="ghostwriter-composer-status" role="status">{ghostwriterDraftStatus}</p>}
-          {ghostwriterActive && ghostwriterAutocompleteStatus === 'loading' && <p className="ghostwriter-composer-status" role="status">Local model is correcting your draft…</p>}
-          {ghostwriterActive && ghostwriterRewriteText && ghostwriterAutocompleteStatus !== 'loading' && <span className="visually-hidden" role="status">Draft correction ready. Press Tab to replace the draft.</span>}
-          {ghostwriterAutocompleteStatus === 'offline' && <p className="ghostwriter-composer-status" role="status">Local draft correction unavailable. Check that the model is running.</p>}
-          {videoRecordingActive && <div className="video-capture-preview"><video ref={videoPreviewRef} muted playsInline autoPlay aria-label="Camera preview" /></div>}
-          <div className="composer-footer">
-            <div className="composer-toolbar-row composer-toolbar-row-compose">
-              {preferenceBoolean(preferences, 'composer.formatting_toolbar') && <div className="composer-format-toolbar" role="toolbar" aria-label="Formatting">
-                <div className="composer-format-group" role="group" aria-label="Inline formatting">
-                  <IconTooltip label="Bold text"><button className="icon-button" type="button" aria-label="Bold" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bold')}><Bold size={15} /></button></IconTooltip>
-                  <IconTooltip label="Italic text"><button className="icon-button" type="button" aria-label="Italic" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('italic')}><Italic size={15} /></button></IconTooltip>
-                  <IconTooltip label="Strikethrough text"><button className="icon-button" type="button" aria-label="Strikethrough" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('strikethrough')}><Strikethrough size={15} /></button></IconTooltip>
-                  <IconTooltip label="Inline code"><button className="icon-button" type="button" aria-label="Inline code" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('inlineCode')}><Code size={15} /></button></IconTooltip>
-                </div>
-                <div className="composer-format-group" role="group" aria-label="Link insertion">
-                  <IconTooltip label="Insert link"><button className="icon-button" type="button" aria-label="Insert link" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('link')}><Link size={15} /></button></IconTooltip>
-                </div>
-                <div className="composer-format-group" role="group" aria-label="Block formatting">
-                  <IconTooltip label="Format as heading"><button className="icon-button" type="button" aria-label="Heading" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('heading')}><Heading1 size={15} /></button></IconTooltip>
-                  <IconTooltip label="Start a bulleted list"><button className="icon-button" type="button" aria-label="Bulleted list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bulletList')}><List size={15} /></button></IconTooltip>
-                  <IconTooltip label="Start a numbered list"><button className="icon-button" type="button" aria-label="Numbered list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('numberedList')}><ListOrdered size={15} /></button></IconTooltip>
-                  <IconTooltip label="Format as quote"><button className="icon-button" type="button" aria-label="Quote" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('quote')}><Quote size={15} /></button></IconTooltip>
-                  <IconTooltip label="Insert a code block"><button className="icon-button" type="button" aria-label="Code block" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('codeBlock')}><SquareCode size={15} /></button></IconTooltip>
-                </div>
+            <div className="conversation-thread">
+              {(scheduledNotice || undoRoomID) && <div className="chat-notice-stack" aria-label="Notifications">
+                {scheduledNotice && <div className="scheduled-notice" role="status">
+                  <BellRing size={16} />
+                  <span>{scheduledNotice}</span>
+                  <button type="button" title="Open reminders" onClick={openScheduledJobs}>View reminders</button>
+                  <button className="icon-button" type="button" aria-label="Dismiss reminder notice" title="Dismiss reminder notice" onClick={clearScheduledNotice}><X size={15} /></button>
+                </div>}
+                {undoRoomID && <div className="triage-toast" role="status">
+                  <Check className="triage-toast-icon" size={16} aria-hidden="true" />
+                  <span>Marked {rooms.find((room) => room.id === undoRoomID)?.name || 'room'} answered</span>
+                  <button type="button" onClick={() => void undoAnswered()}><RotateCcw size={14} />Undo</button>
+                  <button className="icon-button" type="button" aria-label="Dismiss notification" title="Dismiss notification" onClick={clearUndoToast}><X size={15} /></button>
+                </div>}
               </div>}
-              <div className="composer-tool-group composer-tool-group-message" role="group" aria-label="Message tools">
-                <div className="composer-tool-cluster" role="group" aria-label="Add content">
-                  <IconTooltip label="Attach file"><button className="icon-button" type="button" aria-label="Attach file" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onClick={() => attachmentInputRef.current?.click()}><Paperclip size={15} /></button></IconTooltip>
-                  <div className="composer-emoji-control" ref={composerEmojiControlRef}>
-                    <IconTooltip label="Choose an emoji"><button className="icon-button" type="button" aria-label="Emoji picker" aria-haspopup="dialog" aria-expanded={emojiPickerOpen} disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onMouseDown={(event) => event.preventDefault()} onClick={toggleComposerEmojiPicker}><Smile size={15} /></button></IconTooltip>
-                    {emojiPickerOpen && <div className="composer-emoji-popover" role="dialog" aria-label="Choose an emoji">
-                      <EmojiPicker
-                        className="composer-emoji-picker-widget"
-                        colorScheme={themeModeForPreference(themePreference, systemPrefersDark)}
-                        width="100%"
-                        height={360}
-                        autoFocusSearch
-                        previewConfig={{ showPreview: false }}
-                        onEmojiClick={(emojiData) => insertPickedEmoji(emojiData.emoji)}
-                      />
-                    </div>}
+
+              {searchOpen && (
+                <section className="message-search-panel" aria-label="Search messages across rooms">
+                  <div className="message-search-heading">
+                    <h3>Search messages</h3>
+                    <button className="icon-button" type="button" aria-label="Close message search" title="Close search" onClick={closeMessageSearch}>
+                      <X size={16} />
+                    </button>
                   </div>
-                </div>
-                <div className="composer-tool-cluster" role="group" aria-label="Delivery options">
-                  <IconTooltip label={voiceRecordingActive ? 'Stop and send voice note' : 'Record voice note'}><button className="icon-button" type="button" aria-label={voiceRecordingActive ? 'Stop and send voice note' : 'Record voice note'} aria-pressed={voiceRecordingActive} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing' || videoRecordingActive} onClick={() => voiceRecordingActive ? stopRecording() : void startRecording('voice')}>{voiceRecordingActive ? <Square size={15} /> : <Mic size={15} />}</button></IconTooltip>
-                  <IconTooltip label={videoRecordingActive ? 'Stop and send video message' : 'Record video message'}><button className="icon-button" type="button" aria-label={videoRecordingActive ? 'Stop and send video message' : 'Record video message'} aria-pressed={videoRecordingActive} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing' || voiceRecordingActive} onClick={() => videoRecordingActive ? stopRecording() : void startRecording('video')}>{videoRecordingActive ? <Square size={15} /> : <Video size={15} />}</button></IconTooltip>
-                  <IconTooltip label={replyTarget ? 'Schedule reply' : 'Schedule message'}><button className="icon-button" type="button" aria-label={replyTarget ? 'Schedule reply' : 'Schedule message'} disabled={!selectedRoom || !composeText.trim() || busy || voiceCaptureStatus !== null || Boolean(editTarget)} onClick={openScheduleMessage}><Clock3 size={15} /></button></IconTooltip>
-                </div>
+                  <form className="message-search-form" onSubmit={submitMessageSearch}>
+                    <input
+                      autoFocus
+                      value={messageSearch}
+                      onChange={(event) => setMessageSearch(event.target.value)}
+                      placeholder="Search all chats"
+                      aria-label="Search local message history"
+                      spellCheck={false}
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                    />
+                    <button className="search-submit" type="submit" aria-label="Search" title="Search messages" disabled={!messageSearch.trim() || searching}>
+                      <Search size={16} />
+                    </button>
+                  </form>
+                  <details className="message-search-filters">
+                    <summary>Filters</summary>
+                    <div className="message-search-filter-grid">
+                      <label>
+                        <span>Chat</span>
+                        <select aria-label="Filter by room" value={searchRoomID} onChange={(event) => setSearchRoomID(event.target.value)}>
+                          <option value="">All chats</option>
+                          {rooms.map((room) => <option key={room.id} value={room.id}>{room.name || room.id}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Sender</span>
+                        <input aria-label="Filter by sender" value={searchSender} onChange={(event) => setSearchSender(event.target.value)} placeholder="@user:server" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
+                      </label>
+                      <label>
+                        <span>From</span>
+                        <input aria-label="Search from date" type="date" value={searchFrom} onChange={(event) => setSearchFrom(event.target.value)} />
+                      </label>
+                      <label>
+                        <span>To</span>
+                        <input aria-label="Search to date" type="date" value={searchTo} onChange={(event) => setSearchTo(event.target.value)} />
+                      </label>
+                    </div>
+                  </details>
+                  {searchStatus && <p className="message-search-status" role="status">{searchStatus}</p>}
+                  <div className="message-search-results" aria-live="polite">
+                    {searching && <div className="message-search-empty"><span className="loading-mark" />Searching local history</div>}
+                    {!searching && searchResults.map((result, index) => {
+                      const room = rooms.find((candidate) => candidate.id === result.roomID)
+                      const message = result.message
+                      return <button className="message-search-result" key={`${result.roomID}:${message.id || message.transactionId || index}`} type="button" aria-label={`Open message in ${room?.name || result.roomID}`} title={`Open message in ${room?.name || result.roomID}`} onClick={() => openSearchResult(result)}>
+                        <span className="message-search-room">{room?.name || result.roomID}{room?.bridge && <small>{room.bridge}</small>}</span>
+                        <div className="message-search-meta">
+                          <strong>{message.senderName || message.sender}</strong>
+                          {message.timestamp > 0 && <time>{new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(message.timestamp))}</time>}
+                        </div>
+                        <p>{message.body}</p>
+                      </button>
+                    })}
+                    {!searching && searchNextBatch && <button className="message-search-more" type="button" onClick={() => void loadMoreSearchResults()}>Load more results</button>}
+                  </div>
+                </section>
+              )}
+
+              {error && <div className="inline-error" role="alert"><CircleAlert size={15} />{error}<button aria-label="Dismiss error" title="Dismiss error" onClick={() => setError('')}>×</button></div>}
+
+              <div className="timeline" key={selectedRoomID} ref={timelineRef} role="region" aria-label="Message timeline" tabIndex={0} onKeyDown={handleTimelineKeyDown} onScroll={(event) => {
+                const element = event.currentTarget
+                const atPinnedPosition = pinnedScrollTopRef.current !== null && Math.abs(element.scrollTop - pinnedScrollTopRef.current) < 1
+                // Only a scroll away from the bottom that is not our own pin stops following the newest message.
+                if (isNearBottom(element)) stickToBottomRef.current = true
+                else if (!atPinnedPosition) stickToBottomRef.current = false
+                // Infinite scroll: reaching the top of the loaded history fetches the
+                // next older page. The refs keep a burst of scroll events from
+                // starting several fetches before `loadingOlder` commits.
+                if (hasOlderRef.current && !loadingOlderRef.current && isNearTop(element)) {
+                  void loadOlderMessages()
+                }
+              }}>
+                {!selectedRoom && <div className="timeline-empty"><MessageCircleMore size={25} /><span>Select a room</span></div>}
+                {selectedRoom && loadingHistory && messages.length === 0 && <div className="timeline-empty"><span className="loading-mark" />Loading messages</div>}
+                {selectedRoom && !loadingHistory && visibleMessages.length === 0 && <div className="timeline-empty"><MessageCircleMore size={25} /><span>{messages.length > 0 ? 'Deleted messages are hidden' : hasOlder ? 'No messages in the past 24 hours' : 'No messages yet'}</span></div>}
+                {selectedRoom && hasOlder && (
+                  <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={loadOlderMessages} disabled={loadingOlder}>
+                    {loadingOlder ? <><span className="loading-mark" />Loading older messages</> : 'Load older messages'}
+                  </button>
+                )}
+                <TimelineMessageList
+                  messages={messages}
+                  hideDeleted={preferenceBoolean(preferences, 'appearance.hide_deleted_messages')}
+                  preferences={preferences}
+                  currentUserID={snapshot?.profile.userId ?? ''}
+                  selectedRoomID={selectedRoomID}
+                  groupChat={Boolean(selectedRoom && !isDirectLikeRoom(selectedRoom))}
+                  chatTranslation={chatTranslation?.roomID === selectedRoomID ? chatTranslation : null}
+                  contextMessageID={messageContextMenu?.message.id || messageContextMenu?.message.transactionId || ''}
+                  reactingMessageID={reactingMessageID}
+                  autoPlayNextMessageId={autoPlayNextMessageId}
+                  canUseTranscriptAsDraft={!editTarget}
+                  actionsRef={timelineMessageActionsRef}
+                />
+                {chatTranslation?.roomID === selectedRoomID && <div className="chat-translation-status">
+                  {chatTranslation.busy && <p role="status">{chatTranslation.status}</p>}
+                  {chatTranslation.error && <>
+                    <p role="alert">{chatTranslation.error}</p>
+                    {chatTranslation.errorResponse !== null && <details className="chat-translation-response">
+                      <summary>Show raw AI response</summary>
+                      <pre>{chatTranslation.errorResponse || '(empty response)'}</pre>
+                    </details>}
+                  </>}
+                </div>}
               </div>
-            </div>
-            <div className="composer-toolbar-row composer-toolbar-row-assist">
-              <div className="composer-tool-group composer-tool-group-ai" role="group" aria-label="AI tools">
-                <span className="composer-tool-group-label" aria-hidden="true"><Sparkles size={13} />AI</span>
-                <div className="composer-tool-cluster" role="group" aria-label="Draft assistance">
-                  <IconTooltip label={aiEnabled ? 'Analyze draft with Language Tutor · Ctrl+Shift+T' : 'Analyze draft with Language Tutor · set up a local AI endpoint'}><button className="composer-tutor-button" type="button" aria-label="Analyze draft with Language Tutor" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => void analyzeWithTurkishTutor(composeText, 'draft')}><GraduationCap size={14} /><span>Tutor</span></button></IconTooltip>
-                  <IconTooltip label={ghostwriterActive ? 'Disable suggestions in this chat' : ghostwriterEnabled ? 'Enable suggestions in this chat' : 'Enable suggestions in this chat and configure the local model'}><button className={`composer-tutor-button ghostwriter-toggle ${ghostwriterActive ? 'is-enabled' : ''}`} type="button" aria-label={ghostwriterActive ? 'Disable suggestions in this chat' : 'Enable suggestions in this chat'} aria-pressed={ghostwriterActive} disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => void toggleRoomGhostwriter(!ghostwriterActive)}><Sparkles size={14} /><span>Suggest</span></button></IconTooltip>
-                  <IconTooltip label={ghostwriterActive ? 'Suggest one draft edit' : 'Enable suggestions in this chat first'}><button className="composer-tutor-button" type="button" aria-label="Suggest draft edit" disabled={!selectedRoom || !ghostwriterActive || !composeText.trim() || busy || ghostwriterDraftBusy || Boolean(editTarget) || isGhostCommandDraft(composeText) || ghostwriterAutocompleteStatus === 'loading'} onClick={() => void requestGhostwriterCompletion()}><WandSparkles size={14} /><span>Suggest edit</span></button></IconTooltip>
-                  <IconTooltip label={askAILabel}><button className="icon-button" type="button" aria-label="Ask AI about the composer text" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={askAI}><MessageCircleQuestion size={15} /></button></IconTooltip>
-                  <IconTooltip label={aiEnabled ? 'Rewrite draft' : 'Rewrite · unavailable'}><button className="icon-button" type="button" aria-label="Rewrite composer draft" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => rewriteDraft('rewrite')}><Pencil size={15} /></button></IconTooltip>
-                  <IconTooltip label={aiEnabled ? 'Shorten draft' : 'Shorten · unavailable'}><button className="icon-button" type="button" aria-label="Shorten composer draft" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => rewriteDraft('shorten')}><Minimize2 size={15} /></button></IconTooltip>
+              {typingStatus && <div className="typing-indicator" aria-live="polite"><UsersRound size={13} />{typingStatus}</div>}
+              {messageContextMenu && <div className="message-context-scrim" aria-hidden="true">
+                <div className="message-context-scrim-panel message-context-scrim-top" style={{ height: messageContextMenu.targetBounds.top }} />
+                <div className="message-context-scrim-panel message-context-scrim-left" style={{ top: messageContextMenu.targetBounds.top, width: messageContextMenu.targetBounds.left, height: messageContextMenu.targetBounds.bottom - messageContextMenu.targetBounds.top }} />
+                <div className="message-context-scrim-panel message-context-scrim-right" style={{ left: messageContextMenu.targetBounds.right, top: messageContextMenu.targetBounds.top, height: messageContextMenu.targetBounds.bottom - messageContextMenu.targetBounds.top }} />
+                <div className="message-context-scrim-panel message-context-scrim-bottom" style={{ top: messageContextMenu.targetBounds.bottom }} />
+              </div>}
+              {messageContextMenu && <div className="message-context-menu" role="menu" aria-label="Message actions" style={{ left: messageContextMenu.x, top: messageContextMenu.y }}>
+                {messageContextMenuItems(messageContextMenu.message).map((item) => (
+                  <Fragment key={item.key}>
+                    {item.separatorBefore && <div className="message-context-separator" role="separator" />}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={item.danger ? 'is-danger' : undefined}
+                      aria-label={item.ariaLabel}
+                      title={item.ariaLabel}
+                      disabled={item.disabled}
+                      onClick={() => { setMessageContextMenu(null); item.run() }}
+                    >
+                      {item.icon}<span>{item.label}</span>
+                    </button>
+                  </Fragment>
+                ))}
+              </div>}
+              <form className="composer" onSubmit={submitMessage}>
+                <input ref={attachmentInputRef} className="visually-hidden" type="file" aria-hidden="true" tabIndex={-1} onChange={(event) => void uploadAttachment(event)} />
+                {emojiOptions.length > 0 && <div className="mention-menu emoji-menu" role="listbox" aria-label="Emoji suggestions">
+                  {emojiOptions.map(([name, emoji], index) => <button key={name} className={`mention-option ${index === emojiActiveIndex ? 'is-active' : ''}`} type="button" role="option" aria-selected={index === emojiActiveIndex} onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setEmojiActiveIndex(index)} onClick={() => applyEmojiSuggestion(emoji)}><span aria-hidden="true">{emoji}</span> :{name}:</button>)}
+                </div>}
+                {mentionOptions.length > 0 && <div className="mention-menu" role="listbox" aria-label="Mention someone">
+                  {mentionOptions.map((member, index) => <button key={member.id} className={`mention-option ${index === mentionActiveIndex ? 'is-active' : ''}`} type="button" role="option" aria-selected={index === mentionActiveIndex} onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setMentionActiveIndex(index)} onClick={() => applyMention(member)}>
+                    <span className="room-member-avatar">{initials(member.displayName || member.id)}</span><span><strong>{member.displayName || member.id}</strong><small>{member.id}</small></span>
+                  </button>)}
+                </div>}
+                {composerContextMessage && <div className={`composer-context ${editTarget ? 'is-editing' : 'is-replying'}`}>
+                  <span className="composer-context-icon" aria-hidden="true">{editTarget ? <Pencil size={15} /> : <Reply size={15} />}</span>
+                  <div className="composer-context-copy">
+                    <strong>{editTarget ? 'Editing message' : `Replying to ${replyTarget?.senderName || replyTarget?.sender}`}</strong>
+                    <span title={composerContextMessage.body}>{composerContextMessage.body}</span>
+                  </div>
+                  <button className="composer-context-link" type="button" title="View message in the timeline" onClick={() => focusTimelineMessage(composerContextMessage.id)}>View message</button>
+                  <button type="button" className="icon-button" aria-label="Cancel reply or edit" title="Cancel" onClick={() => {
+                    const nextDraft = editTarget ? draftsRef.current.get(selectedRoomID) ?? '' : ''
+                    if (!editTarget) draftsRef.current.delete(selectedRoomID)
+                    setReplyTarget(null)
+                    setEditTarget(null)
+                    setComposeText(nextDraft)
+                    setMentionBindings([])
+                    setMentionStart(-1)
+                  }}><X size={14} /></button>
+                </div>}
+                <div className="composer-input-wrap">
+                  <textarea
+                    ref={composerInputRef}
+                    value={composeText}
+                    spellCheck={preferenceBoolean(preferences, 'composer.spellcheck', true)}
+                    onChange={(event) => {
+                      const rawValue = event.currentTarget.value
+                      const rawCursor = event.currentTarget.selectionStart
+                      const customReplacements = parseCustomEmoticonReplacements(preferenceString(preferencesRef.current, 'emoji.emoticon_replacements', ''))
+                      const converted = preferenceBoolean(preferencesRef.current, 'emoji.replace_emoticons', true)
+                        ? replaceEmoticonsAtCursor(rawValue, rawCursor, customReplacements)
+                        : { text: rawValue, cursor: rawCursor }
+                      const value = converted.text
+                      if (value !== rawValue) {
+                        requestAnimationFrame(() => {
+                          if (document.activeElement === composerInputRef.current) composerInputRef.current?.setSelectionRange(converted.cursor, converted.cursor)
+                        })
+                      }
+                      ghostwriterDraftRequestRef.current++
+                      composeTextRef.current = value
+                      setGhostwriterDraftBusy(false)
+                      setGhostwriterDraftStatus('')
+                      setComposeText(value)
+                      if (!editTarget && selectedRoomID) {
+                        if (value) draftsRef.current.set(selectedRoomID, value)
+                        else draftsRef.current.delete(selectedRoomID)
+                      }
+                      setMentionBindings((current) => current.every(({ token }) => value.includes(token))
+                        ? current
+                        : current.filter(({ token }) => value.includes(token)))
+                      updateMentionQuery(value, converted.cursor)
+                      updateEmojiQuery(value, converted.cursor)
+                      snippetExpander.handleChange(value, converted.cursor)
+                    }}
+                    onKeyDown={handleComposerKeyDown}
+                    onClick={(event) => snippetExpander.handleClick(event.currentTarget.value, event.currentTarget.selectionStart)}
+                    onKeyUp={(event) => {
+                      if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+                        snippetExpander.handleKeyUp(event.currentTarget.value, event.currentTarget.selectionStart)
+                      }
+                    }}
+                    onPaste={handleComposerPaste}
+                    placeholder={selectedRoom ? `Message ${selectedRoom.name || selectedRoom.id}` : 'Select a room to start'}
+                    aria-label="Message"
+                    aria-controls={snippetMenuVisible ? 'snippet-suggestions' : undefined}
+                    aria-activedescendant={snippetMenuVisible ? `snippet-option-${snippetExpander.activeIndex}` : undefined}
+                    disabled={!selectedRoom || busy || voiceCaptureStatus !== null}
+                    rows={1}
+                  />
+                  {snippetMenuVisible && snippetMatch && <SnippetPopover
+                    inputRef={composerInputRef}
+                    value={composeText}
+                    caret={snippetExpander.caret}
+                    snippets={snippetOptions}
+                    activeIndex={snippetExpander.activeIndex}
+                    onActiveIndexChange={snippetExpander.setActiveIndex}
+                    onSelect={snippetExpander.select}
+                  />}
                 </div>
-                <div className="composer-tool-cluster" role="group" aria-label="Conversation analysis and translation">
-                  <IconTooltip label={aiEnabled ? 'Summarize recent messages' : 'Summarize recent messages · unavailable'}><button className="icon-button" type="button" aria-label="Summarize recent messages" disabled={!selectedRoom || busy || !aiEnabled || messages.length === 0} onClick={summarizeRoom}><ScrollText size={15} /></button></IconTooltip>
-                  <IconTooltip label={aiEnabled ? 'Analyze chat topics' : 'Analyze chat topics · unavailable'}><button className="icon-button" type="button" aria-label="Analyze chat topics" disabled={!selectedRoom || busy || !aiEnabled || messages.length === 0} onClick={analyzeTopics}><Tags size={15} /></button></IconTooltip>
-                  {selectedRoom?.direct && <IconTooltip label={aiEnabled ? 'Analyze conversation' : 'Analyze conversation · unavailable'}><button className="icon-button" type="button" aria-label="Analyze conversation" disabled={busy || !aiEnabled || !hasAIConversationContext} onClick={analyzeConversation}><MessageCircleMore size={15} /></button></IconTooltip>}
-                  <IconTooltip label={aiEnabled ? 'Translate latest 10 received messages to English' : 'Translate latest 10 received messages to English · unavailable'}><button className="icon-button" type="button" aria-label="Translate latest 10 received messages to English" disabled={!selectedRoom || busy || loadingOlder || !aiEnabled || (!hasAIConversationContext && !hasOlder)} onClick={() => void translateRoomToEnglish()}><Languages size={15} /></button></IconTooltip>
-                  {chatTranslation?.roomID === selectedRoomID && <IconTooltip label="Clear message translations"><button className="icon-button" type="button" aria-label="Clear message translations" onClick={clearChatTranslation}><X size={15} /></button></IconTooltip>}
-                  <IconTooltip label={roomAgents.agents.length === 0 ? 'Create a chat agent' : aiEnabled ? 'Run a chat agent' : 'Run a chat agent · unavailable'}><button className="icon-button" type="button" aria-label={roomAgents.agents.length === 0 ? 'Create a chat agent' : 'Run a chat agent'} disabled={!selectedRoom || busy || (roomAgents.agents.length > 0 && !aiEnabled)} onClick={openChatAgentAction}><Bot size={15} /></button></IconTooltip>
+                {ghostwriterActive && ghostwriterRewriteText && <div className="ghostwriter-rewrite-preview" role="group" aria-label="Suggested draft edit">
+                  <div className="ghostwriter-rewrite-copy">
+                    <span className="ghostwriter-rewrite-label">Suggested edit</span>
+                    <span className="ghostwriter-rewrite-text">{ghostwriterRewriteText}</span>
+                  </div>
+                  <button className="ghostwriter-rewrite-apply" type="button" disabled={ghostwriterAutocompleteStatus === 'loading'} onMouseDown={(event) => event.preventDefault()} onClick={acceptGhostwriterCompletion}>Replace draft</button>
+                  <IconTooltip label="Dismiss suggestion"><button className="icon-button" type="button" aria-label="Dismiss draft suggestion" title="Dismiss suggestion" onMouseDown={(event) => event.preventDefault()} onClick={() => {
+                    ghostwriterAutocompleteRequestRef.current++
+                    ghostwriterStreamRequestRef.current = ''
+                    setGhostwriterCompletion(null)
+                    setGhostwriterAutocompleteStatus('idle')
+                  }}><X size={14} /></button></IconTooltip>
+                </div>}
+                {ghostwriterDraftStatus && <p className="ghostwriter-composer-status" role="status">{ghostwriterDraftStatus}</p>}
+                {ghostwriterActive && ghostwriterAutocompleteStatus === 'loading' && <p className="ghostwriter-composer-status" role="status">Local model is correcting your draft…</p>}
+                {ghostwriterActive && ghostwriterRewriteText && ghostwriterAutocompleteStatus !== 'loading' && <span className="visually-hidden" role="status">Draft correction ready. Press Tab to replace the draft.</span>}
+                {ghostwriterAutocompleteStatus === 'offline' && <p className="ghostwriter-composer-status" role="status">Local draft correction unavailable. Check that the model is running.</p>}
+                {videoRecordingActive && <div className="video-capture-preview"><video ref={videoPreviewRef} muted playsInline autoPlay aria-label="Camera preview" /></div>}
+                <div className="composer-footer">
+                  <div className="composer-toolbar-row composer-toolbar-row-compose">
+                    {preferenceBoolean(preferences, 'composer.formatting_toolbar') && <div className="composer-format-toolbar" role="toolbar" aria-label="Formatting">
+                      <div className="composer-format-group" role="group" aria-label="Inline formatting">
+                        <IconTooltip label="Bold text"><button className="icon-button" type="button" aria-label="Bold" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bold')}><Bold size={15} /></button></IconTooltip>
+                        <IconTooltip label="Italic text"><button className="icon-button" type="button" aria-label="Italic" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('italic')}><Italic size={15} /></button></IconTooltip>
+                        <IconTooltip label="Strikethrough text"><button className="icon-button" type="button" aria-label="Strikethrough" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('strikethrough')}><Strikethrough size={15} /></button></IconTooltip>
+                        <IconTooltip label="Inline code"><button className="icon-button" type="button" aria-label="Inline code" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('inlineCode')}><Code size={15} /></button></IconTooltip>
+                      </div>
+                      <div className="composer-format-group" role="group" aria-label="Link insertion">
+                        <IconTooltip label="Insert link"><button className="icon-button" type="button" aria-label="Insert link" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('link')}><Link size={15} /></button></IconTooltip>
+                      </div>
+                      <div className="composer-format-group" role="group" aria-label="Block formatting">
+                        <IconTooltip label="Format as heading"><button className="icon-button" type="button" aria-label="Heading" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('heading')}><Heading1 size={15} /></button></IconTooltip>
+                        <IconTooltip label="Start a bulleted list"><button className="icon-button" type="button" aria-label="Bulleted list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bulletList')}><List size={15} /></button></IconTooltip>
+                        <IconTooltip label="Start a numbered list"><button className="icon-button" type="button" aria-label="Numbered list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('numberedList')}><ListOrdered size={15} /></button></IconTooltip>
+                        <IconTooltip label="Format as quote"><button className="icon-button" type="button" aria-label="Quote" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('quote')}><Quote size={15} /></button></IconTooltip>
+                        <IconTooltip label="Insert a code block"><button className="icon-button" type="button" aria-label="Code block" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('codeBlock')}><SquareCode size={15} /></button></IconTooltip>
+                      </div>
+                    </div>}
+                    <div className="composer-tool-group composer-tool-group-message" role="group" aria-label="Message tools">
+                      <div className="composer-tool-cluster" role="group" aria-label="Add content">
+                        <IconTooltip label="Attach file"><button className="icon-button" type="button" aria-label="Attach file" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onClick={() => attachmentInputRef.current?.click()}><Paperclip size={15} /></button></IconTooltip>
+                        <div className="composer-emoji-control" ref={composerEmojiControlRef}>
+                          <IconTooltip label="Choose an emoji"><button className="icon-button" type="button" aria-label="Emoji picker" aria-haspopup="dialog" aria-expanded={emojiPickerOpen} disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onMouseDown={(event) => event.preventDefault()} onClick={toggleComposerEmojiPicker}><Smile size={15} /></button></IconTooltip>
+                          {emojiPickerOpen && <div className="composer-emoji-popover" role="dialog" aria-label="Choose an emoji">
+                            <EmojiPicker
+                              className="composer-emoji-picker-widget"
+                              colorScheme={themeModeForPreference(themePreference, systemPrefersDark)}
+                              width="100%"
+                              height={360}
+                              autoFocusSearch
+                              previewConfig={{ showPreview: false }}
+                              onEmojiClick={(emojiData) => insertPickedEmoji(emojiData.emoji)}
+                            />
+                          </div>}
+                        </div>
+                      </div>
+                      <div className="composer-tool-cluster" role="group" aria-label="Delivery options">
+                        <IconTooltip label={voiceRecordingActive ? 'Stop and send voice note' : 'Record voice note'}><button className="icon-button" type="button" aria-label={voiceRecordingActive ? 'Stop and send voice note' : 'Record voice note'} aria-pressed={voiceRecordingActive} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing' || videoRecordingActive} onClick={() => voiceRecordingActive ? stopRecording() : void startRecording('voice')}>{voiceRecordingActive ? <Square size={15} /> : <Mic size={15} />}</button></IconTooltip>
+                        <IconTooltip label={videoRecordingActive ? 'Stop and send video message' : 'Record video message'}><button className="icon-button" type="button" aria-label={videoRecordingActive ? 'Stop and send video message' : 'Record video message'} aria-pressed={videoRecordingActive} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing' || voiceRecordingActive} onClick={() => videoRecordingActive ? stopRecording() : void startRecording('video')}>{videoRecordingActive ? <Square size={15} /> : <Video size={15} />}</button></IconTooltip>
+                        <IconTooltip label={replyTarget ? 'Schedule reply' : 'Schedule message'}><button className="icon-button" type="button" aria-label={replyTarget ? 'Schedule reply' : 'Schedule message'} disabled={!selectedRoom || !composeText.trim() || busy || voiceCaptureStatus !== null || Boolean(editTarget)} onClick={openScheduleMessage}><Clock3 size={15} /></button></IconTooltip>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="composer-toolbar-row composer-toolbar-row-assist">
+                    <div className="composer-tool-group composer-tool-group-ai" role="group" aria-label="AI tools">
+                      <span className="composer-tool-group-label" aria-hidden="true"><Sparkles size={13} />AI</span>
+                      <div className="composer-tool-cluster" role="group" aria-label="Draft assistance">
+                        <IconTooltip label={aiEnabled ? 'Analyze draft with Language Tutor · Ctrl+Shift+T' : 'Analyze draft with Language Tutor · set up a local AI endpoint'}><button className="composer-tutor-button" type="button" aria-label="Analyze draft with Language Tutor" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => void analyzeWithTurkishTutor(composeText, 'draft')}><GraduationCap size={14} /><span>Tutor</span></button></IconTooltip>
+                        <IconTooltip label={ghostwriterActive ? 'Disable suggestions in this chat' : ghostwriterEnabled ? 'Enable suggestions in this chat' : 'Enable suggestions in this chat and configure the local model'}><button className={`composer-tutor-button ghostwriter-toggle ${ghostwriterActive ? 'is-enabled' : ''}`} type="button" aria-label={ghostwriterActive ? 'Disable suggestions in this chat' : 'Enable suggestions in this chat'} aria-pressed={ghostwriterActive} disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => void toggleRoomGhostwriter(!ghostwriterActive)}><Sparkles size={14} /><span>Suggest</span></button></IconTooltip>
+                        <IconTooltip label={ghostwriterActive ? 'Suggest one draft edit' : 'Enable suggestions in this chat first'}><button className="composer-tutor-button" type="button" aria-label="Suggest draft edit" disabled={!selectedRoom || !ghostwriterActive || !composeText.trim() || busy || ghostwriterDraftBusy || Boolean(editTarget) || isGhostCommandDraft(composeText) || ghostwriterAutocompleteStatus === 'loading'} onClick={() => void requestGhostwriterCompletion()}><WandSparkles size={14} /><span>Suggest edit</span></button></IconTooltip>
+                        <IconTooltip label={askAILabel}><button className="icon-button" type="button" aria-label="Ask AI about the composer text" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={askAI}><MessageCircleQuestion size={15} /></button></IconTooltip>
+                        <IconTooltip label={aiEnabled ? 'Rewrite draft' : 'Rewrite · unavailable'}><button className="icon-button" type="button" aria-label="Rewrite composer draft" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => rewriteDraft('rewrite')}><Pencil size={15} /></button></IconTooltip>
+                        <IconTooltip label={aiEnabled ? 'Shorten draft' : 'Shorten · unavailable'}><button className="icon-button" type="button" aria-label="Shorten composer draft" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => rewriteDraft('shorten')}><Minimize2 size={15} /></button></IconTooltip>
+                      </div>
+                      <div className="composer-tool-cluster" role="group" aria-label="Conversation analysis and translation">
+                        <IconTooltip label={aiEnabled ? 'Summarize recent messages' : 'Summarize recent messages · unavailable'}><button className="icon-button" type="button" aria-label="Summarize recent messages" disabled={!selectedRoom || busy || !aiEnabled || messages.length === 0} onClick={summarizeRoom}><ScrollText size={15} /></button></IconTooltip>
+                        <IconTooltip label={aiEnabled ? 'Analyze chat topics' : 'Analyze chat topics · unavailable'}><button className="icon-button" type="button" aria-label="Analyze chat topics" disabled={!selectedRoom || busy || !aiEnabled || messages.length === 0} onClick={analyzeTopics}><Tags size={15} /></button></IconTooltip>
+                        {selectedRoom?.direct && <IconTooltip label={aiEnabled ? 'Analyze conversation' : 'Analyze conversation · unavailable'}><button className="icon-button" type="button" aria-label="Analyze conversation" disabled={busy || !aiEnabled || !hasAIConversationContext} onClick={analyzeConversation}><MessageCircleMore size={15} /></button></IconTooltip>}
+                        <IconTooltip label={aiEnabled ? 'Translate latest 10 received messages to English' : 'Translate latest 10 received messages to English · unavailable'}><button className="icon-button" type="button" aria-label="Translate latest 10 received messages to English" disabled={!selectedRoom || busy || loadingOlder || !aiEnabled || (!hasAIConversationContext && !hasOlder)} onClick={() => void translateRoomToEnglish()}><Languages size={15} /></button></IconTooltip>
+                        {chatTranslation?.roomID === selectedRoomID && <IconTooltip label="Clear message translations"><button className="icon-button" type="button" aria-label="Clear message translations" onClick={clearChatTranslation}><X size={15} /></button></IconTooltip>}
+                        <IconTooltip label={roomAgents.agents.length === 0 ? 'Create a chat agent' : aiEnabled ? 'Run a chat agent' : 'Run a chat agent · unavailable'}><button className="icon-button" type="button" aria-label={roomAgents.agents.length === 0 ? 'Create a chat agent' : 'Run a chat agent'} disabled={!selectedRoom || busy || (roomAgents.agents.length > 0 && !aiEnabled)} onClick={openChatAgentAction}><Bot size={15} /></button></IconTooltip>
+                      </div>
+                    </div>
+                    <span className={`composer-hint${voiceCaptureStatus !== null || busy ? ' is-status' : ''}`}>{voiceCaptureStatus === 'recording' ? `Recording ${captureNoun} · click stop to send` : voiceCaptureStatus === 'processing' ? `Preparing ${captureNoun}…` : selectedRoom ? busy ? 'Sending…' : preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter to send' : 'Enter to send · Shift + Enter for a new line' : ' '}</span>
+                  </div>
+                  <IconTooltip label="Send message" className="send-tooltip">
+                    <button className="send-button" type="submit" aria-label="Send message" disabled={!selectedRoom || !composeText.trim() || busy || voiceCaptureStatus !== null}>
+                      <Send size={17} />
+                    </button>
+                  </IconTooltip>
                 </div>
-              </div>
-              <span className={`composer-hint${voiceCaptureStatus !== null || busy ? ' is-status' : ''}`}>{voiceCaptureStatus === 'recording' ? `Recording ${captureNoun} · click stop to send` : voiceCaptureStatus === 'processing' ? `Preparing ${captureNoun}…` : selectedRoom ? busy ? 'Sending…' : preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter to send' : 'Enter to send · Shift + Enter for a new line' : ' '}</span>
+              </form>
             </div>
-            <IconTooltip label="Send message" className="send-tooltip">
-              <button className="send-button" type="submit" aria-label="Send message" disabled={!selectedRoom || !composeText.trim() || busy || voiceCaptureStatus !== null}>
-                <Send size={17} />
-              </button>
-            </IconTooltip>
-          </div>
-        </form>
-          </div>
-          {contactHUDOpen && selectedRoom?.direct && <ContactHUD accountID={snapshot?.activeAccountId ?? ''} roomID={selectedRoom.id} rooms={rooms.filter((room) => isActiveAccountRoom(room) && room.direct)} onClose={() => setContactHUDOpen(false)} />}
+            {contactHUDOpen && selectedRoom?.direct && <ContactHUD accountID={snapshot?.activeAccountId ?? ''} roomID={selectedRoom.id} rooms={rooms.filter((room) => isActiveAccountRoom(room) && room.direct)} onClose={() => setContactHUDOpen(false)} />}
           </>}
         </div>
       </section>
@@ -5379,7 +5429,7 @@ function App() {
                       <span title={message.senderName || message.sender}>{message.senderName || message.sender || 'Unknown sender'}</span>
                       {message.timestamp > 0 && <time dateTime={new Date(message.timestamp).toISOString()}>{formatMediaGalleryDateTime(message.timestamp, preferences)}</time>}
                     </div>
-                    <MessageMedia roomID={selectedRoom.id} message={message} aiEnabled={Boolean(preferenceString(preferences, 'ai.endpoint', '').trim())} canUseDraft={false} onUseDraft={() => {}} />
+                    <MessageMedia roomID={selectedRoom.id} message={message} aiEnabled={Boolean(preferenceString(preferences, 'ai.endpoint', '').trim())} canUseDraft={false} onUseDraft={() => { }} />
                   </article>
                 ))}
               </div>}
@@ -5781,7 +5831,9 @@ const RoomButton = memo(function RoomButton({ room, index, active, needsReply, m
   const activityAt = roomActivityAt(room)
   return (
     <button data-room-index={index} className={`room-button ${active ? 'is-active' : ''} ${multiSelected ? 'is-multiselected' : ''} ${room.muted ? 'is-muted' : ''} ${hasUnread ? 'has-unread' : ''}`} onClick={(event) => actionsRef.current.onSelect(room, index, event)} onKeyDown={(event) => actionsRef.current.onKeyDown(room, index, event)} onContextMenu={(event) => actionsRef.current.onContextMenu(room, event)} aria-current={active ? 'page' : undefined} title={room.name || room.id}>
-      <Avatar uri={room.avatar} label={room.name || room.id} className="room-avatar" style={avatarStyle(room.name || room.id)} deferLoad />
+      {isLocalAIRoomID(room.id)
+        ? <span className="room-avatar room-avatar-ai" aria-hidden="true"><Sparkles size={16} /></span>
+        : <Avatar uri={room.avatar} label={room.name || room.id} className="room-avatar" style={avatarStyle(room.name || room.id)} deferLoad />}
       <span className="room-copy">
         <span className="room-name">{room.favorite && <Star size={10} fill="currentColor" aria-label="Favorite" />}<span className="room-name-text">{room.name || room.id}</span>{room.muted && <span className="room-muted-mark" title="Muted">· muted</span>}{showNetwork && room.bridge && <span className="room-network" style={{ '--network-hue': networkHue(room.bridge) } as React.CSSProperties}>{room.bridge}</span>}</span>
         <span className="room-preview">
@@ -6303,6 +6355,7 @@ function SettingsDialog({
   const ghostwriterProviderValue = preferenceString(preferences, 'ghostwriter.provider', 'ollama')
   const ghostwriterProvider: GhostwriterProvider = ghostwriterProviderValue === 'openai-compatible' ? 'openai-compatible' : 'ollama'
   const downloadFolder = preferenceString(preferences, 'downloads.folder', '')
+  const localAIAgents = useMemo<ChatAgentCollection>(() => parseChatAgents(preferenceString(preferences, 'ai.local_agents', JSON.stringify(EMPTY_CHAT_AGENTS))), [preferences])
   const [downloadError, setDownloadError] = useState('')
   async function chooseDownloadFolder() {
     setDownloadError('')
@@ -6371,7 +6424,7 @@ function SettingsDialog({
     ['Ctrl + Shift + T', 'Analyze draft with Language Tutor'],
     ['Ctrl / ⌘ + Shift + A', 'Show all rooms'],
     ['Ctrl / ⌘ + Shift + U', 'Show needs-reply rooms'],
-    ['Ctrl / ⌘ + Shift + M', 'Open Local AI chat'],
+    ['Ctrl / ⌘ + Shift + M', 'Start a private model chat'],
     ['Ctrl / ⌘ + Shift + L', 'Jump to latest messages'],
     ['↑ / ↓ / Home / End', 'Navigate the room list'],
     ['Shift + F10', 'Open room actions'],
@@ -6673,532 +6726,533 @@ function SettingsDialog({
 
   return (
     <>
-    <div className="settings-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <DialogSurface className="settings-dialog" labelledBy="settings-title" onClose={onClose}>
-        <header className="settings-header">
-          <div><span className="eyebrow">PINGER</span><h2 id="settings-title">Settings</h2></div>
-          <button className="icon-button" type="button" aria-label="Close settings" title="Close settings" onClick={onClose}><X size={17} /></button>
-        </header>
-        <div className="settings-search">
-          <Search size={15} />
-          <input
-            ref={searchInputRef}
-            type="search"
-            value={searchQuery}
-            placeholder="Search settings"
-            aria-label="Search settings"
-            spellCheck={false}
-            autoCorrect="off"
-            autoCapitalize="off"
-            onChange={(event) => setSearchQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== 'Escape') return
-              event.preventDefault()
-              event.stopPropagation()
-              setSearchQuery('')
-            }}
-          />
-          {searchQuery && (
-            <button type="button" className="icon-button" aria-label="Clear settings search" title="Clear search" onClick={() => { setSearchQuery(''); searchInputRef.current?.focus() }}><X size={14} /></button>
-          )}
-        </div>
-        <nav className="settings-tabs" role="tablist" aria-label="Settings sections">
-          {tabs.map((item) => {
-            const matches = searchResultsByTab.get(item)?.length ?? 0
-            return (
-              <button
-                key={item}
-                id={`settings-tab-${item.toLowerCase().replace(/\s+/g, '-')}`}
-                type="button"
-                role="tab"
-                aria-selected={tab === item}
-                aria-controls="settings-panel"
-                tabIndex={tab === item ? 0 : -1}
-                className={`${tab === item ? 'is-active' : ''} ${searchActive && matches > 0 ? 'has-matches' : ''}`}
-                onClick={() => {
-                  const firstMatch = searchResultsByTab.get(item)?.[0]
-                  if (searchActive && firstMatch) {
-                    revealSetting(firstMatch)
-                    return
-                  }
-                  if (searchActive) setSearchQuery('')
-                  onTabChange(item)
-                }}
-                onKeyDown={(event) => {
-                  const currentIndex = tabs.indexOf(item)
-                  let nextIndex: number
-                  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % tabs.length
-                  else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
-                  else if (event.key === 'Home') nextIndex = 0
-                  else if (event.key === 'End') nextIndex = tabs.length - 1
-                  else return
-                  event.preventDefault()
-                  onTabChange(tabs[nextIndex])
-                  event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus()
-                }}
-              >{item}{searchActive && matches > 0 && <span className="settings-tab-count" aria-hidden="true">{matches}</span>}</button>
-            )
-          })}
-        </nav>
-        <div id="settings-panel" className={`settings-content ${searchActive ? 'is-searching' : ''}`} role="tabpanel" aria-labelledby={`settings-tab-${tab.toLowerCase().replace(/\s+/g, '-')}`} tabIndex={0} ref={settingsPanelRef}>
-          {searchActive && (
-            <div className="settings-search-results" role="region" aria-label="Settings search results">
-              <p className="settings-note" role="status">
-                {searchResults.length === 0
-                  ? `No settings match “${searchQuery.trim()}”.`
-                  : `${searchResults.length} ${searchResults.length === 1 ? 'setting matches' : 'settings match'} “${searchQuery.trim()}”.`}
-              </p>
-              {Array.from(searchResultsByTab.entries()).map(([group, entries]) => (
-                <section className="settings-search-group" key={group}>
-                  <h3>{group}</h3>
-                  <div className="settings-search-list">
-                    {entries.map((entry) => (
-                      <button key={entry.id} type="button" className="settings-search-result" onClick={() => revealSetting(entry)}>
-                        <strong>{entry.title}</strong>
-                        <small>{entry.description}</small>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
-          )}
-          {tab === 'General' && (
-            <div className="settings-section">
-              <h3>General</h3>
-              <PreferenceToggle label="Launch Pinger at login" checked={preferenceBoolean(preferences, 'system.launch_at_startup')} onChange={(value) => onPreferenceChange('system.launch_at_startup', value)} />
-              <PreferenceToggle label="Minimize to tray when closing the window" checked={preferenceBoolean(preferences, 'window.minimize_to_tray')} onChange={(value) => onPreferenceChange('window.minimize_to_tray', value)} />
-              <PreferenceToggle label="Start minimized" checked={preferenceBoolean(preferences, 'window.start_minimized')} onChange={(value) => onPreferenceChange('window.start_minimized', value)} />
-              <PreferenceToggle label="Quit Pinger when the window closes" checked={preferenceBoolean(preferences, 'window.quit_on_close')} onChange={(value) => onPreferenceChange('window.quit_on_close', value)} />
-              <PreferenceToggle label="Show menu bar icon" checked={preferenceBoolean(preferences, 'window.menu_bar_icon', true)} onChange={(value) => onPreferenceChange('window.menu_bar_icon', value)} />
-              <div className="setting-row"><span><strong>Download folder</strong><small>{downloadFolder || 'Downloads folder in your home directory'}</small></span>
-                <span>
-                  <button type="button" className="settings-command" onClick={() => void chooseDownloadFolder()}>Choose…</button>
-                  {downloadFolder && <button type="button" className="settings-command" onClick={() => onPreferenceChange('downloads.folder', '')}>Use default</button>}
-                </span>
+      <div className="settings-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+        <DialogSurface className="settings-dialog" labelledBy="settings-title" onClose={onClose}>
+          <header className="settings-header">
+            <div><span className="eyebrow">PINGER</span><h2 id="settings-title">Settings</h2></div>
+            <button className="icon-button" type="button" aria-label="Close settings" title="Close settings" onClick={onClose}><X size={17} /></button>
+          </header>
+          <div className="settings-search">
+            <Search size={15} />
+            <input
+              ref={searchInputRef}
+              type="search"
+              value={searchQuery}
+              placeholder="Search settings"
+              aria-label="Search settings"
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') return
+                event.preventDefault()
+                event.stopPropagation()
+                setSearchQuery('')
+              }}
+            />
+            {searchQuery && (
+              <button type="button" className="icon-button" aria-label="Clear settings search" title="Clear search" onClick={() => { setSearchQuery(''); searchInputRef.current?.focus() }}><X size={14} /></button>
+            )}
+          </div>
+          <nav className="settings-tabs" role="tablist" aria-label="Settings sections">
+            {tabs.map((item) => {
+              const matches = searchResultsByTab.get(item)?.length ?? 0
+              return (
+                <button
+                  key={item}
+                  id={`settings-tab-${item.toLowerCase().replace(/\s+/g, '-')}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === item}
+                  aria-controls="settings-panel"
+                  tabIndex={tab === item ? 0 : -1}
+                  className={`${tab === item ? 'is-active' : ''} ${searchActive && matches > 0 ? 'has-matches' : ''}`}
+                  onClick={() => {
+                    const firstMatch = searchResultsByTab.get(item)?.[0]
+                    if (searchActive && firstMatch) {
+                      revealSetting(firstMatch)
+                      return
+                    }
+                    if (searchActive) setSearchQuery('')
+                    onTabChange(item)
+                  }}
+                  onKeyDown={(event) => {
+                    const currentIndex = tabs.indexOf(item)
+                    let nextIndex: number
+                    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % tabs.length
+                    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+                    else if (event.key === 'Home') nextIndex = 0
+                    else if (event.key === 'End') nextIndex = tabs.length - 1
+                    else return
+                    event.preventDefault()
+                    onTabChange(tabs[nextIndex])
+                    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus()
+                  }}
+                >{item}{searchActive && matches > 0 && <span className="settings-tab-count" aria-hidden="true">{matches}</span>}</button>
+              )
+            })}
+          </nav>
+          <div id="settings-panel" className={`settings-content ${searchActive ? 'is-searching' : ''}`} role="tabpanel" aria-labelledby={`settings-tab-${tab.toLowerCase().replace(/\s+/g, '-')}`} tabIndex={0} ref={settingsPanelRef}>
+            {searchActive && (
+              <div className="settings-search-results" role="region" aria-label="Settings search results">
+                <p className="settings-note" role="status">
+                  {searchResults.length === 0
+                    ? `No settings match “${searchQuery.trim()}”.`
+                    : `${searchResults.length} ${searchResults.length === 1 ? 'setting matches' : 'settings match'} “${searchQuery.trim()}”.`}
+                </p>
+                {Array.from(searchResultsByTab.entries()).map(([group, entries]) => (
+                  <section className="settings-search-group" key={group}>
+                    <h3>{group}</h3>
+                    <div className="settings-search-list">
+                      {entries.map((entry) => (
+                        <button key={entry.id} type="button" className="settings-search-result" onClick={() => revealSetting(entry)}>
+                          <strong>{entry.title}</strong>
+                          <small>{entry.description}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ))}
               </div>
-              {downloadError && <p className="settings-error" role="alert">{downloadError}</p>}
-              <PreferenceToggle label="Ask where to save each download" checked={preferenceBoolean(preferences, 'downloads.ask_each_time')} onChange={(value) => onPreferenceChange('downloads.ask_each_time', value)} />
-              <label className="setting-row"><span><strong>Double-click a message</strong><small>Choose what a double-click on a message does.</small></span>
-                <select aria-label="Double-click a message" value={preferenceString(preferences, 'messages.double_click', 'None')} onChange={(event) => onPreferenceChange('messages.double_click', event.target.value)}>
-                  <option value="None">Nothing</option>
-                  <option value="Reply">Reply</option>
-                  <option value="React">Add reaction</option>
-                </select>
-              </label>
-              <PreferenceToggle label="Show quick reaction picker" checked={preferenceBoolean(preferences, 'reactions.quick_enabled', true)} onChange={(value) => onPreferenceChange('reactions.quick_enabled', value)} />
-              <label className="setting-row"><span><strong>Default reaction</strong><small>Sent directly when the quick picker is turned off.</small></span>
-                <select aria-label="Default reaction" value={preferenceString(preferences, 'reactions.default_emoji', '👍')} onChange={(event) => onPreferenceChange('reactions.default_emoji', event.target.value)}>
-                  {['👍', '❤️', '😂', '🎉', '👀', '🙏'].map((emoji) => <option key={emoji} value={emoji}>{emoji}</option>)}
-                </select>
-              </label>
-              <label className="setting-row"><span><strong>Quick reaction set</strong><small>Use the built-in frequent set or your own emoji.</small></span>
-                <select aria-label="Quick reaction set" value={preferenceString(preferences, 'reactions.quick_source', 'Frequent')} onChange={(event) => onPreferenceChange('reactions.quick_source', event.target.value)}>
-                  <option value="Frequent">Frequent</option>
-                  <option value="Custom">Custom</option>
-                </select>
-              </label>
-              <label className="setting-row"><span><strong>Custom quick reactions</strong><small>Up to 6 emoji, separated by spaces.</small></span>
-                <input type="text" aria-label="Custom quick reactions" defaultValue={preferenceString(preferences, 'reactions.custom_emojis', '')} onBlur={(event) => onPreferenceChange('reactions.custom_emojis', event.target.value.trim())} />
-              </label>
-              <label className="setting-row"><span><strong>After changing a room's read state</strong><small>Choose where to go after marking a room read or unread.</small></span>
-                <select aria-label="After changing a room's read state" value={preferenceString(preferences, 'inbox.after_read', 'stay')} onChange={(event) => onPreferenceChange('inbox.after_read', event.target.value)}>
-                  <option value="stay">Stay in the current room</option>
-                  <option value="next_visible">Next visible room</option>
-                  <option value="next_unread">Next unread room</option>
-                  <option value="none">Clear selection</option>
-                </select>
-              </label>
-              <label className="setting-row"><span><strong>After archiving a room</strong><small>Choose what opens after the selected room is archived.</small></span>
-                <select aria-label="After archiving a room" value={preferenceString(preferences, 'archive.next_room', 'next_visible')} onChange={(event) => onPreferenceChange('archive.next_room', event.target.value)}>
-                  <option value="next_visible">Next visible room</option>
-                  <option value="next_unread">Next unread room</option>
-                  <option value="none">Clear selection</option>
-                </select>
-              </label>
-              <PreferenceToggle label="Automatically archive inactive rooms" checked={preferenceBoolean(preferences, 'archive.automatic')} onChange={(value) => onPreferenceChange('archive.automatic', value)} />
-              <label className="setting-row"><span><strong>Inactive room age</strong><small>Archive rooms without activity for this long.</small></span>
-                <input type="number" min="1" max="3650" step="1" value={archiveAgeDraft} aria-label="Inactive room age" aria-invalid={Boolean(archiveAgeError)} onChange={(event) => { setArchiveAgeDraft(event.target.value); setArchiveAgeError('') }} onBlur={() => saveArchiveAge(archiveAgeDraft)} />
-              </label>
-              {archiveAgeError && <p className="form-error" role="alert">{archiveAgeError}</p>}
-              <button className="settings-command" type="button" onClick={() => void onArchiveInactiveRooms()}><Archive size={15} />Archive inactive rooms</button>
-              <label className="setting-row"><span><strong>Voice-note microphone</strong><small>Choose the input used for recording.</small></span>
-                <select value={selectedAudioInputDeviceId} aria-label="Voice-note microphone" onChange={(event) => onPreferenceChange('audio.input_device', event.target.value)}>
-                  <option value="">System default</option>
-                  {audioInputDevices.map((device, index) => <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}
-                </select>
-              </label>
-              <PreferenceToggle label="Auto-play next voice note" checked={preferenceBoolean(preferences, 'voice.autoplay_next')} onChange={(value) => onPreferenceChange('voice.autoplay_next', value)} />
-              <label className="setting-row"><span><strong>Default Send Later delay</strong><small>Initial scheduled-send time, in minutes (1–10080).</small></span>
-                <input type="number" min="1" max="10080" step="1" value={scheduleSendDelayDraft} aria-label="Default Send Later delay in minutes" aria-invalid={Boolean(scheduleSendDelayError)} onChange={(event) => { setScheduleSendDelayDraft(event.target.value); setScheduleSendDelayError('') }} onBlur={() => saveScheduleDefaultDelay('schedule.default_send_minutes', scheduleSendDelayDraft, setScheduleSendDelayDraft, setScheduleSendDelayError)} />
-              </label>
-              {scheduleSendDelayError && <p className="form-error" role="alert">{scheduleSendDelayError}</p>}
-              <label className="setting-row"><span><strong>Default Remind Later delay</strong><small>Initial reminder time, in minutes (1–10080).</small></span>
-                <input type="number" min="1" max="10080" step="1" value={scheduleReminderDelayDraft} aria-label="Default Remind Later delay in minutes" aria-invalid={Boolean(scheduleReminderDelayError)} onChange={(event) => { setScheduleReminderDelayDraft(event.target.value); setScheduleReminderDelayError('') }} onBlur={() => saveScheduleDefaultDelay('schedule.default_reminder_minutes', scheduleReminderDelayDraft, setScheduleReminderDelayDraft, setScheduleReminderDelayError)} />
-              </label>
-              {scheduleReminderDelayError && <p className="form-error" role="alert">{scheduleReminderDelayError}</p>}
-              <label className="setting-row"><span><strong>Schedule time suggestions</strong><small>Enter 1–6 comma-separated delays in minutes.</small></span>
-                <input className="schedule-suggestions-input" type="text" inputMode="numeric" value={scheduleSuggestionsDraft} aria-label="Schedule time suggestions" aria-invalid={Boolean(scheduleSuggestionsError)} onChange={(event) => { setScheduleSuggestionsDraft(event.target.value); setScheduleSuggestionsError('') }} onBlur={() => {
-                  const minutes = parseTimeSuggestionMinutes(scheduleSuggestionsDraft)
-                  if (minutes.length === 0) {
-                    setScheduleSuggestionsError('Use 1–6 unique values from 1 to 10080.')
-                    return
-                  }
-                  const value = minutes.join(',')
-                  setScheduleSuggestionsDraft(value)
-                  setScheduleSuggestionsError('')
-                  onPreferenceChange('schedule.suggestions_minutes', value)
-                }} />
-              </label>
-              {scheduleSuggestionsError && <p className="form-error" role="alert">{scheduleSuggestionsError}</p>}
-            </div>
-          )}
-          {tab === 'Appearance' && (
-            <div className="settings-section">
-              <h3>Appearance</h3>
-              <label className="setting-row"><span><strong>Theme</strong><small>Choose the conversation surface. {themeDescription}</small></span>
-                <select value={theme} onChange={(event) => onPreferenceChange('appearance.theme', event.target.value)}>
-                  <option value={SYSTEM_THEME_NAME}>{SYSTEM_THEME_NAME}</option>
-                  {appearanceThemes.map((entry) => <option key={entry.id} value={entry.name}>{entry.name} ({entry.mode})</option>)}
-                </select>
-              </label>
-              <label className="setting-row"><span><strong>Font size</strong><small>Adjust room and message text.</small></span>
-                <select value={fontSize} onChange={(event) => onPreferenceChange('appearance.font_size', event.target.value)}>
-                  {['Small', 'Medium', 'Large'].map((value) => <option key={value}>{value}</option>)}
-                </select>
-              </label>
-              <label className="setting-row"><span><strong>App zoom</strong><small>Scale the full interface.</small></span>
-                <PreferenceRange label="App zoom" min={75} max={125} step={5} value={preferenceNumber(preferences, 'appearance.zoom', 100, 75, 125)} onChange={(value) => onPreferenceChange('appearance.zoom', value)} />
-              </label>
-              <label className="setting-row"><span><strong>Outgoing message color</strong><small>Choose a color for your messages.</small></span>
-                <input className="color-input" type="color" value={safeBubbleColor} onChange={(event) => onPreferenceChange('appearance.bubble_color', event.target.value)} aria-label="Outgoing message color" />
-              </label>
-              <div className="setting-row accent-setting-row"><span><strong>Theme accent</strong><small>Choose an accent. Message color follows it until you pick one.</small></span>
-                <div className="accent-palette" role="group" aria-label="Theme accent color">
-                  {accentPresets.map((palette) => <button key={palette.name} className="accent-swatch" type="button" aria-label={`${palette.name} accent color`} aria-pressed={activeAccentPalette.name === palette.name} title={palette.name} style={{ '--swatch': palette.base } as React.CSSProperties} onClick={() => onPreferenceChange('appearance.accent_color', palette.name)}>
-                    {activeAccentPalette.name === palette.name && <Check size={14} />}
-                  </button>)}
-                  <label className={`accent-swatch accent-swatch-custom${isAccentHex(accentPreference) ? ' is-selected' : ''}`} title="Custom color" style={{ '--swatch': activeAccentPalette.base } as React.CSSProperties}>
-                    <input type="color" value={activeAccentPalette.base} aria-label="Custom accent color" onChange={(event) => onPreferenceChange('appearance.accent_color', event.target.value)} />
-                    {isAccentHex(accentPreference) && <Check size={14} />}
-                  </label>
+            )}
+            {tab === 'General' && (
+              <div className="settings-section">
+                <h3>General</h3>
+                <PreferenceToggle label="Launch Pinger at login" checked={preferenceBoolean(preferences, 'system.launch_at_startup')} onChange={(value) => onPreferenceChange('system.launch_at_startup', value)} />
+                <PreferenceToggle label="Minimize to tray when closing the window" checked={preferenceBoolean(preferences, 'window.minimize_to_tray')} onChange={(value) => onPreferenceChange('window.minimize_to_tray', value)} />
+                <PreferenceToggle label="Start minimized" checked={preferenceBoolean(preferences, 'window.start_minimized')} onChange={(value) => onPreferenceChange('window.start_minimized', value)} />
+                <PreferenceToggle label="Quit Pinger when the window closes" checked={preferenceBoolean(preferences, 'window.quit_on_close')} onChange={(value) => onPreferenceChange('window.quit_on_close', value)} />
+                <PreferenceToggle label="Show menu bar icon" checked={preferenceBoolean(preferences, 'window.menu_bar_icon', true)} onChange={(value) => onPreferenceChange('window.menu_bar_icon', value)} />
+                <div className="setting-row"><span><strong>Download folder</strong><small>{downloadFolder || 'Downloads folder in your home directory'}</small></span>
+                  <span>
+                    <button type="button" className="settings-command" onClick={() => void chooseDownloadFolder()}>Choose…</button>
+                    {downloadFolder && <button type="button" className="settings-command" onClick={() => onPreferenceChange('downloads.folder', '')}>Use default</button>}
+                  </span>
                 </div>
-              </div>
-              <div className="setting-row accent-setting-row"><span><strong>Chat wallpaper</strong><small>Add a subtle background to conversations.</small></span>
-                <div className="wallpaper-picker" role="group" aria-label="Chat wallpaper">
-                  {chatWallpapers.map((wallpaper) => <button key={wallpaper.name} className="wallpaper-swatch" type="button" aria-label={`${wallpaper.name} wallpaper`} aria-pressed={activeWallpaper.name === wallpaper.name} title={wallpaper.name} style={{ '--wallpaper-swatch': wallpaper.swatch } as React.CSSProperties} onClick={() => onPreferenceChange('appearance.chat_wallpaper', wallpaper.name)}>
-                    {activeWallpaper.name === wallpaper.name && <Check size={13} />}
-                  </button>)}
-                </div>
-              </div>
-              <PreferenceToggle label="Use pointer cursor on clickable controls" checked={preferenceBoolean(preferences, 'appearance.pointer_cursor', true)} onChange={(value) => onPreferenceChange('appearance.pointer_cursor', value)} />
-              <PreferenceToggle label="Show room previews" checked={preferenceBoolean(preferences, 'sidebar.show_previews', true)} onChange={(value) => onPreferenceChange('sidebar.show_previews', value)} />
-              <PreferenceToggle label="Show unread counts" checked={preferenceBoolean(preferences, 'sidebar.show_unread_counts', true)} onChange={(value) => onPreferenceChange('sidebar.show_unread_counts', value)} />
-              <PreferenceToggle label="Compact chat list" checked={preferenceBoolean(preferences, 'sidebar.compact_chat_list')} onChange={(value) => onPreferenceChange('sidebar.compact_chat_list', value)} />
-              <PreferenceToggle label="Show network labels in the chat list" checked={preferenceBoolean(preferences, 'sidebar.network_icons')} onChange={(value) => onPreferenceChange('sidebar.network_icons', value)} />
-              <label className="setting-row"><span><strong>Favorite chats</strong><small>List favorite rooms first, or only mark them with a star.</small></span>
-                <select aria-label="Favorite chats" value={preferenceString(preferences, 'sidebar.pinned_style', 'Top of list')} onChange={(event) => onPreferenceChange('sidebar.pinned_style', event.target.value)}>
-                  {['Top of list', 'Star only'].map((value) => <option key={value}>{value}</option>)}
-                </select>
-              </label>
-              <PreferenceToggle label="Animate new messages" checked={preferenceBoolean(preferences, 'appearance.message_animations', true)} onChange={(value) => onPreferenceChange('appearance.message_animations', value)} />
-              <PreferenceToggle label="Show message timestamps" checked={preferenceBoolean(preferences, 'appearance.show_timestamps', true)} onChange={(value) => onPreferenceChange('appearance.show_timestamps', value)} />
-              <PreferenceToggle label="Hide images and videos" checked={preferenceBoolean(preferences, 'appearance.hide_images_and_videos')} onChange={(value) => onPreferenceChange('appearance.hide_images_and_videos', value)} />
-              <PreferenceToggle label="Hide deleted messages" checked={preferenceBoolean(preferences, 'appearance.hide_deleted_messages')} onChange={(value) => onPreferenceChange('appearance.hide_deleted_messages', value)} />
-              <PreferenceToggle label="Balance message line wrapping" checked={preferenceBoolean(preferences, 'appearance.balanced_text')} onChange={(value) => onPreferenceChange('appearance.balanced_text', value)} />
-              <PreferenceToggle label="Use a 24-hour clock" checked={preferenceBoolean(preferences, 'appearance.time_24_hour')} onChange={(value) => onPreferenceChange('appearance.time_24_hour', value)} />
-              <PreferenceToggle label="Use relative timestamps" checked={preferenceBoolean(preferences, 'appearance.relative_timestamps')} onChange={(value) => onPreferenceChange('appearance.relative_timestamps', value)} />
-            </div>
-          )}
-          {tab === 'Notifications' && (
-            <div className="settings-section">
-              <h3>Notifications</h3>
-              <p className="settings-note">Alerts use your operating system's native notification service. macOS requests permission; Windows and Linux follow system notification settings.</p>
-              <div className="setting-row notification-permission"><span><strong>System permission</strong><small>{notificationPermission === 'granted' ? 'Allowed' : notificationPermission === 'denied' ? 'Blocked by the system. Open Notification Settings to allow alerts.' : notificationPermission === 'unsupported' ? 'Native notifications are unavailable. On macOS, launch the bundled Pinger.app; on Linux or Windows, use a desktop session with notifications enabled.' : 'Permission needed for desktop alerts.'}</small></span>
-                <button className="settings-command" type="button" disabled={notificationPermission === 'granted' || notificationPermission === 'unsupported'} onClick={() => void enableSystemNotifications()}><Bell size={14} />{notificationPermission === 'granted' ? 'Allowed' : notificationPermission === 'denied' ? 'Open Settings' : notificationPermission === 'unsupported' ? 'Unavailable' : 'Enable'}</button>
-              </div>
-              <PreferenceToggle label="Enable notifications" checked={preferenceBoolean(preferences, 'notifications.enabled', true)} onChange={(value) => {
-                onPreferenceChange('notifications.enabled', value)
-                if (value) void enableSystemNotifications()
-              }} />
-              <PreferenceToggle label="Busy mode auto-replies" checked={preferenceBoolean(preferences, 'busy_mode.enabled')} onChange={(value) => onPreferenceChange('busy_mode.enabled', value)} />
-              <p className="settings-note">Automatically replies once in each direct chat while busy mode is on. Language detection runs on this device. For other languages, only the generic reply is sent to the configured AI endpoint for translation; without one, the reply uses English.</p>
-              <PreferenceToggle label="Notify while Pinger is focused" checked={!preferenceBoolean(preferences, 'notifications.only_when_unfocused', true)} onChange={(value) => onPreferenceChange('notifications.only_when_unfocused', !value)} />
-              <PreferenceToggle label="Play a notification sound" checked={preferenceBoolean(preferences, 'notifications.sound')} onChange={(value) => onPreferenceChange('notifications.sound', value)} />
-              <label className="setting-row"><span><strong>Notification volume</strong><small>Adjust the alert tone level.</small></span>
-                <PreferenceRange label="Notification volume" min={0} max={100} step={5} value={preferenceNumber(preferences, 'notifications.volume', 50)} onChange={(value) => onPreferenceChange('notifications.volume', value)} />
-              </label>
-              <label className="setting-row"><span><strong>Notification content</strong><small>Control what appears outside the app.</small></span>
-                <select value={preferenceString(preferences, 'notifications.privacy', 'Sender and message preview')} onChange={(event) => onPreferenceChange('notifications.privacy', event.target.value)}>
-                  {['Sender and message preview', 'Sender only', 'Hidden content'].map((value) => <option key={value}>{value}</option>)}
-                </select>
-              </label>
-              <PreferenceToggle label="Direct message alerts" checked={preferenceBoolean(preferences, 'notifications.direct', true)} onChange={(value) => onPreferenceChange('notifications.direct', value)} />
-              <PreferenceToggle label="Mention alerts" checked={preferenceBoolean(preferences, 'notifications.mentions', true)} onChange={(value) => onPreferenceChange('notifications.mentions', value)} />
-              <PreferenceToggle label="Group message alerts" checked={preferenceBoolean(preferences, 'notifications.group')} onChange={(value) => onPreferenceChange('notifications.group', value)} />
-              {[['Direct message tone', 'notifications.sound_direct'], ['Mention tone', 'notifications.sound_mention'], ['Group message tone', 'notifications.sound_group']].map(([label, key]) => (
-                <label key={key} className="setting-row"><span><strong>{label}</strong><small>Sound played for this kind of alert.</small></span>
-                  <select aria-label={label} value={preferenceString(preferences, key, 'Chime')} onChange={(event) => {
-                    const tone = event.currentTarget.value
-                    void onPreferenceChange(key, tone)
-                    playNotificationSound(preferenceNumber(preferences, 'notifications.volume', 50), tone)
-                  }}>
-                    {['Chime', 'Pulse', 'Soft', 'Silent'].map((value) => <option key={value}>{value}</option>)}
+                {downloadError && <p className="settings-error" role="alert">{downloadError}</p>}
+                <PreferenceToggle label="Ask where to save each download" checked={preferenceBoolean(preferences, 'downloads.ask_each_time')} onChange={(value) => onPreferenceChange('downloads.ask_each_time', value)} />
+                <label className="setting-row"><span><strong>Double-click a message</strong><small>Choose what a double-click on a message does.</small></span>
+                  <select aria-label="Double-click a message" value={preferenceString(preferences, 'messages.double_click', 'None')} onChange={(event) => onPreferenceChange('messages.double_click', event.target.value)}>
+                    <option value="None">Nothing</option>
+                    <option value="Reply">Reply</option>
+                    <option value="React">Add reaction</option>
                   </select>
                 </label>
-              ))}
-              <label className="setting-row"><span><strong>Batch new messages</strong><small>Combine messages from the same room into one alert.</small></span>
-                <select aria-label="Batch new messages" value={preferenceString(preferences, 'notifications.batch_seconds', '0')} onChange={(event) => onPreferenceChange('notifications.batch_seconds', event.target.value)}>
-                  <option value="0">Off</option>
-                  <option value="3">3 seconds</option>
-                  <option value="10">10 seconds</option>
-                  <option value="30">30 seconds</option>
-                </select>
-              </label>
-              <label className="setting-row"><span><strong>Repeat unread reminder</strong><small>Remind you once about a room that is still unread.</small></span>
-                <select aria-label="Repeat unread reminder" value={preferenceString(preferences, 'notifications.repeat_minutes', '0')} onChange={(event) => onPreferenceChange('notifications.repeat_minutes', event.target.value)}>
-                  <option value="0">Off</option>
-                  <option value="5">After 5 minutes</option>
-                  <option value="15">After 15 minutes</option>
-                  <option value="60">After 60 minutes</option>
-                </select>
-              </label>
-              <PreferenceToggle label="Notify one-time codes immediately" checked={preferenceBoolean(preferences, 'notifications.otp_immediate', true)} onChange={(value) => onPreferenceChange('notifications.otp_immediate', value)} />
-              <PreferenceToggle label="Copy one-time codes automatically" checked={preferenceBoolean(preferences, 'notifications.otp_copy')} onChange={(value) => onPreferenceChange('notifications.otp_copy', value)} />
-              <label className="setting-row"><span><strong>Sound effects</strong><small>Play a short sound when a message is sent.</small></span>
-                <select aria-label="Sound effects" value={preferenceString(preferences, 'sounds.effects', 'Off')} onChange={(event) => onPreferenceChange('sounds.effects', event.target.value)}>
-                  <option value="Off">Off</option>
-                  <option value="Sent messages">Sent messages</option>
-                </select>
-              </label>
-            </div>
-          )}
-          {tab === 'Keyboard' && (
-            <div className="settings-section">
-              <h3>Keyboard</h3>
-              <PreferenceToggle label="Use Ctrl + Enter to send" checked={preferenceBoolean(preferences, 'composer.ctrl_enter')} onChange={(value) => onPreferenceChange('composer.ctrl_enter', value)} />
-              <PreferenceToggle label="Spellcheck messages" checked={preferenceBoolean(preferences, 'composer.spellcheck', true)} onChange={(value) => onPreferenceChange('composer.spellcheck', value)} />
-              <PreferenceToggle label="Show formatting toolbar" checked={preferenceBoolean(preferences, 'composer.formatting_toolbar')} onChange={(value) => onPreferenceChange('composer.formatting_toolbar', value)} />
-              <PreferenceToggle label="Suggest emoji for :shortcodes:" checked={preferenceBoolean(preferences, 'emoji.autocomplete')} onChange={(value) => onPreferenceChange('emoji.autocomplete', value)} />
-              <PreferenceToggle label="Replace emoticons as you type" checked={preferenceBoolean(preferences, 'emoji.replace_emoticons', true)} onChange={(value) => onPreferenceChange('emoji.replace_emoticons', value)} />
-              <div className="emoticon-replacement-editor" id="emoticon-replacement-editor">
-                <div>
-                  <strong>Custom emoji replacements</strong>
-                  <p className="settings-note">Add a symbol and emoji pair. Custom pairs override built-in faces such as `:)`.</p>
-                </div>
-                {customEmoticonDraft.length === 0 && <p className="settings-note">No custom replacements.</p>}
-                {customEmoticonDraft.map(([symbol, emoji], index) => (
-                  <div className="emoticon-replacement-row" key={index}>
-                    <label><span>Symbol</span><input type="text" maxLength={16} value={symbol} aria-label={`Symbol for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 0, event.target.value)} /></label>
-                    <span className="emoticon-replacement-arrow" aria-hidden="true">→</span>
-                    <label><span>Emoji</span><input type="text" maxLength={16} value={emoji} aria-label={`Emoji for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 1, event.target.value)} /></label>
-                    <button type="button" className="icon-button" aria-label={`Remove replacement ${index + 1}`} title="Remove replacement" onClick={() => { setCustomEmoticonDraft((current) => current.filter((_, pairIndex) => pairIndex !== index)); setCustomEmoticonStatus('') }}><Trash2 size={14} /></button>
-                  </div>
-                ))}
-                <div className="emoticon-replacement-actions">
-                  <button className="settings-command" type="button" disabled={customEmoticonDraft.length >= 64} onClick={() => { setCustomEmoticonDraft((current) => [...current, ['', '']]); setCustomEmoticonStatus('') }}><Plus size={14} />Add mapping</button>
-                  <button className="settings-command" type="button" onClick={() => void saveCustomEmoticons()}><Check size={14} />Save mappings</button>
-                  <button className="settings-command" type="button" onClick={() => void resetCustomEmoticons()}><RotateCcw size={14} />Reset built-ins</button>
-                </div>
-                {customEmoticonStatus && <p className="settings-note" role="status">{customEmoticonStatus}</p>}
+                <PreferenceToggle label="Show quick reaction picker" checked={preferenceBoolean(preferences, 'reactions.quick_enabled', true)} onChange={(value) => onPreferenceChange('reactions.quick_enabled', value)} />
+                <label className="setting-row"><span><strong>Default reaction</strong><small>Sent directly when the quick picker is turned off.</small></span>
+                  <select aria-label="Default reaction" value={preferenceString(preferences, 'reactions.default_emoji', '👍')} onChange={(event) => onPreferenceChange('reactions.default_emoji', event.target.value)}>
+                    {['👍', '❤️', '😂', '🎉', '👀', '🙏'].map((emoji) => <option key={emoji} value={emoji}>{emoji}</option>)}
+                  </select>
+                </label>
+                <label className="setting-row"><span><strong>Quick reaction set</strong><small>Use the built-in frequent set or your own emoji.</small></span>
+                  <select aria-label="Quick reaction set" value={preferenceString(preferences, 'reactions.quick_source', 'Frequent')} onChange={(event) => onPreferenceChange('reactions.quick_source', event.target.value)}>
+                    <option value="Frequent">Frequent</option>
+                    <option value="Custom">Custom</option>
+                  </select>
+                </label>
+                <label className="setting-row"><span><strong>Custom quick reactions</strong><small>Up to 6 emoji, separated by spaces.</small></span>
+                  <input type="text" aria-label="Custom quick reactions" defaultValue={preferenceString(preferences, 'reactions.custom_emojis', '')} onBlur={(event) => onPreferenceChange('reactions.custom_emojis', event.target.value.trim())} />
+                </label>
+                <label className="setting-row"><span><strong>After changing a room's read state</strong><small>Choose where to go after marking a room read or unread.</small></span>
+                  <select aria-label="After changing a room's read state" value={preferenceString(preferences, 'inbox.after_read', 'stay')} onChange={(event) => onPreferenceChange('inbox.after_read', event.target.value)}>
+                    <option value="stay">Stay in the current room</option>
+                    <option value="next_visible">Next visible room</option>
+                    <option value="next_unread">Next unread room</option>
+                    <option value="none">Clear selection</option>
+                  </select>
+                </label>
+                <label className="setting-row"><span><strong>After archiving a room</strong><small>Choose what opens after the selected room is archived.</small></span>
+                  <select aria-label="After archiving a room" value={preferenceString(preferences, 'archive.next_room', 'next_visible')} onChange={(event) => onPreferenceChange('archive.next_room', event.target.value)}>
+                    <option value="next_visible">Next visible room</option>
+                    <option value="next_unread">Next unread room</option>
+                    <option value="none">Clear selection</option>
+                  </select>
+                </label>
+                <PreferenceToggle label="Automatically archive inactive rooms" checked={preferenceBoolean(preferences, 'archive.automatic')} onChange={(value) => onPreferenceChange('archive.automatic', value)} />
+                <label className="setting-row"><span><strong>Inactive room age</strong><small>Archive rooms without activity for this long.</small></span>
+                  <input type="number" min="1" max="3650" step="1" value={archiveAgeDraft} aria-label="Inactive room age" aria-invalid={Boolean(archiveAgeError)} onChange={(event) => { setArchiveAgeDraft(event.target.value); setArchiveAgeError('') }} onBlur={() => saveArchiveAge(archiveAgeDraft)} />
+                </label>
+                {archiveAgeError && <p className="form-error" role="alert">{archiveAgeError}</p>}
+                <button className="settings-command" type="button" onClick={() => void onArchiveInactiveRooms()}><Archive size={15} />Archive inactive rooms</button>
+                <label className="setting-row"><span><strong>Voice-note microphone</strong><small>Choose the input used for recording.</small></span>
+                  <select value={selectedAudioInputDeviceId} aria-label="Voice-note microphone" onChange={(event) => onPreferenceChange('audio.input_device', event.target.value)}>
+                    <option value="">System default</option>
+                    {audioInputDevices.map((device, index) => <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}
+                  </select>
+                </label>
+                <PreferenceToggle label="Auto-play next voice note" checked={preferenceBoolean(preferences, 'voice.autoplay_next')} onChange={(value) => onPreferenceChange('voice.autoplay_next', value)} />
+                <label className="setting-row"><span><strong>Default Send Later delay</strong><small>Initial scheduled-send time, in minutes (1–10080).</small></span>
+                  <input type="number" min="1" max="10080" step="1" value={scheduleSendDelayDraft} aria-label="Default Send Later delay in minutes" aria-invalid={Boolean(scheduleSendDelayError)} onChange={(event) => { setScheduleSendDelayDraft(event.target.value); setScheduleSendDelayError('') }} onBlur={() => saveScheduleDefaultDelay('schedule.default_send_minutes', scheduleSendDelayDraft, setScheduleSendDelayDraft, setScheduleSendDelayError)} />
+                </label>
+                {scheduleSendDelayError && <p className="form-error" role="alert">{scheduleSendDelayError}</p>}
+                <label className="setting-row"><span><strong>Default Remind Later delay</strong><small>Initial reminder time, in minutes (1–10080).</small></span>
+                  <input type="number" min="1" max="10080" step="1" value={scheduleReminderDelayDraft} aria-label="Default Remind Later delay in minutes" aria-invalid={Boolean(scheduleReminderDelayError)} onChange={(event) => { setScheduleReminderDelayDraft(event.target.value); setScheduleReminderDelayError('') }} onBlur={() => saveScheduleDefaultDelay('schedule.default_reminder_minutes', scheduleReminderDelayDraft, setScheduleReminderDelayDraft, setScheduleReminderDelayError)} />
+                </label>
+                {scheduleReminderDelayError && <p className="form-error" role="alert">{scheduleReminderDelayError}</p>}
+                <label className="setting-row"><span><strong>Schedule time suggestions</strong><small>Enter 1–6 comma-separated delays in minutes.</small></span>
+                  <input className="schedule-suggestions-input" type="text" inputMode="numeric" value={scheduleSuggestionsDraft} aria-label="Schedule time suggestions" aria-invalid={Boolean(scheduleSuggestionsError)} onChange={(event) => { setScheduleSuggestionsDraft(event.target.value); setScheduleSuggestionsError('') }} onBlur={() => {
+                    const minutes = parseTimeSuggestionMinutes(scheduleSuggestionsDraft)
+                    if (minutes.length === 0) {
+                      setScheduleSuggestionsError('Use 1–6 unique values from 1 to 10080.')
+                      return
+                    }
+                    const value = minutes.join(',')
+                    setScheduleSuggestionsDraft(value)
+                    setScheduleSuggestionsError('')
+                    onPreferenceChange('schedule.suggestions_minutes', value)
+                  }} />
+                </label>
+                {scheduleSuggestionsError && <p className="form-error" role="alert">{scheduleSuggestionsError}</p>}
               </div>
-              <PreferenceToggle label="Include timestamps when copying messages" checked={preferenceBoolean(preferences, 'clipboard.copy_timestamp')} onChange={(value) => onPreferenceChange('clipboard.copy_timestamp', value)} />
-              <PreferenceToggle label="Use Up to focus the message list when the composer is empty" checked={preferenceBoolean(preferences, 'composer.arrow_up_focus_timeline')} onChange={(value) => onPreferenceChange('composer.arrow_up_focus_timeline', value)} />
-              <PreferenceToggle label="Enable single-key shortcuts (N, U, A, F, R, J, K and the answered key)" checked={preferenceBoolean(preferences, 'shortcuts.single_keys', true)} onChange={(value) => onPreferenceChange('shortcuts.single_keys', value)} />
-              {!preferenceBoolean(preferences, 'shortcuts.single_keys', true) && <p className="settings-note" role="status">Single-key shortcuts are off. Use the message and room menus instead. Ctrl / ⌘ shortcuts still work.</p>}
-              <label className="setting-row"><span><strong>Mark answered shortcut</strong><small>Use one letter to mark the selected room answered.</small></span>
-                <input className="shortcut-input" type="text" maxLength={1} value={preferenceString(preferences, 'shortcuts.mark_answered', 'E')} aria-label="Mark answered shortcut" onChange={(event) => { const value = event.target.value.toUpperCase(); if (value) onPreferenceChange('shortcuts.mark_answered', value) }} />
-              </label>
-              <button className="settings-command" type="button" onClick={() => setSnippetManagerOpen(true)}><FileText size={15} />Manage text snippets</button>
-              <p className="settings-note">Expand personal shortcuts while composing. Snippets are stored on this device.</p>
-              <div className="settings-search shortcut-search">
-                <Search size={15} />
-                <input
-                  type="search"
-                  value={shortcutSearchQuery}
-                  placeholder="Find a shortcut"
-                  aria-label="Search keyboard shortcuts"
-                  spellCheck={false}
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  onChange={(event) => setShortcutSearchQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Escape' || !shortcutSearchQuery) return
-                    event.preventDefault()
-                    event.stopPropagation()
-                    setShortcutSearchQuery('')
-                  }}
-                />
-                {shortcutSearchQuery && (
-                  <button type="button" className="icon-button" aria-label="Clear shortcut search" title="Clear search" onClick={() => setShortcutSearchQuery('')}><X size={14} /></button>
+            )}
+            {tab === 'Appearance' && (
+              <div className="settings-section">
+                <h3>Appearance</h3>
+                <label className="setting-row"><span><strong>Theme</strong><small>Choose the conversation surface. {themeDescription}</small></span>
+                  <select value={theme} onChange={(event) => onPreferenceChange('appearance.theme', event.target.value)}>
+                    <option value={SYSTEM_THEME_NAME}>{SYSTEM_THEME_NAME}</option>
+                    {appearanceThemes.map((entry) => <option key={entry.id} value={entry.name}>{entry.name} ({entry.mode})</option>)}
+                  </select>
+                </label>
+                <label className="setting-row"><span><strong>Font size</strong><small>Adjust room and message text.</small></span>
+                  <select value={fontSize} onChange={(event) => onPreferenceChange('appearance.font_size', event.target.value)}>
+                    {['Small', 'Medium', 'Large'].map((value) => <option key={value}>{value}</option>)}
+                  </select>
+                </label>
+                <label className="setting-row"><span><strong>App zoom</strong><small>Scale the full interface.</small></span>
+                  <PreferenceRange label="App zoom" min={75} max={125} step={5} value={preferenceNumber(preferences, 'appearance.zoom', 100, 75, 125)} onChange={(value) => onPreferenceChange('appearance.zoom', value)} />
+                </label>
+                <label className="setting-row"><span><strong>Outgoing message color</strong><small>Choose a color for your messages.</small></span>
+                  <input className="color-input" type="color" value={safeBubbleColor} onChange={(event) => onPreferenceChange('appearance.bubble_color', event.target.value)} aria-label="Outgoing message color" />
+                </label>
+                <div className="setting-row accent-setting-row"><span><strong>Theme accent</strong><small>Choose an accent. Message color follows it until you pick one.</small></span>
+                  <div className="accent-palette" role="group" aria-label="Theme accent color">
+                    {accentPresets.map((palette) => <button key={palette.name} className="accent-swatch" type="button" aria-label={`${palette.name} accent color`} aria-pressed={activeAccentPalette.name === palette.name} title={palette.name} style={{ '--swatch': palette.base } as React.CSSProperties} onClick={() => onPreferenceChange('appearance.accent_color', palette.name)}>
+                      {activeAccentPalette.name === palette.name && <Check size={14} />}
+                    </button>)}
+                    <label className={`accent-swatch accent-swatch-custom${isAccentHex(accentPreference) ? ' is-selected' : ''}`} title="Custom color" style={{ '--swatch': activeAccentPalette.base } as React.CSSProperties}>
+                      <input type="color" value={activeAccentPalette.base} aria-label="Custom accent color" onChange={(event) => onPreferenceChange('appearance.accent_color', event.target.value)} />
+                      {isAccentHex(accentPreference) && <Check size={14} />}
+                    </label>
+                  </div>
+                </div>
+                <div className="setting-row accent-setting-row"><span><strong>Chat wallpaper</strong><small>Add a subtle background to conversations.</small></span>
+                  <div className="wallpaper-picker" role="group" aria-label="Chat wallpaper">
+                    {chatWallpapers.map((wallpaper) => <button key={wallpaper.name} className="wallpaper-swatch" type="button" aria-label={`${wallpaper.name} wallpaper`} aria-pressed={activeWallpaper.name === wallpaper.name} title={wallpaper.name} style={{ '--wallpaper-swatch': wallpaper.swatch } as React.CSSProperties} onClick={() => onPreferenceChange('appearance.chat_wallpaper', wallpaper.name)}>
+                      {activeWallpaper.name === wallpaper.name && <Check size={13} />}
+                    </button>)}
+                  </div>
+                </div>
+                <PreferenceToggle label="Use pointer cursor on clickable controls" checked={preferenceBoolean(preferences, 'appearance.pointer_cursor', true)} onChange={(value) => onPreferenceChange('appearance.pointer_cursor', value)} />
+                <PreferenceToggle label="Show room previews" checked={preferenceBoolean(preferences, 'sidebar.show_previews', true)} onChange={(value) => onPreferenceChange('sidebar.show_previews', value)} />
+                <PreferenceToggle label="Show unread counts" checked={preferenceBoolean(preferences, 'sidebar.show_unread_counts', true)} onChange={(value) => onPreferenceChange('sidebar.show_unread_counts', value)} />
+                <PreferenceToggle label="Compact chat list" checked={preferenceBoolean(preferences, 'sidebar.compact_chat_list')} onChange={(value) => onPreferenceChange('sidebar.compact_chat_list', value)} />
+                <PreferenceToggle label="Show network labels in the chat list" checked={preferenceBoolean(preferences, 'sidebar.network_icons')} onChange={(value) => onPreferenceChange('sidebar.network_icons', value)} />
+                <label className="setting-row"><span><strong>Favorite chats</strong><small>List favorite rooms first, or only mark them with a star.</small></span>
+                  <select aria-label="Favorite chats" value={preferenceString(preferences, 'sidebar.pinned_style', 'Top of list')} onChange={(event) => onPreferenceChange('sidebar.pinned_style', event.target.value)}>
+                    {['Top of list', 'Star only'].map((value) => <option key={value}>{value}</option>)}
+                  </select>
+                </label>
+                <PreferenceToggle label="Animate new messages" checked={preferenceBoolean(preferences, 'appearance.message_animations', true)} onChange={(value) => onPreferenceChange('appearance.message_animations', value)} />
+                <PreferenceToggle label="Show message timestamps" checked={preferenceBoolean(preferences, 'appearance.show_timestamps', true)} onChange={(value) => onPreferenceChange('appearance.show_timestamps', value)} />
+                <PreferenceToggle label="Hide images and videos" checked={preferenceBoolean(preferences, 'appearance.hide_images_and_videos')} onChange={(value) => onPreferenceChange('appearance.hide_images_and_videos', value)} />
+                <PreferenceToggle label="Hide deleted messages" checked={preferenceBoolean(preferences, 'appearance.hide_deleted_messages')} onChange={(value) => onPreferenceChange('appearance.hide_deleted_messages', value)} />
+                <PreferenceToggle label="Balance message line wrapping" checked={preferenceBoolean(preferences, 'appearance.balanced_text')} onChange={(value) => onPreferenceChange('appearance.balanced_text', value)} />
+                <PreferenceToggle label="Use a 24-hour clock" checked={preferenceBoolean(preferences, 'appearance.time_24_hour')} onChange={(value) => onPreferenceChange('appearance.time_24_hour', value)} />
+                <PreferenceToggle label="Use relative timestamps" checked={preferenceBoolean(preferences, 'appearance.relative_timestamps')} onChange={(value) => onPreferenceChange('appearance.relative_timestamps', value)} />
+              </div>
+            )}
+            {tab === 'Notifications' && (
+              <div className="settings-section">
+                <h3>Notifications</h3>
+                <p className="settings-note">Alerts use your operating system's native notification service. macOS requests permission; Windows and Linux follow system notification settings.</p>
+                <div className="setting-row notification-permission"><span><strong>System permission</strong><small>{notificationPermission === 'granted' ? 'Allowed' : notificationPermission === 'denied' ? 'Blocked by the system. Open Notification Settings to allow alerts.' : notificationPermission === 'unsupported' ? 'Native notifications are unavailable. On macOS, launch the bundled Pinger.app; on Linux or Windows, use a desktop session with notifications enabled.' : 'Permission needed for desktop alerts.'}</small></span>
+                  <button className="settings-command" type="button" disabled={notificationPermission === 'granted' || notificationPermission === 'unsupported'} onClick={() => void enableSystemNotifications()}><Bell size={14} />{notificationPermission === 'granted' ? 'Allowed' : notificationPermission === 'denied' ? 'Open Settings' : notificationPermission === 'unsupported' ? 'Unavailable' : 'Enable'}</button>
+                </div>
+                <PreferenceToggle label="Enable notifications" checked={preferenceBoolean(preferences, 'notifications.enabled', true)} onChange={(value) => {
+                  onPreferenceChange('notifications.enabled', value)
+                  if (value) void enableSystemNotifications()
+                }} />
+                <PreferenceToggle label="Busy mode auto-replies" checked={preferenceBoolean(preferences, 'busy_mode.enabled')} onChange={(value) => onPreferenceChange('busy_mode.enabled', value)} />
+                <p className="settings-note">Automatically replies once in each direct chat while busy mode is on. Language detection runs on this device. For other languages, only the generic reply is sent to the configured AI endpoint for translation; without one, the reply uses English.</p>
+                <PreferenceToggle label="Notify while Pinger is focused" checked={!preferenceBoolean(preferences, 'notifications.only_when_unfocused', true)} onChange={(value) => onPreferenceChange('notifications.only_when_unfocused', !value)} />
+                <PreferenceToggle label="Play a notification sound" checked={preferenceBoolean(preferences, 'notifications.sound')} onChange={(value) => onPreferenceChange('notifications.sound', value)} />
+                <label className="setting-row"><span><strong>Notification volume</strong><small>Adjust the alert tone level.</small></span>
+                  <PreferenceRange label="Notification volume" min={0} max={100} step={5} value={preferenceNumber(preferences, 'notifications.volume', 50)} onChange={(value) => onPreferenceChange('notifications.volume', value)} />
+                </label>
+                <label className="setting-row"><span><strong>Notification content</strong><small>Control what appears outside the app.</small></span>
+                  <select value={preferenceString(preferences, 'notifications.privacy', 'Sender and message preview')} onChange={(event) => onPreferenceChange('notifications.privacy', event.target.value)}>
+                    {['Sender and message preview', 'Sender only', 'Hidden content'].map((value) => <option key={value}>{value}</option>)}
+                  </select>
+                </label>
+                <PreferenceToggle label="Direct message alerts" checked={preferenceBoolean(preferences, 'notifications.direct', true)} onChange={(value) => onPreferenceChange('notifications.direct', value)} />
+                <PreferenceToggle label="Mention alerts" checked={preferenceBoolean(preferences, 'notifications.mentions', true)} onChange={(value) => onPreferenceChange('notifications.mentions', value)} />
+                <PreferenceToggle label="Group message alerts" checked={preferenceBoolean(preferences, 'notifications.group')} onChange={(value) => onPreferenceChange('notifications.group', value)} />
+                {[['Direct message tone', 'notifications.sound_direct'], ['Mention tone', 'notifications.sound_mention'], ['Group message tone', 'notifications.sound_group']].map(([label, key]) => (
+                  <label key={key} className="setting-row"><span><strong>{label}</strong><small>Sound played for this kind of alert.</small></span>
+                    <select aria-label={label} value={preferenceString(preferences, key, 'Chime')} onChange={(event) => {
+                      const tone = event.currentTarget.value
+                      void onPreferenceChange(key, tone)
+                      playNotificationSound(preferenceNumber(preferences, 'notifications.volume', 50), tone)
+                    }}>
+                      {['Chime', 'Pulse', 'Soft', 'Silent'].map((value) => <option key={value}>{value}</option>)}
+                    </select>
+                  </label>
+                ))}
+                <label className="setting-row"><span><strong>Batch new messages</strong><small>Combine messages from the same room into one alert.</small></span>
+                  <select aria-label="Batch new messages" value={preferenceString(preferences, 'notifications.batch_seconds', '0')} onChange={(event) => onPreferenceChange('notifications.batch_seconds', event.target.value)}>
+                    <option value="0">Off</option>
+                    <option value="3">3 seconds</option>
+                    <option value="10">10 seconds</option>
+                    <option value="30">30 seconds</option>
+                  </select>
+                </label>
+                <label className="setting-row"><span><strong>Repeat unread reminder</strong><small>Remind you once about a room that is still unread.</small></span>
+                  <select aria-label="Repeat unread reminder" value={preferenceString(preferences, 'notifications.repeat_minutes', '0')} onChange={(event) => onPreferenceChange('notifications.repeat_minutes', event.target.value)}>
+                    <option value="0">Off</option>
+                    <option value="5">After 5 minutes</option>
+                    <option value="15">After 15 minutes</option>
+                    <option value="60">After 60 minutes</option>
+                  </select>
+                </label>
+                <PreferenceToggle label="Notify one-time codes immediately" checked={preferenceBoolean(preferences, 'notifications.otp_immediate', true)} onChange={(value) => onPreferenceChange('notifications.otp_immediate', value)} />
+                <PreferenceToggle label="Copy one-time codes automatically" checked={preferenceBoolean(preferences, 'notifications.otp_copy')} onChange={(value) => onPreferenceChange('notifications.otp_copy', value)} />
+                <label className="setting-row"><span><strong>Sound effects</strong><small>Play a short sound when a message is sent.</small></span>
+                  <select aria-label="Sound effects" value={preferenceString(preferences, 'sounds.effects', 'Off')} onChange={(event) => onPreferenceChange('sounds.effects', event.target.value)}>
+                    <option value="Off">Off</option>
+                    <option value="Sent messages">Sent messages</option>
+                  </select>
+                </label>
+              </div>
+            )}
+            {tab === 'Keyboard' && (
+              <div className="settings-section">
+                <h3>Keyboard</h3>
+                <PreferenceToggle label="Use Ctrl + Enter to send" checked={preferenceBoolean(preferences, 'composer.ctrl_enter')} onChange={(value) => onPreferenceChange('composer.ctrl_enter', value)} />
+                <PreferenceToggle label="Spellcheck messages" checked={preferenceBoolean(preferences, 'composer.spellcheck', true)} onChange={(value) => onPreferenceChange('composer.spellcheck', value)} />
+                <PreferenceToggle label="Show formatting toolbar" checked={preferenceBoolean(preferences, 'composer.formatting_toolbar')} onChange={(value) => onPreferenceChange('composer.formatting_toolbar', value)} />
+                <PreferenceToggle label="Suggest emoji for :shortcodes:" checked={preferenceBoolean(preferences, 'emoji.autocomplete')} onChange={(value) => onPreferenceChange('emoji.autocomplete', value)} />
+                <PreferenceToggle label="Replace emoticons as you type" checked={preferenceBoolean(preferences, 'emoji.replace_emoticons', true)} onChange={(value) => onPreferenceChange('emoji.replace_emoticons', value)} />
+                <div className="emoticon-replacement-editor" id="emoticon-replacement-editor">
+                  <div>
+                    <strong>Custom emoji replacements</strong>
+                    <p className="settings-note">Add a symbol and emoji pair. Custom pairs override built-in faces such as `:)`.</p>
+                  </div>
+                  {customEmoticonDraft.length === 0 && <p className="settings-note">No custom replacements.</p>}
+                  {customEmoticonDraft.map(([symbol, emoji], index) => (
+                    <div className="emoticon-replacement-row" key={index}>
+                      <label><span>Symbol</span><input type="text" maxLength={16} value={symbol} aria-label={`Symbol for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 0, event.target.value)} /></label>
+                      <span className="emoticon-replacement-arrow" aria-hidden="true">→</span>
+                      <label><span>Emoji</span><input type="text" maxLength={16} value={emoji} aria-label={`Emoji for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 1, event.target.value)} /></label>
+                      <button type="button" className="icon-button" aria-label={`Remove replacement ${index + 1}`} title="Remove replacement" onClick={() => { setCustomEmoticonDraft((current) => current.filter((_, pairIndex) => pairIndex !== index)); setCustomEmoticonStatus('') }}><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                  <div className="emoticon-replacement-actions">
+                    <button className="settings-command" type="button" disabled={customEmoticonDraft.length >= 64} onClick={() => { setCustomEmoticonDraft((current) => [...current, ['', '']]); setCustomEmoticonStatus('') }}><Plus size={14} />Add mapping</button>
+                    <button className="settings-command" type="button" onClick={() => void saveCustomEmoticons()}><Check size={14} />Save mappings</button>
+                    <button className="settings-command" type="button" onClick={() => void resetCustomEmoticons()}><RotateCcw size={14} />Reset built-ins</button>
+                  </div>
+                  {customEmoticonStatus && <p className="settings-note" role="status">{customEmoticonStatus}</p>}
+                </div>
+                <PreferenceToggle label="Include timestamps when copying messages" checked={preferenceBoolean(preferences, 'clipboard.copy_timestamp')} onChange={(value) => onPreferenceChange('clipboard.copy_timestamp', value)} />
+                <PreferenceToggle label="Use Up to focus the message list when the composer is empty" checked={preferenceBoolean(preferences, 'composer.arrow_up_focus_timeline')} onChange={(value) => onPreferenceChange('composer.arrow_up_focus_timeline', value)} />
+                <PreferenceToggle label="Enable single-key shortcuts (N, U, A, F, R, J, K and the answered key)" checked={preferenceBoolean(preferences, 'shortcuts.single_keys', true)} onChange={(value) => onPreferenceChange('shortcuts.single_keys', value)} />
+                {!preferenceBoolean(preferences, 'shortcuts.single_keys', true) && <p className="settings-note" role="status">Single-key shortcuts are off. Use the message and room menus instead. Ctrl / ⌘ shortcuts still work.</p>}
+                <label className="setting-row"><span><strong>Mark answered shortcut</strong><small>Use one letter to mark the selected room answered.</small></span>
+                  <input className="shortcut-input" type="text" maxLength={1} value={preferenceString(preferences, 'shortcuts.mark_answered', 'E')} aria-label="Mark answered shortcut" onChange={(event) => { const value = event.target.value.toUpperCase(); if (value) onPreferenceChange('shortcuts.mark_answered', value) }} />
+                </label>
+                <button className="settings-command" type="button" onClick={() => setSnippetManagerOpen(true)}><FileText size={15} />Manage text snippets</button>
+                <p className="settings-note">Expand personal shortcuts while composing. Snippets are stored on this device.</p>
+                <div className="settings-search shortcut-search">
+                  <Search size={15} />
+                  <input
+                    type="search"
+                    value={shortcutSearchQuery}
+                    placeholder="Find a shortcut"
+                    aria-label="Search keyboard shortcuts"
+                    spellCheck={false}
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    onChange={(event) => setShortcutSearchQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Escape' || !shortcutSearchQuery) return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setShortcutSearchQuery('')
+                    }}
+                  />
+                  {shortcutSearchQuery && (
+                    <button type="button" className="icon-button" aria-label="Clear shortcut search" title="Clear search" onClick={() => setShortcutSearchQuery('')}><X size={14} /></button>
+                  )}
+                </div>
+                <dl className="keyboard-shortcut-list" aria-label="Keyboard shortcuts">
+                  {filteredKeyboardShortcuts.map(([keys, description]) => (
+                    <div className="keyboard-shortcut-row" key={description}>
+                      <dt>{description}</dt>
+                      <dd><kbd>{keys}</kbd></dd>
+                    </div>
+                  ))}
+                </dl>
+                {normalizedShortcutSearch && filteredKeyboardShortcuts.length === 0 && <p className="settings-note" role="status">No shortcuts match “{shortcutSearchQuery.trim()}”.</p>}
+              </div>
+            )}
+            {tab === 'History' && (
+              <div className="settings-section">
+                <h3>Message history</h3>
+                <label className="setting-row"><span><strong>Messages to load</strong><small>Load this many recent messages when opening a room.</small></span>
+                  <select value={preferenceString(preferences, 'history.initial_messages', '100')} onChange={(event) => onPreferenceChange('history.initial_messages', event.target.value)}>
+                    {['25', '50', '100', '250', '500', '1000'].map((value) => <option key={value} value={value}>{Number(value).toLocaleString()}</option>)}
+                  </select>
+                </label>
+              </div>
+            )}
+            {tab === 'Account' && (
+              <div className="settings-section">
+                <h3>Account</h3>
+                <div className="account-summary"><Avatar uri={profile.avatarUri} label={profile.displayName || profile.userId} className="profile-avatar" /><div><strong>{profile.displayName || profile.userId}</strong><span>{profile.userId}</span></div></div>
+                <div className="account-details"><span>Homeserver</span><strong>{profile.homeserver}</strong><span>This device</span><strong>{profile.deviceId}</strong><span>Encryption</span><strong>{profile.verified ? 'Verified' : 'Needs verification'}</strong></div>
+                <PreferenceToggle label="Send typing indicators" checked={preferenceBoolean(preferences, 'privacy.send_typing', true)} onChange={(value) => onPreferenceChange('privacy.send_typing', value)} />
+                <PreferenceToggle label="Content blur" checked={preferenceBoolean(preferences, 'privacy.incognito')} onChange={(value) => onPreferenceChange('privacy.incognito', value)} />
+                {preferenceBoolean(preferences, 'privacy.incognito') && <p className="settings-note" role="status">Content blur is active. Message text, names, and room images are blurred until hovered or focused. Read receipts are still sent when you open a room.</p>}
+                <p className="settings-note">Session data and encryption keys are stored locally on this device.</p>
+                {!logoutConfirm ? (
+                  <button className="settings-command is-danger" type="button" onClick={() => setLogoutConfirm(true)}><LogOut size={15} />Log out</button>
+                ) : (
+                  <div className="logout-confirm" role="group" aria-label="Confirm logout">
+                    <span>Log out and clear local session data?</span>
+                    <button type="button" onClick={() => setLogoutConfirm(false)}>Cancel</button>
+                    <button className="is-danger" type="button" disabled={logoutBusy} onClick={() => void confirmLogout()}>{logoutBusy ? 'Logging out…' : 'Log out'}</button>
+                  </div>
                 )}
               </div>
-              <dl className="keyboard-shortcut-list" aria-label="Keyboard shortcuts">
-                {filteredKeyboardShortcuts.map(([keys, description]) => (
-                  <div className="keyboard-shortcut-row" key={description}>
-                    <dt>{description}</dt>
-                    <dd><kbd>{keys}</kbd></dd>
-                  </div>
+            )}
+            {tab === 'Devices' && (
+              <div className="settings-section">
+                <h3>Active devices</h3>
+                {devicesLoading && <p className="settings-note">Loading devices…</p>}
+                {devicesError && <p className="settings-error" role="alert">{devicesError}</p>}
+                {!devicesLoading && !devicesError && devices.length === 0 && <p className="settings-note">No devices were returned by the homeserver.</p>}
+                {devices.map((device) => (
+                  <article className="device-row" key={device.id}>
+                    <div><strong>{device.displayName || '(unnamed device)'}</strong><span>{device.id}{device.current ? ' · this device' : ''}</span><small>{device.lastSeenAt > 0 ? `Last active ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(device.lastSeenAt))}` : device.lastSeenIp || 'Last active time unavailable'}</small></div>
+                    {!device.current && (deviceRevokeID === device.id ? (
+                      <form className="logout-confirm device-revoke-confirm" aria-label={`Confirm revoking ${device.displayName || device.id}`} onSubmit={(event) => { event.preventDefault(); void revokeDevice(device) }}>
+                        <span>Enter your Matrix account password to revoke this device.</span>
+                        <label className="security-field"><span>Account password</span><input aria-label="Account password" type="password" autoComplete="current-password" required value={deviceRevokePassword} onChange={(event) => setDeviceRevokePassword(event.target.value)} /></label>
+                        <button type="button" disabled={deviceRevokeBusy} onClick={cancelDeviceRevoke}>Cancel</button>
+                        <button className="is-danger" type="submit" disabled={deviceRevokeBusy}>{deviceRevokeBusy ? 'Revoking…' : 'Revoke device'}</button>
+                      </form>
+                    ) : <button className="settings-command is-danger" type="button" onClick={() => { setDevicesError(''); setDeviceRevokePassword(''); setDeviceRevokeID(device.id) }}>Revoke</button>)}
+                  </article>
                 ))}
-              </dl>
-              {normalizedShortcutSearch && filteredKeyboardShortcuts.length === 0 && <p className="settings-note" role="status">No shortcuts match “{shortcutSearchQuery.trim()}”.</p>}
-            </div>
-          )}
-          {tab === 'History' && (
-            <div className="settings-section">
-              <h3>Message history</h3>
-              <label className="setting-row"><span><strong>Messages to load</strong><small>Load this many recent messages when opening a room.</small></span>
-                <select value={preferenceString(preferences, 'history.initial_messages', '100')} onChange={(event) => onPreferenceChange('history.initial_messages', event.target.value)}>
-                  {['25', '50', '100', '250', '500', '1000'].map((value) => <option key={value} value={value}>{Number(value).toLocaleString()}</option>)}
-                </select>
-              </label>
-            </div>
-          )}
-          {tab === 'Account' && (
-            <div className="settings-section">
-              <h3>Account</h3>
-              <div className="account-summary"><Avatar uri={profile.avatarUri} label={profile.displayName || profile.userId} className="profile-avatar" /><div><strong>{profile.displayName || profile.userId}</strong><span>{profile.userId}</span></div></div>
-              <div className="account-details"><span>Homeserver</span><strong>{profile.homeserver}</strong><span>This device</span><strong>{profile.deviceId}</strong><span>Encryption</span><strong>{profile.verified ? 'Verified' : 'Needs verification'}</strong></div>
-              <PreferenceToggle label="Send typing indicators" checked={preferenceBoolean(preferences, 'privacy.send_typing', true)} onChange={(value) => onPreferenceChange('privacy.send_typing', value)} />
-              <PreferenceToggle label="Content blur" checked={preferenceBoolean(preferences, 'privacy.incognito')} onChange={(value) => onPreferenceChange('privacy.incognito', value)} />
-              {preferenceBoolean(preferences, 'privacy.incognito') && <p className="settings-note" role="status">Content blur is active. Message text, names, and room images are blurred until hovered or focused. Read receipts are still sent when you open a room.</p>}
-              <p className="settings-note">Session data and encryption keys are stored locally on this device.</p>
-              {!logoutConfirm ? (
-                <button className="settings-command is-danger" type="button" onClick={() => setLogoutConfirm(true)}><LogOut size={15} />Log out</button>
-              ) : (
-                <div className="logout-confirm" role="group" aria-label="Confirm logout">
-                  <span>Log out and clear local session data?</span>
-                  <button type="button" onClick={() => setLogoutConfirm(false)}>Cancel</button>
-                  <button className="is-danger" type="button" disabled={logoutBusy} onClick={() => void confirmLogout()}>{logoutBusy ? 'Logging out…' : 'Log out'}</button>
+              </div>
+            )}
+            {tab === 'Storage' && (
+              <div className="settings-section">
+                <h3>Local storage</h3>
+                {storageLoading && <p className="settings-note">Reading storage usage…</p>}
+                {storageError && <p className="settings-error" role="alert">{storageError}</p>}
+                {storage && <div className="storage-summary">
+                  <div><HardDrive size={16} /><span>Matrix database</span><strong>{formatBytes(storage.database.databaseBytes)}</strong></div>
+                  <div><HardDrive size={16} /><span>Database WAL</span><strong>{formatBytes(storage.database.walBytes)}</strong></div>
+                  <div><HardDrive size={16} /><span>Media cache</span><strong>{formatBytes(storage.media.bytes)} · {storage.media.files} files</strong></div>
+                </div>}
+                <button className="settings-command" type="button" disabled={storageLoading || storageAction !== ''} onClick={() => void runStorageAction('clear')}><HardDrive size={15} />{storageAction === 'clear' ? 'Clearing cache…' : 'Clear media cache'}</button>
+                <button className="settings-command" type="button" disabled={storageLoading || storageAction !== ''} onClick={() => void runStorageAction('optimize')}><HardDrive size={15} />{storageAction === 'optimize' ? 'Optimizing database…' : 'Optimize database'}</button>
+                <p className="settings-note">Clearing the media cache does not remove messages or encryption keys.</p>
+                <ChatStorageSettings />
+              </div>
+            )}
+            {tab === 'Security' && (
+              <div className="settings-section">
+                <h3>Encryption and room keys</h3>
+                <p className="settings-note">Device verification: {profile.verified ? 'Verified' : 'This device needs verification.'}</p>
+                <label className="security-field"><span>Backup passphrase</span><input type="password" autoComplete="new-password" value={backupPassphrase} onChange={(event) => setBackupPassphrase(event.target.value)} /></label>
+                <label className="security-field"><span>Confirm passphrase</span><input type="password" autoComplete="new-password" value={backupConfirmation} onChange={(event) => setBackupConfirmation(event.target.value)} /></label>
+                <button className="settings-command" type="button" disabled={keyBusy || !backupPassphrase || backupPassphrase !== backupConfirmation} onClick={() => void exportRoomKeys()}><Download size={15} />{keyBusy ? 'Working…' : 'Export room keys'}</button>
+                <label className="security-field"><span>Import passphrase</span><input type="password" autoComplete="off" value={importPassphrase} onChange={(event) => setImportPassphrase(event.target.value)} /></label>
+                <label className="settings-command file-command"><Upload size={15} />Import room key file<input type="file" accept=".txt,.json,application/octet-stream" disabled={keyBusy || !importPassphrase} onChange={(event) => void importRoomKeys(event)} /></label>
+                {keyStatus && <p className="settings-note" role="status">{keyStatus}</p>}
+              </div>
+            )}
+            {tab === 'AI' && (
+              <div className="settings-section">
+                <h3>AI</h3>
+                <p className="settings-note">Configure the local AI endpoint, Ghostwriter, and the instructions and tuning for each AI feature. AI replies are drafts and are never sent automatically.</p>
+                <div className="integration-status" aria-label="AI status">
+                  <div className="account-details"><span>Endpoint</span><strong>{preferenceString(preferences, 'ai.endpoint', '').trim() ? 'Set' : 'Not set'}</strong></div>
+                  <div className="account-details"><span>Ghostwriter</span><strong>{preferenceBoolean(preferences, 'ghostwriter.enabled') ? 'On' : 'Off'}</strong></div>
                 </div>
-              )}
-            </div>
-          )}
-          {tab === 'Devices' && (
-            <div className="settings-section">
-              <h3>Active devices</h3>
-              {devicesLoading && <p className="settings-note">Loading devices…</p>}
-              {devicesError && <p className="settings-error" role="alert">{devicesError}</p>}
-              {!devicesLoading && !devicesError && devices.length === 0 && <p className="settings-note">No devices were returned by the homeserver.</p>}
-              {devices.map((device) => (
-                <article className="device-row" key={device.id}>
-                  <div><strong>{device.displayName || '(unnamed device)'}</strong><span>{device.id}{device.current ? ' · this device' : ''}</span><small>{device.lastSeenAt > 0 ? `Last active ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(device.lastSeenAt))}` : device.lastSeenIp || 'Last active time unavailable'}</small></div>
-                  {!device.current && (deviceRevokeID === device.id ? (
-                    <form className="logout-confirm device-revoke-confirm" aria-label={`Confirm revoking ${device.displayName || device.id}`} onSubmit={(event) => { event.preventDefault(); void revokeDevice(device) }}>
-                      <span>Enter your Matrix account password to revoke this device.</span>
-                      <label className="security-field"><span>Account password</span><input aria-label="Account password" type="password" autoComplete="current-password" required value={deviceRevokePassword} onChange={(event) => setDeviceRevokePassword(event.target.value)} /></label>
-                      <button type="button" disabled={deviceRevokeBusy} onClick={cancelDeviceRevoke}>Cancel</button>
-                      <button className="is-danger" type="submit" disabled={deviceRevokeBusy}>{deviceRevokeBusy ? 'Revoking…' : 'Revoke device'}</button>
-                    </form>
-                  ) : <button className="settings-command is-danger" type="button" onClick={() => { setDevicesError(''); setDeviceRevokePassword(''); setDeviceRevokeID(device.id) }}>Revoke</button>)}
-                </article>
-              ))}
-            </div>
-          )}
-          {tab === 'Storage' && (
-            <div className="settings-section">
-              <h3>Local storage</h3>
-              {storageLoading && <p className="settings-note">Reading storage usage…</p>}
-              {storageError && <p className="settings-error" role="alert">{storageError}</p>}
-              {storage && <div className="storage-summary">
-                <div><HardDrive size={16} /><span>Matrix database</span><strong>{formatBytes(storage.database.databaseBytes)}</strong></div>
-                <div><HardDrive size={16} /><span>Database WAL</span><strong>{formatBytes(storage.database.walBytes)}</strong></div>
-                <div><HardDrive size={16} /><span>Media cache</span><strong>{formatBytes(storage.media.bytes)} · {storage.media.files} files</strong></div>
-              </div>}
-              <button className="settings-command" type="button" disabled={storageLoading || storageAction !== ''} onClick={() => void runStorageAction('clear')}><HardDrive size={15} />{storageAction === 'clear' ? 'Clearing cache…' : 'Clear media cache'}</button>
-              <button className="settings-command" type="button" disabled={storageLoading || storageAction !== ''} onClick={() => void runStorageAction('optimize')}><HardDrive size={15} />{storageAction === 'optimize' ? 'Optimizing database…' : 'Optimize database'}</button>
-              <p className="settings-note">Clearing the media cache does not remove messages or encryption keys.</p>
-              <ChatStorageSettings />
-            </div>
-          )}
-          {tab === 'Security' && (
-            <div className="settings-section">
-              <h3>Encryption and room keys</h3>
-              <p className="settings-note">Device verification: {profile.verified ? 'Verified' : 'This device needs verification.'}</p>
-              <label className="security-field"><span>Backup passphrase</span><input type="password" autoComplete="new-password" value={backupPassphrase} onChange={(event) => setBackupPassphrase(event.target.value)} /></label>
-              <label className="security-field"><span>Confirm passphrase</span><input type="password" autoComplete="new-password" value={backupConfirmation} onChange={(event) => setBackupConfirmation(event.target.value)} /></label>
-              <button className="settings-command" type="button" disabled={keyBusy || !backupPassphrase || backupPassphrase !== backupConfirmation} onClick={() => void exportRoomKeys()}><Download size={15} />{keyBusy ? 'Working…' : 'Export room keys'}</button>
-              <label className="security-field"><span>Import passphrase</span><input type="password" autoComplete="off" value={importPassphrase} onChange={(event) => setImportPassphrase(event.target.value)} /></label>
-              <label className="settings-command file-command"><Upload size={15} />Import room key file<input type="file" accept=".txt,.json,application/octet-stream" disabled={keyBusy || !importPassphrase} onChange={(event) => void importRoomKeys(event)} /></label>
-              {keyStatus && <p className="settings-note" role="status">{keyStatus}</p>}
-            </div>
-          )}
-          {tab === 'AI' && (
-            <div className="settings-section">
-              <h3>AI</h3>
-              <p className="settings-note">Configure the local AI endpoint, Ghostwriter, and the instructions and tuning for each AI feature. AI replies are drafts and are never sent automatically.</p>
-              <div className="integration-status" aria-label="AI status">
-                <div className="account-details"><span>Endpoint</span><strong>{preferenceString(preferences, 'ai.endpoint', '').trim() ? 'Set' : 'Not set'}</strong></div>
-                <div className="account-details"><span>Ghostwriter</span><strong>{preferenceBoolean(preferences, 'ghostwriter.enabled') ? 'On' : 'Off'}</strong></div>
-              </div>
-              <LocalAISettings
-                endpoint={preferenceString(preferences, 'ai.endpoint', '')}
-                model={preferenceString(preferences, 'ai.model', '')}
-                transcriptionModel={preferenceString(preferences, 'ai.transcription_model', '')}
-                translateLanguage={preferenceString(preferences, 'ai.translate_language', 'English')}
-                onSave={onPreferenceChange}
-              />
-              <TutorLanguageSettings languages={resolveTutorLanguages(preferences)} onSave={onPreferenceChange} />
-              <GhostwriterSettings
-                enabled={preferenceBoolean(preferences, 'ghostwriter.enabled')}
-                provider={ghostwriterProvider}
-                endpoint={preferenceString(preferences, 'ghostwriter.endpoint', ghostwriterDefaultEndpoints[ghostwriterProvider])}
-                model={preferenceString(preferences, 'ghostwriter.model', '')}
-                onSave={onPreferenceChange}
-              />
-              <AIPromptSettings preferences={preferences} onSave={onPreferenceChange} />
-            </div>
-          )}
-          {tab === 'Integrations' && (
-            <div className="settings-section">
-              <h3>Integrations</h3>
-              <p className="settings-note">Chat networks are detected from the active account's chats, using room names and DM users. This is a best-effort view. Connecting a network requires a bridge set up on your homeserver; Pinger cannot create bridge logins.</p>
-              <section className="ai-settings-form relationship-health-settings">
-                <h4>Keep in Touch</h4>
-                <p className="settings-note">Uses recent direct-chat messages for tracked contacts with your configured local Ghostwriter model. Requests are restricted to localhost. Suggestions stay as drafts; no message is sent automatically.</p>
-                <PreferenceToggle
-                  label="Enable relationship health and Keep in Touch"
-                  checked={preferenceBoolean(preferences, 'relationship_health.enabled')}
-                  onChange={(enabled) => void onPreferenceChange('relationship_health.enabled', enabled)}
+                <LocalAISettings
+                  endpoint={preferenceString(preferences, 'ai.endpoint', '')}
+                  model={preferenceString(preferences, 'ai.model', '')}
+                  transcriptionModel={preferenceString(preferences, 'ai.transcription_model', '')}
+                  translateLanguage={preferenceString(preferences, 'ai.translate_language', 'English')}
+                  onSave={onPreferenceChange}
                 />
-              </section>
-              <div className="integration-status" aria-label="Detected chat networks">
-                {chatNetworks.map(({ code, name }) => {
-                  const count = rooms.filter((room) => room.bridge === code).length
-                  return (
-                    <div key={code} className="account-details"><span>{name}</span><strong>{count > 0 ? `${count.toLocaleString()} ${count === 1 ? 'chat' : 'chats'} detected` : 'No chats detected'}</strong></div>
-                  )
-                })}
+                <LocalAIAgentSettings agents={localAIAgents} onSave={(collection) => onPreferenceChange('ai.local_agents', serializeChatAgents(collection))} />
+                <TutorLanguageSettings languages={resolveTutorLanguages(preferences)} onSave={onPreferenceChange} />
+                <GhostwriterSettings
+                  enabled={preferenceBoolean(preferences, 'ghostwriter.enabled')}
+                  provider={ghostwriterProvider}
+                  endpoint={preferenceString(preferences, 'ghostwriter.endpoint', ghostwriterDefaultEndpoints[ghostwriterProvider])}
+                  model={preferenceString(preferences, 'ghostwriter.model', '')}
+                  onSave={onPreferenceChange}
+                />
+                <AIPromptSettings preferences={preferences} onSave={onPreferenceChange} />
               </div>
-            </div>
-          )}
-          {tab === 'Help' && (
-            <div className="settings-section">
-              <h3>Help center</h3>
-              <p className="settings-note">Answers to common questions about Pinger.</p>
-              <article className="help-item"><h4>Keyboard shortcuts</h4><p>The Keyboard tab lists every shortcut. Single-key shortcuts can be turned off there.</p><button className="settings-command" type="button" onClick={() => onTabChange('Keyboard')}>Open keyboard shortcuts</button></article>
-              <article className="help-item"><h4>Storage and media</h4><p>Clearing media removes cached files only. Messages and encryption keys stay, and media downloads again when you open it.</p><button className="settings-command" type="button" onClick={() => onTabChange('Storage')}>Open storage</button></article>
-              <article className="help-item"><h4>Local AI</h4><p>Pinger connects to a llama-server you run yourself. Set its address in AI settings. AI replies are drafts and are never sent automatically.</p></article>
-              <article className="help-item"><h4>Chat networks</h4><p>WhatsApp, Telegram and other networks appear when your homeserver has bridges set up. Pinger cannot create bridge logins.</p></article>
-              <article className="help-item"><h4>Encryption and room keys</h4><p>Export room keys from Security and protect the file with a passphrase. Keep the backup somewhere safe.</p></article>
-              <a className="settings-link" href="https://github.com/cataWalter/pinger/issues" target="_blank" rel="noreferrer">Report an issue</a>
-            </div>
-          )}
-          {tab === 'About' && (
-            <div className="settings-section">
-              <h3>Pinger</h3>
-              <AboutPinger />
-            </div>
-          )}
-        </div>
-      </DialogSurface>
-    </div>
-    {snippetManagerOpen && <SnippetSettingsModal
-      open
-      snippets={snippets}
-      onSnippetsChange={onSnippetsChange}
-      onClose={closeSnippetManager}
-    />}
+            )}
+            {tab === 'Integrations' && (
+              <div className="settings-section">
+                <h3>Integrations</h3>
+                <p className="settings-note">Chat networks are detected from the active account's chats, using room names and DM users. This is a best-effort view. Connecting a network requires a bridge set up on your homeserver; Pinger cannot create bridge logins.</p>
+                <section className="ai-settings-form relationship-health-settings">
+                  <h4>Keep in Touch</h4>
+                  <p className="settings-note">Uses recent direct-chat messages for tracked contacts with your configured local Ghostwriter model. Requests are restricted to localhost. Suggestions stay as drafts; no message is sent automatically.</p>
+                  <PreferenceToggle
+                    label="Enable relationship health and Keep in Touch"
+                    checked={preferenceBoolean(preferences, 'relationship_health.enabled')}
+                    onChange={(enabled) => void onPreferenceChange('relationship_health.enabled', enabled)}
+                  />
+                </section>
+                <div className="integration-status" aria-label="Detected chat networks">
+                  {chatNetworks.map(({ code, name }) => {
+                    const count = rooms.filter((room) => room.bridge === code).length
+                    return (
+                      <div key={code} className="account-details"><span>{name}</span><strong>{count > 0 ? `${count.toLocaleString()} ${count === 1 ? 'chat' : 'chats'} detected` : 'No chats detected'}</strong></div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+            {tab === 'Help' && (
+              <div className="settings-section">
+                <h3>Help center</h3>
+                <p className="settings-note">Answers to common questions about Pinger.</p>
+                <article className="help-item"><h4>Keyboard shortcuts</h4><p>The Keyboard tab lists every shortcut. Single-key shortcuts can be turned off there.</p><button className="settings-command" type="button" onClick={() => onTabChange('Keyboard')}>Open keyboard shortcuts</button></article>
+                <article className="help-item"><h4>Storage and media</h4><p>Clearing media removes cached files only. Messages and encryption keys stay, and media downloads again when you open it.</p><button className="settings-command" type="button" onClick={() => onTabChange('Storage')}>Open storage</button></article>
+                <article className="help-item"><h4>Local AI</h4><p>Pinger connects to a llama-server you run yourself. Set its address in AI settings. AI replies are drafts and are never sent automatically.</p></article>
+                <article className="help-item"><h4>Chat networks</h4><p>WhatsApp, Telegram and other networks appear when your homeserver has bridges set up. Pinger cannot create bridge logins.</p></article>
+                <article className="help-item"><h4>Encryption and room keys</h4><p>Export room keys from Security and protect the file with a passphrase. Keep the backup somewhere safe.</p></article>
+                <a className="settings-link" href="https://github.com/cataWalter/pinger/issues" target="_blank" rel="noreferrer">Report an issue</a>
+              </div>
+            )}
+            {tab === 'About' && (
+              <div className="settings-section">
+                <h3>Pinger</h3>
+                <AboutPinger />
+              </div>
+            )}
+          </div>
+        </DialogSurface>
+      </div>
+      {snippetManagerOpen && <SnippetSettingsModal
+        open
+        snippets={snippets}
+        onSnippetsChange={onSnippetsChange}
+        onClose={closeSnippetManager}
+      />}
     </>
   )
 }

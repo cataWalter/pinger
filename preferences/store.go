@@ -504,6 +504,16 @@ func Validate(key string, value any) error {
 		}
 		return nil
 	}
+	const localAIChatFavoritePrefix = "ai.local_chat.favorite."
+	if strings.HasPrefix(key, localAIChatFavoritePrefix) {
+		if strings.TrimPrefix(key, localAIChatFavoritePrefix) == "" {
+			return errors.New("local AI chat favorite requires a chat ID")
+		}
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("preference %q must be a boolean", key)
+		}
+		return nil
+	}
 	if strings.HasPrefix(key, "ai.feature.") {
 		return validateAIFeaturePreference(key, value)
 	}

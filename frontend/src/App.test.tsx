@@ -375,6 +375,16 @@ describe('settings storage, integrations, help, and about', () => {
     await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('ai.feature.explain.temperature', '0.6'))
   })
 
+  it('adds a chat agent from AI settings', async () => {
+    const user = await openSettingsTab('AI')
+    await user.click(await screen.findByRole('button', { name: 'Add agent' }))
+    await user.type(screen.getByRole('textbox', { name: 'Agent name' }), 'Tutor')
+    await user.type(screen.getByRole('textbox', { name: 'Agent instructions' }), 'Answer in short sentences.')
+    await user.click(screen.getByRole('button', { name: 'Save agent' }))
+
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('ai.local_agents', expect.stringContaining('"name":"Tutor"')))
+  })
+
   it('keeps Ghostwriter opt-in and rejects non-loopback settings', async () => {
     const user = await openSettingsTab('AI')
     const enabled = screen.getByRole('checkbox', { name: 'Enable local AI Ghostwriter' }) as HTMLInputElement
@@ -813,7 +823,7 @@ describe('settings storage, integrations, help, and about', () => {
       static createObjectURL = createObjectURL
       static revokeObjectURL = vi.fn()
     })
-    snippetDownloadClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    snippetDownloadClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => { })
 
     render(<App />)
     await user.click(await screen.findByRole('button', { name: 'Settings' }))
@@ -1710,7 +1720,7 @@ describe('room history updates', () => {
 
   it('streams an AI answer into the panel before the request resolves', async () => {
     const user = userEvent.setup()
-    let finishRequest: (reply: string) => void = () => {}
+    let finishRequest: (reply: string) => void = () => { }
     harness.service.AIComplete.mockImplementationOnce(() => new Promise<string>((resolve) => { finishRequest = resolve }))
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
     harness.service.History.mockResolvedValue({ messages: [message('$previous', 'unrelated earlier context', 200), message('$latest', 'selected message', 300)], before: 0, hasMore: false })
@@ -1737,7 +1747,7 @@ describe('room history updates', () => {
 
   it('stops a streaming answer, keeps the partial text, and offers Regenerate', async () => {
     const user = userEvent.setup()
-    let rejectRequest: (error: Error) => void = () => {}
+    let rejectRequest: (error: Error) => void = () => { }
     harness.service.AIComplete.mockImplementationOnce(() => new Promise<string>((_, reject) => { rejectRequest = reject }))
     harness.service.AICancel.mockImplementationOnce(async () => {
       rejectRequest(new Error('request cancelled'))
@@ -2441,7 +2451,9 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     render(<App />)
     await screen.findByText('latest message')
-    await user.click(screen.getByRole('button', { name: 'Local AI chat' }))
+    await user.click(screen.getByRole('button', { name: 'Local AI chats' }))
+    expect(screen.getByText('No private model chats yet')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'New private chat' }))
 
     expect(screen.getByRole('heading', { name: 'Local AI' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Message timeline' })).toBeNull()
@@ -2471,16 +2483,91 @@ describe('room history updates', () => {
     expect(harness.service.AppendLocalAIChatMessage).toHaveBeenCalledWith('chat-1', expect.objectContaining({ role: 'user', content: 'Follow-up' }))
   })
 
-  it('opens Local AI chat with Ctrl or Command+Shift+M', async () => {
+  it('opens a new private chat with Ctrl or Command+Shift+M', async () => {
     const { container } = render(<App />)
     await screen.findByText('latest message')
-    const localAIButton = screen.getByRole('button', { name: 'Local AI chat' })
-    expect(localAIButton.getAttribute('aria-keyshortcuts')).toBe('Control+Shift+M Meta+Shift+M')
 
     fireEvent.keyDown(container.querySelector('.app-shell')!, { key: 'm', ctrlKey: true, shiftKey: true })
 
     expect(await screen.findByRole('heading', { name: 'Local AI' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Message timeline' })).toBeNull()
+  })
+
+  it('lists private chats in the main list and opens one from its row', async () => {
+    const user = userEvent.setup()
+    harness.service.ListLocalAIChats.mockResolvedValue([{ id: 'chat-1', title: 'Trip plan', agentId: '', updatedAt: 1_700_000_000_000, preview: 'Here is a draft' }])
+    render(<App />)
+    await screen.findByText('latest message')
+    await user.click(screen.getByRole('button', { name: 'Local AI chats' }))
+
+    const row = await screen.findByRole('button', { name: /Trip plan/ })
+    expect(within(row).getByText('Here is a draft')).toBeTruthy()
+    await user.click(row)
+
+    expect(await screen.findByRole('heading', { name: 'Trip plan' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Message timeline' })).toBeNull()
+    await waitFor(() => expect(harness.service.LoadLocalAIChatMessages).toHaveBeenCalledWith('chat-1'))
+  })
+
+  it('renames a private chat from its menu; Enter saves and Escape cancels', async () => {
+    const user = userEvent.setup()
+    harness.service.ListLocalAIChats.mockResolvedValue([{ id: 'chat-1', title: 'Trip plan', agentId: '', updatedAt: 1_700_000_000_000, preview: '' }])
+    harness.service.RenameLocalAIChat.mockResolvedValue(undefined)
+    render(<App />)
+    await screen.findByText('latest message')
+    await user.click(screen.getByRole('button', { name: 'Local AI chats' }))
+
+    fireEvent.contextMenu(await screen.findByRole('button', { name: /Trip plan/ }), { clientX: 48, clientY: 48 })
+    await user.click(screen.getByRole('menuitem', { name: 'Rename chat' }))
+    expect((screen.getByRole('textbox', { name: 'Chat title' }) as HTMLInputElement).value).toBe('Trip plan')
+    await user.clear(screen.getByRole('textbox', { name: 'Chat title' }))
+    await user.type(screen.getByRole('textbox', { name: 'Chat title' }), 'Discarded{Escape}')
+    expect(screen.getByRole('heading', { name: 'Trip plan' })).toBeTruthy()
+    expect(harness.service.RenameLocalAIChat).not.toHaveBeenCalled()
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /Trip plan/ }), { clientX: 48, clientY: 48 })
+    await user.click(screen.getByRole('menuitem', { name: 'Rename chat' }))
+    await user.clear(screen.getByRole('textbox', { name: 'Chat title' }))
+    await user.type(screen.getByRole('textbox', { name: 'Chat title' }), 'Renamed trip{Enter}')
+
+    await waitFor(() => expect(harness.service.RenameLocalAIChat).toHaveBeenCalledWith('chat-1', 'Renamed trip'))
+    expect(screen.queryByRole('textbox', { name: 'Chat title' })).toBeNull()
+  })
+
+  it('does not save the placeholder name when renaming an untitled chat', async () => {
+    const user = userEvent.setup()
+    harness.service.ListLocalAIChats.mockResolvedValue([{ id: 'chat-1', title: '', agentId: '', updatedAt: 1_700_000_000_000, preview: '' }])
+    render(<App />)
+    await screen.findByText('latest message')
+    await user.click(screen.getByRole('button', { name: 'Local AI chats' }))
+
+    fireEvent.contextMenu(await screen.findByRole('button', { name: /Untitled chat/ }), { clientX: 48, clientY: 48 })
+    await user.click(screen.getByRole('menuitem', { name: 'Rename chat' }))
+    expect((screen.getByRole('textbox', { name: 'Chat title' }) as HTMLInputElement).value).toBe('')
+    await user.type(screen.getByRole('textbox', { name: 'Chat title' }), '{Enter}')
+
+    expect(screen.queryByRole('textbox', { name: 'Chat title' })).toBeNull()
+    expect(harness.service.RenameLocalAIChat).not.toHaveBeenCalled()
+  })
+
+  it('favorites and deletes a private chat from its menu', async () => {
+    const user = userEvent.setup()
+    harness.service.ListLocalAIChats.mockResolvedValue([{ id: 'chat-1', title: 'Trip plan', agentId: '', updatedAt: 1_700_000_000_000, preview: '' }])
+    harness.service.DeleteLocalAIChat.mockResolvedValue(undefined)
+    render(<App />)
+    await screen.findByText('latest message')
+    await user.click(screen.getByRole('button', { name: 'Local AI chats' }))
+
+    fireEvent.contextMenu(await screen.findByRole('button', { name: /Trip plan/ }), { clientX: 48, clientY: 48 })
+    await user.click(screen.getByRole('menuitem', { name: 'Add to Favorites' }))
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('ai.local_chat.favorite.chat-1', true))
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /Trip plan/ }), { clientX: 48, clientY: 48 })
+    await user.click(screen.getByRole('menuitem', { name: 'Delete chat' }))
+    expect(harness.service.DeleteLocalAIChat).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('menuitem', { name: 'Confirm delete' }))
+
+    await waitFor(() => expect(harness.service.DeleteLocalAIChat).toHaveBeenCalledWith('chat-1'))
   })
 
   it('labels each room filter with an icon', async () => {
@@ -3371,6 +3458,25 @@ describe('room history updates', () => {
     await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('archive.older_than_days', '30'))
     await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('archive.automatic', true))
     await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(`room.archived.primary.${staleRoom.id}`, true))
+  })
+
+  it('archives inactive rooms that only have a list activity timestamp', async () => {
+    const user = userEvent.setup()
+    const staleRoom = { ...secondRoom, lastEventAt: 0, lastSeen: Date.now() - 20 * 24 * 60 * 60 * 1000 }
+    const currentRoom = { ...room, lastEventAt: Date.now() }
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [currentRoom, staleRoom],
+      preferences: { 'archive.older_than_days': '7' },
+    })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('button', { name: 'Archive inactive rooms' }))
+
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(`room.archived.primary.${staleRoom.id}`, true))
+    expect(harness.service.SetBooleanPreference).not.toHaveBeenCalledWith(`room.archived.primary.${currentRoom.id}`, true)
   })
 
   it('navigates to the next unread room after an explicit mark-read action', async () => {

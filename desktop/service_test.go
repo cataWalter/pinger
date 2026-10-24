@@ -129,7 +129,7 @@ func TestReadDroppedAttachmentRejectsDirectories(t *testing.T) {
 
 func TestSendAttachmentRejectsOversizedData(t *testing.T) {
 	service := &AppService{}
-	err := service.sendAttachment(context.Background(), "!room:example.org", "large.bin", make([]byte, maxAttachmentSize+1), false, false, 0)
+	err := service.sendAttachment(context.Background(), "!room:example.org", "large.bin", make([]byte, maxAttachmentSize+1), false, 0)
 	if err == nil || !strings.Contains(err.Error(), "50 MiB") {
 		t.Fatalf("error = %v, want 50 MiB limit error", err)
 	}
@@ -137,7 +137,7 @@ func TestSendAttachmentRejectsOversizedData(t *testing.T) {
 
 func TestSendAttachmentRejectsMissingActiveClient(t *testing.T) {
 	service := &AppService{}
-	err := service.sendAttachment(context.Background(), "!room:example.org", "photo.png", []byte("pixels"), false, false, 0)
+	err := service.sendAttachment(context.Background(), "!room:example.org", "photo.png", []byte("pixels"), false, 0)
 	if err == nil || !strings.Contains(err.Error(), "account unavailable") {
 		t.Fatalf("error = %v, want unavailable-account error", err)
 	}
