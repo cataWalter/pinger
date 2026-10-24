@@ -1356,6 +1356,67 @@ func TestMissingMatrixMediaErrorIsRecognized(t *testing.T) {
 	}
 }
 
+func TestMarkReadRetriesLatestEventWhenTargetIsMissing(t *testing.T) {
+	var attempted []string
+	marked, err := markReadWithLatestEventFallback("$stale", "$latest", func(eventID string) error {
+		attempted = append(attempted, eventID)
+		if eventID == "$stale" {
+			return fmt.Errorf("failed to mark event as read: %w", mautrix.MNotFound)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("mark read with latest event: %v", err)
+	}
+	if marked != "$latest" {
+		t.Fatalf("marked event = %q, want $latest", marked)
+	}
+	if len(attempted) != 2 || attempted[0] != "$stale" || attempted[1] != "$latest" {
+		t.Fatalf("attempted events = %v, want [$stale $latest]", attempted)
+	}
+}
+
+func TestMarkReadIgnoresMissingTargetsAfterFallback(t *testing.T) {
+	tests := []struct {
+		name          string
+		eventID       string
+		latestEventID string
+		wantAttempts  []string
+	}{
+		{name: "same latest event", eventID: "$missing", latestEventID: "$missing", wantAttempts: []string{"$missing"}},
+		{name: "missing fallback event", eventID: "$stale", latestEventID: "$latest", wantAttempts: []string{"$stale", "$latest"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var attempted []string
+			_, err := markReadWithLatestEventFallback(test.eventID, test.latestEventID, func(eventID string) error {
+				attempted = append(attempted, eventID)
+				return fmt.Errorf("failed to mark event as read: %w", mautrix.MNotFound)
+			})
+			if err != nil {
+				t.Fatalf("markReadWithLatestEventFallback() error = %v, want stale event ignored", err)
+			}
+			if strings.Join(attempted, ",") != strings.Join(test.wantAttempts, ",") {
+				t.Fatalf("attempted events = %v, want %v", attempted, test.wantAttempts)
+			}
+		})
+	}
+}
+
+func TestMarkReadDoesNotFallbackForOtherErrors(t *testing.T) {
+	attempts := 0
+	_, err := markReadWithLatestEventFallback("$stale", "$latest", func(string) error {
+		attempts++
+		return fmt.Errorf("homeserver unavailable")
+	})
+	if err == nil {
+		t.Fatal("expected mark-read error")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempt count = %d, want 1", attempts)
+	}
+}
+
 func TestLocalMessagesMatchTimelineByEventOrTransactionID(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1578,6 +1639,35 @@ func TestMediaCacheUsageAndClear(t *testing.T) {
 	}
 }
 
+func TestLogoutClearsMediaCache(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "account.db")
+	client, err := New(databasePath)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer client.Close()
+
+	cacheDir := filepath.Join(t.TempDir(), "media")
+	client.SetMediaCacheDir(cacheDir)
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		t.Fatalf("create media cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "decrypted-media"), []byte("private"), 0o600); err != nil {
+		t.Fatalf("write media cache: %v", err)
+	}
+
+	if err := client.Logout(context.Background()); err != nil {
+		t.Fatalf("Logout() error = %v", err)
+	}
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		t.Fatalf("read media cache after logout: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("media cache contains %d entries after logout, want none", len(entries))
+	}
+}
+
 func TestCachedMediaBytesUsesIncomingEncryptionMetadata(t *testing.T) {
 	uri := "mxc://example.org/encrypted-image"
 	client := &Client{mediaCacheDir: t.TempDir()}
@@ -1630,6 +1720,11 @@ func TestBridgeLabelDetectsNetworks(t *testing.T) {
 	}
 	if got := bridgeLabel(nil); got != "" {
 		t.Fatalf("nil bridge = %q, want empty", got)
+	}
+	topic := "Instagram private chat"
+	instagram := &database.Room{ID: "!room:example.org", Topic: &topic}
+	if got := bridgeLabel(instagram); got != "IG" {
+		t.Fatalf("Instagram topic bridge = %q, want IG", got)
 	}
 }
 

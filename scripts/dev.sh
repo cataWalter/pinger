@@ -5,56 +5,16 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 PORT="${WAILS_VITE_PORT:-9245}"
 PLATFORM="$(uname -s)"
-CONFIG="./build/config.dev.unix.yml"
+CONFIG="./build/config.yml"
 
 if [[ "$PLATFORM" == "Darwin" ]]; then
   CONFIG="./build/darwin/dev-config.yml"
 elif [[ "$PLATFORM" == MINGW* || "$PLATFORM" == MSYS* || "$PLATFORM" == CYGWIN* ]]; then
-  CONFIG="./build/windows/dev-config.yml"
-  MINGW_CANDIDATES=(
-    "$REPO_ROOT/toolchain/mingw64/bin"
-    "$REPO_ROOT/tools/msys64/ucrt64/bin"
-    "/c/msys64/ucrt64/bin"
-  )
-  if [[ -n "${MSYSTEM_PREFIX:-}" ]]; then
-    MINGW_CANDIDATES+=("$MSYSTEM_PREFIX/bin")
+  MINGW_BIN="$REPO_ROOT/tools/msys64/ucrt64/bin"
+  if [[ -x "$MINGW_BIN/gcc.exe" ]]; then
+    export PATH="$MINGW_BIN:$PATH"
+    export CC=gcc
   fi
-
-  MINGW_BIN=""
-  for candidate in "${MINGW_CANDIDATES[@]}"; do
-    compiler="$candidate/gcc.exe"
-    if [[ -x "$compiler" ]] &&
-      crt2="$("$compiler" -print-file-name=crt2.o 2>/dev/null)" &&
-      libm="$("$compiler" -print-file-name=libm.a 2>/dev/null)" &&
-      [[ -f "$crt2" && -f "$libm" ]]; then
-      MINGW_BIN="$candidate"
-      break
-    fi
-  done
-
-  if [[ -z "$MINGW_BIN" ]] && command -v gcc >/dev/null 2>&1; then
-    compiler="$(command -v gcc)"
-    if crt2="$("$compiler" -print-file-name=crt2.o 2>/dev/null)" &&
-      libm="$("$compiler" -print-file-name=libm.a 2>/dev/null)" &&
-      [[ -f "$crt2" && -f "$libm" ]]; then
-      MINGW_BIN="$(dirname "$compiler")"
-    fi
-  fi
-
-  if [[ -z "$MINGW_BIN" ]]; then
-    echo "A working MinGW-w64 GCC was not found (crt2.o and libm.a are required)." >&2
-    echo "Install MSYS2 UCRT64 GCC and run this script from its terminal, or add it to PATH:" >&2
-    echo "  pacman -S --needed mingw-w64-ucrt-x86_64-gcc" >&2
-    exit 1
-  fi
-  export PATH="$MINGW_BIN:$REPO_ROOT/toolchain/mingw64/x86_64-w64-mingw32/bin:$REPO_ROOT/toolchain/msys64/usr/bin:$PATH"
-  export CC=gcc
-  if [[ -z "${GOFLAGS:-}" ]]; then
-    export GOFLAGS=-p=2
-  fi
-elif [[ "$PLATFORM" != "Darwin" && "$PLATFORM" != "Linux" ]]; then
-  echo "Unsupported development platform: $PLATFORM" >&2
-  exit 1
 fi
 
 WAILS_COMMAND="$(command -v wails3 || true)"

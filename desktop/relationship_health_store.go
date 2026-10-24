@@ -32,12 +32,6 @@ type relationshipHealthRow struct {
 	UpdatedAt              int64
 }
 
-type relationshipAnalysisCheckpoint struct {
-	RoomID     string
-	MessageID  string
-	AnalyzedAt int64
-}
-
 type relationshipDecayCandidate struct {
 	ContactID                string
 	DisplayName              string
@@ -362,64 +356,6 @@ func (s *relationshipHealthStore) unlinkRoom(roomID, displayName string) error {
 	return tx.Commit()
 }
 
-func (s *relationshipHealthStore) checkpoint(contactID string) (relationshipAnalysisCheckpoint, error) {
-	var checkpoint relationshipAnalysisCheckpoint
-	err := s.db.QueryRow(`
-		SELECT last_analyzed_room_id, last_analyzed_message_id, analyzed_at
-		FROM relationship_analysis_state WHERE contact_id = ?
-	`, contactID).Scan(&checkpoint.RoomID, &checkpoint.MessageID, &checkpoint.AnalyzedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return relationshipAnalysisCheckpoint{}, nil
-	}
-	if err != nil {
-		return relationshipAnalysisCheckpoint{}, fmt.Errorf("read relationship analysis checkpoint: %w", err)
-	}
-	return checkpoint, nil
-}
-
-func (s *relationshipHealthStore) saveHealth(row relationshipHealthRow) error {
-	if row.ContactID == "" || row.WindowDate == "" || row.SentimentScore < -1 || row.SentimentScore > 1 {
-		return errors.New("relationship health row is invalid")
-	}
-	if len(row.DetectedFrictionPoints) == 0 {
-		row.DetectedFrictionPoints = []string{}
-	}
-	frictionJSON, err := json.Marshal(row.DetectedFrictionPoints)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`
-		INSERT INTO relationship_health (
-			contact_id, window_date, sentiment_score, status, detected_friction_points,
-			trend, reasoning, last_analyzed_room_id, last_analyzed_message_id, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(contact_id, window_date) DO UPDATE SET
-			sentiment_score = excluded.sentiment_score,
-			status = excluded.status,
-			detected_friction_points = excluded.detected_friction_points,
-			trend = excluded.trend,
-			reasoning = excluded.reasoning,
-			last_analyzed_room_id = excluded.last_analyzed_room_id,
-			last_analyzed_message_id = excluded.last_analyzed_message_id,
-			updated_at = excluded.updated_at
-	`, row.ContactID, row.WindowDate, row.SentimentScore, row.Status, frictionJSON, row.Trend, row.Reasoning, row.LastAnalyzedRoomID, row.LastAnalyzedMessageID, row.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("save relationship health: %w", err)
-	}
-	_, err = s.db.Exec(`
-		INSERT INTO relationship_analysis_state (contact_id, last_analyzed_room_id, last_analyzed_message_id, analyzed_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(contact_id) DO UPDATE SET
-			last_analyzed_room_id = excluded.last_analyzed_room_id,
-			last_analyzed_message_id = excluded.last_analyzed_message_id,
-			analyzed_at = excluded.analyzed_at
-	`, row.ContactID, row.LastAnalyzedRoomID, row.LastAnalyzedMessageID, row.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("save relationship analysis checkpoint: %w", err)
-	}
-	return nil
-}
-
 func (s *relationshipHealthStore) recentHealth(contactID string, limit int) ([]relationshipHealthRow, error) {
 	if limit < 1 || limit > 90 {
 		limit = 28
@@ -458,11 +394,10 @@ func (s *relationshipHealthStore) setContactTier(contactID, tier string) error {
 	result, err := s.db.Exec(`
 		UPDATE contacts SET
 			tier = ?,
-			decay_nudge = CASE WHEN tier <> ? THEN '' ELSE decay_nudge END,
 			last_decay_alert_timestamp = CASE WHEN tier <> ? THEN 0 ELSE last_decay_alert_timestamp END,
 			snoozed_until = CASE WHEN tier <> ? THEN 0 ELSE snoozed_until END
 		WHERE contact_id = ?
-	`, tier, tier, tier, tier, contactID)
+	`, tier, tier, tier, contactID)
 	if err != nil {
 		return fmt.Errorf("set relationship tier: %w", err)
 	}
@@ -481,7 +416,6 @@ func (s *relationshipHealthStore) updateContactInteraction(contactID string, tim
 	_, err := s.db.Exec(`
 		UPDATE contacts SET
 			last_interaction_timestamp = ?,
-			decay_nudge = '',
 			last_decay_alert_timestamp = 0,
 			snoozed_until = 0
 		WHERE contact_id = ? AND last_interaction_timestamp < ?
@@ -536,18 +470,18 @@ func (s *relationshipHealthStore) dueDecayCandidates(now time.Time, limit int) (
 	return candidates, rows.Err()
 }
 
-func (s *relationshipHealthStore) saveDecayAlert(candidate relationshipDecayCandidate, nudge string, alertedAt int64, now time.Time) (bool, error) {
-	if candidate.ContactID == "" || strings.TrimSpace(nudge) == "" || alertedAt <= 0 {
+func (s *relationshipHealthStore) saveDecayAlert(candidate relationshipDecayCandidate, alertedAt int64, now time.Time) (bool, error) {
+	if candidate.ContactID == "" || alertedAt <= 0 {
 		return false, errors.New("relationship decay alert is invalid")
 	}
 	nowMillis := now.UnixMilli()
 	cutoffMillis := now.Add(-relationshipDecayCooldown).UnixMilli()
 	result, err := s.db.Exec(`
-		UPDATE contacts SET last_decay_alert_timestamp = ?, decay_nudge = ?
+		UPDATE contacts SET last_decay_alert_timestamp = ?
 		WHERE contact_id = ? AND tier = ? AND last_interaction_timestamp = ?
 			AND last_decay_alert_timestamp = ? AND snoozed_until = ?
 			AND last_decay_alert_timestamp <= ? AND snoozed_until <= ?
-	`, alertedAt, strings.TrimSpace(nudge), candidate.ContactID, candidate.Tier,
+	`, alertedAt, candidate.ContactID, candidate.Tier,
 		candidate.LastInteractionTimestamp, candidate.LastDecayAlertTimestamp, candidate.SnoozedUntil,
 		cutoffMillis, nowMillis)
 	if err != nil {
@@ -573,7 +507,7 @@ func (s *relationshipHealthStore) snoozeDecayAlert(contactID string, until int64
 func (s *relationshipHealthStore) decayContacts(now time.Time) ([]RelationshipDecayContact, error) {
 	rows, err := s.db.Query(`
 		SELECT c.contact_id, c.display_name, c.tier, c.last_interaction_timestamp,
-			c.last_decay_alert_timestamp, c.snoozed_until, c.decay_nudge, l.room_id
+			c.last_decay_alert_timestamp, c.snoozed_until, l.room_id
 		FROM contacts c
 		LEFT JOIN contact_room_links l ON l.contact_id = c.contact_id
 		ORDER BY c.display_name COLLATE NOCASE, c.contact_id, l.room_id
@@ -585,10 +519,10 @@ func (s *relationshipHealthStore) decayContacts(now time.Time) ([]RelationshipDe
 	contacts := make([]RelationshipDecayContact, 0)
 	contactIndexes := make(map[string]int)
 	for rows.Next() {
-		var contactID, displayName, tier, nudge string
+		var contactID, displayName, tier string
 		var lastInteraction, lastAlert, snoozedUntil int64
 		var roomID sql.NullString
-		if err := rows.Scan(&contactID, &displayName, &tier, &lastInteraction, &lastAlert, &snoozedUntil, &nudge, &roomID); err != nil {
+		if err := rows.Scan(&contactID, &displayName, &tier, &lastInteraction, &lastAlert, &snoozedUntil, &roomID); err != nil {
 			return nil, err
 		}
 		index, exists := contactIndexes[contactID]
@@ -602,7 +536,6 @@ func (s *relationshipHealthStore) decayContacts(now time.Time) ([]RelationshipDe
 				LastInteractionTimestamp: lastInteraction,
 				LastDecayAlertTimestamp:  lastAlert,
 				SnoozedUntil:             snoozedUntil,
-				Nudge:                    nudge,
 				RoomIDs:                  []string{},
 			})
 		}

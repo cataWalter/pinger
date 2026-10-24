@@ -22,7 +22,7 @@ const busyReplyTemplates: Record<string, string> = {
   ukr: 'Вітаю! Я ШІ-помічник {name}. Зараз ця людина зайнята, але ваше повідомлення отримано. Вона відповість, щойно зможе; це може зайняти трохи часу. Дякую за терпіння.',
 }
 
-export function detectBusyReplyLanguage(messages: string[]) {
+function detectLanguageCode(messages: string[]) {
   const votes = new Map<string, { count: number; lastIndex: number }>()
   for (const [index, message] of messages.filter((text) => text.trim()).slice(-10).entries()) {
     const language = franc(message, { minLength: 10 })
@@ -33,7 +33,20 @@ export function detectBusyReplyLanguage(messages: string[]) {
     votes.set(language, vote)
   }
 
-  return [...votes.entries()].sort((left, right) => right[1].count - left[1].count || right[1].lastIndex - left[1].lastIndex)[0]?.[0] ?? 'eng'
+  return [...votes.entries()].sort((left, right) => right[1].count - left[1].count || right[1].lastIndex - left[1].lastIndex)[0]?.[0] ?? ''
+}
+
+export function detectConversationLanguage(messages: string[]) {
+  const recentText = messages.filter((text) => text.trim()).slice(-10).join(' ')
+  if (!recentText) return ''
+  if (/[ğĞıİşŞ]/u.test(recentText)) return 'Turkish'
+  const language = franc(recentText, { minLength: 10 })
+  if (language === 'und') return ''
+  return language ? new Intl.DisplayNames(['en'], { type: 'language' }).of(language) ?? language : ''
+}
+
+export function detectBusyReplyLanguage(messages: string[]) {
+  return detectLanguageCode(messages) || 'eng'
 }
 
 export function hasBusyReplyTemplate(language: string) {

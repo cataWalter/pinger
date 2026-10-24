@@ -1,9 +1,14 @@
 package desktop
 
 import (
+	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"mychat/matrix"
 )
 
 func TestAccountRegistryPersistsAccountsAndActiveAccount(t *testing.T) {
@@ -33,6 +38,35 @@ func TestAccountRegistryPersistsAccountsAndActiveAccount(t *testing.T) {
 	}
 	if got := reloaded.ActiveID(); got != second.ID {
 		t.Fatalf("active account = %q, want %q", got, second.ID)
+	}
+}
+
+func TestAddAccountLoginFailureRollsBackAccountData(t *testing.T) {
+	dataDir := t.TempDir()
+	registry, err := newAccountRegistry(filepath.Join(dataDir, "accounts.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &AppService{
+		accountRegistry:      registry,
+		accountClients:       map[string]*matrix.Client{},
+		dataDir:              dataDir,
+		accountMediaCacheDir: filepath.Join(t.TempDir(), "media-cache"),
+		ctx:                  context.Background(),
+	}
+
+	if _, err := service.AddAccount("://invalid", "@alice:example.org", "password"); err == nil {
+		t.Fatal("AddAccount() succeeded with an invalid homeserver")
+	}
+	entries, err := os.ReadDir(filepath.Join(dataDir, "accounts"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read account data directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("account data directory contains %d entries after failed login", len(entries))
+	}
+	if accounts := service.Accounts(); len(accounts) != 0 {
+		t.Fatalf("registered accounts after failed login = %#v, want none", accounts)
 	}
 }
 

@@ -1586,9 +1586,13 @@ func (c *Client) MarkRead(ctx context.Context, roomID, eventID string) error {
 	}
 	defer finish()
 	c.mu.RLock()
-	markedUnread := c.rooms[roomID].MarkedUnread
+	room := c.rooms[roomID]
 	c.mu.RUnlock()
-	if err = c.engine.MarkRead(ctx, id.RoomID(roomID), id.EventID(eventID), event.ReceiptTypeRead); err != nil {
+	markedUnread := room.MarkedUnread
+	_, err = markReadWithLatestEventFallback(eventID, room.LastEventID, func(targetEventID string) error {
+		return c.engine.MarkRead(ctx, id.RoomID(roomID), id.EventID(targetEventID), event.ReceiptTypeRead)
+	})
+	if err != nil {
 		return fmt.Errorf("mark Matrix room as read: %w", err)
 	}
 	if markedUnread {
@@ -1609,6 +1613,22 @@ func (c *Client) MarkRead(ctx context.Context, roomID, eventID string) error {
 		c.publish(nil, "")
 	}
 	return nil
+}
+
+func markReadWithLatestEventFallback(eventID, latestEventID string, mark func(string) error) (string, error) {
+	if err := mark(eventID); err == nil {
+		return eventID, nil
+	} else if !errors.Is(err, mautrix.MNotFound) {
+		return "", err
+	}
+	if latestEventID != "" && latestEventID != eventID {
+		if err := mark(latestEventID); err == nil {
+			return latestEventID, nil
+		} else if !errors.Is(err, mautrix.MNotFound) {
+			return "", err
+		}
+	}
+	return "", nil
 }
 
 func (c *Client) MarkUnread(ctx context.Context, roomID string) error {
@@ -1783,6 +1803,9 @@ func (c *Client) Logout(ctx context.Context) error {
 		return fmt.Errorf("terminate Matrix session: %w", err)
 	}
 	c.Close()
+	if err := c.ClearMediaCache(); err != nil {
+		return fmt.Errorf("clear decrypted media cache on logout: %w", err)
+	}
 	for _, path := range []string{
 		c.dbPath, c.dbPath + "-wal", c.dbPath + "-shm", filepath.Join(filepath.Dir(c.dbPath), "crypto.key"),
 	} {
@@ -2351,7 +2374,7 @@ func bridgeLabel(room *database.Room) string {
 	if room == nil {
 		return ""
 	}
-	candidates := make([]string, 0, 3)
+	candidates := make([]string, 0, 4)
 	if room.DMUserID != nil {
 		candidates = append(candidates, strings.ToLower(room.DMUserID.String()))
 	}
@@ -2360,6 +2383,9 @@ func bridgeLabel(room *database.Room) string {
 	}
 	if room.Name != nil {
 		candidates = append(candidates, strings.ToLower(*room.Name))
+	}
+	if room.Topic != nil {
+		candidates = append(candidates, strings.ToLower(*room.Topic))
 	}
 	for _, candidate := range candidates {
 		switch {

@@ -39,7 +39,7 @@ export const settingsEntries: SettingsEntry[] = [
 
   { id: 'account.details', tab: 'Account', title: 'Account details', description: 'Your user ID, homeserver, device and verification status.', keywords: 'profile user id homeserver device verified', anchor: '.account-details' },
   { id: 'account.send-typing', tab: 'Account', title: 'Send typing indicators', description: 'Let others see when you are typing.', keywords: 'typing privacy indicator' },
-  { id: 'account.incognito', tab: 'Account', title: 'Incognito mode', description: 'Blur message text, names, and room images until hovered; suppress read receipts.', keywords: 'privacy hidden incognito blur hover messages names' },
+  { id: 'account.content-blur', tab: 'Account', title: 'Content blur', description: 'Blur message text, names, and room images until hovered or focused. Read receipts are still sent when you open a room.', keywords: 'privacy hidden blur hover focus messages names read receipts' },
   { id: 'account.log-out', tab: 'Account', title: 'Log out', description: 'Sign out and clear the local session data.', keywords: 'sign out logout session exit' },
 
   { id: 'appearance.theme', tab: 'Appearance', title: 'Theme', description: 'Choose the conversation surface.', keywords: 'dark light mode oled black color scheme dracula midnight slate solarized sepia' },
@@ -119,6 +119,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'integrations.ai-model', tab: 'Integrations', title: 'Model name (optional)', description: 'Model served by the endpoint.', keywords: 'ai model name' },
   { id: 'integrations.ai-translate', tab: 'Integrations', title: 'Translate into', description: 'Language used for translations.', keywords: 'ai translate language' },
   { id: 'integrations.ai-test', tab: 'Integrations', title: 'Test endpoint', description: 'Check that the endpoint answers.', keywords: 'ai test connection endpoint' },
+  { id: 'integrations.ai-prompts', tab: 'Integrations', title: 'AI prompts and tuning', description: 'Edit the instructions, temperature, and token limit for each AI feature.', keywords: 'ai prompt prompts instructions system temperature max tokens tune agent summarize translate reply tone', anchor: '.ai-prompts-settings' },
   { id: 'integrations.ghostwriter', tab: 'Integrations', title: 'AI Ghostwriter', description: 'Draft context-aware replies using your local chat history and writing style.', keywords: 'ghostwriter autocomplete quick reply slash local ollama llama.cpp', anchor: '.ghostwriter-settings' },
   { id: 'integrations.ghostwriter-enabled', tab: 'Integrations', title: 'Enable local AI Ghostwriter', description: 'Show local reply chips, inline completions, and /ghost drafts.', keywords: 'ghostwriter opt in autocomplete replies', anchor: '.ghostwriter-settings .setting-toggle' },
   { id: 'integrations.ghostwriter-provider', tab: 'Integrations', title: 'Ghostwriter provider', description: 'Choose Ollama or an OpenAI-compatible local server.', keywords: 'ollama llama.cpp local provider', anchor: '.ghostwriter-settings select' },

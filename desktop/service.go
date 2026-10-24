@@ -56,12 +56,16 @@ type AppService struct {
 	contactDossierJobs       map[string]bool
 	relationshipDecayWorker  bool
 	relationshipDecayTrigger chan struct{}
+	aiRuns                   aiRunRegistry
 
 	emitUpdate             func(Update)
 	emitReminder           func(ScheduledJob)
 	emitRelationshipHealth func(RelationshipHealthSnapshot)
 	emitRelationshipDecay  func(RelationshipDecaySnapshot)
 	emitContactDossier     func(ContactDossierSnapshot)
+	emitGhostwriterStream  func(GhostwriterStreamEvent)
+	emitLocalAIChatStream  func(LocalAIChatStreamEvent)
+	emitAIStream           func(AIStreamEvent)
 }
 
 func (s *AppService) OpenExternalURL(rawURL string) error {

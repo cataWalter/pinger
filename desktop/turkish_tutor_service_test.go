@@ -16,17 +16,31 @@ func TestAnalyzeTurkishTutorUsesLocalStructuredRequest(t *testing.T) {
 			t.Errorf("request = %s %s, want POST /v1/chat/completions", r.Method, r.URL.Path)
 		}
 		var request struct {
-			Model       string      `json:"model"`
-			Messages    []AIMessage `json:"messages"`
-			Stream      bool        `json:"stream"`
-			Temperature float64     `json:"temperature"`
-			MaxTokens   int         `json:"max_tokens"`
+			Model              string          `json:"model"`
+			Messages           []AIMessage     `json:"messages"`
+			Stream             bool            `json:"stream"`
+			Temperature        float64         `json:"temperature"`
+			MaxTokens          int             `json:"max_tokens"`
+			ResponseFormat     json.RawMessage `json:"response_format"`
+			ChatTemplateKwargs map[string]any  `json:"chat_template_kwargs"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
 		if request.Model != "tutor-model" || request.Stream || request.Temperature != 0.1 || request.MaxTokens != turkishTutorMaxTokens || len(request.Messages) != 2 {
 			t.Errorf("unexpected AI request: %+v", request)
+		}
+		if enabled, ok := request.ChatTemplateKwargs["enable_thinking"]; !ok || enabled != false {
+			t.Errorf("chat_template_kwargs = %+v, want enable_thinking false", request.ChatTemplateKwargs)
+		}
+		var responseFormat struct {
+			Type       string `json:"type"`
+			JSONSchema struct {
+				Name string `json:"name"`
+			} `json:"json_schema"`
+		}
+		if err := json.Unmarshal(request.ResponseFormat, &responseFormat); err != nil || responseFormat.Type != "json_schema" || responseFormat.JSONSchema.Name != "tutor_analysis" {
+			t.Errorf("response_format = %s, want json_schema tutor_analysis (err %v)", request.ResponseFormat, err)
 		}
 		if !strings.Contains(request.Messages[0].Content, "Agglutination Analysis") || !strings.Contains(request.Messages[0].Content, "NEVER suggest") {
 			t.Errorf("system prompt omitted tutor rules: %q", request.Messages[0].Content)
@@ -112,7 +126,7 @@ func TestAnalyzeTurkishTutorRetriesMalformedResponse(t *testing.T) {
 		requestCount++
 		content := "The response was truncated: {"
 		if requestCount == 2 {
-			if request.MaxTokens != turkishTutorRetryMaxTokens || !strings.Contains(request.Messages[1].Content, "Re-analyze the original source text") {
+			if request.MaxTokens != turkishTutorMaxTokens || !strings.Contains(request.Messages[1].Content, "Re-analyze the original source text") {
 				t.Errorf("unexpected retry request: %+v", request)
 			}
 			content = `{"detected_language":"it","corrected_text":"Merhaba.","translation":"Merhaba.","morpheme_breakdown":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}],"grammar_rule":"Turkish uses vowel harmony.","text_to_insert":"Merhaba."}`

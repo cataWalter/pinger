@@ -467,6 +467,21 @@ func ValidateLocalHTTPEndpoint(raw string) error {
 	return nil
 }
 
+func ValidateAIEndpoint(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return errors.New("AI endpoint must be an http or https URL")
+	}
+	if parsed.Scheme == "http" {
+		host := strings.ToLower(parsed.Hostname())
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return errors.New("AI endpoints outside localhost must use HTTPS")
+		}
+	}
+	return nil
+}
+
 func Validate(key string, value any) error {
 	const roomAIAgentsPrefix = "room.ai_agents."
 	const messageBookmarkPrefix = "message.bookmark."
@@ -489,7 +504,10 @@ func Validate(key string, value any) error {
 		}
 		return nil
 	}
-	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted.", "room.tone_guard."} {
+	if strings.HasPrefix(key, "ai.feature.") {
+		return validateAIFeaturePreference(key, value)
+	}
+	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted.", "room.tone_guard.", "room.ghostwriter."} {
 		if strings.HasPrefix(key, prefix) {
 			if strings.TrimPrefix(key, prefix) == "" {
 				return errors.New("room preference requires a room ID")
@@ -522,10 +540,7 @@ func Validate(key string, value any) error {
 			return fmt.Errorf("preference %q must be a string", key)
 		}
 		if endpoint != "" {
-			parsed, err := url.Parse(endpoint)
-			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-				return errors.New("AI endpoint must be an HTTP or HTTPS URL")
-			}
+			return ValidateAIEndpoint(endpoint)
 		}
 	case "ghostwriter.endpoint":
 		endpoint, ok := value.(string)
@@ -656,6 +671,74 @@ func Validate(key string, value any) error {
 		}
 	default:
 		return fmt.Errorf("unknown preference %q", key)
+	}
+	return nil
+}
+
+// aiFeatureIDs lists the AI features whose prompt, temperature, and token limit can be tuned from settings.
+// The IDs must match the feature catalog in desktop/ai_settings.go and frontend/src/aiSettings.ts.
+var aiFeatureIDs = map[string]bool{
+	"ghostwriter":           true,
+	"local_chat":            true,
+	"turkish_tutor":         true,
+	"contact_dossier":       true,
+	"relationship_health":   true,
+	"relationship_decay":    true,
+	"ask_ai":                true,
+	"summarize":             true,
+	"translate":             true,
+	"draft_reply":           true,
+	"rewrite":               true,
+	"shorten":               true,
+	"explain":               true,
+	"topics":                true,
+	"conversation_analysis": true,
+	"agent":                 true,
+	"chat_translation":      true,
+	"tone_guard":            true,
+}
+
+const (
+	aiFeatureMaxPromptRunes = 8000
+	aiFeatureMaxTemperature = 2
+	aiFeatureMaxTokens      = 8192
+)
+
+// validateAIFeaturePreference checks ai.feature.<id>.prompt, ai.feature.<id>.temperature, and ai.feature.<id>.max_tokens.
+// Numeric values are stored as strings. An empty temperature or token limit keeps the built-in default.
+func validateAIFeaturePreference(key string, value any) error {
+	rest := strings.TrimPrefix(key, "ai.feature.")
+	dot := strings.LastIndexByte(rest, '.')
+	if dot <= 0 || !aiFeatureIDs[rest[:dot]] {
+		return fmt.Errorf("unknown AI feature preference %q", key)
+	}
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("preference %q must be a string", key)
+	}
+	switch rest[dot+1:] {
+	case "prompt":
+		if utf8.RuneCountInString(text) > aiFeatureMaxPromptRunes {
+			return fmt.Errorf("AI prompt must be %d characters or fewer", aiFeatureMaxPromptRunes)
+		}
+	case "temperature":
+		if text == "" {
+			return nil
+		}
+		temperature, err := strconv.ParseFloat(text, 64)
+		if err != nil || !(temperature >= 0 && temperature <= aiFeatureMaxTemperature) {
+			return errors.New("AI temperature must be a number from 0 to 2")
+		}
+	case "max_tokens":
+		if text == "" {
+			return nil
+		}
+		tokens, err := strconv.Atoi(text)
+		if err != nil || tokens < 0 || tokens > aiFeatureMaxTokens {
+			return fmt.Errorf("AI max tokens must be a whole number from 0 to %d", aiFeatureMaxTokens)
+		}
+	default:
+		return fmt.Errorf("unknown AI feature preference %q", key)
 	}
 	return nil
 }

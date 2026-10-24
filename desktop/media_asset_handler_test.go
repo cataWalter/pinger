@@ -66,7 +66,7 @@ func TestMediaAssetHandlerServesRangesAndEventMIME(t *testing.T) {
 	if got := response.Header().Get("Accept-Ranges"); got != "bytes" {
 		t.Fatalf("Accept-Ranges = %q, want bytes", got)
 	}
-	if got := response.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+	if got := response.Header().Get("Cache-Control"); got != "private, no-store" {
 		t.Fatalf("Cache-Control = %q", got)
 	}
 	if source.roomID != "!room:example.org" || source.eventID != "$photo" {

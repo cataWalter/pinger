@@ -128,6 +128,46 @@ func TestApplyPendingKeepsTheOldFolderWhenTheCopyFails(t *testing.T) {
 	}
 }
 
+func TestApplyPendingKeepsCustomSourceWhenTheCopyFails(t *testing.T) {
+	defaultDir := filepath.Join(t.TempDir(), "default")
+	sourceDir := filepath.Join(t.TempDir(), "source")
+	blocked := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blocked, []byte("not a folder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeApplicationData(t, sourceDir, "custom data")
+
+	if err := Request(defaultDir, blocked, sourceDir); err != nil {
+		t.Fatalf("Request() error = %v", err)
+	}
+	effective, err := ApplyPending(defaultDir)
+	if err == nil {
+		t.Fatal("ApplyPending() succeeded with an unusable target folder")
+	}
+	if effective != sourceDir {
+		t.Fatalf("ApplyPending() = %q, want the unchanged source %q", effective, sourceDir)
+	}
+	if got := readMessage(t, filepath.Join(sourceDir, "matrix.db")); got != "custom data" {
+		t.Fatalf("source database message = %q, want custom data", got)
+	}
+	if exists(t, filepath.Join(defaultDir, "matrix.db")) {
+		t.Fatal("failed move created a database in the default folder")
+	}
+}
+
+func TestCopyDataRejectsNestedDestination(t *testing.T) {
+	source := t.TempDir()
+	writeApplicationData(t, source, "hello")
+	target := filepath.Join(source, "nested")
+
+	if err := CopyData(source, target); err == nil {
+		t.Fatal("CopyData() succeeded with a destination nested in the source")
+	}
+	if exists(t, target) {
+		t.Fatal("CopyData() created the nested destination")
+	}
+}
+
 func TestRemoveDataKeepsTheLocationMarker(t *testing.T) {
 	directory := t.TempDir()
 	writeApplicationData(t, directory, "hello")

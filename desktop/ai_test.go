@@ -13,15 +13,37 @@ import (
 )
 
 func TestValidateAIEndpointRequiresHTTPURL(t *testing.T) {
-	for _, endpoint := range []string{"http://localhost:8080", "https://ai.example.net/base"} {
+	for _, endpoint := range []string{"http://localhost:8080", "http://127.0.0.1:8080/base", "https://ai.example.net/base"} {
 		if err := validateAIEndpoint(endpoint); err != nil {
 			t.Fatalf("validateAIEndpoint(%q) error = %v", endpoint, err)
 		}
 	}
-	for _, endpoint := range []string{"localhost:8080", "ftp://example.net", "http://", "not a url"} {
+	for _, endpoint := range []string{"localhost:8080", "ftp://example.net", "http://", "http://ai.example.net", "http://localhost.evil.example", "not a url"} {
 		if err := validateAIEndpoint(endpoint); err == nil {
 			t.Fatalf("validateAIEndpoint(%q) accepted invalid endpoint", endpoint)
 		}
+	}
+}
+
+func TestAIChatCompletionRejectsCrossOriginRedirect(t *testing.T) {
+	var redirectedRequests int
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		redirectedRequests++
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"unexpected"}}]}`)
+	}))
+	defer target.Close()
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+
+	_, err := aiChatCompletion(context.Background(), source.Client(), source.URL, "", []AIMessage{{Role: "user", Content: "private chat text"}})
+	if err == nil || !strings.Contains(err.Error(), "redirect changed origin") {
+		t.Fatalf("aiChatCompletion() error = %v, want cross-origin redirect rejection", err)
+	}
+	if redirectedRequests != 0 {
+		t.Fatalf("cross-origin server received %d request(s), want none", redirectedRequests)
 	}
 }
 
@@ -94,14 +116,14 @@ func TestAIToneGuardCompletionUsesLocalLowTemperatureRequest(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		if body.Model != "local-tone-model" || body.Stream || body.Temperature != 0.1 || body.MaxTokens != aiToneGuardMaxTokens || len(body.Messages) != 2 {
+		if body.Model != "local-tone-model" || body.Stream || body.Temperature != 0.1 || body.MaxTokens != 192 || len(body.Messages) != 2 {
 			t.Errorf("unexpected Tone Guard request: %+v", body)
 		}
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"{\"is_hostile_or_unprofessional\":false}"}}]}`)
 	}))
 	defer server.Close()
 
-	result, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "local-tone-model", []AIMessage{{Role: "system", Content: "classify"}, {Role: "user", Content: "draft"}})
+	result, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "local-tone-model", []AIMessage{{Role: "system", Content: "classify"}, {Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.1, MaxTokens: 192})
 	if err != nil {
 		t.Fatalf("aiToneGuardCompletion() error = %v", err)
 	}
@@ -112,7 +134,7 @@ func TestAIToneGuardCompletionUsesLocalLowTemperatureRequest(t *testing.T) {
 
 func TestAIToneGuardCompletionRejectsNonLocalEndpoints(t *testing.T) {
 	for _, endpoint := range []string{"https://localhost:8080", "http://example.com:8080", "http://localhost:8080/v1"} {
-		if _, err := aiToneGuardCompletion(context.Background(), http.DefaultClient, endpoint, "", []AIMessage{{Role: "user", Content: "draft"}}); err == nil {
+		if _, err := aiToneGuardCompletion(context.Background(), http.DefaultClient, endpoint, "", []AIMessage{{Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.1, MaxTokens: 192}); err == nil {
 			t.Errorf("aiToneGuardCompletion(%q) accepted a non-local endpoint", endpoint)
 		}
 	}
@@ -132,7 +154,7 @@ func TestAIToneGuardCompletionTimesOut(t *testing.T) {
 	}()
 
 	started := time.Now()
-	_, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "", []AIMessage{{Role: "user", Content: "draft"}})
+	_, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "", []AIMessage{{Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.1, MaxTokens: 192})
 	if err == nil {
 		t.Fatal("aiToneGuardCompletion() succeeded after the deadline")
 	}

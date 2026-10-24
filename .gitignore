@@ -1,7 +1,6 @@
 /bin/
 /.task/
 /mychat
-/rsrc_windows_*.syso
 /dist/
 /frontend/node_modules/
 /node_modules/

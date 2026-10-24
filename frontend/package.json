@@ -18,13 +18,16 @@
     "@wailsio/runtime": "3.0.0-beta.30",
     "emoji-picker-react": "^5.1.0",
     "franc-min": "^6.2.0",
+    "katex": "^0.19.1",
     "lucide-react": "^0.468.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
     "react-virtuoso": "^4.18.19",
     "rehype-highlight": "^7.0.2",
-    "remark-gfm": "^4.0.1"
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

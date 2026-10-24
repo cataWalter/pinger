@@ -44,7 +44,7 @@ func TestBuildRelationshipHealthPromptPreservesLanguageAndLatency(t *testing.T) 
 		{RoomID: "!room:example.org", MessageID: "$incoming", Timestamp: start, Text: "¿Llegaste bien?", Channel: "Matrix"},
 		{RoomID: "!room:example.org", MessageID: "$reply", Timestamp: start.Add(2 * time.Hour), Own: true, Text: "Sí, gracias", Channel: "Matrix"},
 	}
-	systemPrompt, userPrompt, err := buildRelationshipHealthPrompt(messages, nil, start.Add(24*time.Hour))
+	systemPrompt, userPrompt, err := buildRelationshipHealthPrompt(messages, nil, start.Add(24*time.Hour), relationshipHealthDefaultInstructions)
 	if err != nil {
 		t.Fatalf("buildRelationshipHealthPrompt() error = %v", err)
 	}

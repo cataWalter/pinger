@@ -30,8 +30,6 @@ dev_mode:
   executes:
     - cmd: wails3 task common:build:frontend DEV=true
       type: blocking
-    - cmd: wails3 generate syso -arch amd64 -icon build/windows/icon.ico -manifest build/windows/pinger.exe.manifest -out rsrc_windows_amd64.syso
-      type: blocking
     - cmd: go build -tags=sqlite_fts5,goolm -o bin/pinger.exe .
       type: blocking
     - cmd: wails3 task common:dev:frontend

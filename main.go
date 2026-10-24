@@ -52,8 +52,7 @@ func main() {
 	defaultDataDir := paths.DataDir
 	dataDir, err := datadir.ApplyPending(defaultDataDir)
 	if err != nil {
-		logger.Error().Err(err).Msg("could not apply the selected data folder; using the default")
-		dataDir = defaultDataDir
+		logger.Error().Err(err).Str("data_dir", dataDir).Msg("could not apply the selected data folder; continuing with the current folder")
 	}
 	paths = paths.WithDataDir(dataDir)
 	migrationReport, err := migration.MigrateLegacy(paths)

@@ -58,7 +58,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - Actions: **Ask AI** (answer a question using room context), draft a reply, explain or translate a selected message, rewrite or shorten composer text, summarize a room, identify chat topics and themes, analyze a two-person conversation, and run a per-room chat agent. **Translate chat to English** batches the room history so a whole conversation can be translated at once, and audio messages can be transcribed (optional transcription model in Settings → Integrations). Results can be inserted into the composer as a draft or reply.
 - Create up to eight named instruction profiles per room, with an optional default. Profiles are managed in the room **Details** panel, stored in the active account's local preferences, and are not synced through Matrix.
 - AI actions return suggestions only. Nothing is sent as a Matrix message unless you review and send it yourself. The selected text, included chat context, and custom profile instructions are sent to the configured endpoint, which may be remote.
-- **AI Ghostwriter** is a separate, opt-in local feature. It offers three context-aware reply chips, a Tab-accepted inline continuation after 300 ms, and `/ghost <intent>` for a complete draft. Configure Ollama or a llama.cpp-compatible server in Settings → Integrations; Ghostwriter accepts only HTTP loopback endpoints, bypasses proxies, rejects redirects, and never sends a message automatically. Autocomplete times out after 1.5 seconds.
+- **AI Ghostwriter** is a separate, opt-in local feature. It offers three context-aware reply chips, a Tab-accepted inline continuation after 300 ms, and `/ghost <intent>` for a complete draft. Configure Ollama or a llama.cpp-compatible server in Settings → Integrations; Ghostwriter accepts only HTTP loopback endpoints, bypasses proxies, rejects redirects, and never sends a message automatically. Inline completions use a compact context and a 20-second response limit.
 - **Tone Guard** checks drafts over 10 words, drafts sent from 10 PM to 6 AM, drafts after tense incoming messages, or every draft in rooms where it is enabled. It uses only a local loopback model; a remote endpoint, timeout, or model error fails open. Medium- or high-severity drafts can be replaced with a calmer alternative or sent unchanged.
 
 **Room details & media**
@@ -82,7 +82,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 A searchable dialog with twelve tabs:
 
 - **General** — launch at login, tray behavior (minimize to tray, start minimized, quit on close, menu bar icon), download folder and "ask where to save", double-click action, quick-reaction options, navigation after read/archive, inactive-room age and Archive inactive rooms, voice-note microphone and autoplay, schedule defaults and suggestions.
-- **Account** — profile details, typing indicators, incognito mode (pauses read markers), log out.
+- **Account** — profile details, typing indicators, content blur (read receipts are still sent when you open a room), log out.
 - **Appearance** — theme, accent, wallpaper, font size, app zoom, message and sidebar layout, timestamps.
 - **Notifications** — permission, enable/focus, sound and volume, content privacy, per-category alerts and tones, batching, repeat reminder, one-time-code handling, sound effects, and a button that opens the OS notification settings for Pinger.
 - **Keyboard** — Ctrl+Enter send, undo send window, spellcheck, formatting toolbar, emoji suggestions, emoticon replacement, copy timestamps, Up-arrow focus, single-key shortcuts (R, J, K, and the answered key), mark-answered key, full shortcut list.
@@ -159,10 +159,6 @@ Targets macOS 12+, Windows x64 (WebView2 Runtime), and Linux x64.
 - Windows: [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) and MinGW-w64 GCC for CGO (MSYS2 UCRT64 is supported; `gcc` must be on `PATH` or under `tools/msys64/ucrt64/bin`)
 - Linux: GTK4 and WebKitGTK 6 development libraries (required by Wails on Linux)
 
-On Linux, the GTK4 desktop shell resolves the application icon through its desktop entry. The DEB and AppImage releases include a matching `fi.mau.pinger` desktop entry and Pinger icon; use the installed launcher (or integrate the AppImage with your desktop) for the correct shell icon.
-
-On Windows, CGO requires MinGW-w64 GCC with its runtime files (`crt2.o` and `libm.a`). The launchers first check for a working repository-local compiler in `toolchain/mingw64/bin` and add its adjacent target-runtime and MSYS DLL directories to `PATH`, then check `tools/msys64/ucrt64/bin`, the standard `C:\msys64` location, and `PATH`. If you need to install MSYS2, open its **UCRT64** terminal (not Git Bash), then run `pacman -Syu` followed by `pacman -S --needed mingw-w64-ucrt-x86_64-gcc` (reopen the terminal and run `pacman -Su` first if the update asks you to). Toolchain directories are git-ignored and are not committed.
-
 Two Go build tags are used throughout: `sqlite_fts5` is required (SQLite full-text search), and `goolm` selects mautrix-go's pure-Go Olm implementation (no libolm needed).
 
 ### Build and run
@@ -190,10 +186,6 @@ wails3 task dev
 ```
 
 Hot-reloads the frontend via Vite and rebuilds the Go app on change.
-
-The Windows launcher checks that GCC can locate both `crt2.o` and `libm.a` before starting and limits Go build parallelism to reduce memory use during the initial build. If the app is signed in but its encryption device is unverified, Pinger shows the recovery-key form immediately while Matrix performs its initial sync.
-
-Application logs use timestamped, colored console output and include a component and severity. The default level is `info`; set `PINGER_LOG_LEVEL=debug` to include detailed Matrix-engine diagnostics. In Git Bash, for example, run `PINGER_LOG_LEVEL=debug bash scripts/dev.sh`; in PowerShell, run `$env:PINGER_LOG_LEVEL="debug"; node scripts/dev.mjs`. Debug output from Matrix dependencies can include server URLs and account identifiers, so review and redact it before sharing.
 
 For a native executable without the desktop installer, run `wails3 task build:linux` on Linux or `wails3 task build:windows` on Windows. These write to `bin/`; Windows builds require MinGW-w64 GCC on `PATH`. The Windows ZIP and Linux DEB/AppImage installers are produced by manually dispatching the release workflow; local builds do not create those installer formats.
 
@@ -249,4 +241,4 @@ Desktop release builds embed version, commit, and build timestamp via ldflags; o
 
 ## License
 
-AGPL-3.0-or-later, matching the embedded gomuks `hicli` engine. See [gnu.org/licenses](https://www.gnu.org/licenses/agpl-3.0.html) for the license text.
+AGPL-3.0-or-later, matching the embedded gomuks `hicli` engine. See [LICENSE](LICENSE) or [gnu.org/licenses](https://www.gnu.org/licenses/agpl-3.0.html) for the license text.

@@ -3,7 +3,9 @@ import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } fro
 import { Check, Copy } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
+import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
 
 function markdownText(children: ReactNode): string {
   if (typeof children === 'string' || typeof children === 'number') return String(children)
@@ -47,8 +49,8 @@ function MarkdownMessage({ body }: { body: string }) {
   return (
     <div className="message-body markdown-message">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { detect: true }]]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: true }]]}
         components={{
           a({ children, href }) {
             return <a href={href} target="_blank" rel="noreferrer" onClick={(event) => {

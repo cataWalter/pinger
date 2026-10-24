@@ -189,10 +189,21 @@ func CopyData(sourceDir, targetDir string) error {
 	if source == target {
 		return nil
 	}
+	if pathsOverlap(source, target) {
+		return fmt.Errorf("source and target data directories must not overlap")
+	}
 	if err = os.MkdirAll(target, 0o700); err != nil {
 		return fmt.Errorf("create data directory %q: %w", target, err)
 	}
 	return copyDirectory(source, target)
+}
+
+func pathsOverlap(first, second string) bool {
+	contains := func(parent, child string) bool {
+		relative, err := filepath.Rel(parent, child)
+		return err == nil && (relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))))
+	}
+	return contains(first, second) || contains(second, first)
 }
 
 // RemoveData deletes the application data in directory. The data location marker is

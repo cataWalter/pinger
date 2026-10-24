@@ -76,13 +76,6 @@ export function isGhostCommandDraft(value: string) {
   return /^\/ghost(?:\s|$)/i.test(value.trimStart())
 }
 
-export function appendGhostCompletion(draft: string, completion: string) {
-  const suffix = completion.trimStart()
-  if (!suffix) return draft
-  const needsSpace = Boolean(draft) && !/\s$/.test(draft) && !/^[,.;!?):\]}]/.test(suffix)
-  return `${draft}${needsSpace ? ' ' : ''}${suffix}`
-}
-
 export function isGhostSuggestion(value: { type: string }): value is GhostSuggestion {
   return value.type === 'chip' || value.type === 'autocomplete' || value.type === 'slash_result'
 }

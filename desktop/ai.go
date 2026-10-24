@@ -20,9 +20,8 @@ import (
 )
 
 const (
-	aiCompletionTimeout    = 60 * time.Second
+	aiCompletionTimeout    = 3 * time.Minute
 	aiToneGuardTimeout     = 1200 * time.Millisecond
-	aiToneGuardMaxTokens   = 192
 	aiHealthTimeout        = 10 * time.Second
 	aiTranscriptionTimeout = 5 * time.Minute
 	aiMaxAudioBytes        = 50 << 20
@@ -36,11 +35,14 @@ type AIMessage struct {
 }
 
 type aiChatRequest struct {
-	Model       string      `json:"model,omitempty"`
-	Messages    []AIMessage `json:"messages"`
-	Stream      bool        `json:"stream"`
-	Temperature *float64    `json:"temperature,omitempty"`
-	MaxTokens   int         `json:"max_tokens,omitempty"`
+	Model              string          `json:"model,omitempty"`
+	Messages           []AIMessage     `json:"messages"`
+	Stream             bool            `json:"stream"`
+	Temperature        *float64        `json:"temperature,omitempty"`
+	MaxTokens          int             `json:"max_tokens,omitempty"`
+	Stop               []string        `json:"stop,omitempty"`
+	ResponseFormat     json.RawMessage `json:"response_format,omitempty"`
+	ChatTemplateKwargs map[string]any  `json:"chat_template_kwargs,omitempty"`
 }
 
 type aiChatResponse struct {
@@ -62,68 +64,67 @@ type aiTranscriptionResponse struct {
 }
 
 func validateAIEndpoint(raw string) error {
-	parsed, err := url.Parse(raw)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return errors.New("AI endpoint must be an http or https URL")
-	}
-	return nil
+	return sharedpreferences.ValidateAIEndpoint(raw)
 }
 
-// aiChatCompletion posts to an OpenAI-compatible chat endpoint such as llama-server.
-func aiChatCompletion(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage) (string, error) {
-	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiCompletionTimeout, nil, 0)
-}
-
-func aiChatCompletionWithOptions(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, timeout time.Duration, temperature *float64, maxTokens int) (string, error) {
-	if err := validateAIEndpoint(endpoint); err != nil {
-		return "", err
-	}
-	if len(messages) == 0 {
-		return "", errors.New("AI request has no messages")
-	}
-	body, err := json.Marshal(aiChatRequest{Model: model, Messages: messages, Stream: false, Temperature: temperature, MaxTokens: maxTokens})
+func doAIRequest(client *http.Client, endpoint string, request *http.Request) (*http.Response, error) {
+	baseURL, err := url.Parse(endpoint)
 	if err != nil {
-		return "", fmt.Errorf("encode AI request: %w", err)
+		return nil, fmt.Errorf("parse AI endpoint: %w", err)
 	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	clientCopy := *client
+	previousCheckRedirect := client.CheckRedirect
+	clientCopy.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if !sameAIOrigin(baseURL, request.URL) {
+			return errors.New("AI endpoint redirect changed origin")
+		}
+		if previousCheckRedirect != nil {
+			return previousCheckRedirect(request, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return clientCopy.Do(request)
+}
+
+func sameAIOrigin(first, second *url.URL) bool {
+	return strings.EqualFold(first.Scheme, second.Scheme) &&
+		strings.EqualFold(first.Hostname(), second.Hostname()) && aiEndpointPort(first) == aiEndpointPort(second)
+}
+
+func aiEndpointPort(endpoint *url.URL) string {
+	if port := endpoint.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(endpoint.Scheme, "https") {
+		return "443"
+	}
+	return "80"
+}
+
+// aiChatCompletion posts a non-streaming request to an OpenAI-compatible chat endpoint such as llama-server.
+func aiChatCompletion(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage) (string, error) {
+	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiCompletionTimeout, aiCompletionOptions{}, nil)
+}
+
+// aiChatCompletionWithOptions runs one OpenAI-compatible chat request. When onChunk is set, the reply is streamed.
+func aiChatCompletionWithOptions(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, timeout time.Duration, options aiCompletionOptions, onChunk func(string)) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("create AI request: %w", err)
-	}
-	request.Header.Set("Content-Type", "application/json")
-	response, err := client.Do(request)
-	if err != nil {
-		return "", fmt.Errorf("contact AI endpoint: %w", err)
-	}
-	defer response.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(response.Body, aiMaxResponseBytes))
-	if err != nil {
-		return "", fmt.Errorf("read AI response: %w", err)
-	}
-	var parsed aiChatResponse
-	decodeErr := json.Unmarshal(data, &parsed)
-	if response.StatusCode < 200 || response.StatusCode > 299 {
-		if decodeErr == nil && parsed.Error != nil && parsed.Error.Message != "" {
-			return "", fmt.Errorf("AI endpoint returned %d: %s", response.StatusCode, parsed.Error.Message)
-		}
-		return "", fmt.Errorf("AI endpoint returned %d", response.StatusCode)
-	}
-	if decodeErr != nil {
-		return "", fmt.Errorf("decode AI response: %w", decodeErr)
-	}
-	if len(parsed.Choices) == 0 {
-		return "", errors.New("AI endpoint returned no choices")
-	}
-	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
+	return aiProviderCompletion(ctx, client, GhostwriterProviderOpenAICompatible, endpoint, model, messages, options, onChunk)
 }
 
-func aiToneGuardCompletion(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage) (string, error) {
+// aiToneGuardCompletion classifies a draft on a loopback endpoint only, so the draft never leaves the machine.
+func aiToneGuardCompletion(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, options aiCompletionOptions) (string, error) {
 	if err := sharedpreferences.ValidateLocalHTTPEndpoint(endpoint); err != nil {
 		return "", fmt.Errorf("Tone Guard requires a localhost HTTP endpoint: %w", err)
 	}
-	temperature := 0.1
-	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiToneGuardTimeout, &temperature, aiToneGuardMaxTokens)
+	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiToneGuardTimeout, options, nil)
 }
 
 func aiAudioTranscription(ctx context.Context, client *http.Client, endpoint, model, filename, contentType string, audio []byte) (string, error) {
@@ -184,7 +185,7 @@ func aiAudioTranscription(ctx context.Context, client *http.Client, endpoint, mo
 		return "", fmt.Errorf("create transcription request: %w", err)
 	}
 	request.Header.Set("Content-Type", writer.FormDataContentType())
-	response, err := client.Do(request)
+	response, err := doAIRequest(client, endpoint, request)
 	if err != nil {
 		return "", fmt.Errorf("contact AI transcription endpoint: %w", err)
 	}
@@ -222,7 +223,7 @@ func aiHealthCheck(ctx context.Context, client *http.Client, endpoint string) er
 	if err != nil {
 		return fmt.Errorf("create health request: %w", err)
 	}
-	response, err := client.Do(request)
+	response, err := doAIRequest(client, endpoint, request)
 	if err != nil {
 		return fmt.Errorf("contact AI endpoint: %w", err)
 	}
@@ -255,22 +256,58 @@ func (s *AppService) aiContext() context.Context {
 	return context.Background()
 }
 
-// AIComplete sends chat messages to the configured local endpoint and returns the reply text.
-func (s *AppService) AIComplete(messages []AIMessage) (string, error) {
+// AIComplete sends chat messages to the configured endpoint and returns the full reply.
+// When requestID is set, reply deltas are emitted as ai:stream events so the answer can be shown while it is generated.
+// temperature and maxTokens are chosen by the caller from the AI feature settings; zero maxTokens means no explicit limit.
+func (s *AppService) AIComplete(messages []AIMessage, requestID string, temperature float64, maxTokens int) (string, error) {
 	endpoint, model, err := s.aiEndpointSettings()
 	if err != nil {
 		return "", err
 	}
-	return aiChatCompletion(s.aiContext(), aiHTTPClient, endpoint, model, messages)
+	options, err := aiRunOptions(temperature, maxTokens)
+	if err != nil {
+		return "", err
+	}
+	return s.runAIStream(requestID, func(ctx context.Context, onChunk func(string)) (string, error) {
+		return aiChatCompletionWithOptions(ctx, aiHTTPClient, endpoint, model, messages, aiCompletionTimeout, options, onChunk)
+	})
+}
+
+// AICancel stops the AI request with requestID and reports whether it was running.
+func (s *AppService) AICancel(requestID string) bool {
+	return s.aiRuns.cancel(requestID)
+}
+
+// runAIStream runs one AI call tracked under requestID. Deltas are emitted as ai:stream events when requestID is set.
+func (s *AppService) runAIStream(requestID string, run func(ctx context.Context, onChunk func(string)) (string, error)) (string, error) {
+	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
+	defer release()
+	var onChunk func(string)
+	if requestID != "" {
+		onChunk = func(text string) {
+			if s.emitAIStream != nil {
+				s.emitAIStream(AIStreamEvent{RequestID: requestID, Text: text})
+			}
+		}
+	}
+	result, err := run(ctx, onChunk)
+	if err != nil && ctx.Err() == context.Canceled {
+		return "", errAIRunStopped
+	}
+	return result, err
 }
 
 // CheckMessageTone classifies a draft using only a local loopback AI endpoint.
-func (s *AppService) CheckMessageTone(messages []AIMessage) (string, error) {
+func (s *AppService) CheckMessageTone(messages []AIMessage, temperature float64, maxTokens int) (string, error) {
 	endpoint, model, err := s.aiEndpointSettings()
 	if err != nil {
 		return "", err
 	}
-	return aiToneGuardCompletion(s.aiContext(), ghostwriterHTTPClient, endpoint, model, messages)
+	options, err := aiRunOptions(temperature, maxTokens)
+	if err != nil {
+		return "", err
+	}
+	return aiToneGuardCompletion(s.aiContext(), ghostwriterHTTPClient, endpoint, model, messages, options)
 }
 
 // AITranscribeMedia transcribes cached Matrix audio with the configured OpenAI-compatible endpoint.

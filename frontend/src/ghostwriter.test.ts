@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendGhostCompletion, ghostwriterDefaultEndpoints, isGhostCommandDraft, isGhostSuggestion, isLoopbackEndpoint, parseGhostCommand } from './ghostwriter'
+import { ghostwriterDefaultEndpoints, isGhostCommandDraft, isGhostSuggestion, isLoopbackEndpoint, parseGhostCommand } from './ghostwriter'
 
 describe('Ghostwriter helpers', () => {
   it('recognizes only loopback HTTP endpoints', () => {
@@ -19,13 +19,6 @@ describe('Ghostwriter helpers', () => {
     expect(isGhostCommandDraft('/ghost decline politely')).toBe(true)
     expect(isGhostCommandDraft('/ghost')).toBe(true)
     expect(isGhostCommandDraft('hello /ghost')).toBe(false)
-  })
-
-  it('adds inline continuations without duplicating spaces or punctuation', () => {
-    expect(appendGhostCompletion('I can', 'send it tomorrow')).toBe('I can send it tomorrow')
-    expect(appendGhostCompletion('I can ', 'send it tomorrow')).toBe('I can send it tomorrow')
-    expect(appendGhostCompletion('Sounds good', '!')).toBe('Sounds good!')
-    expect(appendGhostCompletion('Draft', '')).toBe('Draft')
   })
 
   it('narrows generated binding suggestions to supported modes', () => {

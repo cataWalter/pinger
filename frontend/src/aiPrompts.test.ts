@@ -8,6 +8,7 @@ import {
   buildReplyPrompt,
   buildRewritePrompt,
   buildTopicInsightsPrompt,
+  buildTranslationPrompt,
   parseChatAgents,
   parseChatTranslationResponse,
   splitChatTranslationBatches,
@@ -145,6 +146,19 @@ describe('local AI prompts', () => {
     expect(prompt[1].content).toContain('message 54')
     expect(prompt[1].content.split('\n')).not.toContain('Alice: message 4')
     expect(prompt[1].content).not.toContain('redacted message')
+  })
+
+  it('uses saved instructions in place of the default while keeping the fixed rules', () => {
+    const rewrite = buildRewritePrompt('My draft', 'rewrite', 'Make it warmer.')
+    expect(rewrite[0].content.startsWith('Make it warmer. ')).toBe(true)
+    expect(rewrite[0].content).toContain('Return only the revised draft.')
+    expect(rewrite[0].content).not.toContain('Improve clarity')
+
+    expect(buildTranslationPrompt('Ciao', 'French', 'Translate into {language} for a child.')[0].content).toContain('Translate into French for a child.')
+
+    const prompt = buildAgentPrompt({ id: 'tutor', name: 'Language tutor', instructions: 'Teach Spanish gently.' }, 'Explain the idiom', messages, '', 'You are {name}. Rules: {instructions}')
+    expect(prompt[0].content).toContain('You are Language tutor. Rules: Teach Spanish gently.')
+    expect(prompt[0].content).toContain('Return a suggestion for the user to review')
   })
 
   it('falls back to an empty collection for malformed agent preferences', () => {

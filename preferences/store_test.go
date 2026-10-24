@@ -81,6 +81,40 @@ func TestValidateAITranscriptionModelPreference(t *testing.T) {
 	}
 }
 
+func TestValidateAIFeaturePreferences(t *testing.T) {
+	for _, key := range []string{
+		"ai.feature.agent.prompt",
+		"ai.feature.tone_guard.temperature",
+		"ai.feature.chat_translation.max_tokens",
+		"ai.feature.turkish_tutor.prompt",
+	} {
+		if err := Validate(key, ""); err != nil {
+			t.Errorf("Validate(%q, blank) error = %v", key, err)
+		}
+	}
+	if err := Validate("ai.feature.tone_guard.temperature", "0.1"); err != nil {
+		t.Fatalf("Validate(tone_guard.temperature, 0.1) error = %v", err)
+	}
+	if err := Validate("ai.feature.summarize.max_tokens", "512"); err != nil {
+		t.Fatalf("Validate(summarize.max_tokens, 512) error = %v", err)
+	}
+	if err := Validate("ai.feature.agent.prompt", strings.Repeat("a", 8001)); err == nil {
+		t.Fatal("Validate() accepted an AI prompt longer than 8000 characters")
+	}
+	if err := Validate("ai.feature.tone_guard.temperature", "2.5"); err == nil {
+		t.Fatal("Validate() accepted an out-of-range AI temperature")
+	}
+	if err := Validate("ai.feature.summarize.max_tokens", "9000"); err == nil {
+		t.Fatal("Validate() accepted an AI token limit above 8192")
+	}
+	if err := Validate("ai.feature.unknown_feature.prompt", "text"); err == nil {
+		t.Fatal("Validate() accepted an unknown AI feature")
+	}
+	if err := Validate("ai.feature.agent.temperature", 0.5); err == nil {
+		t.Fatal("Validate() accepted a non-string AI temperature")
+	}
+}
+
 func TestValidateGhostwriterPreferences(t *testing.T) {
 	for _, endpoint := range []string{"", "http://localhost:11434", "http://127.0.0.1:8080", "http://[::1]:8080"} {
 		if err := Validate("ghostwriter.endpoint", endpoint); err != nil {
@@ -351,6 +385,21 @@ func TestValidateRoomToneGuardPreference(t *testing.T) {
 	}
 	if err := Validate("room.tone_guard.", true); err == nil {
 		t.Fatal("Validate(room tone guard) accepted a missing room ID")
+	}
+}
+
+func TestValidateRoomGhostwriterPreference(t *testing.T) {
+	if err := Validate("room.ghostwriter.!room:example.org", true); err != nil {
+		t.Fatalf("Validate(room Ghostwriter) error = %v", err)
+	}
+	if err := Validate("room.ghostwriter.!room:example.org", false); err != nil {
+		t.Fatalf("Validate(disabled room Ghostwriter) error = %v", err)
+	}
+	if err := Validate("room.ghostwriter.!room:example.org", "true"); err == nil {
+		t.Fatal("Validate(room Ghostwriter) accepted a non-boolean value")
+	}
+	if err := Validate("room.ghostwriter.", true); err == nil {
+		t.Fatal("Validate(room Ghostwriter) accepted a missing room ID")
 	}
 }
 

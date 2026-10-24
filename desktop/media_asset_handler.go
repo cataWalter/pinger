@@ -124,7 +124,7 @@ func (handler mediaAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Accept-Ranges", "bytes")
 	http.ServeContent(w, r, eventID, info.ModTime(), file)
 }

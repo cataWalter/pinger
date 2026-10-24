@@ -13,40 +13,6 @@ import (
 	"time"
 )
 
-func TestShouldAnalyzeContactDossier(t *testing.T) {
-	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
-	fresh := now.Add(-contactDossierReanalyzeAfter + time.Minute).UnixMilli()
-	if shouldAnalyzeContactDossier(now, fresh, contactDossierNewMessageGate) {
-		t.Fatal("dossier refreshed before 24 hours or 11 new messages")
-	}
-	if !shouldAnalyzeContactDossier(now, now.Add(-contactDossierReanalyzeAfter).UnixMilli(), 0) {
-		t.Fatal("dossier did not refresh after 24 hours")
-	}
-	if !shouldAnalyzeContactDossier(now, fresh, contactDossierNewMessageGate+1) {
-		t.Fatal("dossier did not refresh after 11 new messages")
-	}
-	if !shouldAnalyzeContactDossier(now, 0, 0) {
-		t.Fatal("new dossier was not marked for initial analysis")
-	}
-}
-
-func TestContactDossierNewMessageCount(t *testing.T) {
-	start := time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC)
-	messages := make([]relationshipHealthMessage, 12)
-	for index := range messages {
-		messages[index] = relationshipHealthMessage{MessageID: string(rune('a' + index)), Timestamp: start.Add(time.Duration(index) * time.Minute)}
-	}
-	if count := contactDossierNewMessageCount(messages, "b", 0); count != 10 {
-		t.Fatalf("new messages after b = %d, want 10", count)
-	}
-	if count := contactDossierNewMessageCount(messages, "a", 0); count != 11 {
-		t.Fatalf("new messages after a = %d, want 11", count)
-	}
-	if count := contactDossierNewMessageCount(messages, "older-checkpoint", start.Add(-time.Minute).UnixMilli()); count != 12 {
-		t.Fatalf("new messages after an evicted checkpoint = %d, want 12", count)
-	}
-}
-
 func TestContactDossierWriteRequiresCurrentLinkedRooms(t *testing.T) {
 	store, err := openRelationshipHealthStore(filepath.Join(t.TempDir(), "relationship-health.db"))
 	if err != nil {
@@ -150,7 +116,7 @@ func TestLocalContactDossierCompletionRequestsStructuredOutput(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := localContactDossierCompletion(context.Background(), test.provider, endpoint, "local", "system", "prompt")
+			result, err := localContactDossierCompletion(context.Background(), test.provider, endpoint, "local", "system", "prompt", aiFeatureTuningFor(nil, aiFeatureContactDossier))
 			if err != nil {
 				t.Fatal(err)
 			}
