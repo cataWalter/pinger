@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,12 +25,17 @@ const (
 	ghostwriterStyleSampleLimit   = 40
 	ghostwriterConversationLimit  = 10
 	ghostwriterExampleLimit       = 5
-	ghostwriterChatHistoryLimit   = 20
-	ghostwriterChatMessageLimit   = 8000
-	ghostwriterChatInputLimit     = 32 << 10
+	ghostwriterChatHistoryLimit   = 40
+	localAIChatMessageLimit       = 48000
+	localAIChatInputLimit         = 512 << 10
+	localAIChatImageLimit         = 4
+	localAIChatImageBytes         = 8 << 20
+	localAIChatImageInputLimit    = 16 << 20
+	localAIChatAgentLimit         = 8000
+	localAIChatResponseBytes      = 256 << 10
 	ghostwriterMaxResponseBytes   = 64 << 10
 	ghostwriterSuggestionTimeout  = 20 * time.Second
-	ghostwriterChatTimeout        = 2 * time.Minute
+	ghostwriterChatTimeout        = 10 * time.Minute
 	ghostwriterStreamEventName    = "ghostwriter:stream"
 	localAIChatStreamEventName    = "local-ai:stream"
 	ghostwriterDefaultOllamaURL   = "http://127.0.0.1:11434"
@@ -386,7 +392,7 @@ func (s *AppService) Ghostwriter(request GhostwriterRequest) ([]GhostSuggestion,
 	preferences := s.preferenceValues()
 	enabled, _ := preferences["ghostwriter.enabled"].(bool)
 	if !enabled {
-		return nil, errors.New("enable Ghostwriter in Settings > Integrations first")
+		return nil, errors.New("enable Ghostwriter in Settings > AI first")
 	}
 	provider, localEndpoint, model, err := ghostwriterModelConfig(preferences)
 	if err != nil {
@@ -489,9 +495,21 @@ func (s *AppService) Ghostwriter(request GhostwriterRequest) ([]GhostSuggestion,
 	return suggestions, err
 }
 
-func (s *AppService) LocalAIChat(messages []AIMessage, requestID string) (string, error) {
-	if err := validateLocalAIChatMessages(messages); err != nil {
+// LocalAIChatRequest is one conversation turn sent from the local AI chat window.
+type LocalAIChatRequest struct {
+	Messages          []AIMessage `json:"messages"`
+	RequestID         string      `json:"requestId"`
+	AgentInstructions string      `json:"agentInstructions,omitempty"`
+}
+
+// LocalAIChat returns the next assistant turn. Deltas are emitted as local-ai:stream events, and AICancel stops RequestID.
+func (s *AppService) LocalAIChat(request LocalAIChatRequest) (string, error) {
+	if err := validateLocalAIChatMessages(request.Messages); err != nil {
 		return "", err
+	}
+	agentInstructions := strings.TrimSpace(request.AgentInstructions)
+	if utf8.RuneCountInString(agentInstructions) > localAIChatAgentLimit {
+		return "", fmt.Errorf("agent instructions must be %d characters or fewer", localAIChatAgentLimit)
 	}
 	preferences := s.preferenceValues()
 	provider, localEndpoint, model, err := ghostwriterModelConfig(preferences)
@@ -499,25 +517,41 @@ func (s *AppService) LocalAIChat(messages []AIMessage, requestID string) (string
 		return "", err
 	}
 	tuning := aiFeatureTuningFor(preferences, aiFeatureLocalChat)
-	conversation := make([]AIMessage, 0, len(messages)+1)
-	conversation = append(conversation, AIMessage{Role: "system", Content: tuning.Prompt})
-	conversation = append(conversation, messages...)
-	ctx, cancel := context.WithTimeout(s.aiContext(), ghostwriterChatTimeout)
+	systemPrompt := tuning.Prompt
+	if agentInstructions != "" {
+		systemPrompt += "\n\nAgent instructions:\n" + agentInstructions
+	}
+	conversation := make([]AIMessage, 0, len(request.Messages)+1)
+	conversation = append(conversation, AIMessage{Role: "system", Content: systemPrompt})
+	conversation = append(conversation, request.Messages...)
+	ctx, release := s.aiRuns.begin(s.aiContext(), request.RequestID)
+	defer release()
+	ctx, cancel := context.WithTimeout(ctx, ghostwriterChatTimeout)
 	defer cancel()
 	var onChunk func(string)
-	if requestID != "" && s.emitLocalAIChatStream != nil {
+	if request.RequestID != "" && s.emitLocalAIChatStream != nil {
 		onChunk = func(text string) {
-			s.emitLocalAIChatStream(LocalAIChatStreamEvent{RequestID: requestID, Text: text})
+			s.emitLocalAIChatStream(LocalAIChatStreamEvent{RequestID: request.RequestID, Text: text})
 		}
 	}
-	return runLocalAICompletion(ctx, ghostwriterHTTPClient, provider, localEndpoint, model, conversation, ghostwriterCompletionOptions(GhostwriterModeChat, tuning), onChunk)
+	reply, err := runLocalAICompletion(ctx, ghostwriterHTTPClient, provider, localEndpoint, model, conversation, ghostwriterCompletionOptions(GhostwriterModeChat, tuning), onChunk)
+	if err != nil && ctx.Err() == context.Canceled {
+		return "", errAIRunStopped
+	}
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
+		return "", errors.New("local AI reply timed out")
+	}
+	return reply, err
 }
+
+var localAIChatImageTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true}
 
 func validateLocalAIChatMessages(messages []AIMessage) error {
 	if len(messages) == 0 || len(messages) > ghostwriterChatHistoryLimit {
 		return fmt.Errorf("local AI chat must contain between 1 and %d messages", ghostwriterChatHistoryLimit)
 	}
 	totalBytes := 0
+	imageBytes := 0
 	previousRole := ""
 	for _, message := range messages {
 		if message.Role != "user" && message.Role != "assistant" {
@@ -529,11 +563,19 @@ func validateLocalAIChatMessages(messages []AIMessage) error {
 		if message.Role == "assistant" && previousRole != "user" {
 			return errors.New("local AI assistant messages must follow a user message")
 		}
-		if strings.TrimSpace(message.Content) == "" || utf8.RuneCountInString(message.Content) > ghostwriterChatMessageLimit {
+		if (strings.TrimSpace(message.Content) == "" && len(message.Images) == 0) || utf8.RuneCountInString(message.Content) > localAIChatMessageLimit {
 			return errors.New("local AI chat messages must be non-empty and within the size limit")
 		}
+		messageImageBytes, err := validateLocalAIChatImages(message)
+		if err != nil {
+			return err
+		}
+		imageBytes += messageImageBytes
+		if imageBytes > localAIChatImageInputLimit {
+			return errors.New("local AI chat images exceeded the size limit")
+		}
 		totalBytes += len(message.Content)
-		if totalBytes > ghostwriterChatInputLimit {
+		if totalBytes > localAIChatInputLimit {
 			return errors.New("local AI chat history exceeded the size limit")
 		}
 		previousRole = message.Role
@@ -542,6 +584,43 @@ func validateLocalAIChatMessages(messages []AIMessage) error {
 		return errors.New("local AI chat must end with a user message")
 	}
 	return nil
+}
+
+// validateLocalAIChatImages checks one message's images and returns their decoded size.
+func validateLocalAIChatImages(message AIMessage) (int, error) {
+	if len(message.Images) == 0 {
+		return 0, nil
+	}
+	if message.Role != "user" {
+		return 0, errors.New("only user messages can include images")
+	}
+	if len(message.Images) > localAIChatImageLimit {
+		return 0, fmt.Errorf("a message can include at most %d images", localAIChatImageLimit)
+	}
+	total := 0
+	for _, image := range message.Images {
+		size, err := validateLocalAIChatImage(image)
+		if err != nil {
+			return 0, err
+		}
+		total += size
+	}
+	return total, nil
+}
+
+// validateLocalAIChatImage checks one image's type, size, and encoding and returns its decoded size.
+func validateLocalAIChatImage(image AIImage) (int, error) {
+	if !localAIChatImageTypes[image.MediaType] {
+		return 0, errors.New("local AI images must be PNG, JPEG, GIF, or WebP")
+	}
+	size := base64.RawStdEncoding.DecodedLen(len(strings.TrimRight(image.Data, "=")))
+	if size > localAIChatImageBytes {
+		return 0, fmt.Errorf("local AI images must be %d MiB or smaller", localAIChatImageBytes>>20)
+	}
+	if _, err := base64.StdEncoding.DecodeString(image.Data); err != nil {
+		return 0, errors.New("local AI image data must be base64")
+	}
+	return size, nil
 }
 
 func stringPreference(preferences map[string]any, key, fallback string) string {
@@ -744,12 +823,15 @@ func ghostwriterCompletionOptions(mode GhostwriterMode, tuning aiFeatureTuning) 
 	switch mode {
 	case GhostwriterModeChat:
 		options.Chat = true
+		options.MaxResponseBytes = localAIChatResponseBytes
 	case GhostwriterModeChips:
 		options.JSONObject = true
 		options.Stop = ghostwriterStopSequences
 	default:
 		options.Stop = ghostwriterStopSequences
 	}
+	// Hidden reasoning is turned off for every mode, because it would consume the token limit before the reply.
+	options.ChatTemplateKwargs = aiThinkingDisabled()
 	return options
 }
 
@@ -761,7 +843,7 @@ func ghostwriterModeMaxTokens(mode GhostwriterMode) int {
 	case GhostwriterModeChips:
 		return 400
 	case GhostwriterModeChat:
-		return 2048
+		return 8192
 	default:
 		return 180
 	}

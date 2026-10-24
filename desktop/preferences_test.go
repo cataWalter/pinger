@@ -111,6 +111,23 @@ func TestPreferenceStoreAcceptsAccentPalette(t *testing.T) {
 	}
 }
 
+func TestPreferenceStoreAcceptsCustomAccentColor(t *testing.T) {
+	store, err := NewPreferenceStore(filepath.Join(t.TempDir(), "preferences.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, color := range []string{"#28718f", "#FFAA00"} {
+		if err = store.Set("appearance.accent_color", color); err != nil {
+			t.Errorf("Set(appearance.accent_color, %q) error = %v", color, err)
+		}
+	}
+	for _, color := range []string{"Blue", "#28718", "#28718fff", "28718f", "#28718g"} {
+		if err = store.Set("appearance.accent_color", color); err == nil {
+			t.Errorf("Set(appearance.accent_color, %q) error = nil, want error", color)
+		}
+	}
+}
+
 func TestPreferenceStoreAcceptsChatWallpaper(t *testing.T) {
 	store, err := NewPreferenceStore(filepath.Join(t.TempDir(), "preferences.json"))
 	if err != nil {
@@ -186,26 +203,6 @@ func TestPreferenceStoreAcceptsAfterReadNavigationPreference(t *testing.T) {
 		if err = store.Set("inbox.after_read", value); err != nil {
 			t.Errorf("Set(inbox.after_read, %q) error = %v", value, err)
 		}
-	}
-}
-
-func TestPreferenceStoreAcceptsUndoSendWindow(t *testing.T) {
-	store, err := NewPreferenceStore(filepath.Join(t.TempDir(), "preferences.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, value := range []string{"0", "5", "10", "20", "30"} {
-		if err = store.Set("composer.undo_send_seconds", value); err != nil {
-			t.Errorf("Set(composer.undo_send_seconds, %q) error = %v", value, err)
-		}
-	}
-	for _, enabled := range []bool{true, false} {
-		if err = store.Set("composer.undo_send_enabled", enabled); err != nil {
-			t.Errorf("Set(composer.undo_send_enabled, %t) error = %v", enabled, err)
-		}
-	}
-	if err = store.Set("composer.undo_send_seconds", "15"); err == nil {
-		t.Fatal("Set(composer.undo_send_seconds, 15) unexpectedly succeeded")
 	}
 }
 

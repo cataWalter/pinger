@@ -316,7 +316,7 @@ func TestLocalAIChatUsesOllamaConversationEndpoint(t *testing.T) {
 			t.Errorf("request body = %+v", body)
 		}
 		for index, message := range messages {
-			if body.Messages[index+1] != message {
+			if body.Messages[index+1].Role != message.Role || body.Messages[index+1].Content != message.Content {
 				t.Errorf("message %d = %+v, want %+v", index+1, body.Messages[index+1], message)
 			}
 		}
@@ -358,11 +358,11 @@ func TestLocalAIChatUsesOpenAICompatibleConversation(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		if body.Model != "local-model" || body.Stream || body.MaxTokens != 2048 || len(body.Stop) != 0 || len(body.Messages) != len(conversation) {
+		if body.Model != "local-model" || body.Stream || body.MaxTokens != 8192 || len(body.Stop) != 0 || len(body.Messages) != len(conversation) {
 			t.Errorf("request body = %+v", body)
 		}
 		for index, message := range conversation {
-			if body.Messages[index] != message {
+			if body.Messages[index].Role != message.Role || body.Messages[index].Content != message.Content {
 				t.Errorf("message %d = %+v, want %+v", index, body.Messages[index], message)
 			}
 		}
@@ -446,6 +446,38 @@ func TestLocalAIChatStreamsOpenAICompatibleResponse(t *testing.T) {
 	}
 }
 
+// cutOffReader returns its bytes, then fails the way a timed-out response body does.
+type cutOffReader struct {
+	data []byte
+	err  error
+}
+
+func (r *cutOffReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func TestStreamedReplyReportsCutOffReadNotPartialLine(t *testing.T) {
+	openAI := &cutOffReader{
+		data: []byte("data: {\"choices\":[{\"delta\":{\"content\":\"A streamed\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\" partial"),
+		err:  context.DeadlineExceeded,
+	}
+	if _, err := streamOpenAICompatibleCompletion(openAI, 64<<10, func(string) {}); err == nil || !strings.Contains(err.Error(), "read OpenAI-compatible stream") {
+		t.Fatalf("OpenAI-compatible cut-off error = %v, want the read failure", err)
+	}
+	ollama := &cutOffReader{
+		data: []byte("{\"response\":\"A streamed\"}\n{\"response\":\" part"),
+		err:  context.DeadlineExceeded,
+	}
+	if _, err := streamOllamaCompletion(ollama, false, 64<<10, func(string) {}); err == nil || !strings.Contains(err.Error(), "read Ollama stream") {
+		t.Fatalf("Ollama cut-off error = %v, want the read failure", err)
+	}
+}
+
 func TestValidateLocalAIChatMessages(t *testing.T) {
 	valid := []AIMessage{{Role: "user", Content: "Question"}, {Role: "assistant", Content: "Answer"}, {Role: "user", Content: "Follow-up"}}
 	if err := validateLocalAIChatMessages(valid); err != nil {
@@ -457,7 +489,7 @@ func TestValidateLocalAIChatMessages(t *testing.T) {
 		{{Role: "assistant", Content: "answer"}},
 		{{Role: "user", Content: "question"}, {Role: "assistant", Content: "answer"}},
 		{{Role: "user", Content: "question"}, {Role: "assistant", Content: "answer"}, {Role: "assistant", Content: "duplicate"}},
-		{{Role: "user", Content: strings.Repeat("x", ghostwriterChatMessageLimit+1)}},
+		{{Role: "user", Content: strings.Repeat("x", localAIChatMessageLimit+1)}},
 	} {
 		if err := validateLocalAIChatMessages(messages); err == nil {
 			t.Errorf("validateLocalAIChatMessages(%+v) accepted invalid history", messages)

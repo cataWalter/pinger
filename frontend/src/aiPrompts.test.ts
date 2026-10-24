@@ -158,7 +158,7 @@ describe('local AI prompts', () => {
 
     const prompt = buildAgentPrompt({ id: 'tutor', name: 'Language tutor', instructions: 'Teach Spanish gently.' }, 'Explain the idiom', messages, '', 'You are {name}. Rules: {instructions}')
     expect(prompt[0].content).toContain('You are Language tutor. Rules: Teach Spanish gently.')
-    expect(prompt[0].content).toContain('Return a suggestion for the user to review')
+    expect(prompt[0].content).toContain('Return exactly one suggestion for the user to review')
   })
 
   it('falls back to an empty collection for malformed agent preferences', () => {

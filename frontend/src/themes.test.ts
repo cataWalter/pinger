@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SYSTEM_THEME_NAME, defaultBubbleColorForTheme, findThemeByName, themeIdForPreference, themeModeForPreference, themes } from './themes'
+import { SYSTEM_THEME_NAME, findThemeByName, themeIdForPreference, themeModeForPreference, themes } from './themes'
 
 describe('themes', () => {
   it('defines eleven unique themes that are each light or dark', () => {
@@ -25,19 +25,13 @@ describe('themes', () => {
     expect(themeModeForPreference(SYSTEM_THEME_NAME, true)).toBe('dark')
     expect(themeModeForPreference(SYSTEM_THEME_NAME, false)).toBe('light')
     expect(themeIdForPreference('Something else', true)).toBe('something-else')
-    expect(defaultBubbleColorForTheme('something-else')).toBe('#236b52')
   })
 
-  it('resolves modes and bubble colors per theme', () => {
+  it('resolves theme ids and modes', () => {
     expect(findThemeByName('oled black')?.mode).toBe('dark')
     expect(findThemeByName('vs code')?.id).toBe('vs-code')
     expect(findThemeByName('bosco')?.mode).toBe('light')
     expect(themeModeForPreference('Dracula', false)).toBe('dark')
     expect(themeModeForPreference('Sepia', true)).toBe('light')
-    expect(defaultBubbleColorForTheme('bosco')).toBe('#276d4b')
-    expect(defaultBubbleColorForTheme('rosa')).toBe('#ad3f60')
-    expect(defaultBubbleColorForTheme('midnight')).toBe('#3e6fc2')
-    expect(defaultBubbleColorForTheme('solarized')).toBe('#268bd2')
-    expect(defaultBubbleColorForTheme('vs-code')).toBe('#264f78')
   })
 })

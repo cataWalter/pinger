@@ -141,7 +141,7 @@ func TestMediaAssetHandlerUsesRawHTTPForBinaryOperations(t *testing.T) {
 			importedData = string(append([]byte(nil), data...))
 			return RoomKeyImportResult{Imported: 2, Total: 3}, nil
 		},
-		sendAttachmentFn: func(_ context.Context, roomID, filename string, data []byte, voiceNote bool, duration int64) error {
+		sendAttachmentFn: func(_ context.Context, roomID, filename string, data []byte, voiceNote, _ bool, duration int64) error {
 			uploadedRoomID = roomID
 			uploadedFilename = filename
 			uploadedData = string(append([]byte(nil), data...))
@@ -176,5 +176,30 @@ func TestMediaAssetHandlerUsesRawHTTPForBinaryOperations(t *testing.T) {
 	handler.ServeHTTP(attachmentResponse, attachmentRequest)
 	if attachmentResponse.Code != http.StatusNoContent || uploadedRoomID != "!room:example.org" || uploadedFilename != "voice.ogg" || uploadedData != "voice bytes" || !uploadedVoiceNote || uploadedDuration != 1250 {
 		t.Fatalf("attachment upload = %d, room=%q filename=%q data=%q voice=%t duration=%d", attachmentResponse.Code, uploadedRoomID, uploadedFilename, uploadedData, uploadedVoiceNote, uploadedDuration)
+	}
+}
+
+func TestMediaAssetHandlerForwardsVideoMessageFlag(t *testing.T) {
+	var uploadedVoiceNote, uploadedVideoMessage bool
+	var uploadedDuration int64
+	handler := mediaAssetHandler{
+		sendAttachmentFn: func(_ context.Context, _, _ string, _ []byte, voiceNote, videoMessage bool, duration int64) error {
+			uploadedVoiceNote = voiceNote
+			uploadedVideoMessage = videoMessage
+			uploadedDuration = duration
+			return nil
+		},
+	}
+
+	videoResponse := httptest.NewRecorder()
+	handler.ServeHTTP(videoResponse, httptest.NewRequest(http.MethodPost, "/media/ipc/attachment/%21room%3Aexample.org?filename=video-message.webm&videoMessage=true&durationMs=4000", strings.NewReader("video bytes")))
+	if videoResponse.Code != http.StatusNoContent || uploadedVoiceNote || !uploadedVideoMessage || uploadedDuration != 4000 {
+		t.Fatalf("video upload = %d, voice=%t video=%t duration=%d", videoResponse.Code, uploadedVoiceNote, uploadedVideoMessage, uploadedDuration)
+	}
+
+	bothResponse := httptest.NewRecorder()
+	handler.ServeHTTP(bothResponse, httptest.NewRequest(http.MethodPost, "/media/ipc/attachment/%21room%3Aexample.org?filename=clip.webm&voiceNote=true&videoMessage=true&durationMs=4000", strings.NewReader("clip bytes")))
+	if bothResponse.Code != http.StatusBadRequest {
+		t.Fatalf("combined voice and video upload = %d, want 400", bothResponse.Code)
 	}
 }

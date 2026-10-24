@@ -44,7 +44,6 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - In direct chats, your own messages show a **Seen at** timestamp derived from the other person's read receipt.
 - The composer accepts pasted images and files dropped onto the window (50 MiB per attachment), completes `@` mentions from the room member list, suggests emoji for `:shortcodes:`, optionally replaces emoticons as you type, and offers an optional formatting toolbar (bold, italic, inline code, strikethrough) with spellcheck.
 - **Voice notes** record straight from the composer with a selectable microphone (up to 4 minutes / 50 MiB); the next voice note can auto-play. Any audio message can be **transcribed with AI** and the transcript inserted into the composer as a draft.
-- An optional **undo send** window (5–30 seconds) holds outgoing messages briefly so they can be recalled.
 
 **Scheduled messages & reminders**
 
@@ -85,7 +84,7 @@ A searchable dialog with twelve tabs:
 - **Account** — profile details, typing indicators, content blur (read receipts are still sent when you open a room), log out.
 - **Appearance** — theme, accent, wallpaper, font size, app zoom, message and sidebar layout, timestamps.
 - **Notifications** — permission, enable/focus, sound and volume, content privacy, per-category alerts and tones, batching, repeat reminder, one-time-code handling, sound effects, and a button that opens the OS notification settings for Pinger.
-- **Keyboard** — Ctrl+Enter send, undo send window, spellcheck, formatting toolbar, emoji suggestions, emoticon replacement, copy timestamps, Up-arrow focus, single-key shortcuts (R, J, K, and the answered key), mark-answered key, full shortcut list.
+- **Keyboard** — Ctrl+Enter send, spellcheck, formatting toolbar, emoji suggestions, emoticon replacement, copy timestamps, Up-arrow focus, single-key shortcuts (R, J, K, and the answered key), mark-answered key, full shortcut list.
 - **History** — messages loaded when a room opens (25–1000).
 - **Devices** — list active devices with last-seen details and revoke them.
 - **Storage** — database, WAL, and media-cache sizes; clear media cache; optimize the database (VACUUM); storage per chat; cleanup filtered by media type and age.

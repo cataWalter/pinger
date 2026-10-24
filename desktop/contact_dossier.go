@@ -643,10 +643,16 @@ func parseContactDossierResult(response string) (contactDossierResult, error) {
 }
 
 func localContactDossierCompletion(ctx context.Context, provider GhostwriterProvider, endpoint *url.URL, model, systemPrompt, userPrompt string, tuning aiFeatureTuning) (string, error) {
-	return runLocalAICompletion(ctx, ghostwriterHTTPClient, provider, endpoint, model, []AIMessage{{Role: "system", Content: systemPrompt}, {Role: "user", Content: userPrompt}}, aiCompletionOptions{
-		Temperature:    tuning.Temperature,
-		MaxTokens:      tuning.MaxTokens,
-		JSONSchemaName: "contact_dossier",
-		JSONSchema:     contactDossierJSONSchema,
-	}, nil)
+	return runLocalAICompletion(ctx, ghostwriterHTTPClient, provider, endpoint, model, []AIMessage{{Role: "system", Content: systemPrompt}, {Role: "user", Content: userPrompt}}, contactDossierCompletionOptions(tuning), nil)
+}
+
+// contactDossierCompletionOptions maps the dossier tuning to one JSON-schema constrained model call without hidden reasoning.
+func contactDossierCompletionOptions(tuning aiFeatureTuning) aiCompletionOptions {
+	return aiCompletionOptions{
+		Temperature:        tuning.Temperature,
+		MaxTokens:          tuning.MaxTokens,
+		JSONSchemaName:     "contact_dossier",
+		JSONSchema:         contactDossierJSONSchema,
+		ChatTemplateKwargs: aiThinkingDisabled(),
+	}
 }

@@ -25,6 +25,34 @@ func TestValidateAIEndpointRequiresHTTPURL(t *testing.T) {
 	}
 }
 
+func TestAIRequestsDisableHiddenReasoning(t *testing.T) {
+	assertDisabled := func(name string, kwargs map[string]any) {
+		t.Helper()
+		if enabled, ok := kwargs["enable_thinking"]; !ok || enabled != false {
+			t.Errorf("%s chat_template_kwargs = %+v, want enable_thinking false", name, kwargs)
+		}
+	}
+
+	uiOptions, err := aiRunOptions(0.8, 0)
+	if err != nil {
+		t.Fatalf("aiRunOptions() error = %v", err)
+	}
+	assertDisabled("aiRunOptions()", uiOptions.ChatTemplateKwargs)
+
+	for _, mode := range []GhostwriterMode{GhostwriterModeChips, GhostwriterModeAutocomplete, GhostwriterModeSlash, GhostwriterModeChat} {
+		assertDisabled("ghostwriterCompletionOptions("+string(mode)+")", ghostwriterCompletionOptions(mode, aiFeatureTuning{Temperature: 0.8}).ChatTemplateKwargs)
+	}
+	assertDisabled("contactDossierCompletionOptions()", contactDossierCompletionOptions(aiFeatureTuning{Temperature: 0.6, MaxTokens: 700}).ChatTemplateKwargs)
+
+	body, _, err := encodeAICompletionRequest(GhostwriterProviderOpenAICompatible, "local-model", []AIMessage{{Role: "user", Content: "hi"}}, uiOptions, false)
+	if err != nil {
+		t.Fatalf("encodeAICompletionRequest() error = %v", err)
+	}
+	if !strings.Contains(string(body), `"chat_template_kwargs":{"enable_thinking":false}`) {
+		t.Errorf("request body = %s, want chat_template_kwargs with enable_thinking false", body)
+	}
+}
+
 func TestAIChatCompletionRejectsCrossOriginRedirect(t *testing.T) {
 	var redirectedRequests int
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -104,7 +132,7 @@ func TestAIChatCompletionSendsMessagesAndReturnsReply(t *testing.T) {
 	}
 }
 
-func TestAIToneGuardCompletionUsesLocalLowTemperatureRequest(t *testing.T) {
+func TestAIToneGuardCompletionSendsRequestedTemperature(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Model       string      `json:"model"`
@@ -116,14 +144,14 @@ func TestAIToneGuardCompletionUsesLocalLowTemperatureRequest(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		if body.Model != "local-tone-model" || body.Stream || body.Temperature != 0.1 || body.MaxTokens != 192 || len(body.Messages) != 2 {
+		if body.Model != "local-tone-model" || body.Stream || body.Temperature != 0.6 || body.MaxTokens != 192 || len(body.Messages) != 2 {
 			t.Errorf("unexpected Tone Guard request: %+v", body)
 		}
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"{\"is_hostile_or_unprofessional\":false}"}}]}`)
 	}))
 	defer server.Close()
 
-	result, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "local-tone-model", []AIMessage{{Role: "system", Content: "classify"}, {Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.1, MaxTokens: 192})
+	result, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "local-tone-model", []AIMessage{{Role: "system", Content: "classify"}, {Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.6, MaxTokens: 192})
 	if err != nil {
 		t.Fatalf("aiToneGuardCompletion() error = %v", err)
 	}
@@ -134,7 +162,7 @@ func TestAIToneGuardCompletionUsesLocalLowTemperatureRequest(t *testing.T) {
 
 func TestAIToneGuardCompletionRejectsNonLocalEndpoints(t *testing.T) {
 	for _, endpoint := range []string{"https://localhost:8080", "http://example.com:8080", "http://localhost:8080/v1"} {
-		if _, err := aiToneGuardCompletion(context.Background(), http.DefaultClient, endpoint, "", []AIMessage{{Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.1, MaxTokens: 192}); err == nil {
+		if _, err := aiToneGuardCompletion(context.Background(), http.DefaultClient, endpoint, "", []AIMessage{{Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.6, MaxTokens: 192}); err == nil {
 			t.Errorf("aiToneGuardCompletion(%q) accepted a non-local endpoint", endpoint)
 		}
 	}
@@ -154,7 +182,7 @@ func TestAIToneGuardCompletionTimesOut(t *testing.T) {
 	}()
 
 	started := time.Now()
-	_, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "", []AIMessage{{Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.1, MaxTokens: 192})
+	_, err := aiToneGuardCompletion(context.Background(), server.Client(), server.URL, "", []AIMessage{{Role: "user", Content: "draft"}}, aiCompletionOptions{Temperature: 0.6, MaxTokens: 192})
 	if err == nil {
 		t.Fatal("aiToneGuardCompletion() succeeded after the deadline")
 	}

@@ -81,6 +81,22 @@ func TestValidateAITranscriptionModelPreference(t *testing.T) {
 	}
 }
 
+func TestValidateTutorLanguagePreferences(t *testing.T) {
+	for _, key := range []string{"ai.tutor_language", "ai.tutor_explanation_language"} {
+		for _, value := range []string{"", "es", "tr"} {
+			if err := Validate(key, value); err != nil {
+				t.Errorf("Validate(%q, %q) error = %v", key, value, err)
+			}
+		}
+		if err := Validate(key, "xx"); err == nil {
+			t.Errorf("Validate(%q) accepted an unsupported tutor language", key)
+		}
+		if err := Validate(key, true); err == nil {
+			t.Errorf("Validate(%q) accepted a non-string tutor language", key)
+		}
+	}
+}
+
 func TestValidateAIFeaturePreferences(t *testing.T) {
 	for _, key := range []string{
 		"ai.feature.agent.prompt",
@@ -92,8 +108,11 @@ func TestValidateAIFeaturePreferences(t *testing.T) {
 			t.Errorf("Validate(%q, blank) error = %v", key, err)
 		}
 	}
-	if err := Validate("ai.feature.tone_guard.temperature", "0.1"); err != nil {
-		t.Fatalf("Validate(tone_guard.temperature, 0.1) error = %v", err)
+	if err := Validate("ai.feature.tone_guard.temperature", "0.6"); err != nil {
+		t.Fatalf("Validate(tone_guard.temperature, 0.6) error = %v", err)
+	}
+	if err := Validate("ai.feature.tone_guard.temperature", "0.5"); err == nil {
+		t.Fatal("Validate() accepted an AI temperature below 0.6")
 	}
 	if err := Validate("ai.feature.summarize.max_tokens", "512"); err != nil {
 		t.Fatalf("Validate(summarize.max_tokens, 512) error = %v", err)
@@ -166,6 +185,27 @@ func TestValidateEmoticonReplacements(t *testing.T) {
 	} {
 		if err := Validate(key, value); err == nil {
 			t.Errorf("Validate(%s, %#v) unexpectedly succeeded", key, value)
+		}
+	}
+}
+
+func TestValidateLocalAIAgents(t *testing.T) {
+	const key = "ai.local_agents"
+	if err := Validate(key, `{"agents":[{"id":"tutor","name":"Tutor","instructions":"Teach gently."}],"defaultAgentId":"tutor"}`); err != nil {
+		t.Fatalf("Validate(valid local agents) error = %v", err)
+	}
+	if err := Validate(key, `{"agents":[],"defaultAgentId":""}`); err != nil {
+		t.Fatalf("Validate(empty local agents) error = %v", err)
+	}
+	for name, value := range map[string]any{
+		"wrong type":         true,
+		"malformed JSON":     "{",
+		"missing default":    `{"agents":[]}`,
+		"unknown default":    `{"agents":[{"id":"tutor","name":"Tutor","instructions":"Teach."}],"defaultAgentId":"missing"}`,
+		"blank instructions": `{"agents":[{"id":"tutor","name":"Tutor","instructions":" "}],"defaultAgentId":""}`,
+	} {
+		if err := Validate(key, value); err == nil {
+			t.Errorf("%s: Validate(%s) unexpectedly succeeded", name, key)
 		}
 	}
 }

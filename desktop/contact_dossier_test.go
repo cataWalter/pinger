@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestContactDossierWriteRequiresCurrentLinkedRooms(t *testing.T) {

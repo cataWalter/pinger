@@ -857,6 +857,7 @@ func (c *Client) HistoryPageWithLimit(ctx context.Context, roomID string, before
 		c.mu.Unlock()
 	}
 	c.rememberMediaEncryption(messages)
+	c.populateReactions(ctx, roomID, messages)
 	c.populateMessageProfiles(ctx, roomID, messages)
 	c.enrichReplyPreviews(ctx, roomID, messages)
 	for i := range messages {
@@ -1354,18 +1355,49 @@ func (c *Client) EditMessage(ctx context.Context, roomID, text, editID string) e
 	}, nil)
 }
 
+const maxVideoMessageDuration = 3 * time.Minute
+
+type recordingKind int
+
+const (
+	recordingNone recordingKind = iota
+	recordingVoiceNote
+	recordingVideoMessage
+)
+
 func (c *Client) SendAttachment(ctx context.Context, roomID, filename string, data []byte) error {
-	return c.sendAttachment(ctx, roomID, filename, data, 0)
+	return c.sendAttachment(ctx, roomID, filename, data, recordingNone, 0)
 }
 
 func (c *Client) SendVoiceNote(ctx context.Context, roomID, filename string, data []byte, durationMilliseconds int64) error {
 	if durationMilliseconds <= 0 || durationMilliseconds > int64((4*time.Minute)/time.Millisecond) {
 		return errors.New("voice note duration must be between 1 ms and 4 minutes")
 	}
-	return c.sendAttachment(ctx, roomID, filename, data, durationMilliseconds)
+	return c.sendAttachment(ctx, roomID, filename, data, recordingVoiceNote, durationMilliseconds)
 }
 
-func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, data []byte, voiceDurationMilliseconds int64) error {
+func (c *Client) SendVideoMessage(ctx context.Context, roomID, filename string, data []byte, durationMilliseconds int64) error {
+	if durationMilliseconds <= 0 || durationMilliseconds > int64(maxVideoMessageDuration/time.Millisecond) {
+		return errors.New("video message duration must be between 1 ms and 3 minutes")
+	}
+	return c.sendAttachment(ctx, roomID, filename, data, recordingVideoMessage, durationMilliseconds)
+}
+
+// videoMessageMIMEType accepts only WebM and MP4 recordings, falling back to the extension because Go does not sniff isom MP4 files.
+func videoMessageMIMEType(sniffed, filename string) (string, error) {
+	if sniffed == "video/webm" || sniffed == "video/mp4" {
+		return sniffed, nil
+	}
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".webm":
+		return "video/webm", nil
+	case ".mp4":
+		return "video/mp4", nil
+	}
+	return "", errors.New("video message must be a WebM or MP4 recording")
+}
+
+func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, data []byte, recording recordingKind, durationMilliseconds int64) error {
 	if len(data) == 0 {
 		return errors.New("attachment is empty")
 	}
@@ -1380,6 +1412,13 @@ func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, da
 	mimeType := http.DetectContentType(data)
 	if detected, _, err := mime.ParseMediaType(mimeType); err == nil {
 		mimeType = detected
+	}
+	if recording == recordingVideoMessage {
+		videoType, err := videoMessageMIMEType(mimeType, filename)
+		if err != nil {
+			return err
+		}
+		mimeType = videoType
 	}
 	msgType := event.MsgFile
 	switch {
@@ -1411,13 +1450,15 @@ func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, da
 		FileName: filename,
 		Info:     info,
 	}
-	if voiceDurationMilliseconds > 0 {
+	if recording != recordingNone {
+		content.Info.Duration = int(durationMilliseconds)
+	}
+	if recording == recordingVoiceNote {
 		if msgType != event.MsgAudio {
 			return errors.New("voice note data must have an audio MIME type")
 		}
 		content.Body = "Voice message"
-		content.Info.Duration = int(voiceDurationMilliseconds)
-		content.MSC1767Audio = &event.MSC1767Audio{Duration: int(voiceDurationMilliseconds), Waveform: []int{}}
+		content.MSC1767Audio = &event.MSC1767Audio{Duration: int(durationMilliseconds), Waveform: []int{}}
 		content.MSC3245Voice = &event.MSC3245Voice{}
 	}
 	uploadData := data
@@ -1490,8 +1531,11 @@ func (c *Client) sendMessage(ctx context.Context, roomID, text string, relation 
 	return nil
 }
 
+// React sets the current user's reaction on a message. Each user has one
+// reaction per message, so the new emoji replaces any previous one. Picking the
+// emoji that is already set is a no-op.
 func (c *Client) React(ctx context.Context, roomID, eventID, emoji string) error {
-	if eventID == "" || strings.TrimSpace(emoji) == "" {
+	if eventID == "" || strings.HasPrefix(eventID, "~") || strings.TrimSpace(emoji) == "" {
 		return errors.New("reaction requires a target event and emoji")
 	}
 	emoji = strings.TrimSpace(emoji)
@@ -1500,25 +1544,170 @@ func (c *Client) React(ctx context.Context, roomID, eventID, emoji string) error
 		return err
 	}
 	defer finish()
-	if _, err = c.engine.Client.SendReaction(ctx, id.RoomID(roomID), id.EventID(eventID), emoji); err != nil {
-		return fmt.Errorf("send Matrix reaction: %w", err)
+	mine, err := c.ownReactions(ctx, roomID, eventID)
+	if err != nil {
+		return fmt.Errorf("read own Matrix reactions: %w", err)
 	}
-	c.mu.Lock()
-	if messages, ok := c.local[roomID]; ok {
-		for key, message := range messages {
-			if message.ID != eventID {
-				continue
-			}
-			if message.Reacted == nil {
-				message.Reacted = make(map[string]bool)
-			}
-			message.Reacted[emoji] = true
-			messages[key] = message
+	send, replaced := planReaction(mine, emoji)
+	if send {
+		if _, err = c.engine.Client.SendReaction(ctx, id.RoomID(roomID), id.EventID(eventID), emoji); err != nil {
+			return fmt.Errorf("send Matrix reaction: %w", err)
 		}
 	}
-	c.mu.Unlock()
+	err = c.redactReactions(ctx, roomID, replaced)
 	c.publishTimeline([]string{roomID}, "")
+	return err
+}
+
+// RemoveReaction withdraws the current user's reaction with the given emoji.
+func (c *Client) RemoveReaction(ctx context.Context, roomID, eventID, emoji string) error {
+	if eventID == "" || strings.HasPrefix(eventID, "~") || strings.TrimSpace(emoji) == "" {
+		return errors.New("reaction removal requires a target event and emoji")
+	}
+	emoji = strings.TrimSpace(emoji)
+	ctx, finish, err := c.beginOperation(ctx)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	mine, err := c.ownReactions(ctx, roomID, eventID)
+	if err != nil {
+		return fmt.Errorf("read own Matrix reactions: %w", err)
+	}
+	var removed []id.EventID
+	for _, evt := range mine {
+		if reactionKey(evt) == emoji {
+			removed = append(removed, evt.ID)
+		}
+	}
+	err = c.redactReactions(ctx, roomID, removed)
+	c.publishTimeline([]string{roomID}, "")
+	return err
+}
+
+// ownReactions returns the current user's live, non-redacted annotations on a
+// message. The result comes from the event table, not the cached counts column.
+func (c *Client) ownReactions(ctx context.Context, roomID, eventID string) ([]*database.Event, error) {
+	own := c.currentUserID()
+	if own == "" {
+		return nil, nil
+	}
+	results, err := c.engine.DB.Event.GetReactions(ctx, id.RoomID(roomID), id.EventID(eventID))
+	if err != nil {
+		return nil, err
+	}
+	result := results[id.EventID(eventID)]
+	if result == nil {
+		return nil, nil
+	}
+	var mine []*database.Event
+	for _, evt := range result.Events {
+		if evt != nil && evt.RedactedBy == "" && evt.Sender.String() == own {
+			mine = append(mine, evt)
+		}
+	}
+	return mine, nil
+}
+
+func (c *Client) redactReactions(ctx context.Context, roomID string, reactionIDs []id.EventID) error {
+	for _, reactionID := range reactionIDs {
+		if _, err := c.engine.Client.RedactEvent(ctx, id.RoomID(roomID), reactionID); err != nil {
+			return fmt.Errorf("remove Matrix reaction: %w", err)
+		}
+	}
 	return nil
+}
+
+// planReaction decides how to apply a new reaction given the user's current
+// annotations. It reports whether the emoji must be sent (it is skipped when
+// already set) and which other annotations must be redacted so the new emoji
+// replaces them.
+func planReaction(mine []*database.Event, emoji string) (send bool, replaced []id.EventID) {
+	send = true
+	for _, evt := range mine {
+		if reactionKey(evt) == emoji {
+			send = false
+			continue
+		}
+		replaced = append(replaced, evt.ID)
+	}
+	return send, replaced
+}
+
+// reactionKey returns the emoji of an m.reaction annotation.
+func reactionKey(evt *database.Event) string {
+	var content struct {
+		RelatesTo struct {
+			Key string `json:"key"`
+		} `json:"m.relates_to"`
+	}
+	if err := json.Unmarshal(evt.Content, &content); err != nil {
+		return ""
+	}
+	return content.RelatesTo.Key
+}
+
+// summarizeReactions counts live reactions per emoji and reports which emoji
+// the given user has set. Redacted annotations and empty emoji are skipped, so
+// an emoji with no remaining reactions does not appear.
+func summarizeReactions(events []*database.Event, ownUserID string) (map[string]int, map[string]bool) {
+	counts := make(map[string]int)
+	reacted := make(map[string]bool)
+	for _, evt := range events {
+		if evt == nil || evt.RedactedBy != "" || evt.Type != event.EventReaction.Type {
+			continue
+		}
+		key := reactionKey(evt)
+		if key == "" {
+			continue
+		}
+		counts[key]++
+		if ownUserID != "" && evt.Sender.String() == ownUserID {
+			reacted[key] = true
+		}
+	}
+	return counts, reacted
+}
+
+// populateReactions replaces each message's reaction counts and own-reaction
+// state with values computed from live annotation events. The stored counts
+// column only refreshes when a reaction is added, so removing the last
+// reaction would otherwise leave a stale count behind.
+func (c *Client) populateReactions(ctx context.Context, roomID string, messages []Message) {
+	eventIDs := make([]id.EventID, 0, len(messages))
+	seen := make(map[string]struct{}, len(messages))
+	for _, message := range messages {
+		if message.ID == "" || strings.HasPrefix(message.ID, "~") {
+			continue
+		}
+		if _, ok := seen[message.ID]; ok {
+			continue
+		}
+		seen[message.ID] = struct{}{}
+		eventIDs = append(eventIDs, id.EventID(message.ID))
+	}
+	if len(eventIDs) == 0 {
+		return
+	}
+	results, err := c.engine.DB.Event.GetReactions(ctx, id.RoomID(roomID), eventIDs...)
+	if err != nil {
+		log.Printf("read Matrix reactions for room %s: %v", roomID, err)
+		return
+	}
+	own := c.currentUserID()
+	for i := range messages {
+		result := results[id.EventID(messages[i].ID)]
+		if result == nil {
+			continue
+		}
+		messages[i].Reactions, messages[i].Reacted = summarizeReactions(result.Events, own)
+	}
+}
+
+// isReactionEvent reports whether an event changes reactions. Reactions are not
+// timeline rows, so syncs carrying them must still refresh an open room.
+func isReactionEvent(evt *database.Event) bool {
+	return evt.Type == event.EventReaction.Type
 }
 
 func (c *Client) RedactMessage(ctx context.Context, roomID, eventID string) error {
@@ -2207,6 +2396,7 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 			}
 			inTimeline := isTimelineEvent(syncRoom.Timeline, evt.RowID)
 			if isMessage && !previewResolved && evt.CanUseForPreview() {
+
 				// Timeline membership keeps stale rows resent in `events` from
 				// moving the preview backwards, but a freshly sent own message
 				// may not have a timeline row yet, so let it seed an empty
@@ -2217,7 +2407,7 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 					room.LastEventSender = message.Sender
 				}
 			}
-			if notify && inTimeline {
+			if notify && (inTimeline || isReactionEvent(evt)) {
 				if c.pendingTimelineRooms == nil {
 					c.pendingTimelineRooms = make(map[string]struct{})
 				}

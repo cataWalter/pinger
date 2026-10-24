@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   AI_FEATURE_SPECS,
   AI_MAX_TOKENS_LIMIT,
+  AI_TEMPERATURE_MAX,
+  AI_TEMPERATURE_MIN,
   aiFeatureDraftFromTuning,
   aiFeaturePreferenceEntries,
   aiFeatureResetEntries,
@@ -11,7 +13,10 @@ import {
   parseAITemperature,
   renderAITemplate,
   resolveAIFeatureTuning,
+  resolveTutorLanguages,
   tuningFromPreferences,
+  TUTOR_LANGUAGES,
+  tutorLanguageName,
   validateAIFeatureDraft,
 } from './aiSettings'
 
@@ -27,10 +32,18 @@ describe('AI feature settings', () => {
     }
   })
 
+  it('keeps every built-in temperature between the minimum and maximum', () => {
+    expect(AI_TEMPERATURE_MIN).toBe(0.6)
+    for (const spec of AI_FEATURE_SPECS) {
+      expect(spec.temperature).toBeGreaterThanOrEqual(AI_TEMPERATURE_MIN)
+      expect(spec.temperature).toBeLessThanOrEqual(AI_TEMPERATURE_MAX)
+    }
+  })
+
   it('resolves built-in defaults when no overrides are saved', () => {
     expect(resolveAIFeatureTuning({}, 'tone_guard')).toEqual({
       prompt: aiFeatureSpec('tone_guard').prompt,
-      temperature: 0.1,
+      temperature: 0.6,
       maxTokens: 192,
     })
     expect(resolveAIFeatureTuning({}, 'summarize').maxTokens).toBe(0)
@@ -48,18 +61,23 @@ describe('AI feature settings', () => {
     expect(resolveAIFeatureTuning(preferences, 'explain')).toEqual({ prompt: 'Explain like a teacher.', temperature: 0.9, maxTokens: 300 })
     expect(resolveAIFeatureTuning(preferences, 'summarize')).toEqual({
       prompt: aiFeatureSpec('summarize').prompt,
-      temperature: 0.5,
+      temperature: 0.6,
       maxTokens: 0,
     })
   })
 
-  it('keeps a temperature of zero instead of replacing it with the default', () => {
-    expect(tuningFromPreferences({ 'ai.feature.x.temperature': '0' }, 'x', { prompt: 'p', temperature: 0.5, maxTokens: 0 }).temperature).toBe(0)
+  it('falls back to the default for a saved temperature below the minimum', () => {
+    const defaults = { prompt: 'p', temperature: 0.8, maxTokens: 0 }
+
+    expect(tuningFromPreferences({ 'ai.feature.x.temperature': '0.2' }, 'x', defaults).temperature).toBe(0.8)
+    expect(tuningFromPreferences({ 'ai.feature.x.temperature': '0.6' }, 'x', defaults).temperature).toBe(0.6)
   })
 
   it('parses temperature and max tokens within the allowed ranges', () => {
     expect(parseAITemperature('')).toBeNull()
-    expect(parseAITemperature('0')).toBe(0)
+    expect(parseAITemperature('0')).toBeNull()
+    expect(parseAITemperature('0.5')).toBeNull()
+    expect(parseAITemperature('0.6')).toBe(0.6)
     expect(parseAITemperature('2')).toBe(2)
     expect(parseAITemperature('2.5')).toBeNull()
     expect(parseAITemperature('-0.1')).toBeNull()
@@ -92,7 +110,8 @@ describe('AI feature settings', () => {
     expect(validateAIFeatureDraft(valid)).toBe('')
     expect(validateAIFeatureDraft({ prompt: '', temperature: '', maxTokens: '' })).toBe('')
     expect(validateAIFeatureDraft({ ...valid, prompt: 'x'.repeat(8001) })).toContain('8000 characters')
-    expect(validateAIFeatureDraft({ ...valid, temperature: '2.5' })).toContain('from 0 to 2')
+    expect(validateAIFeatureDraft({ ...valid, temperature: '0.3' })).toBe('Temperature must be a number from 0.6 to 2.')
+    expect(validateAIFeatureDraft({ ...valid, temperature: '2.5' })).toContain('from 0.6 to 2')
     expect(validateAIFeatureDraft({ ...valid, maxTokens: '1.5' })).toContain('whole number')
     expect(validateAIFeatureDraft({ ...valid, maxTokens: '9000' })).toContain(String(AI_MAX_TOKENS_LIMIT))
   })
@@ -119,5 +138,32 @@ describe('AI feature settings', () => {
       ['ai.feature.explain.max_tokens', ''],
     ])
     expect(aiFeatureDraftFromTuning({ prompt: 'p', temperature: 0.2, maxTokens: 0 })).toEqual({ prompt: 'p', temperature: '0.2', maxTokens: '' })
+  })
+
+  it('lists unique tutor language codes including the Turkish and Italian defaults', () => {
+    const codes = TUTOR_LANGUAGES.map((language) => language.code)
+
+    expect(codes).toHaveLength(16)
+    expect(new Set(codes).size).toBe(codes.length)
+    expect(codes).toContain('tr')
+    expect(codes).toContain('it')
+  })
+
+  it('names tutor languages and returns unknown codes unchanged', () => {
+    expect(tutorLanguageName('es')).toBe('Spanish')
+    expect(tutorLanguageName('tr')).toBe('Turkish')
+    expect(tutorLanguageName('xx')).toBe('xx')
+    expect(tutorLanguageName()).toBe('')
+  })
+
+  it('resolves tutor languages from preferences and falls back to Turkish and Italian', () => {
+    expect(resolveTutorLanguages({})).toEqual({ target: 'tr', explanation: 'it' })
+    expect(resolveTutorLanguages({ 'ai.tutor_language': 'de', 'ai.tutor_explanation_language': 'en' })).toEqual({ target: 'de', explanation: 'en' })
+    expect(resolveTutorLanguages({ 'ai.tutor_language': 'xx', 'ai.tutor_explanation_language': 'fr' })).toEqual({ target: 'tr', explanation: 'fr' })
+    expect(resolveTutorLanguages({ 'ai.tutor_language': true, 'ai.tutor_explanation_language': 'de' })).toEqual({ target: 'tr', explanation: 'de' })
+  })
+
+  it('falls back to the default pair when both languages are the same', () => {
+    expect(resolveTutorLanguages({ 'ai.tutor_language': 'es', 'ai.tutor_explanation_language': 'es' })).toEqual({ target: 'tr', explanation: 'it' })
   })
 })

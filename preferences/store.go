@@ -493,7 +493,7 @@ func Validate(key string, value any) error {
 		if !ok {
 			return fmt.Errorf("preference %q must be a JSON string", key)
 		}
-		return validateRoomAIAgents(serialized)
+		return validateAIAgentCollection(serialized)
 	}
 	if strings.HasPrefix(key, messageBookmarkPrefix) {
 		if strings.TrimPrefix(key, messageBookmarkPrefix) == "" {
@@ -520,7 +520,7 @@ func Validate(key string, value any) error {
 	}
 	switch key {
 	case "appearance.compact", "appearance.hide_deleted_messages", "appearance.hide_images_and_videos", "appearance.message_animations", "appearance.pointer_cursor", "appearance.show_avatars", "appearance.show_timestamps", "appearance.time_24_hour", "appearance.relative_timestamps",
-		"clipboard.copy_timestamp", "composer.arrow_up_focus_timeline", "composer.ctrl_enter", "composer.spellcheck", "composer.undo_send_enabled", "notifications.enabled", "notifications.only_when_unfocused", "notifications.sound",
+		"clipboard.copy_timestamp", "composer.arrow_up_focus_timeline", "composer.ctrl_enter", "composer.spellcheck", "notifications.enabled", "notifications.only_when_unfocused", "notifications.sound",
 		"sidebar.compact_chat_list", "sidebar.show_previews", "sidebar.show_unread_counts", "window.minimize_to_tray", "window.room_details_visible", "window.sidebar_visible", "system.launch_at_startup", "voice.autoplay_next",
 		"notifications.direct", "notifications.mentions", "notifications.group", "notifications.otp_immediate", "notifications.otp_copy", "sidebar.transparent", "sidebar.network_icons", "reactions.quick_enabled", "window.start_minimized", "window.quit_on_close", "window.menu_bar_icon", "downloads.ask_each_time", "appearance.balanced_text", "composer.formatting_toolbar", "emoji.autocomplete", "emoji.replace_emoticons", "privacy.incognito", "busy_mode.enabled", "ghostwriter.enabled", "relationship_health.enabled", "archive.automatic":
 		if _, ok := value.(bool); !ok {
@@ -568,6 +568,12 @@ func Validate(key string, value any) error {
 		}
 	case "emoji.emoticon_replacements":
 		return validateEmoticonReplacements(value)
+	case "ai.local_agents":
+		serialized, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("preference %q must be a JSON string", key)
+		}
+		return validateAIAgentCollection(serialized)
 	case "ai.translate_language":
 		language, ok := value.(string)
 		if !ok {
@@ -575,6 +581,14 @@ func Validate(key string, value any) error {
 		}
 		if len(language) > 40 {
 			return errors.New("AI translation language must be 40 characters or fewer")
+		}
+	case "ai.tutor_language", "ai.tutor_explanation_language":
+		code, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("preference %q must be a string", key)
+		}
+		if _, known := tutorLanguageNames[code]; code != "" && !known {
+			return errors.New("AI tutor language is not supported")
 		}
 	case "notifications.sound_direct", "notifications.sound_mention", "notifications.sound_group":
 		if !oneOf(value, "Chime", "Pulse", "Soft", "Silent") {
@@ -617,7 +631,7 @@ func Validate(key string, value any) error {
 			return errors.New("appearance.theme has an unsupported value")
 		}
 	case "appearance.accent_color":
-		if !oneOf(value, "Forest", "Ocean", "Rose", "Gold") {
+		if !oneOf(value, "Forest", "Ocean", "Rose", "Gold") && !isHexColor(value) {
 			return errors.New("appearance.accent_color has an unsupported value")
 		}
 	case "appearance.chat_wallpaper":
@@ -635,10 +649,6 @@ func Validate(key string, value any) error {
 	case "notifications.privacy":
 		if !oneOf(value, "Sender and message preview", "Sender only", "Hidden content") {
 			return errors.New("notifications.privacy has an unsupported value")
-		}
-	case "composer.undo_send_seconds":
-		if !oneOf(value, "0", "5", "10", "20", "30") {
-			return errors.New("composer.undo_send_seconds has an unsupported value")
 		}
 	case "schedule.suggestions_minutes":
 		if !validScheduleSuggestions(value) {
@@ -675,6 +685,33 @@ func Validate(key string, value any) error {
 	return nil
 }
 
+// tutorLanguageNames lists the languages the Language Tutor can teach or explain in, keyed by code.
+// The codes must match TUTOR_LANGUAGES in frontend/src/aiSettings.ts.
+var tutorLanguageNames = map[string]string{
+	"ar": "Arabic",
+	"de": "German",
+	"el": "Greek",
+	"en": "English",
+	"es": "Spanish",
+	"fr": "French",
+	"it": "Italian",
+	"ja": "Japanese",
+	"ko": "Korean",
+	"nl": "Dutch",
+	"pl": "Polish",
+	"pt": "Portuguese",
+	"ru": "Russian",
+	"sv": "Swedish",
+	"tr": "Turkish",
+	"zh": "Chinese",
+}
+
+// TutorLanguageName returns the English name for a Language Tutor language code.
+func TutorLanguageName(code string) (string, bool) {
+	name, ok := tutorLanguageNames[code]
+	return name, ok
+}
+
 // aiFeatureIDs lists the AI features whose prompt, temperature, and token limit can be tuned from settings.
 // The IDs must match the feature catalog in desktop/ai_settings.go and frontend/src/aiSettings.ts.
 var aiFeatureIDs = map[string]bool{
@@ -698,6 +735,7 @@ var aiFeatureIDs = map[string]bool{
 
 const (
 	aiFeatureMaxPromptRunes = 8000
+	aiFeatureMinTemperature = 0.6
 	aiFeatureMaxTemperature = 2
 	aiFeatureMaxTokens      = 8192
 )
@@ -724,8 +762,8 @@ func validateAIFeaturePreference(key string, value any) error {
 			return nil
 		}
 		temperature, err := strconv.ParseFloat(text, 64)
-		if err != nil || !(temperature >= 0 && temperature <= aiFeatureMaxTemperature) {
-			return errors.New("AI temperature must be a number from 0 to 2")
+		if err != nil || !(temperature >= aiFeatureMinTemperature && temperature <= aiFeatureMaxTemperature) {
+			return errors.New("AI temperature must be a number from 0.6 to 2")
 		}
 	case "max_tokens":
 		if text == "" {
@@ -774,7 +812,8 @@ func validateEmoticonReplacements(value any) error {
 	return nil
 }
 
-func validateRoomAIAgents(serialized string) error {
+// validateAIAgentCollection checks a serialized list of chat agent profiles and their default selection.
+func validateAIAgentCollection(serialized string) error {
 	const (
 		maxBytes       = 32_768
 		maxAgents      = 8
@@ -783,7 +822,7 @@ func validateRoomAIAgents(serialized string) error {
 		maxPromptRunes = 2_000
 	)
 	if len(serialized) > maxBytes {
-		return errors.New("room AI-agent data exceeds the size limit")
+		return errors.New("AI-agent data exceeds the size limit")
 	}
 	var collection struct {
 		Agents []struct {
@@ -794,33 +833,33 @@ func validateRoomAIAgents(serialized string) error {
 		DefaultAgentID *string `json:"defaultAgentId"`
 	}
 	if err := json.Unmarshal([]byte(serialized), &collection); err != nil {
-		return fmt.Errorf("invalid room AI-agent JSON: %w", err)
+		return fmt.Errorf("invalid AI-agent JSON: %w", err)
 	}
 	if collection.Agents == nil || collection.DefaultAgentID == nil {
-		return errors.New("room AI-agent data must include agents and defaultAgentId")
+		return errors.New("AI-agent data must include agents and defaultAgentId")
 	}
 	if len(collection.Agents) > maxAgents {
-		return fmt.Errorf("room AI-agent data may contain at most %d profiles", maxAgents)
+		return fmt.Errorf("AI-agent data may contain at most %d profiles", maxAgents)
 	}
 	ids := make(map[string]struct{}, len(collection.Agents))
 	for _, agent := range collection.Agents {
 		if agent.ID == "" || utf8.RuneCountInString(agent.ID) > maxIDRunes {
-			return errors.New("room AI-agent IDs must contain 1 to 64 characters")
+			return errors.New("AI-agent IDs must contain 1 to 64 characters")
 		}
 		if _, duplicate := ids[agent.ID]; duplicate {
-			return errors.New("room AI-agent IDs must be unique")
+			return errors.New("AI-agent IDs must be unique")
 		}
 		ids[agent.ID] = struct{}{}
 		if strings.TrimSpace(agent.Name) == "" || utf8.RuneCountInString(agent.Name) > maxNameRunes {
-			return errors.New("room AI-agent names must contain 1 to 48 characters")
+			return errors.New("AI-agent names must contain 1 to 48 characters")
 		}
 		if strings.TrimSpace(agent.Instructions) == "" || utf8.RuneCountInString(agent.Instructions) > maxPromptRunes {
-			return errors.New("room AI-agent instructions must contain 1 to 2000 characters")
+			return errors.New("AI-agent instructions must contain 1 to 2000 characters")
 		}
 	}
 	if defaultID := *collection.DefaultAgentID; defaultID != "" {
 		if _, exists := ids[defaultID]; !exists {
-			return errors.New("default room AI-agent must match a saved profile")
+			return errors.New("default AI-agent must match a saved profile")
 		}
 	}
 	return nil
@@ -837,6 +876,19 @@ func oneOf(value any, choices ...string) bool {
 		}
 	}
 	return false
+}
+
+func isHexColor(value any) bool {
+	text, ok := value.(string)
+	if !ok || len(text) != 7 || text[0] != '#' {
+		return false
+	}
+	for _, r := range text[1:] {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return false
+		}
+	}
+	return true
 }
 
 func validEmojiList(value any) bool {

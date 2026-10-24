@@ -47,6 +47,12 @@ type aiCompletionOptions struct {
 	MaxResponseBytes int64
 }
 
+// aiThinkingDisabled returns the chat template arguments that turn off hidden reasoning on OpenAI-compatible servers.
+// The app never shows reasoning, and reasoning counts against max_tokens, so every request turns it off.
+func aiThinkingDisabled() map[string]any {
+	return map[string]any{"enable_thinking": false}
+}
+
 type aiOllamaOptions struct {
 	Temperature float64  `json:"temperature"`
 	NumPredict  int      `json:"num_predict,omitempty"`
@@ -54,13 +60,36 @@ type aiOllamaOptions struct {
 }
 
 type aiOllamaRequest struct {
-	Model    string          `json:"model"`
-	Messages []AIMessage     `json:"messages,omitempty"`
-	System   string          `json:"system,omitempty"`
-	Prompt   string          `json:"prompt,omitempty"`
-	Stream   bool            `json:"stream"`
-	Format   json.RawMessage `json:"format,omitempty"`
-	Options  aiOllamaOptions `json:"options"`
+	Model    string            `json:"model"`
+	Messages []aiOllamaMessage `json:"messages,omitempty"`
+	System   string            `json:"system,omitempty"`
+	Prompt   string            `json:"prompt,omitempty"`
+	Stream   bool              `json:"stream"`
+	Format   json.RawMessage   `json:"format,omitempty"`
+	Options  aiOllamaOptions   `json:"options"`
+}
+
+// aiOllamaMessage carries images as raw base64 strings, which is the Ollama chat wire format.
+type aiOllamaMessage struct {
+	Role    string   `json:"role"`
+	Content string   `json:"content"`
+	Images  []string `json:"images,omitempty"`
+}
+
+// aiOpenAIMessage uses a string for text-only turns and a content part list when images are attached.
+type aiOpenAIMessage struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"`
+}
+
+type aiOpenAIContentPart struct {
+	Type     string            `json:"type"`
+	Text     string            `json:"text,omitempty"`
+	ImageURL *aiOpenAIImageURL `json:"image_url,omitempty"`
+}
+
+type aiOpenAIImageURL struct {
+	URL string `json:"url"`
 }
 
 // aiRunRegistry tracks in-flight AI requests by ID so the UI can stop them.
@@ -182,6 +211,9 @@ func aiProviderCompletion(ctx context.Context, client *http.Client, provider Gho
 }
 
 func encodeAICompletionRequest(provider GhostwriterProvider, model string, messages []AIMessage, options aiCompletionOptions, stream bool) ([]byte, string, error) {
+	if !options.Chat && aiMessagesHaveImages(messages) {
+		return nil, "", errors.New("images require a chat request")
+	}
 	switch provider {
 	case GhostwriterProviderOllama:
 		request := aiOllamaRequest{
@@ -192,7 +224,7 @@ func encodeAICompletionRequest(provider GhostwriterProvider, model string, messa
 		}
 		var requestPath string
 		if options.Chat {
-			request.Messages = messages
+			request.Messages = aiOllamaMessages(messages)
 			requestPath = "/api/chat"
 		} else {
 			if messages[0].Role == "system" {
@@ -214,7 +246,7 @@ func encodeAICompletionRequest(provider GhostwriterProvider, model string, messa
 		temperature := options.Temperature
 		body, err := json.Marshal(aiChatRequest{
 			Model:              model,
-			Messages:           messages,
+			Messages:           aiOpenAIMessages(messages),
 			Stream:             stream,
 			Temperature:        &temperature,
 			MaxTokens:          options.MaxTokens,
@@ -229,6 +261,43 @@ func encodeAICompletionRequest(provider GhostwriterProvider, model string, messa
 	default:
 		return nil, "", errors.New("unsupported AI provider")
 	}
+}
+
+func aiMessagesHaveImages(messages []AIMessage) bool {
+	for _, message := range messages {
+		if len(message.Images) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func aiOllamaMessages(messages []AIMessage) []aiOllamaMessage {
+	converted := make([]aiOllamaMessage, 0, len(messages))
+	for _, message := range messages {
+		item := aiOllamaMessage{Role: message.Role, Content: message.Content}
+		for _, image := range message.Images {
+			item.Images = append(item.Images, image.Data)
+		}
+		converted = append(converted, item)
+	}
+	return converted
+}
+
+func aiOpenAIMessages(messages []AIMessage) []aiOpenAIMessage {
+	converted := make([]aiOpenAIMessage, 0, len(messages))
+	for _, message := range messages {
+		item := aiOpenAIMessage{Role: message.Role, Content: message.Content}
+		if len(message.Images) > 0 {
+			parts := []aiOpenAIContentPart{{Type: "text", Text: message.Content}}
+			for _, image := range message.Images {
+				parts = append(parts, aiOpenAIContentPart{Type: "image_url", ImageURL: &aiOpenAIImageURL{URL: "data:" + image.MediaType + ";base64," + image.Data}})
+			}
+			item.Content = parts
+		}
+		converted = append(converted, item)
+	}
+	return converted
 }
 
 func aiOllamaFormat(options aiCompletionOptions) json.RawMessage {
@@ -366,6 +435,10 @@ func streamOllamaCompletion(reader io.Reader, chat bool, maxBytes int64, onChunk
 			Error    string    `json:"error"`
 		}
 		if err := json.Unmarshal(line, &chunk); err != nil {
+			// A cut-off read leaves a partial last line, so the read failure is the real cause.
+			if readErr := scanner.Err(); readErr != nil {
+				return "", fmt.Errorf("read Ollama stream: %w", readErr)
+			}
 			return "", fmt.Errorf("decode Ollama stream: %w", err)
 		}
 		if chunk.Error != "" {
@@ -418,6 +491,10 @@ func streamOpenAICompatibleCompletion(reader io.Reader, maxBytes int64, onChunk 
 			} `json:"choices"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			// A cut-off read leaves a partial last line, so the read failure is the real cause.
+			if readErr := scanner.Err(); readErr != nil {
+				return "", fmt.Errorf("read OpenAI-compatible stream: %w", readErr)
+			}
 			return "", fmt.Errorf("decode OpenAI-compatible stream: %w", err)
 		}
 		if chunk.Error != nil {

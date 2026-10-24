@@ -359,9 +359,6 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 		}
 		eventBatcher.EnqueueUpdate(update)
 	})
-	service.emitRelationshipHealth = func(update RelationshipHealthSnapshot) {
-		app.Event.Emit(relationshipHealthEventName, update)
-	}
 	service.emitRelationshipDecay = func(update RelationshipDecaySnapshot) {
 		app.Event.Emit(relationshipDecayEventName, update)
 	}

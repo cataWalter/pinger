@@ -28,21 +28,28 @@ const (
 	aiMaxResponseBytes     = 4 << 20
 )
 
+// AIImage is one base64-encoded image attached to a chat turn. Data excludes any data URL prefix.
+type AIImage struct {
+	MediaType string `json:"mediaType"`
+	Data      string `json:"data"`
+}
+
 // AIMessage is one chat turn sent to the local model.
 type AIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string    `json:"role"`
+	Content string    `json:"content"`
+	Images  []AIImage `json:"images,omitempty"`
 }
 
 type aiChatRequest struct {
-	Model              string          `json:"model,omitempty"`
-	Messages           []AIMessage     `json:"messages"`
-	Stream             bool            `json:"stream"`
-	Temperature        *float64        `json:"temperature,omitempty"`
-	MaxTokens          int             `json:"max_tokens,omitempty"`
-	Stop               []string        `json:"stop,omitempty"`
-	ResponseFormat     json.RawMessage `json:"response_format,omitempty"`
-	ChatTemplateKwargs map[string]any  `json:"chat_template_kwargs,omitempty"`
+	Model              string            `json:"model,omitempty"`
+	Messages           []aiOpenAIMessage `json:"messages"`
+	Stream             bool              `json:"stream"`
+	Temperature        *float64          `json:"temperature,omitempty"`
+	MaxTokens          int               `json:"max_tokens,omitempty"`
+	Stop               []string          `json:"stop,omitempty"`
+	ResponseFormat     json.RawMessage   `json:"response_format,omitempty"`
+	ChatTemplateKwargs map[string]any    `json:"chat_template_kwargs,omitempty"`
 }
 
 type aiChatResponse struct {
@@ -244,7 +251,7 @@ func (s *AppService) aiEndpointSettings() (string, string, error) {
 	endpoint, _ := preferences["ai.endpoint"].(string)
 	model, _ := preferences["ai.model"].(string)
 	if endpoint == "" {
-		return "", "", errors.New("set an AI endpoint in Settings > Integrations")
+		return "", "", errors.New("set an AI endpoint in Settings > AI")
 	}
 	return endpoint, model, nil
 }

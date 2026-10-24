@@ -805,6 +805,140 @@ func TestPopulateEditHistoriesReturnsPersistedPreviousVersions(t *testing.T) {
 	}
 }
 
+func TestSummarizeReactionsCountsLiveAnnotationsAndOwnState(t *testing.T) {
+	events := []*database.Event{
+		{Type: event.EventReaction.Type, Sender: id.UserID("@me:example.org"), Content: json.RawMessage(`{"m.relates_to":{"rel_type":"m.annotation","event_id":"$message","key":"👍"}}`)},
+		{Type: event.EventReaction.Type, Sender: id.UserID("@alice:example.org"), Content: json.RawMessage(`{"m.relates_to":{"rel_type":"m.annotation","event_id":"$message","key":"👍"}}`)},
+		{Type: event.EventReaction.Type, Sender: id.UserID("@bob:example.org"), Content: json.RawMessage(`{"m.relates_to":{"key":"🎉"}}`)},
+		{Type: event.EventReaction.Type, Sender: id.UserID("@me:example.org"), RedactedBy: id.EventID("$redaction"), Content: json.RawMessage(`{"m.relates_to":{"key":"❤️"}}`)},
+		{Type: event.EventReaction.Type, Sender: id.UserID("@me:example.org"), Content: json.RawMessage(`{"m.relates_to":{}}`)},
+		{Type: event.EventMessage.Type, Sender: id.UserID("@me:example.org"), Content: json.RawMessage(`{"body":"not a reaction"}`)},
+		nil,
+	}
+	counts, reacted := summarizeReactions(events, "@me:example.org")
+	if len(counts) != 2 || counts["👍"] != 2 || counts["🎉"] != 1 {
+		t.Fatalf("counts = %v, want 👍:2 and 🎉:1 only", counts)
+	}
+	if len(reacted) != 1 || !reacted["👍"] {
+		t.Fatalf("reacted = %v, want only 👍", reacted)
+	}
+}
+
+func TestPlanReactionReplacesOwnReactionAndSkipsDuplicates(t *testing.T) {
+	thumbs := &database.Event{ID: id.EventID("$thumbs"), Content: json.RawMessage(`{"m.relates_to":{"key":"👍"}}`)}
+	heart := &database.Event{ID: id.EventID("$heart"), Content: json.RawMessage(`{"m.relates_to":{"key":"❤️"}}`)}
+	tests := []struct {
+		name       string
+		mine       []*database.Event
+		emoji      string
+		wantSend   bool
+		wantRedact []id.EventID
+	}{
+		{name: "first reaction is sent", emoji: "🎉", wantSend: true},
+		{name: "same emoji is not sent again", mine: []*database.Event{thumbs}, emoji: "👍", wantSend: false},
+		{name: "new emoji replaces the previous one", mine: []*database.Event{thumbs}, emoji: "🎉", wantSend: true, wantRedact: []id.EventID{"$thumbs"}},
+		{name: "other emoji is replaced when the same one is set", mine: []*database.Event{thumbs, heart}, emoji: "👍", wantSend: false, wantRedact: []id.EventID{"$heart"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			send, redact := planReaction(tt.mine, tt.emoji)
+			if send != tt.wantSend {
+				t.Fatalf("send = %v, want %v", send, tt.wantSend)
+			}
+			if fmt.Sprint(redact) != fmt.Sprint(tt.wantRedact) {
+				t.Fatalf("redact = %v, want %v", redact, tt.wantRedact)
+			}
+		})
+	}
+}
+
+func TestIsReactionEventMatchesOnlyAnnotations(t *testing.T) {
+	if !isReactionEvent(&database.Event{Type: event.EventReaction.Type}) {
+		t.Fatal("reaction event was not recognized")
+	}
+	if isReactionEvent(&database.Event{Type: event.EventMessage.Type}) {
+		t.Fatal("message event was recognized as a reaction")
+	}
+}
+
+func TestPopulateReactionsUsesLiveAnnotationsAndOwnState(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "profile", "matrix.db")
+	client, err := New(databasePath)
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	defer client.Close()
+	ctx := context.Background()
+	roomID := id.RoomID("!room:example.org")
+	baseTime := time.Date(2026, time.October, 22, 12, 0, 0, 0, time.UTC)
+	if err = client.engine.DB.Room.CreateRow(ctx, roomID); err != nil {
+		t.Fatalf("create test room: %v", err)
+	}
+	client.engine.Account = &database.Account{UserID: id.UserID("@me:example.org")}
+	message := &database.Event{
+		RoomID:    roomID,
+		ID:        id.EventID("$message"),
+		Sender:    id.UserID("@alice:example.org"),
+		Type:      event.EventMessage.Type,
+		Timestamp: jsontime.UM(baseTime),
+		Content:   json.RawMessage(`{"msgtype":"m.text","body":"hello"}`),
+		Unsigned:  json.RawMessage(`{}`),
+	}
+	if _, err = client.engine.DB.Event.Upsert(ctx, message); err != nil {
+		t.Fatalf("store message: %v", err)
+	}
+	reaction := func(eventID id.EventID, sender id.UserID, key string, offset int, redactedBy id.EventID) *database.Event {
+		content, marshalErr := json.Marshal(map[string]any{
+			"m.relates_to": map[string]any{"rel_type": "m.annotation", "event_id": "$message", "key": key},
+		})
+		if marshalErr != nil {
+			t.Fatalf("marshal reaction content: %v", marshalErr)
+		}
+		return &database.Event{
+			RoomID:       roomID,
+			ID:           eventID,
+			Sender:       sender,
+			Type:         event.EventReaction.Type,
+			Timestamp:    jsontime.UM(baseTime.Add(time.Duration(offset) * time.Second)),
+			Content:      content,
+			Unsigned:     json.RawMessage(`{}`),
+			RelatesTo:    id.EventID("$message"),
+			RelationType: event.RelAnnotation,
+			RedactedBy:   redactedBy,
+		}
+	}
+	for _, evt := range []*database.Event{
+		reaction("$own-thumbs", "@me:example.org", "👍", 1, ""),
+		reaction("$alice-thumbs", "@alice:example.org", "👍", 2, ""),
+		reaction("$bob-party", "@bob:example.org", "🎉", 3, ""),
+		reaction("$own-heart", "@me:example.org", "❤️", 4, "$redaction"),
+	} {
+		if _, err = client.engine.DB.Event.Upsert(ctx, evt); err != nil {
+			t.Fatalf("store reaction %s: %v", evt.ID, err)
+		}
+	}
+
+	messages := []Message{
+		{ID: "$message", Reactions: map[string]int{"👍": 9}},
+		{ID: "$lonely", Reactions: map[string]int{"🎉": 3}},
+		{ID: "~local", Reactions: map[string]int{"👍": 1}},
+	}
+	client.populateReactions(ctx, roomID.String(), messages)
+
+	if len(messages[0].Reactions) != 2 || messages[0].Reactions["👍"] != 2 || messages[0].Reactions["🎉"] != 1 {
+		t.Fatalf("reactions = %v, want live counts 👍:2 and 🎉:1", messages[0].Reactions)
+	}
+	if !messages[0].Reacted["👍"] || len(messages[0].Reacted) != 1 {
+		t.Fatalf("reacted = %v, want only own 👍", messages[0].Reacted)
+	}
+	if len(messages[1].Reactions) != 0 {
+		t.Fatalf("reactions = %v, want stale count cleared when no live reactions remain", messages[1].Reactions)
+	}
+	if messages[2].Reactions["👍"] != 1 {
+		t.Fatalf("local message reactions = %v, want untouched", messages[2].Reactions)
+	}
+}
+
 func TestMessageFromEventSkipsEditEvent(t *testing.T) {
 	message, ok := messageFromEvent(&database.Event{
 		ID:           "$edit-event",

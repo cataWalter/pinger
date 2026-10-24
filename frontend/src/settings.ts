@@ -1,8 +1,8 @@
 import { fuzzyScore } from './fuzzy'
 
-export type SettingsTab = 'General' | 'Appearance' | 'Notifications' | 'Keyboard' | 'History' | 'Account' | 'Devices' | 'Storage' | 'Security' | 'Help' | 'About' | 'Integrations'
+export type SettingsTab = 'General' | 'Appearance' | 'Notifications' | 'Keyboard' | 'History' | 'Account' | 'Devices' | 'Storage' | 'Security' | 'Help' | 'About' | 'AI' | 'Integrations'
 
-export const SETTINGS_TABS: SettingsTab[] = ['General', 'Account', 'Appearance', 'Notifications', 'Keyboard', 'History', 'Devices', 'Storage', 'Security', 'Help', 'About', 'Integrations']
+export const SETTINGS_TABS: SettingsTab[] = ['General', 'Account', 'Appearance', 'Notifications', 'Keyboard', 'History', 'Devices', 'Storage', 'Security', 'Help', 'About', 'AI', 'Integrations']
 
 export type SettingsEntry = {
   id: string
@@ -46,7 +46,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'appearance.font-size', tab: 'Appearance', title: 'Font size', description: 'Adjust room and message text.', keywords: 'font text size readability' },
   { id: 'appearance.app-zoom', tab: 'Appearance', title: 'App zoom', description: 'Scale the full interface.', keywords: 'zoom scale magnification' },
   { id: 'appearance.bubble-color', tab: 'Appearance', title: 'Outgoing message color', description: 'Choose a color for your messages.', keywords: 'bubble colour green outgoing' },
-  { id: 'appearance.accent-color', tab: 'Appearance', title: 'Theme accent', description: 'Choose an accent independent of message color.', keywords: 'accent palette forest ocean rose gold' },
+  { id: 'appearance.accent-color', tab: 'Appearance', title: 'Theme accent', description: 'Choose an accent. Message color follows it until you pick one.', keywords: 'accent palette forest ocean rose gold custom color hex' },
   { id: 'appearance.chat-wallpaper', tab: 'Appearance', title: 'Chat wallpaper', description: 'Add a subtle background to conversations.', keywords: 'background wallpaper meadow tide rose' },
   { id: 'appearance.pointer-cursor', tab: 'Appearance', title: 'Use pointer cursor on clickable controls', description: 'Show a pointer cursor over buttons and links.', keywords: 'cursor pointer mouse' },
   { id: 'appearance.room-previews', tab: 'Appearance', title: 'Show room previews', description: 'Show the last message in the room list.', keywords: 'sidebar preview last message' },
@@ -82,8 +82,6 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'notifications.sound-effects', tab: 'Notifications', title: 'Sound effects', description: 'Play a short sound when a message is sent.', keywords: 'sound effects sent message' },
 
   { id: 'keyboard.ctrl-enter', tab: 'Keyboard', title: 'Use Ctrl + Enter to send', description: 'Send a message with Ctrl + Enter.', keywords: 'send enter composer' },
-  { id: 'keyboard.undo-send-enabled', tab: 'Keyboard', title: 'Enable undo send', description: 'Keep outgoing messages in the timeline briefly so they can be cancelled before sending.', keywords: 'undo send cancel message toggle queued' },
-  { id: 'keyboard.undo-send', tab: 'Keyboard', title: 'Undo send window', description: 'Hold a sent message briefly so it can be undone.', keywords: 'undo send seconds' },
   { id: 'keyboard.spellcheck', tab: 'Keyboard', title: 'Spellcheck messages', description: 'Check spelling while you type.', keywords: 'spellcheck spell check' },
   { id: 'keyboard.formatting-toolbar', tab: 'Keyboard', title: 'Show formatting toolbar', description: 'Show bold, italic and link controls.', keywords: 'formatting toolbar bold italic' },
   { id: 'keyboard.emoji-autocomplete', tab: 'Keyboard', title: 'Suggest emoji for :shortcodes:', description: 'Complete :shortcodes: as you type.', keywords: 'emoji autocomplete shortcode' },
@@ -114,23 +112,24 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'security.import-passphrase', tab: 'Security', title: 'Import passphrase', description: 'Passphrase of the backup file you are importing.', keywords: 'security import passphrase' },
   { id: 'security.import-file', tab: 'Security', title: 'Import room key file', description: 'Restore room keys from a backup file.', keywords: 'security import backup file restore' },
 
-  { id: 'integrations.ai', tab: 'Integrations', title: 'OpenAI-compatible AI', description: 'Connect Pinger to a llama-server or other OpenAI-compatible endpoint.', keywords: 'ai llm model endpoint local', anchor: '.ai-settings-form' },
-  { id: 'integrations.ai-endpoint', tab: 'Integrations', title: 'Endpoint', description: 'Address of the OpenAI-compatible endpoint.', keywords: 'ai endpoint url server address' },
-  { id: 'integrations.ai-model', tab: 'Integrations', title: 'Model name (optional)', description: 'Model served by the endpoint.', keywords: 'ai model name' },
-  { id: 'integrations.ai-translate', tab: 'Integrations', title: 'Translate into', description: 'Language used for translations.', keywords: 'ai translate language' },
-  { id: 'integrations.ai-test', tab: 'Integrations', title: 'Test endpoint', description: 'Check that the endpoint answers.', keywords: 'ai test connection endpoint' },
-  { id: 'integrations.ai-prompts', tab: 'Integrations', title: 'AI prompts and tuning', description: 'Edit the instructions, temperature, and token limit for each AI feature.', keywords: 'ai prompt prompts instructions system temperature max tokens tune agent summarize translate reply tone', anchor: '.ai-prompts-settings' },
-  { id: 'integrations.ghostwriter', tab: 'Integrations', title: 'AI Ghostwriter', description: 'Draft context-aware replies using your local chat history and writing style.', keywords: 'ghostwriter autocomplete quick reply slash local ollama llama.cpp', anchor: '.ghostwriter-settings' },
-  { id: 'integrations.ghostwriter-enabled', tab: 'Integrations', title: 'Enable local AI Ghostwriter', description: 'Show local reply chips, inline completions, and /ghost drafts.', keywords: 'ghostwriter opt in autocomplete replies', anchor: '.ghostwriter-settings .setting-toggle' },
-  { id: 'integrations.ghostwriter-provider', tab: 'Integrations', title: 'Ghostwriter provider', description: 'Choose Ollama or an OpenAI-compatible local server.', keywords: 'ollama llama.cpp local provider', anchor: '.ghostwriter-settings select' },
-  { id: 'integrations.ghostwriter-endpoint', tab: 'Integrations', title: 'Ghostwriter local endpoint', description: 'Must use localhost or a loopback IP address.', keywords: 'ghostwriter endpoint localhost privacy', anchor: '.ghostwriter-settings input[type="url"]' },
-  { id: 'integrations.ghostwriter-model', tab: 'Integrations', title: 'Ghostwriter model', description: 'Model loaded by Ollama or your local server.', keywords: 'ghostwriter model qwen llama gguf', anchor: '.ghostwriter-settings input[type="text"]' },
-  { id: 'integrations.relationship-health', tab: 'Integrations', title: 'Keep in Touch reminders', description: 'Generate local relationship check-ins and contextual follow-up drafts.', keywords: 'keep in touch relationship health decay follow-up reminders local', anchor: '.relationship-health-settings .setting-toggle' },
+  { id: 'ai.connection', tab: 'AI', title: 'OpenAI-compatible AI', description: 'Connect Pinger to a llama-server or other OpenAI-compatible endpoint.', keywords: 'ai llm model endpoint local', anchor: '.ai-settings-form' },
+  { id: 'ai.endpoint', tab: 'AI', title: 'Endpoint', description: 'Address of the OpenAI-compatible endpoint.', keywords: 'ai endpoint url server address' },
+  { id: 'ai.model', tab: 'AI', title: 'Model name (optional)', description: 'Model served by the endpoint.', keywords: 'ai model name' },
+  { id: 'ai.translate', tab: 'AI', title: 'Translate into', description: 'Language used for translations.', keywords: 'ai translate language' },
+  { id: 'ai.tutor-language', tab: 'AI', title: 'Language Tutor languages', description: 'Choose the language you are learning and the language used for explanations.', keywords: 'ai tutor language learn study explanation turkish italian translation grammar', anchor: '.tutor-language-settings' },
+  { id: 'ai.test', tab: 'AI', title: 'Test endpoint', description: 'Check that the endpoint answers.', keywords: 'ai test connection endpoint' },
+  { id: 'ai.prompts', tab: 'AI', title: 'AI prompts and tuning', description: 'Edit the instructions, temperature (0.6 to 2), and token limit for each AI feature.', keywords: 'ai prompt prompts instructions system temperature max tokens tune agent summarize translate reply tone', anchor: '.ai-prompts-settings' },
+  { id: 'ai.ghostwriter', tab: 'AI', title: 'AI Ghostwriter', description: 'Draft context-aware replies using your local chat history and writing style.', keywords: 'ghostwriter autocomplete quick reply slash local ollama llama.cpp', anchor: '.ghostwriter-settings' },
+  { id: 'ai.ghostwriter-enabled', tab: 'AI', title: 'Enable local AI Ghostwriter', description: 'Show local reply chips, inline completions, and /ghost drafts.', keywords: 'ghostwriter opt in autocomplete replies', anchor: '.ghostwriter-settings .setting-toggle' },
+  { id: 'ai.ghostwriter-provider', tab: 'AI', title: 'Ghostwriter provider', description: 'Choose Ollama or an OpenAI-compatible local server.', keywords: 'ollama llama.cpp local provider', anchor: '.ghostwriter-settings select' },
+  { id: 'ai.ghostwriter-endpoint', tab: 'AI', title: 'Ghostwriter local endpoint', description: 'Must use localhost or a loopback IP address.', keywords: 'ghostwriter endpoint localhost privacy', anchor: '.ghostwriter-settings input[type="url"]' },
+  { id: 'ai.ghostwriter-model', tab: 'AI', title: 'Ghostwriter model', description: 'Model loaded by Ollama or your local server.', keywords: 'ghostwriter model qwen llama gguf', anchor: '.ghostwriter-settings input[type="text"]' },
+  { id: 'integrations.relationship-health', tab: 'Integrations', title: 'Keep in Touch reminders', description: 'Show local reminders when tracked contacts are due for a check-in.', keywords: 'keep in touch relationship health decay follow-up reminders local', anchor: '.relationship-health-settings .setting-toggle' },
   { id: 'integrations.networks', tab: 'Integrations', title: 'Detected chat networks', description: 'Bridged networks found in your chats.', keywords: 'bridges whatsapp telegram signal integration', anchor: '.integration-status' },
 
   { id: 'help.keyboard', tab: 'Help', title: 'Keyboard shortcuts', description: 'A quick tour of the shortcuts Pinger uses.', keywords: 'help shortcuts' },
   { id: 'help.storage', tab: 'Help', title: 'Storage and media', description: 'How clearing the media cache affects your messages.', keywords: 'help storage media cache' },
-  { id: 'help.ai', tab: 'Help', title: 'Local AI', description: 'Pinger connects to a llama-server you run yourself.', keywords: 'help ai llama local model' },
+  { id: 'help.ai', tab: 'Help', title: 'Local AI', description: 'Pinger connects to a llama-server you run yourself. Set it up in the AI tab.', keywords: 'help ai llama local model' },
   { id: 'help.networks', tab: 'Help', title: 'Chat networks', description: 'How bridged chats from other networks appear.', keywords: 'help bridges whatsapp telegram' },
   { id: 'help.encryption', tab: 'Help', title: 'Encryption and room keys', description: 'Export room keys from Security and protect the file with a passphrase.', keywords: 'help encryption keys backup' },
   { id: 'help.report-issue', tab: 'Help', title: 'Report an issue', description: 'Open the issue tracker on GitHub.', keywords: 'help report bug issue github' },

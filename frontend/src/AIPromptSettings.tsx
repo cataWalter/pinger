@@ -6,6 +6,7 @@ import {
   AI_MAX_TOKENS_LIMIT,
   AI_PROMPT_MAX_CHARACTERS,
   AI_TEMPERATURE_MAX,
+  AI_TEMPERATURE_MIN,
   aiFeatureDraftFromTuning,
   aiFeaturePreferenceEntries,
   aiFeatureResetEntries,
@@ -22,6 +23,34 @@ type PromptCard = {
   placeholders: string[]
   fixedRules: string
   defaults: AIFeatureTuning
+}
+
+type PromptGroup = {
+  title: string
+  cards: PromptCard[]
+}
+
+// Feature ids listed here appear under their group title; any other feature appears under Other.
+const PROMPT_GROUPS: { title: string, ids: string[] }[] = [
+  { title: 'Writing and assistants', ids: ['ask_ai', 'local_chat', 'agent', 'draft_reply', 'ghostwriter', 'rewrite', 'shorten'] },
+  { title: 'Translation and understanding', ids: ['translate', 'chat_translation', 'explain', 'summarize', 'topics', 'conversation_analysis', 'turkish_tutor'] },
+  { title: 'Checks and background tasks', ids: ['tone_guard', 'contact_dossier'] },
+]
+
+function groupPromptCards(cards: PromptCard[]): PromptGroup[] {
+  const byID = new Map(cards.map((card) => [card.id, card]))
+  const placed = new Set<string>()
+  const groups = PROMPT_GROUPS.map((group) => ({
+    title: group.title,
+    cards: group.ids.flatMap((id) => {
+      const card = byID.get(id)
+      if (!card) return []
+      placed.add(id)
+      return [card]
+    }),
+  }))
+  groups.push({ title: 'Other', cards: cards.filter((card) => !placed.has(card.id)) })
+  return groups.filter((group) => group.cards.length > 0)
 }
 
 type SaveSetting = (key: string, value: boolean | string) => Promise<boolean>
@@ -92,7 +121,7 @@ function AIPromptCard({ card, tuning, onSave }: {
         <span className="ai-prompt-card-title">{card.label}</span>
         {customized && <span className="ai-prompt-card-badge">Customized</span>}
       </summary>
-      <form className="ai-prompt-card-body" onSubmit={(event) => void saveCard(event)}>
+      <form className="ai-prompt-card-body" noValidate onSubmit={(event) => void saveCard(event)}>
         <p className="settings-note">{card.description}</p>
         {card.placeholders.length > 0 && <p className="settings-note">Placeholders: {card.placeholders.join(', ')}</p>}
         <label>
@@ -110,7 +139,7 @@ function AIPromptCard({ card, tuning, onSave }: {
             <span>Temperature</span>
             <input
               type="number"
-              min={0}
+              min={AI_TEMPERATURE_MIN}
               max={AI_TEMPERATURE_MAX}
               step={0.05}
               value={draft.temperature}
@@ -131,7 +160,7 @@ function AIPromptCard({ card, tuning, onSave }: {
             />
           </label>
         </div>
-        <p className="settings-note">Blank restores the default for that field. Temperature ranges from 0 to {AI_TEMPERATURE_MAX}; max tokens up to {AI_MAX_TOKENS_LIMIT}.</p>
+        <p className="settings-note">Blank restores the default for that field. Temperature ranges from {AI_TEMPERATURE_MIN} to {AI_TEMPERATURE_MAX}; max tokens up to {AI_MAX_TOKENS_LIMIT}.</p>
         {card.fixedRules && <p className="settings-note ai-prompt-fixed-rules">Always added and not editable: {card.fixedRules}</p>}
         {error && <p className="settings-note" role="alert">{error}</p>}
         <div className="ai-settings-actions">
@@ -186,19 +215,26 @@ export function AIPromptSettings({ preferences, onSave }: {
     })),
   ], [backendDefaults])
 
+  const groups = useMemo(() => groupPromptCards(cards), [cards])
+
   return (
     <section className="ai-prompts-settings" aria-label="AI prompts and tuning">
       <h4>AI prompts and tuning</h4>
       <p className="settings-note">Change the instructions, temperature, and token limit for each AI feature. Changes apply to the next request. Fixed rules are always added, so output formats and protection for untrusted chat text stay in place.</p>
       {backendDefaults === null && !loadError && <p className="settings-note" role="status">Loading local assistant features…</p>}
       {loadError && <p className="settings-note" role="status">Local assistant features could not be loaded: {loadError}</p>}
-      {cards.map((card) => (
-        <AIPromptCard
-          key={card.id}
-          card={card}
-          tuning={tuningFromPreferences(preferences, card.id, card.defaults)}
-          onSave={onSave}
-        />
+      {groups.map((group) => (
+        <div className="ai-prompt-group" key={group.title}>
+          <h5>{group.title}</h5>
+          {group.cards.map((card) => (
+            <AIPromptCard
+              key={card.id}
+              card={card}
+              tuning={tuningFromPreferences(preferences, card.id, card.defaults)}
+              onSave={onSave}
+            />
+          ))}
+        </div>
       ))}
     </section>
   )

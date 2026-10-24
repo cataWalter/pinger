@@ -52,20 +52,20 @@ type AppService struct {
 	scheduled                *scheduledJobStore
 	relationshipHealthMu     sync.Mutex
 	relationshipHealthStores map[string]*relationshipHealthStore
-	relationshipHealthJobs   map[string]bool
 	contactDossierJobs       map[string]bool
 	relationshipDecayWorker  bool
 	relationshipDecayTrigger chan struct{}
 	aiRuns                   aiRunRegistry
+	localAIChatMu            sync.Mutex
+	localAIChats             *localAIChatStore
 
-	emitUpdate             func(Update)
-	emitReminder           func(ScheduledJob)
-	emitRelationshipHealth func(RelationshipHealthSnapshot)
-	emitRelationshipDecay  func(RelationshipDecaySnapshot)
-	emitContactDossier     func(ContactDossierSnapshot)
-	emitGhostwriterStream  func(GhostwriterStreamEvent)
-	emitLocalAIChatStream  func(LocalAIChatStreamEvent)
-	emitAIStream           func(AIStreamEvent)
+	emitUpdate            func(Update)
+	emitReminder          func(ScheduledJob)
+	emitRelationshipDecay func(RelationshipDecaySnapshot)
+	emitContactDossier    func(ContactDossierSnapshot)
+	emitGhostwriterStream func(GhostwriterStreamEvent)
+	emitLocalAIChatStream func(LocalAIChatStreamEvent)
+	emitAIStream          func(AIStreamEvent)
 }
 
 func (s *AppService) OpenExternalURL(rawURL string) error {
@@ -388,6 +388,10 @@ func (s *AppService) React(roomID, eventID, emoji string) error {
 	return s.currentClient().React(s.ctx, roomID, eventID, emoji)
 }
 
+func (s *AppService) RemoveReaction(roomID, eventID, emoji string) error {
+	return s.currentClient().RemoveReaction(s.ctx, roomID, eventID, emoji)
+}
+
 func (s *AppService) RedactMessage(roomID, eventID string) error {
 	return s.currentClient().RedactMessage(s.ctx, roomID, eventID)
 }
@@ -564,7 +568,7 @@ func (s *AppService) RevokeDevice(deviceID, password string) error {
 	return s.currentClient().RevokeDevice(s.ctx, deviceID, password)
 }
 
-func (s *AppService) sendAttachment(ctx context.Context, roomID, filename string, data []byte, voiceNote bool, durationMilliseconds int64) error {
+func (s *AppService) sendAttachment(ctx context.Context, roomID, filename string, data []byte, voiceNote, videoMessage bool, durationMilliseconds int64) error {
 	if int64(len(data)) > maxAttachmentSize {
 		return fmt.Errorf("attachment exceeds the 50 MiB limit")
 	}
@@ -574,6 +578,9 @@ func (s *AppService) sendAttachment(ctx context.Context, roomID, filename string
 	}
 	if voiceNote {
 		return client.SendVoiceNote(ctx, roomID, filename, data, durationMilliseconds)
+	}
+	if videoMessage {
+		return client.SendVideoMessage(ctx, roomID, filename, data, durationMilliseconds)
 	}
 	return client.SendAttachment(ctx, roomID, filename, data)
 }
@@ -823,7 +830,7 @@ func (s *AppService) sendDroppedFiles(paths []string) (string, bool, error) {
 			combinedErr = errors.Join(combinedErr, err)
 			continue
 		}
-		if err = s.sendAttachment(s.ctx, roomID, filename, data, false, 0); err != nil {
+		if err = s.sendAttachment(s.ctx, roomID, filename, data, false, false, 0); err != nil {
 			combinedErr = errors.Join(combinedErr, fmt.Errorf("send dropped file %q: %w", filename, err))
 			continue
 		}
@@ -1037,6 +1044,7 @@ func (s *AppService) close() {
 	s.cancel()
 	s.workers.Wait()
 	s.closeRelationshipHealthStores()
+	s.closeLocalAIChatStore()
 	if s.preferencesUnsubscribe != nil {
 		s.preferencesUnsubscribe()
 		s.preferencesUnsubscribe = nil

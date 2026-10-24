@@ -21,7 +21,7 @@ export type ChatAgentCollection = {
 
 export const MAX_CHAT_AGENTS = 8
 export const MAX_AGENT_NAME_LENGTH = 48
-export const MAX_AGENT_INSTRUCTIONS_LENGTH = 2000
+export const MAX_AGENT_INSTRUCTIONS_LENGTH = 8000
 export const MAX_AGENT_COLLECTION_LENGTH = 32_768
 export const PROMPT_CONTEXT_LIMIT = 50
 export const REPLY_CONTEXT_LIMIT = 8

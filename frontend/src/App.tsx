@@ -63,6 +63,7 @@ import {
   SquareCode,
   Strikethrough,
   Tags,
+  Video,
   ZoomIn,
   ZoomOut,
   WandSparkles,
@@ -74,14 +75,15 @@ import { createBusyReplyForLanguage, detectBusyReplyLanguage, detectConversation
 import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, type ComposerFormat, type EmojiQuery, type EmoticonReplacement } from './composerText'
 import { fuzzyScore } from './fuzzy'
 import { ghostwriterDefaultEndpoints, isGhostCommandDraft, isLoopbackEndpoint, parseGhostCommand, type GhostwriterProvider } from './ghostwriter'
-import { SYSTEM_THEME_NAME, defaultBubbleColorForTheme, findThemeByName, themeIdForPreference, themeModeForPreference, themes as appearanceThemes } from './themes'
+import { DEFAULT_ACCENT_NAME, accentCssVariables, accentPaletteFor, accentPresets, isAccentHex } from './accent'
+import { SYSTEM_THEME_NAME, findThemeByName, themeIdForPreference, themeModeForPreference, themes as appearanceThemes } from './themes'
 import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
 import { SnippetPopover } from './SnippetPopover'
 import { loadSnippets, saveSnippets, type Snippet } from './snippets'
 import { useSnippetExpander } from './useSnippetExpander'
 import { ChatTranslationResponseError, EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, boundedTranscript, buildAgentPrompt, buildAskAIPrompt, buildChatTranslationPrompt, buildConversationAnalysisPrompt, buildExplainPrompt, buildReplyPrompt, buildRewritePrompt, buildSummaryPrompt, buildTopicInsightsPrompt, buildTranslationPrompt, parseChatAgents, parseChatTranslationResponse, serializeChatAgents, splitChatTranslationBatches, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage } from './aiPrompts'
-import { parseToneAssessment, raceWithToneGuardDeadline, shouldCheckToneGuard, buildToneGuardSystemPrompt, type ToneAssessment } from './toneGuard'
-import { resolveAIFeatureTuning, type AIFeatureID } from './aiSettings'
+import { resolveAIFeatureTuning, resolveTutorLanguages, tutorLanguageName, TUTOR_DEFAULT_EXPLANATION_LANGUAGE, TUTOR_DEFAULT_LANGUAGE, type AIFeatureID } from './aiSettings'
+import { TutorLanguageSettings } from './TutorLanguageSettings'
 import { AIPromptSettings } from './AIPromptSettings'
 import { matrixMediaURL, matrixMXCMediaURL } from './ChatMediaRenderer'
 import { useMatrixBatch } from './useMatrixBatch'
@@ -89,6 +91,8 @@ import { DialogSurface } from './DialogSurface'
 import { SnippetSettingsModal } from './SnippetSettingsModal'
 import ContactHUD from './ContactHUD'
 import LocalAIChat from './LocalAIChat'
+import LocalAISidebar from './LocalAISidebar'
+import { useLocalAIChatList } from './localAIChats'
 const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
 
 type MatrixUpdate = {
@@ -115,8 +119,7 @@ type MatrixNotification = {
 type PreferenceValues = NonNullable<Snapshot['preferences']>
 type RoomScope = 'all' | 'archived'
 type RoomRefinements = { unanswered: boolean; needsReply: boolean; favorite: boolean }
-type PendingSend = { roomID: string; text: string; replyTo: Message | null; mentionUserIDs: string[]; mentionBindings: { token: string; userID: string }[]; timer: number }
-type PendingSendPreview = { roomID: string; text: string; queuedAt: number }
+type OutgoingMessage = { roomID: string; text: string; replyTo: Message | null; mentionUserIDs: string[] }
 type MessageMenuItem = { key: string; label: string; ariaLabel: string; icon: ReactElement; danger?: boolean; disabled?: boolean; separatorBefore?: boolean; run: () => void }
 type AIAcceptAction = { kind: 'none' } | { kind: 'draft' | 'rewrite' } | { kind: 'reply'; target: Message }
 type AIPanel = {
@@ -139,13 +142,6 @@ type TurkishTutorState = { mode: 'draft' | 'message'; originalText: string; anal
 type ChatTranslationState = { requestID: number; roomID: string; targetMessageIDs: string[]; translations: Record<string, string>; busy: boolean; status: string; error: string; errorResponse: string | null }
 type GhostwriterCompletionState = { roomID: string; draft: string; text: string; requestID: string }
 type GhostwriterStreamChunk = { requestId: string; roomId: string; text: string }
-type ToneGuardSource = 'composer' | 'queued' | 'forward'
-type ToneGuardHold = {
-  message: Pick<PendingSend, 'roomID' | 'text' | 'replyTo' | 'mentionUserIDs'>
-  assessment: ToneAssessment
-  source: ToneGuardSource
-  mentionBindings: { token: string; userID: string }[]
-}
 type ScheduledDraft =
   | { kind: 'message'; roomID: string; text: string; replyToEventID?: string; replyToSender?: string; replyToPreview?: string }
   | { kind: 'reminder'; roomID: string; eventID: string; text: string; archiveAfter?: boolean }
@@ -184,6 +180,7 @@ type TimelineMessageActions = {
   onAudioEnded: (messageID: string) => void
   onUseTranscript: (text: string) => void
   onSendReaction: (message: Message, emoji: string) => void
+  onRemoveReaction: (message: Message, emoji: string) => void
 }
 type RoomButtonActions = {
   onSelect: (room: Room, index: number, event: React.MouseEvent<HTMLButtonElement>) => void
@@ -529,16 +526,20 @@ function ghostwriterTargetLanguage(messages: Message[]) {
   return incomingLanguage || detectConversationLanguage(recentMessages.map((message) => message.body))
 }
 
-function canBeNeedsReplyRoom(room: Room, pendingRoomID = '') {
-  return room.id !== pendingRoomID && (room.direct || room.bridge === 'IG')
+function isDirectLikeRoom(room: Room) {
+  return room.direct || room.bridge === 'IG'
 }
 
-function isNeedsReplyRoom(room: Room, pendingRoomID = '') {
-  return isUnansweredRoom(room, pendingRoomID) && canBeNeedsReplyRoom(room, pendingRoomID)
+function canBeNeedsReplyRoom(room: Room) {
+  return isDirectLikeRoom(room)
 }
 
-function isUnansweredRoom(room: Room, pendingRoomID = '') {
-  return room.unanswered && room.id !== pendingRoomID
+function isNeedsReplyRoom(room: Room) {
+  return isUnansweredRoom(room) && canBeNeedsReplyRoom(room)
+}
+
+function isUnansweredRoom(room: Room) {
+  return room.unanswered && canBeNeedsReplyRoom(room)
 }
 
 function isUnreadRoom(room: Room) {
@@ -555,6 +556,7 @@ const TimelineMessageList = memo(function TimelineMessageList({
   preferences,
   currentUserID,
   selectedRoomID,
+  groupChat,
   chatTranslation,
   contextMessageID,
   reactingMessageID,
@@ -567,6 +569,7 @@ const TimelineMessageList = memo(function TimelineMessageList({
   preferences: PreferenceValues
   currentUserID: string
   selectedRoomID: string
+  groupChat: boolean
   chatTranslation: ChatTranslationState | null
   contextMessageID: string
   reactingMessageID: string
@@ -597,10 +600,12 @@ const TimelineMessageList = memo(function TimelineMessageList({
       const showDayDivider = !previous || !isSameDay(previous.timestamp, message.timestamp)
       const displayBody = displayMessageBody(message)
       const isContextTarget = (message.id || message.transactionId) === contextMessageID
+      const showSender = groupChat && !ownMessage && !grouped
+      const senderName = message.senderName || message.sender
       return (
         <Fragment key={message.id || message.transactionId}>
           {showDayDivider && message.timestamp > 0 && <div className="day-divider" aria-label={formatDayLabel(message.timestamp)}><span>{formatDayLabel(message.timestamp)}</span></div>}
-          <article className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''} ${showTranslation ? 'has-translation' : ''} ${isContextTarget ? 'is-context-target' : ''}`} data-event-id={messageID} tabIndex={messageID ? -1 : undefined} style={{ '--message-index': Math.min(index, 12) } as React.CSSProperties} onDoubleClick={() => actionsRef.current.onDoubleClick(message)} onContextMenu={(event) => {
+          <article className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''} ${showTranslation ? 'has-translation' : ''} ${isContextTarget ? 'is-context-target' : ''} ${groupChat && !ownMessage ? 'is-group-incoming' : ''}`} data-event-id={messageID} tabIndex={messageID ? -1 : undefined} style={{ '--message-index': Math.min(index, 12) } as React.CSSProperties} onDoubleClick={() => actionsRef.current.onDoubleClick(message)} onContextMenu={(event) => {
             if (!selectedRoomID) return
             event.preventDefault()
             actionsRef.current.onOpenContextMenu(message, event.clientX, event.clientY)
@@ -610,8 +615,10 @@ const TimelineMessageList = memo(function TimelineMessageList({
             const bounds = event.currentTarget.getBoundingClientRect()
             actionsRef.current.onOpenContextMenu(message, bounds.left + 8, bounds.bottom)
           }}>
+            {showSender && <Avatar uri={message.avatar} label={senderName} className="message-sender-avatar" deferLoad />}
             <div className="message-body-wrap">
               {!grouped && <div className="message-meta">
+                {showSender && <strong className="message-sender-name">{senderName}</strong>}
                 {message.timestamp > 0 && preferenceBoolean(preferences, 'appearance.show_timestamps', true) && <time>{formatTimelineTime(message.timestamp, preferences)}</time>}
                 {message.edited && <span className="edited-mark" title={message.editHistory?.length ? message.editHistory.join('\n') : 'Edited message'}>edited{(message.editHistory?.length ?? 0) > 0 && ` (${message.editHistory?.length} prior)`}</span>}
               </div>}
@@ -638,7 +645,7 @@ const TimelineMessageList = memo(function TimelineMessageList({
               </time>}
               {Object.keys(message.reactions ?? {}).length > 0 && <div className="message-reactions">
                 {Object.entries(message.reactions ?? {}).map(([emoji, count]) => (
-                  <button key={emoji} type="button" className={`reaction-chip ${message.reacted?.[emoji] ? 'is-reacted' : ''}`} aria-label={`${message.reacted?.[emoji] ? 'Remove' : 'Add'} ${emoji} reaction`} title={`${message.reacted?.[emoji] ? 'Remove' : 'Add'} ${emoji} reaction`} aria-pressed={message.reacted?.[emoji] ?? false} onClick={() => actionsRef.current.onSendReaction(message, emoji)}>{emoji} {typeof count === 'number' ? count : 0}</button>
+                  <button key={emoji} type="button" className={`reaction-chip ${message.reacted?.[emoji] ? 'is-reacted' : ''}`} aria-label={`${message.reacted?.[emoji] ? 'Remove' : 'Add'} ${emoji} reaction`} title={`${message.reacted?.[emoji] ? 'Remove' : 'Add'} ${emoji} reaction`} aria-pressed={message.reacted?.[emoji] ?? false} onClick={() => message.reacted?.[emoji] ? actionsRef.current.onRemoveReaction(message, emoji) : actionsRef.current.onSendReaction(message, emoji)}>{emoji} {typeof count === 'number' ? count : 0}</button>
                 ))}
               </div>}
               {message.sendError && message.sendError !== 'not sent' && <span className="message-error">{message.sendError}</span>}
@@ -657,13 +664,6 @@ const TimelineMessageList = memo(function TimelineMessageList({
     })}
   </>
 })
-
-const accentPalettes = [
-  { name: 'Forest', base: '#2f7653', bright: '#3f9464', soft: 'rgba(47, 118, 83, 0.15)' },
-  { name: 'Ocean', base: '#28718f', bright: '#3d91ad', soft: 'rgba(40, 113, 143, 0.15)' },
-  { name: 'Rose', base: '#a74761', bright: '#c45f79', soft: 'rgba(167, 71, 97, 0.15)' },
-  { name: 'Gold', base: '#98702d', bright: '#b58d45', soft: 'rgba(152, 112, 45, 0.16)' },
-]
 
 const chatWallpapers = [
   { name: 'None', swatch: 'var(--paper)' },
@@ -823,6 +823,15 @@ function quickReactionOptions(preferences: PreferenceValues) {
   return [...new Set(defaultEmoji ? [defaultEmoji, ...base] : base)].slice(0, 6)
 }
 
+type CaptureKind = 'voice' | 'video'
+type RecordedUpload = { kind: CaptureKind; durationMilliseconds: number }
+
+const maxVideoMessageMilliseconds = 3 * 60 * 1000
+
+function preferredVideoMimeType() {
+  return ['video/mp4', 'video/webm'].find((type) => MediaRecorder.isTypeSupported?.(type)) ?? ''
+}
+
 async function requestLocalAsset(path: string, init: RequestInit) {
   const response = await fetch(path, init)
   if (!response.ok) {
@@ -870,6 +879,9 @@ function App() {
   )
   const [selectedRoomID, setSelectedRoomID] = useState('')
   const [localAIChatOpen, setLocalAIChatOpen] = useState(false)
+  const [localAIChatId, setLocalAIChatId] = useState<string | null>(null)
+  const [localAINewChatAgentId, setLocalAINewChatAgentId] = useState('')
+  const localAIChatList = useLocalAIChatList(localAIChatOpen)
   const [mobilePane, setMobilePane] = useState<'rooms' | 'conversation'>('rooms')
   const [search, setSearch] = useState('')
   const [roomScope, setRoomScope] = useState<RoomScope>('all')
@@ -891,9 +903,6 @@ function App() {
   const [ghostwriterAutocompleteStatus, setGhostwriterAutocompleteStatus] = useState<'idle' | 'loading' | 'offline'>('idle')
   const [ghostwriterDraftStatus, setGhostwriterDraftStatus] = useState('')
   const [ghostwriterDraftBusy, setGhostwriterDraftBusy] = useState(false)
-  const [toneGuardHold, setToneGuardHold] = useState<ToneGuardHold | null>(null)
-  const [toneGuardChecking, setToneGuardChecking] = useState(false)
-  const [toneGuardResolving, setToneGuardResolving] = useState(false)
   const [relationshipDecay, setRelationshipDecay] = useState<RelationshipDecaySnapshot | null>(null)
   const [relationshipsOpen, setRelationshipsOpen] = useState(false)
   const [relationshipDecayBusy, setRelationshipDecayBusy] = useState('')
@@ -981,11 +990,9 @@ function App() {
   const [password, setPassword] = useState('')
   const [recoveryKey, setRecoveryKey] = useState('')
   const [busy, setBusy] = useState(false)
-  const [pendingSendPreview, setPendingSendPreview] = useState<PendingSendPreview | null>(null)
-  const [pendingSendDeadline, setPendingSendDeadline] = useState<number | null>(null)
-  const [pendingSendCountdown, setPendingSendCountdown] = useState(0)
   const [autoPlayNextMessageId, setAutoPlayNextMessageId] = useState<string | null>(null)
   const [voiceCaptureStatus, setVoiceCaptureStatus] = useState<'recording' | 'processing' | null>(null)
+  const [captureKind, setCaptureKind] = useState<CaptureKind>('voice')
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([])
   const [selectedAudioInputDeviceId, setSelectedAudioInputDeviceId] = useState<string>(preferenceString(snapshot?.preferences ?? {}, 'audio.input_device', ''))
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
@@ -1011,7 +1018,6 @@ function App() {
   const composerEmojiSelectionRef = useRef({ start: 0, end: 0 })
   const selectedRoomIDRef = useRef(selectedRoomID)
   selectedRoomIDRef.current = selectedRoomID
-  const pendingRelationshipNudgeRef = useRef<{ roomID: string; draft: string } | null>(null)
   const ghostwriterSelectedRoomRef = useRef('')
   const ghostwriterAutocompleteRequestRef = useRef(0)
   const ghostwriterStreamRequestRef = useRef('')
@@ -1042,17 +1048,13 @@ function App() {
     onAudioEnded: () => { },
     onUseTranscript: () => { },
     onSendReaction: () => { },
+    onRemoveReaction: () => { },
   })
   const roomButtonActionsRef = useRef<RoomButtonActions>({
     onSelect: () => { },
     onKeyDown: () => { },
     onContextMenu: () => { },
   })
-  const pendingSendRef = useRef<PendingSend | null>(null)
-  const toneGuardPromptRef = useRef<HTMLElement | null>(null)
-  const toneGuardHoldRef = useRef<ToneGuardHold | null>(null)
-  const toneGuardCheckRef = useRef(false)
-  const toneGuardResolutionRef = useRef(false)
   const notificationBatchesRef = useRef(new Map<string, { notifications: MatrixNotification[]; timer: number }>())
   const repeatRemindersRef = useRef(new Map<string, number>())
 
@@ -1062,19 +1064,19 @@ function App() {
     if (undoToastTimerRef.current !== null) window.clearTimeout(undoToastTimerRef.current)
     if (scheduledNoticeTimerRef.current !== null) window.clearTimeout(scheduledNoticeTimerRef.current)
   }, [])
-  useEffect(() => {
-    if (pendingSendDeadline === null) return
-    const updateCountdown = () => setPendingSendCountdown(Math.max(0, Math.ceil((pendingSendDeadline - Date.now()) / 1000)))
-    updateCountdown()
-    const timer = window.setInterval(updateCountdown, 250)
-    return () => window.clearInterval(timer)
-  }, [pendingSendDeadline])
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const voiceRecorderRef = useRef<MediaRecorder | null>(null)
   const voiceChunksRef = useRef<Blob[]>([])
   const voiceStreamRef = useRef<MediaStream | null>(null)
   const voiceRoomIDRef = useRef('')
   const voiceTimeoutRef = useRef<number | null>(null)
+  const videoPreviewRef = useRef<HTMLVideoElement>(null)
+  const voiceRecordingActive = voiceCaptureStatus === 'recording' && captureKind === 'voice'
+  const videoRecordingActive = voiceCaptureStatus === 'recording' && captureKind === 'video'
+  const captureNoun = captureKind === 'video' ? 'video message' : 'voice note'
+  useEffect(() => {
+    if (videoPreviewRef.current) videoPreviewRef.current.srcObject = voiceStreamRef.current
+  }, [videoRecordingActive])
   const roomSearchInputRef = useRef<HTMLInputElement>(null)
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
   const [aiPanel, setAIPanel] = useState<AIPanel | null>(null)
@@ -1105,12 +1107,6 @@ function App() {
     return () => { active = false }
   }, [])
 
-  useEffect(() => {
-    if (!toneGuardHold) return
-    const frame = requestAnimationFrame(() => toneGuardPromptRef.current?.focus())
-    return () => cancelAnimationFrame(frame)
-  }, [toneGuardHold])
-
   const preferences = snapshot?.preferences ?? {}
   const rooms = snapshot?.rooms ?? EMPTY_ROOMS
   const selectedRoom = useMemo(() => rooms.find((room) => room.id === selectedRoomID), [rooms, selectedRoomID])
@@ -1133,6 +1129,36 @@ function App() {
     : ''
   const roomAgentsPreferenceKey = selectedRoom ? `room.ai_agents.${selectedRoom.id}` : ''
   const roomAgents = useMemo<ChatAgentCollection>(() => parseChatAgents(preferenceString(preferences, roomAgentsPreferenceKey, JSON.stringify(EMPTY_CHAT_AGENTS))), [preferences, roomAgentsPreferenceKey])
+  const localAIAgents = useMemo<ChatAgentCollection>(() => parseChatAgents(preferenceString(preferences, 'ai.local_agents', JSON.stringify(EMPTY_CHAT_AGENTS))), [preferences])
+  const localAIActiveChat = localAIChatList.chats.find((chat) => chat.id === localAIChatId) ?? null
+  const localAIAgentCandidate = localAIActiveChat ? localAIActiveChat.agentId : localAINewChatAgentId
+  const localAIAgentId = localAIAgents.agents.some((agent) => agent.id === localAIAgentCandidate) ? localAIAgentCandidate : ''
+
+  function startLocalAIChat(agentID?: string) {
+    setLocalAIChatId(null)
+    setLocalAINewChatAgentId(agentID ?? localAIAgents.defaultAgentId)
+    setMobilePane('conversation')
+  }
+
+  function selectLocalAIChat(chatID: string) {
+    setLocalAIChatId(chatID)
+    setMobilePane('conversation')
+  }
+
+  async function renameLocalAIChat(chatID: string, title: string) {
+    await AppService.RenameLocalAIChat(chatID, title)
+    localAIChatList.reload()
+  }
+
+  async function deleteLocalAIChat(chatID: string) {
+    await AppService.DeleteLocalAIChat(chatID)
+    if (chatID === localAIChatId) setLocalAIChatId(null)
+    localAIChatList.reload()
+  }
+
+  function saveLocalAIAgents(collection: ChatAgentCollection) {
+    return setPreference('ai.local_agents', serializeChatAgents(collection))
+  }
   const appZoom = preferenceNumber(preferences, 'appearance.zoom', 100, 75, 125)
   const scheduleTimeSuggestions = parseTimeSuggestionMinutes(preferenceString(preferences, 'schedule.suggestions_minutes', '5,15,60'))
   const answeredShortcut = preferenceString(preferences, 'shortcuts.mark_answered', 'E').trim().toUpperCase() || 'E'
@@ -1141,7 +1167,6 @@ function App() {
   const busyModeEnabled = preferenceBoolean(preferences, 'busy_mode.enabled')
   const automaticArchiveEnabled = preferenceBoolean(preferences, 'archive.automatic')
   const visibleMessages = useMemo(() => hideDeletedMessages ? messages.filter((message) => !message.redacted) : messages, [messages, hideDeletedMessages])
-  const roomPendingSend = pendingSendPreview?.roomID === selectedRoomID ? pendingSendPreview : null
   preferencesRef.current = preferences
   roomsRef.current = rooms
   messagesRef.current = messages
@@ -1210,6 +1235,7 @@ function App() {
       composerInputRef.current?.focus()
     },
     onSendReaction: sendReaction,
+    onRemoveReaction: removeReaction,
   }
 
   useEffect(() => {
@@ -1271,22 +1297,12 @@ function App() {
   const filteredRooms = useMemo(() => {
     const query = search.trim().toLowerCase()
     const today = Date.now()
-    const sidebarRooms = scopedRooms.map((room) => {
-      const pendingPreview = pendingSendPreview
-      if (!pendingPreview || pendingPreview.roomID !== room.id) return room
-      return {
-        ...room,
-        preview: pendingPreview.text,
-        lastSeen: pendingPreview.queuedAt,
-        lastEventAt: pendingPreview.queuedAt,
-      }
-    })
-    return sidebarRooms.filter((room) => {
+    return scopedRooms.filter((room) => {
       const matchesQuery = !query || `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query)
       const archived = preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
       const matchesArchive = roomScope === 'archived' ? archived : !archived || Boolean(query)
-      const matchesRefinements = (!roomRefinements.unanswered || isUnansweredRoom(room, pendingSendPreview?.roomID))
-        && (!roomRefinements.needsReply || isNeedsReplyRoom(room, pendingSendPreview?.roomID))
+      const matchesRefinements = (!roomRefinements.unanswered || isUnansweredRoom(room))
+        && (!roomRefinements.needsReply || isNeedsReplyRoom(room))
         && (!roomRefinements.favorite || room.favorite)
       return matchesQuery && matchesArchive && matchesRefinements
     }).sort((left, right) => {
@@ -1295,18 +1311,17 @@ function App() {
         : 0
       return favoriteOrder || compareRoomActivity(left, right, today)
     })
-  }, [scopedRooms, search, preferences, roomScope, roomRefinements, pendingSendPreview])
+  }, [scopedRooms, search, preferences, roomScope, roomRefinements])
   const selectedRoomListIndex = filteredRooms.findIndex((room) => room.id === selectedRoomID && isActiveAccountRoom(room))
   const quickSwitcherRooms = useMemo(() => rankQuickSwitcherRooms(rooms, quickSwitcherQuery), [rooms, quickSwitcherQuery])
-  const unansweredCount = useMemo(() => scopedRooms.filter((room) => isUnansweredRoom(room, pendingSendPreview?.roomID) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences, pendingSendPreview?.roomID])
-  const needsReplyCount = useMemo(() => scopedRooms.filter((room) => isNeedsReplyRoom(room, pendingSendPreview?.roomID) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences, pendingSendPreview?.roomID])
+  const needsReplyCount = useMemo(() => scopedRooms.filter((room) => isNeedsReplyRoom(room) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences])
   const readRoomCount = useMemo(() => rooms.filter((room) => room.unread === 0 && !room.markedUnread && !preferenceBoolean(preferences, archivedPreferenceKey(room.id))).length, [rooms, preferences])
   const contextMenuRooms = roomContextMenu
     ? (selectedRoomIDs.includes(roomContextMenu.roomID) ? selectedRoomIDs : [roomContextMenu.roomID])
       .map((roomID) => rooms.find((room) => room.id === roomID))
       .filter((room): room is Room => Boolean(room))
     : []
-  const contextMenuNeedsReplyRooms = contextMenuRooms.filter((room) => canBeNeedsReplyRoom(room, pendingSendPreview?.roomID))
+  const contextMenuNeedsReplyRooms = contextMenuRooms.filter((room) => canBeNeedsReplyRoom(room))
   const contextMenuNeedsReplyAddCount = contextMenuNeedsReplyRooms.filter((room) => !room.unanswered).length
   const contextMenuIsBulk = contextMenuRooms.length > 1
   const contextMenuHasUnread = contextMenuRooms.some((room) => room.unread > 0 || room.markedUnread)
@@ -1350,10 +1365,9 @@ function App() {
   }).slice(0, 8)
   const themePreference = preferenceString(preferences, 'appearance.theme', SYSTEM_THEME_NAME)
   const themeChoice = themeIdForPreference(themePreference, systemPrefersDark)
-  const defaultBubbleColor = defaultBubbleColorForTheme(themeChoice)
-  const bubbleColor = preferenceString(preferences, 'appearance.bubble_color', defaultBubbleColor)
-  const safeBubbleColor = /^#[0-9a-fA-F]{6}$/.test(bubbleColor) ? bubbleColor : defaultBubbleColor
-  const accentPalette = accentPalettes.find((palette) => palette.name === preferenceString(preferences, 'appearance.accent_color', 'Forest')) ?? accentPalettes[0]
+  const accentPalette = accentPaletteFor(preferenceString(preferences, 'appearance.accent_color', DEFAULT_ACCENT_NAME))
+  const bubbleColor = preferenceString(preferences, 'appearance.bubble_color', accentPalette.base)
+  const safeBubbleColor = /^#[0-9a-fA-F]{6}$/.test(bubbleColor) ? bubbleColor : accentPalette.base
   const composerContextMessage = editTarget ?? replyTarget
 
   useEffect(() => {
@@ -1413,28 +1427,6 @@ function App() {
     } finally {
       setRelationshipDecayBusy('')
     }
-  }
-
-  function draftRelationshipNudge(contact: RelationshipDecayContact) {
-    const roomIDs = contact.roomIds ?? []
-    const room = rooms.find((candidate) => roomIDs.includes(candidate.id) && isActiveAccountRoom(candidate))
-      ?? rooms.find((candidate) => roomIDs.includes(candidate.id))
-    const draft = contact.nudge.trim()
-    if (!room || !draft) return
-    setRelationshipsOpen(false)
-    if (selectedRoomID === room.id && isActiveAccountRoom(room)) {
-      pendingRelationshipNudgeRef.current = null
-      draftsRef.current.set(room.id, draft)
-      composeTextRef.current = draft
-      setReplyTarget(null)
-      setEditTarget(null)
-      setComposeText(draft)
-      ghostwriterDraftRequestRef.current++
-      window.requestAnimationFrame(() => composerInputRef.current?.focus())
-      return
-    }
-    pendingRelationshipNudgeRef.current = { roomID: room.id, draft }
-    openInboxRoom(room)
   }
 
   function openScheduleMessage() {
@@ -1660,7 +1652,7 @@ function App() {
       pinTimelineToBottom(timeline)
       if (!roomSwitchRef.current || historyRoomIDRef.current === selectedRoomID) roomSwitchRef.current = false
     }
-  }, [messages, pendingSendPreview, selectedRoomID])
+  }, [messages, selectedRoomID])
 
   // Media, fonts, and composer or banner changes resize the timeline without changing `messages`.
   // Re-pin to the newest message after each resize while the reader is following the conversation.
@@ -1677,7 +1669,7 @@ function App() {
     observer.disconnect()
     observer.observe(timeline)
     for (const child of Array.from(timeline.children)) observer.observe(child)
-  }, [messages, pendingSendPreview, selectedRoomID])
+  }, [messages, selectedRoomID])
 
   useEffect(() => {
     return () => {
@@ -1706,18 +1698,6 @@ function App() {
     pinnedScrollTopRef.current = null
     setReplyTarget(null)
     setEditTarget(null)
-    const pendingNudge = pendingRelationshipNudgeRef.current
-    if (pendingNudge?.roomID === selectedRoomID) {
-      window.requestAnimationFrame(() => {
-        if (selectedRoomIDRef.current !== pendingNudge.roomID || pendingRelationshipNudgeRef.current !== pendingNudge) return
-        pendingRelationshipNudgeRef.current = null
-        draftsRef.current.set(pendingNudge.roomID, pendingNudge.draft)
-        composeTextRef.current = pendingNudge.draft
-        setComposeText(pendingNudge.draft)
-        ghostwriterDraftRequestRef.current++
-        window.requestAnimationFrame(() => composerInputRef.current?.focus())
-      })
-    }
   }, [selectedRoomID])
 
   useEffect(() => {
@@ -1847,7 +1827,7 @@ function App() {
         const { title, body } = notificationText(currentPreferences, notification, notificationRoomName(notification))
         deliverNotification(currentPreferences, notification, title, body)
       }
-      if (update.error) setError(update.error)
+      // Background sync errors are not shown as banners.
       // Belt-and-braces: if the selected room's sidebar preview moved past the
       // loaded timeline (e.g. a coalesced/dropped timeline signal), force a
       // history refresh so left room list and right message pane stay in sync.
@@ -2591,7 +2571,7 @@ function App() {
       { key: 'received-at', label: `Received at ${receivedAt}`, ariaLabel: `Received at ${receivedAt}`, icon: <Clock3 size={14} />, disabled: true, separatorBefore: true, run: () => { } },
       { key: 'remind', label: 'Set reminder', ariaLabel: 'Set reminder for message', icon: <BellRing size={14} />, disabled: !manageable, separatorBefore: true, run: () => openReminder(message) },
       { key: 'translate', label: 'Translate', ariaLabel: 'Translate message with local AI', icon: <Languages size={14} />, disabled: !aiEnabled || !message.body || Boolean(message.redacted), run: () => translateMessage(message) },
-      { key: 'turkish-tutor', label: 'Analyze with Turkish Tutor', ariaLabel: 'Analyze message with Turkish Tutor', icon: <Languages size={14} />, disabled: !aiEnabled || !body || Boolean(message.redacted), run: () => void analyzeWithTurkishTutor(body, 'message') },
+      { key: 'turkish-tutor', label: 'Analyze with Language Tutor', ariaLabel: 'Analyze message with Language Tutor', icon: <Languages size={14} />, disabled: !aiEnabled || !body || Boolean(message.redacted), run: () => void analyzeWithTurkishTutor(body, 'message') },
       { key: 'ai-reply', label: 'Draft reply with AI', ariaLabel: 'Draft reply with local AI', icon: <Reply size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => draftAIReply(message) },
       { key: 'ai-explain', label: 'Explain message', ariaLabel: 'Explain message with local AI', icon: <Sparkles size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => explainMessage(message) },
     ]
@@ -2628,7 +2608,7 @@ function App() {
   }
 
   async function confirmMessageForward() {
-    if (!forwardingMessage || forwardBusy || toneGuardHoldRef.current || toneGuardCheckRef.current) return
+    if (!forwardingMessage || forwardBusy) return
     const destination = rooms.find((candidate) => candidate.id === forwardTargetRoomID && isActiveAccountRoom(candidate))
     const body = displayMessageBody(forwardingMessage).trim()
     if (!destination || !body) return
@@ -2636,8 +2616,7 @@ function App() {
     setForwardError('')
     try {
       const sender = forwardingMessage.senderName || forwardingMessage.sender || 'Unknown sender'
-      const sent = await dispatchMessage({ roomID: destination.id, text: `Forwarded from ${sender}:\n\n${body}`, replyTo: null, mentionUserIDs: [] }, { source: 'forward' })
-      if (!sent) return
+      await dispatchMessage({ roomID: destination.id, text: `Forwarded from ${sender}:\n\n${body}`, replyTo: null, mentionUserIDs: [] })
       setForwardingMessage(null)
       void refreshRoomSnapshotAfterSend()
     } catch (sendError) {
@@ -2706,7 +2685,7 @@ function App() {
 
     if (action === 'needs-reply') {
       for (const room of targetRooms) {
-        if (!canBeNeedsReplyRoom(room, pendingSendPreview?.roomID) || room.unanswered) continue
+        if (!canBeNeedsReplyRoom(room) || room.unanswered) continue
         try {
           await AppService.SetRoomUnanswered(room.id, true)
           updateRoomUnanswered(room.id, true)
@@ -2786,7 +2765,7 @@ function App() {
     let actionRooms = targetRooms
     if (key === 'n') {
       action = 'needs-reply'
-      actionRooms = targetRooms.filter((room) => canBeNeedsReplyRoom(room, pendingSendPreview?.roomID) && !room.unanswered)
+      actionRooms = targetRooms.filter((room) => canBeNeedsReplyRoom(room) && !room.unanswered)
       if (actionRooms.length === 0) return false
     } else if (key === 'u') {
       action = targetRooms.some(isUnreadRoom) ? 'read' : 'unread'
@@ -2859,7 +2838,7 @@ function App() {
   }
 
   function selectRoomByOffset(direction: number, unansweredOnly = false) {
-    const availableRooms = filteredRooms.filter((room) => !unansweredOnly || isNeedsReplyRoom(room, pendingSendPreview?.roomID))
+    const availableRooms = filteredRooms.filter((room) => !unansweredOnly || isNeedsReplyRoom(room))
     if (availableRooms.length === 0) return
     const currentIndex = availableRooms.findIndex((room) => room.id === selectedRoomRef.current && isActiveAccountRoom(room))
     const nextIndex = currentIndex < 0
@@ -3094,7 +3073,6 @@ function App() {
     setBusy(true)
     setAccountError('')
     try {
-      await flushPendingSend()
       const state = await AppService.SwitchAccount(accountID)
       resetAccountWorkspace(state)
       if (roomID) showRoom(roomID)
@@ -3198,134 +3176,12 @@ function App() {
     }
   }
 
-  const undoSendSeconds = Number(preferenceString(preferences, 'composer.undo_send_seconds', '0')) || 0
-  const undoSendEnabled = preferenceBoolean(preferences, 'composer.undo_send_enabled', undoSendSeconds > 0)
-
-  async function dispatchMessage(
-    message: Pick<PendingSend, 'roomID' | 'text' | 'replyTo' | 'mentionUserIDs'>,
-    options: { source: ToneGuardSource; bypassToneGuard?: boolean; mentionBindings?: { token: string; userID: string }[] },
-  ) {
-    if (toneGuardHoldRef.current && !options.bypassToneGuard) return false
-    const incomingMessages = messagesRef.current
-      .filter((item) => !item.own && !item.redacted)
-      .slice(-2)
-      .map((item) => displayMessageBody(item).trim())
-      .filter(Boolean)
-    const toneGuardEnabled = preferenceBoolean(preferencesRef.current, `room.tone_guard.${message.roomID}`)
-    if (!options.bypassToneGuard && shouldCheckToneGuard(message.text, toneGuardEnabled, new Date(), incomingMessages)) {
-      if (toneGuardCheckRef.current) return false
-      toneGuardCheckRef.current = true
-      setToneGuardChecking(true)
-      try {
-        const toneGuardTuning = resolveAIFeatureTuning(preferencesRef.current, 'tone_guard')
-        const response = await raceWithToneGuardDeadline(AppService.CheckMessageTone([
-          { role: 'system', content: buildToneGuardSystemPrompt(toneGuardTuning.prompt) },
-          { role: 'user', content: JSON.stringify({ draft: message.text, recent_incoming_messages: incomingMessages }) },
-        ], toneGuardTuning.temperature, toneGuardTuning.maxTokens))
-        const assessment = response === null ? null : parseToneAssessment(response)
-        if (assessment?.is_hostile_or_unprofessional && assessment.severity !== 'LOW') {
-          const hold: ToneGuardHold = {
-            message: { ...message },
-            assessment,
-            source: options.source,
-            mentionBindings: options.mentionBindings ?? [],
-          }
-          toneGuardHoldRef.current = hold
-          setToneGuardHold(hold)
-          return false
-        }
-      } catch {
-      } finally {
-        toneGuardCheckRef.current = false
-        setToneGuardChecking(false)
-      }
-    }
+  async function dispatchMessage(message: OutgoingMessage) {
     if (message.replyTo) await AppService.SendReply(message.roomID, message.text, message.replyTo.id)
     else if (message.mentionUserIDs.length > 0) await AppService.SendMessageWithMentions(message.roomID, message.text, message.mentionUserIDs)
     else await AppService.SendMessage(message.roomID, message.text)
     if (preferenceString(preferencesRef.current, 'sounds.effects', 'Off') === 'Sent messages') {
       playNotificationSound(preferenceNumber(preferencesRef.current, 'notifications.volume', 50), 'Soft')
-    }
-    return true
-  }
-
-  function dismissToneGuard() {
-    toneGuardHoldRef.current = null
-    setToneGuardHold(null)
-  }
-
-  function handleToneGuardPromptKeyDown(event: KeyboardEvent<HTMLElement>) {
-    const hold = toneGuardHoldRef.current
-    if (!hold) return
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      event.stopPropagation()
-      dismissToneGuard()
-    } else if (event.key === 'Enter' && !event.shiftKey && event.target === event.currentTarget && hold.assessment.calmer_alternative) {
-      event.preventDefault()
-      event.stopPropagation()
-      void resolveToneGuard('alternative')
-    }
-  }
-
-  function renderToneGuardPrompt(source: 'composer' | 'forward') {
-    if (!toneGuardHold || (source === 'forward') !== (toneGuardHold.source === 'forward')) return null
-    const { assessment, message } = toneGuardHold
-    return <section ref={toneGuardPromptRef} className="tone-guard-warning" role="alert" aria-label="Tone Guard warning" tabIndex={-1} onKeyDown={handleToneGuardPromptKeyDown}>
-      <div className="tone-guard-copy">
-        <strong>Pause before sending · {assessment.severity.toLowerCase()} severity</strong>
-        <span>{assessment.tone_tags.join(' · ') || 'This message may sound hostile or unprofessional.'}</span>
-        <p className="tone-guard-held-text">{message.text}</p>
-        {assessment.calmer_alternative && <p className="tone-guard-alternative"><span>Calmer option</span>{assessment.calmer_alternative}</p>}
-      </div>
-      <div className="tone-guard-actions">
-        <button className="is-primary" type="button" disabled={toneGuardResolving || !assessment.calmer_alternative} onClick={() => void resolveToneGuard('alternative')}>Replace &amp; Send</button>
-        <button type="button" disabled={toneGuardResolving} onClick={() => void resolveToneGuard('anyway')}>Send Anyway</button>
-        <button type="button" disabled={toneGuardResolving} onClick={dismissToneGuard}>Keep editing</button>
-      </div>
-    </section>
-  }
-
-  async function resolveToneGuard(choice: 'alternative' | 'anyway') {
-    const hold = toneGuardHoldRef.current
-    if (!hold || toneGuardResolutionRef.current) return
-    const replacement = choice === 'alternative' ? hold.assessment.calmer_alternative : hold.message.text
-    if (!replacement.trim()) return
-    const mentionUserIDs = choice === 'alternative'
-      ? hold.message.mentionUserIDs.filter((userID) => hold.mentionBindings.some((binding) => binding.userID === userID && replacement.includes(binding.token)))
-      : hold.message.mentionUserIDs
-    toneGuardResolutionRef.current = true
-    setToneGuardResolving(true)
-    setError('')
-    try {
-      await dispatchMessage({ ...hold.message, text: replacement, mentionUserIDs }, { source: hold.source, bypassToneGuard: true })
-      toneGuardHoldRef.current = null
-      setToneGuardHold(null)
-      if (hold.source === 'forward') {
-        setForwardingMessage(null)
-      } else if (selectedRoomRef.current === hold.message.roomID) {
-        const currentDraft = composeTextRef.current
-        const remainingDraft = hold.source === 'queued'
-          ? currentDraft.startsWith(hold.message.text)
-            ? currentDraft.slice(hold.message.text.length).replace(/^\n/, '')
-            : null
-          : currentDraft.trim() === hold.message.text ? '' : null
-        if (remainingDraft !== null) {
-          setComposeDraft(remainingDraft)
-          setMentionBindings((current) => current.filter((binding) => remainingDraft.includes(binding.token)))
-          setMentionStart(-1)
-          if (replyTarget?.id === hold.message.replyTo?.id) setReplyTarget(null)
-        }
-      }
-      await refreshRoomSnapshotAfterSend()
-      stickToBottomRef.current = true
-      scrollTimelineToBottom()
-      setHistoryRevision((revision) => revision + 1)
-    } catch (sendError) {
-      setError(describeError(sendError))
-    } finally {
-      toneGuardResolutionRef.current = false
-      setToneGuardResolving(false)
     }
   }
 
@@ -3454,60 +3310,15 @@ function App() {
     setAutoPlayNextMessageId(null)
   }
 
-  function restorePendingSend(pending: PendingSend) {
-    const existing = draftsRef.current.get(pending.roomID) ?? ''
-    const restored = existing ? `${pending.text}\n${existing}` : pending.text
-    draftsRef.current.set(pending.roomID, restored)
-    if (selectedRoomRef.current !== pending.roomID) return
-    composeTextRef.current = restored
-    setComposeText(restored)
-    setReplyTarget(pending.replyTo)
-    setMentionBindings(pending.mentionBindings)
-  }
-
-  async function flushPendingSend() {
-    const pending = pendingSendRef.current
-    if (!pending) return
-    clearTimeout(pending.timer)
-    pendingSendRef.current = null
-    setPendingSendPreview(null)
-    setPendingSendDeadline(null)
-    setPendingSendCountdown(0)
-    try {
-      const sent = await dispatchMessage(pending, { source: 'queued', mentionBindings: pending.mentionBindings })
-      if (!sent) {
-        restorePendingSend(pending)
-        return
-      }
-      await refreshRoomSnapshotAfterSend()
-      setHistoryRevision((revision) => revision + 1)
-    } catch (sendError) {
-      restorePendingSend(pending)
-      setError(describeError(sendError))
-    }
-  }
-
-  function cancelPendingSend() {
-    const pending = pendingSendRef.current
-    if (!pending) return
-    clearTimeout(pending.timer)
-    pendingSendRef.current = null
-    setPendingSendPreview(null)
-    setPendingSendDeadline(null)
-    setPendingSendCountdown(0)
-    restorePendingSend(pending)
-  }
-
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (toneGuardHoldRef.current || toneGuardCheckRef.current) return
     const roomID = selectedRoomID
     const sourceDraft = composeText
     const ghostIntent = parseGhostCommand(sourceDraft)
     if (ghostIntent !== null) {
       if (!roomID || busy || ghostwriterDraftBusy) return
       if (!ghostwriterEnabled) {
-        setGhostwriterDraftStatus('Enable Ghostwriter in Settings > Integrations first.')
+        setGhostwriterDraftStatus('Enable Ghostwriter in Settings > AI first.')
         return
       }
       if (!ghostwriterActive) {
@@ -3554,30 +3365,13 @@ function App() {
     const text = (preferenceBoolean(preferences, 'emoji.replace_emoticons', true) ? replaceEmoticons(composeText, customReplacements) : composeText).trim()
     if (!roomID || !text || busy || ghostwriterDraftBusy) return
     const mentionUserIDs = [...new Set(mentionBindings.filter(({ token }) => text.includes(token)).map(({ userID }) => userID))]
-    if (!editTarget && undoSendEnabled && undoSendSeconds > 0) {
-      void flushPendingSend()
-      const timer = window.setTimeout(() => void flushPendingSend(), undoSendSeconds * 1000)
-      pendingSendRef.current = { roomID, text, replyTo: replyTarget, mentionUserIDs, mentionBindings, timer }
-      setPendingSendPreview({ roomID, text, queuedAt: Date.now() })
-      setPendingSendDeadline(Date.now() + undoSendSeconds * 1000)
-      setPendingSendCountdown(undoSendSeconds)
-      setError('')
-      draftsRef.current.delete(roomID)
-      if (selectedRoomRef.current === roomID) setComposeText('')
-      setMentionBindings([])
-      setMentionStart(-1)
-      setReplyTarget(null)
-      stickToBottomRef.current = true
-      return
-    }
     setBusy(true)
     setError('')
     try {
       if (editTarget) {
         await AppService.EditMessage(roomID, text, editTarget.id)
       } else {
-        const sent = await dispatchMessage({ roomID, text, replyTo: replyTarget, mentionUserIDs }, { source: 'composer', mentionBindings })
-        if (!sent) return
+        await dispatchMessage({ roomID, text, replyTo: replyTarget, mentionUserIDs })
         await refreshRoomSnapshotAfterSend()
       }
       const nextDraft = editTarget ? draftsRef.current.get(roomID) ?? '' : ''
@@ -3597,7 +3391,7 @@ function App() {
     }
   }
 
-  async function sendAttachmentFiles(files: File[], roomID = selectedRoomID, voiceDurationMilliseconds = 0) {
+  async function sendAttachmentFiles(files: File[], roomID = selectedRoomID, recording?: RecordedUpload) {
     if (files.length === 0) return
     if (!roomID) {
       setError('Select a room before uploading files.')
@@ -3615,8 +3409,9 @@ function App() {
         }
         const query = new URLSearchParams({
           filename: file.name,
-          voiceNote: String(voiceDurationMilliseconds > 0),
-          durationMs: String(voiceDurationMilliseconds),
+          voiceNote: String(recording?.kind === 'voice'),
+          videoMessage: String(recording?.kind === 'video'),
+          durationMs: String(recording?.durationMilliseconds ?? 0),
         })
         await requestLocalAsset(`/media/ipc/attachment/${encodeURIComponent(roomID)}?${query}`, {
           method: 'POST',
@@ -3639,10 +3434,10 @@ function App() {
     if (file) void sendAttachmentFiles([file])
   }
 
-  async function startVoiceNoteRecording() {
+  async function startRecording(kind: CaptureKind) {
     if (!selectedRoomID || busy || voiceCaptureStatus) return
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setError('Voice recording is not supported in this environment.')
+      setError(`${kind === 'video' ? 'Video' : 'Voice'} recording is not supported in this environment.`)
       return
     }
     let stream: MediaStream | null = null
@@ -3650,11 +3445,18 @@ function App() {
       const audioConstraints: MediaStreamConstraints['audio'] = selectedAudioInputDeviceId
         ? { deviceId: { exact: selectedAudioInputDeviceId } }
         : true
-      stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+      const constraints: MediaStreamConstraints = kind === 'video'
+        ? { audio: audioConstraints, video: { width: { ideal: 640 }, height: { ideal: 480 } } }
+        : { audio: audioConstraints }
+      stream = await navigator.mediaDevices.getUserMedia(constraints)
       void navigator.mediaDevices.enumerateDevices?.().then((devices) => {
         setAudioInputDevices(devices.filter((device) => device.kind === 'audioinput'))
       }).catch(() => { })
-      const recorder = new MediaRecorder(stream)
+      const startedAt = Date.now()
+      const mimeType = kind === 'video' ? preferredVideoMimeType() : ''
+      const recorder = kind === 'video'
+        ? new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 1_000_000 })
+        : new MediaRecorder(stream)
       voiceChunksRef.current = []
       voiceRoomIDRef.current = selectedRoomID
       voiceStreamRef.current = stream
@@ -3674,6 +3476,13 @@ function App() {
           return
         }
         setVoiceCaptureStatus('processing')
+        if (kind === 'video') {
+          const durationMilliseconds = Math.max(1, Math.min(Date.now() - startedAt, maxVideoMessageMilliseconds))
+          const extension = recorder.mimeType.includes('mp4') ? 'mp4' : 'webm'
+          const file = new File(chunks, `video-message-${Date.now()}.${extension}`, { type: recorder.mimeType || `video/${extension}` })
+          void sendAttachmentFiles([file], roomID, { kind, durationMilliseconds }).finally(() => setVoiceCaptureStatus(null))
+          return
+        }
         void (async () => {
           const audioContext = new AudioContext()
           try {
@@ -3681,7 +3490,7 @@ function App() {
             const wav = encodeVoiceNoteWav(decoded)
             const durationMilliseconds = Math.round(decoded.duration * 1000)
             const file = new File([wav], `voice-note-${Date.now()}.wav`, { type: 'audio/wav' })
-            await sendAttachmentFiles([file], roomID, durationMilliseconds)
+            await sendAttachmentFiles([file], roomID, { kind, durationMilliseconds })
           } catch (recordError) {
             setError(describeError(recordError))
           } finally {
@@ -3697,12 +3506,13 @@ function App() {
         if (voiceTimeoutRef.current !== null) window.clearTimeout(voiceTimeoutRef.current)
         voiceTimeoutRef.current = null
         setVoiceCaptureStatus(null)
-        setError('Microphone recording failed.')
+        setError(kind === 'video' ? 'Camera recording failed.' : 'Microphone recording failed.')
       }
       recorder.start(250)
       setError('')
+      setCaptureKind(kind)
       setVoiceCaptureStatus('recording')
-      voiceTimeoutRef.current = window.setTimeout(stopVoiceNoteRecording, 4 * 60 * 1000)
+      voiceTimeoutRef.current = window.setTimeout(stopRecording, kind === 'video' ? maxVideoMessageMilliseconds : 4 * 60 * 1000)
     } catch (recordError) {
       stream?.getTracks().forEach((track) => track.stop())
       voiceStreamRef.current = null
@@ -3711,7 +3521,7 @@ function App() {
     }
   }
 
-  function stopVoiceNoteRecording() {
+  function stopRecording() {
     const recorder = voiceRecorderRef.current
     if (!recorder || recorder.state === 'inactive') return
     if (voiceTimeoutRef.current !== null) window.clearTimeout(voiceTimeoutRef.current)
@@ -3763,6 +3573,16 @@ function App() {
     setReactingMessageID('')
     try {
       await AppService.React(selectedRoomID, message.id, emoji)
+      setHistoryRevision((revision) => revision + 1)
+    } catch (reactionError) {
+      setError(describeError(reactionError))
+    }
+  }
+
+  async function removeReaction(message: Message, emoji: string) {
+    if (!selectedRoomID || !message.id || message.id.startsWith('~')) return
+    try {
+      await AppService.RemoveReaction(selectedRoomID, message.id, emoji)
       setHistoryRevision((revision) => revision + 1)
     } catch (reactionError) {
       setError(describeError(reactionError))
@@ -3978,11 +3798,11 @@ function App() {
   async function analyzeWithTurkishTutor(text: string, mode: TurkishTutorState['mode']) {
     const originalText = text.trim()
     if (!originalText) {
-      setError(mode === 'draft' ? 'Write a Turkish or Italian draft first.' : 'This message has no text to analyze.')
+      setError(mode === 'draft' ? 'Write a draft first.' : 'This message has no text to analyze.')
       return
     }
     if (!aiEnabled) {
-      setError('Set a local AI endpoint in Settings > Integrations to use Turkish Tutor.')
+      setError('Set a local AI endpoint in Settings > AI to use Language Tutor.')
       return
     }
     const requestID = newAIRequestID()
@@ -4627,15 +4447,24 @@ function App() {
       style={{
         '--own-bubble': safeBubbleColor,
         '--app-zoom': `${appZoom}%`,
-        '--accent': accentPalette.base,
-        '--accent-bright': accentPalette.bright,
-        '--forest': accentPalette.base,
-        '--forest-bright': accentPalette.bright,
-        '--green': accentPalette.base,
-        '--green-soft': accentPalette.soft,
+        ...accentCssVariables(accentPalette),
       } as React.CSSProperties}
     >
       <aside className="sidebar">
+        {localAIChatOpen ? (
+          <LocalAISidebar
+            chats={localAIChatList.chats}
+            chatsError={localAIChatList.error}
+            agents={localAIAgents}
+            activeChatId={localAIChatId}
+            onNewChat={startLocalAIChat}
+            onSelectChat={selectLocalAIChat}
+            onRenameChat={renameLocalAIChat}
+            onDeleteChat={deleteLocalAIChat}
+            onSaveAgents={saveLocalAIAgents}
+            onReturnToMatrix={() => setLocalAIChatOpen(false)}
+          />
+        ) : <>
         <label className="room-search">
           <Search size={16} />
           <input ref={roomSearchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a room" aria-label="Find a room" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
@@ -4653,7 +4482,7 @@ function App() {
             <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => { setLocalAIChatOpen(false); setRoomScope('archived'); setRoomRefinements({ unanswered: false, needsReply: false, favorite: false }) }}><Archive size={13} /><span className="filter-label">Archive</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧H</kbd></button>
           </div>
           <div className="room-refinement-filters" role="group" aria-label="Room categories">
-            <button type="button" className={roomRefinements.unanswered ? 'is-active' : ''} aria-label="Unanswered rooms" aria-pressed={roomRefinements.unanswered} aria-keyshortcuts="Control+Shift+R Meta+Shift+R" title="Unanswered rooms (Ctrl / ⌘ + Shift + R)" onClick={() => { setLocalAIChatOpen(false); setRoomRefinements((current) => ({ ...current, unanswered: !current.unanswered })) }}><Reply size={14} /><span className="filter-label">Unanswered</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧R</kbd>{unansweredCount > 0 && <span className="filter-count">{unansweredCount}</span>}</button>
+            <button type="button" className={roomRefinements.unanswered ? 'is-active' : ''} aria-label="Unanswered rooms" aria-pressed={roomRefinements.unanswered} aria-keyshortcuts="Control+Shift+R Meta+Shift+R" title="Unanswered rooms (Ctrl / ⌘ + Shift + R)" onClick={() => { setLocalAIChatOpen(false); setRoomRefinements((current) => ({ ...current, unanswered: !current.unanswered })) }}><Reply size={14} /><span className="filter-label">Unanswered</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧R</kbd></button>
             <button type="button" className={roomRefinements.needsReply ? 'is-active' : ''} aria-label="Needs reply" aria-pressed={roomRefinements.needsReply} aria-keyshortcuts={`${answeredShortcut} Control+Shift+U Meta+Shift+U`} title={`Needs reply (Ctrl / ⌘ + Shift + U; ${answeredShortcut} marks answered)`} onClick={() => { setLocalAIChatOpen(false); setRoomRefinements((current) => ({ ...current, needsReply: !current.needsReply })) }} onKeyDown={(event) => handleMarkAnsweredKeyDown(event, selectedRoomID)}>
               <CircleDot size={14} /><span className="filter-label">Needs reply</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧U</kbd>{needsReplyCount > 0 && <span className="filter-count">{needsReplyCount}</span>}
             </button>
@@ -4681,9 +4510,9 @@ function App() {
               room={room}
               index={index}
               active={room.id === selectedRoomID && isActiveAccountRoom(room)}
-              needsReply={isNeedsReplyRoom(room, pendingSendPreview?.roomID)}
+              needsReply={isNeedsReplyRoom(room)}
               multiSelected={selectedRoomIDs.length > 1 && selectedRoomIDs.includes(room.id)}
-              lastMessageByMe={pendingSendPreview?.roomID === room.id || isLastMessageByCurrentUser(room)}
+              lastMessageByMe={isLastMessageByCurrentUser(room)}
               use24Hour={preferenceBoolean(preferences, 'appearance.time_24_hour')}
               showNetwork={preferenceBoolean(preferences, 'sidebar.network_icons')}
               showUnreadCounts={preferenceBoolean(preferences, 'sidebar.show_unread_counts', true)}
@@ -4736,6 +4565,7 @@ function App() {
             <span>{contextMenuIsBulk ? `${contextMenuNeedsFavorite ? 'Add' : 'Remove'} ${contextMenuRooms.length} ${contextMenuNeedsFavorite ? 'to' : 'from'} Favorites` : contextMenuNeedsFavorite ? 'Add to Favorites' : 'Remove from Favorites'}</span><kbd aria-hidden="true">F</kbd>
           </button>}
         </div>}
+        </>}
         <div className="sidebar-profile">
           <button className="account-switcher-trigger" type="button" aria-label="Manage Matrix accounts" title="Manage Matrix accounts" onClick={() => { setAccountError(''); setAddingAccount(false); setAccountManagerOpen(true) }}>
             <Avatar uri={snapshot.profile.avatarUri} label={snapshot.profile.displayName || snapshot.profile.userId} className="profile-avatar" />
@@ -4759,7 +4589,7 @@ function App() {
           {preferenceBoolean(preferences, 'privacy.incognito') && <span className="content-blur-indicator" role="status" aria-label="Content blur is on" title="Content blur is on"><EyeOff size={14} /></span>}
           {localAIChatOpen ? (
             <>
-              <div className="conversation-title"><h2>Local AI</h2><span>Private model chat</span></div>
+              <div className="conversation-title"><h2>{localAIActiveChat?.title || 'Local AI'}</h2><span>Private model chat</span></div>
               <div className="conversation-actions">
                 <IconTooltip label="Return to Matrix">
                   <button className="icon-button" type="button" aria-label="Return to Matrix" onClick={() => setLocalAIChatOpen(false)}><ArrowLeft size={16} /></button>
@@ -4869,7 +4699,21 @@ function App() {
         </header>
 
         <div className="conversation-workspace">
-          {localAIChatOpen ? <LocalAIChat /> : <>
+          <LocalAIChat
+            hidden={!localAIChatOpen}
+            chatId={localAIChatId}
+            chatTitle={localAIActiveChat?.title ?? ''}
+            agentId={localAIAgentId}
+            agents={localAIAgents.agents}
+            onAgentChange={setLocalAINewChatAgentId}
+            onChatCreated={(chat) => {
+              setLocalAIChatId(chat.id)
+              setLocalAINewChatAgentId(chat.agentId)
+              localAIChatList.reload()
+            }}
+            onChatsChanged={localAIChatList.reload}
+          />
+          {localAIChatOpen ? null : <>
           <div className="conversation-thread">
         {(scheduledNotice || undoRoomID) && <div className="chat-notice-stack" aria-label="Notifications">
           {scheduledNotice && <div className="scheduled-notice" role="status">
@@ -4970,7 +4814,7 @@ function App() {
         }}>
           {!selectedRoom && <div className="timeline-empty"><MessageCircleMore size={25} /><span>Select a room</span></div>}
           {selectedRoom && loadingHistory && messages.length === 0 && <div className="timeline-empty"><span className="loading-mark" />Loading messages</div>}
-          {selectedRoom && !loadingHistory && visibleMessages.length === 0 && !roomPendingSend && <div className="timeline-empty"><MessageCircleMore size={25} /><span>{messages.length > 0 ? 'Deleted messages are hidden' : hasOlder ? 'No messages in the past 24 hours' : 'No messages yet'}</span></div>}
+          {selectedRoom && !loadingHistory && visibleMessages.length === 0 && <div className="timeline-empty"><MessageCircleMore size={25} /><span>{messages.length > 0 ? 'Deleted messages are hidden' : hasOlder ? 'No messages in the past 24 hours' : 'No messages yet'}</span></div>}
           {selectedRoom && hasOlder && (
             <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={loadOlderMessages} disabled={loadingOlder}>
               {loadingOlder ? <><span className="loading-mark" />Loading older messages</> : 'Load older messages'}
@@ -4982,6 +4826,7 @@ function App() {
             preferences={preferences}
             currentUserID={snapshot?.profile.userId ?? ''}
             selectedRoomID={selectedRoomID}
+            groupChat={Boolean(selectedRoom && !isDirectLikeRoom(selectedRoom))}
             chatTranslation={chatTranslation?.roomID === selectedRoomID ? chatTranslation : null}
             contextMessageID={messageContextMenu?.message.id || messageContextMenu?.message.transactionId || ''}
             reactingMessageID={reactingMessageID}
@@ -4989,19 +4834,6 @@ function App() {
             canUseTranscriptAsDraft={!editTarget}
             actionsRef={timelineMessageActionsRef}
           />
-          {roomPendingSend && <article className="message-row is-own is-first is-last is-tail is-queued-message" role="group" aria-label="Message queued">
-            <div className="message-body-wrap">
-              <Suspense fallback={<div className="message-body">{roomPendingSend.text}</div>}>
-                <MarkdownMessage body={roomPendingSend.text} />
-              </Suspense>
-              <div className="queued-message-controls">
-                <span className="queued-message-countdown">Sending in {pendingSendCountdown}s</span>
-                <button className="queued-message-undo" type="button" aria-label="Undo send" title={`Undo send; sends in ${pendingSendCountdown} seconds`} onClick={cancelPendingSend}>
-                  <RotateCcw size={13} /><span>Undo send</span>
-                </button>
-              </div>
-            </div>
-          </article>}
           {chatTranslation?.roomID === selectedRoomID && <div className="chat-translation-status">
             {chatTranslation.busy && <p role="status">{chatTranslation.status}</p>}
             {chatTranslation.error && <>
@@ -5137,12 +4969,11 @@ function App() {
               setGhostwriterAutocompleteStatus('idle')
             }}><X size={14} /></button></IconTooltip>
           </div>}
-          {toneGuardChecking && <p className="tone-guard-checking" role="status">Checking this draft on your local model…</p>}
-          {renderToneGuardPrompt('composer')}
           {ghostwriterDraftStatus && <p className="ghostwriter-composer-status" role="status">{ghostwriterDraftStatus}</p>}
           {ghostwriterActive && ghostwriterAutocompleteStatus === 'loading' && <p className="ghostwriter-composer-status" role="status">Local model is correcting your draft…</p>}
           {ghostwriterActive && ghostwriterRewriteText && ghostwriterAutocompleteStatus !== 'loading' && <span className="visually-hidden" role="status">Draft correction ready. Press Tab to replace the draft.</span>}
           {ghostwriterAutocompleteStatus === 'offline' && <p className="ghostwriter-composer-status" role="status">Local draft correction unavailable. Check that the model is running.</p>}
+          {videoRecordingActive && <div className="video-capture-preview"><video ref={videoPreviewRef} muted playsInline autoPlay aria-label="Camera preview" /></div>}
           <div className="composer-footer">
             <div className="composer-toolbar-row composer-toolbar-row-compose">
               {preferenceBoolean(preferences, 'composer.formatting_toolbar') && <div className="composer-format-toolbar" role="toolbar" aria-label="Formatting">
@@ -5182,7 +5013,8 @@ function App() {
                   </div>
                 </div>
                 <div className="composer-tool-cluster" role="group" aria-label="Delivery options">
-                  <IconTooltip label={voiceCaptureStatus === 'recording' ? 'Stop and send voice note' : 'Record voice note'}><button className="icon-button" type="button" aria-label={voiceCaptureStatus === 'recording' ? 'Stop and send voice note' : 'Record voice note'} aria-pressed={voiceCaptureStatus === 'recording'} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing'} onClick={() => voiceCaptureStatus === 'recording' ? stopVoiceNoteRecording() : void startVoiceNoteRecording()}>{voiceCaptureStatus === 'recording' ? <Square size={15} /> : <Mic size={15} />}</button></IconTooltip>
+                  <IconTooltip label={voiceRecordingActive ? 'Stop and send voice note' : 'Record voice note'}><button className="icon-button" type="button" aria-label={voiceRecordingActive ? 'Stop and send voice note' : 'Record voice note'} aria-pressed={voiceRecordingActive} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing' || videoRecordingActive} onClick={() => voiceRecordingActive ? stopRecording() : void startRecording('voice')}>{voiceRecordingActive ? <Square size={15} /> : <Mic size={15} />}</button></IconTooltip>
+                  <IconTooltip label={videoRecordingActive ? 'Stop and send video message' : 'Record video message'}><button className="icon-button" type="button" aria-label={videoRecordingActive ? 'Stop and send video message' : 'Record video message'} aria-pressed={videoRecordingActive} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing' || voiceRecordingActive} onClick={() => videoRecordingActive ? stopRecording() : void startRecording('video')}>{videoRecordingActive ? <Square size={15} /> : <Video size={15} />}</button></IconTooltip>
                   <IconTooltip label={replyTarget ? 'Schedule reply' : 'Schedule message'}><button className="icon-button" type="button" aria-label={replyTarget ? 'Schedule reply' : 'Schedule message'} disabled={!selectedRoom || !composeText.trim() || busy || voiceCaptureStatus !== null || Boolean(editTarget)} onClick={openScheduleMessage}><Clock3 size={15} /></button></IconTooltip>
                 </div>
               </div>
@@ -5191,7 +5023,7 @@ function App() {
               <div className="composer-tool-group composer-tool-group-ai" role="group" aria-label="AI tools">
                 <span className="composer-tool-group-label" aria-hidden="true"><Sparkles size={13} />AI</span>
                 <div className="composer-tool-cluster" role="group" aria-label="Draft assistance">
-                  <IconTooltip label={aiEnabled ? 'Analyze draft with Turkish Tutor · Ctrl+Shift+T' : 'Analyze draft with Turkish Tutor · set up a local AI endpoint'}><button className="composer-tutor-button" type="button" aria-label="Analyze draft with Turkish Tutor" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => void analyzeWithTurkishTutor(composeText, 'draft')}><GraduationCap size={14} /><span>Tutor</span></button></IconTooltip>
+                  <IconTooltip label={aiEnabled ? 'Analyze draft with Language Tutor · Ctrl+Shift+T' : 'Analyze draft with Language Tutor · set up a local AI endpoint'}><button className="composer-tutor-button" type="button" aria-label="Analyze draft with Language Tutor" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => void analyzeWithTurkishTutor(composeText, 'draft')}><GraduationCap size={14} /><span>Tutor</span></button></IconTooltip>
                   <IconTooltip label={ghostwriterActive ? 'Disable suggestions in this chat' : ghostwriterEnabled ? 'Enable suggestions in this chat' : 'Enable suggestions in this chat and configure the local model'}><button className={`composer-tutor-button ghostwriter-toggle ${ghostwriterActive ? 'is-enabled' : ''}`} type="button" aria-label={ghostwriterActive ? 'Disable suggestions in this chat' : 'Enable suggestions in this chat'} aria-pressed={ghostwriterActive} disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => void toggleRoomGhostwriter(!ghostwriterActive)}><Sparkles size={14} /><span>Suggest</span></button></IconTooltip>
                   <IconTooltip label={ghostwriterActive ? 'Suggest one draft edit' : 'Enable suggestions in this chat first'}><button className="composer-tutor-button" type="button" aria-label="Suggest draft edit" disabled={!selectedRoom || !ghostwriterActive || !composeText.trim() || busy || ghostwriterDraftBusy || Boolean(editTarget) || isGhostCommandDraft(composeText) || ghostwriterAutocompleteStatus === 'loading'} onClick={() => void requestGhostwriterCompletion()}><WandSparkles size={14} /><span>Suggest edit</span></button></IconTooltip>
                   <IconTooltip label={askAILabel}><button className="icon-button" type="button" aria-label="Ask AI about the composer text" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={askAI}><MessageCircleQuestion size={15} /></button></IconTooltip>
@@ -5207,7 +5039,7 @@ function App() {
                   <IconTooltip label={roomAgents.agents.length === 0 ? 'Create a chat agent' : aiEnabled ? 'Run a chat agent' : 'Run a chat agent · unavailable'}><button className="icon-button" type="button" aria-label={roomAgents.agents.length === 0 ? 'Create a chat agent' : 'Run a chat agent'} disabled={!selectedRoom || busy || (roomAgents.agents.length > 0 && !aiEnabled)} onClick={openChatAgentAction}><Bot size={15} /></button></IconTooltip>
                 </div>
               </div>
-              <span className={`composer-hint${voiceCaptureStatus !== null || busy ? ' is-status' : ''}`}>{voiceCaptureStatus === 'recording' ? 'Recording voice note · click stop to send' : voiceCaptureStatus === 'processing' ? 'Preparing voice note…' : selectedRoom ? busy ? 'Sending…' : preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter to send' : 'Enter to send · Shift + Enter for a new line' : ' '}</span>
+              <span className={`composer-hint${voiceCaptureStatus !== null || busy ? ' is-status' : ''}`}>{voiceCaptureStatus === 'recording' ? `Recording ${captureNoun} · click stop to send` : voiceCaptureStatus === 'processing' ? `Preparing ${captureNoun}…` : selectedRoom ? busy ? 'Sending…' : preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter to send' : 'Enter to send · Shift + Enter for a new line' : ' '}</span>
             </div>
             <IconTooltip label="Send message" className="send-tooltip">
               <button className="send-button" type="submit" aria-label="Send message" disabled={!selectedRoom || !composeText.trim() || busy || voiceCaptureStatus !== null}>
@@ -5229,7 +5061,6 @@ function App() {
           </header>
           <div className="room-info-content forward-message-content">
             <div className="forward-message-preview">{displayMessageBody(forwardingMessage)}</div>
-            {renderToneGuardPrompt('forward')}
             <label className="forward-message-destination"><span>Send to</span><select aria-label="Forward destination" value={forwardTargetRoomID} onChange={(event) => setForwardTargetRoomID(event.target.value)}>
               {rooms.filter((room) => room.id !== selectedRoomID && isActiveAccountRoom(room)).map((room) => <option key={room.id} value={room.id}>{room.name || room.id}</option>)}
             </select></label>
@@ -5275,49 +5106,21 @@ function App() {
       {turkishTutorState && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeTurkishTutor() }}>
         <DialogSurface className="room-info-dialog ai-result-dialog turkish-tutor-dialog" labelledBy="turkish-tutor-title" onClose={closeTurkishTutor} onClick={(event) => event.stopPropagation()}>
           <header className="room-info-header ai-result-header">
-            <div><span className="eyebrow">TURKISH TUTOR</span><h2 id="turkish-tutor-title">{turkishTutorState.mode === 'draft' ? 'Tutor this draft' : 'Analyze message'}</h2></div>
-            <button className="icon-button" type="button" aria-label="Close Turkish Tutor" title="Close Turkish Tutor" onClick={closeTurkishTutor}><X size={16} /></button>
+            <div><span className="eyebrow">LANGUAGE TUTOR</span><h2 id="turkish-tutor-title">{turkishTutorState.mode === 'draft' ? 'Tutor this draft' : 'Analyze message'}</h2></div>
+            <button className="icon-button" type="button" aria-label="Close Language Tutor" title="Close Language Tutor" onClick={closeTurkishTutor}><X size={16} /></button>
           </header>
           <div className="ai-result-content turkish-tutor-content" aria-live="polite" aria-busy={turkishTutorState.busy}>
             {turkishTutorState.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with the local model…</p>}
             {turkishTutorState.busy && turkishTutorState.preview !== '' && <pre className="turkish-tutor-preview">{turkishTutorState.preview}</pre>}
             {turkishTutorState.error && <p className="settings-error" role="alert">{turkishTutorState.error}</p>}
-            {turkishTutorState.analysis && <>
-              <section className="turkish-tutor-section">
-                <span className="eyebrow">ORIGINAL · {turkishTutorState.analysis.detected_language === 'tr' ? 'TURKISH' : 'ITALIAN'}</span>
-                <p>{turkishTutorState.originalText}</p>
-              </section>
-              <section className="turkish-tutor-section">
-                <span className="eyebrow">CORRECTED TURKISH</span>
-                <p lang="tr">{turkishTutorState.analysis.corrected_text}</p>
-                {turkishTutorState.analysis.has_grammar_errors && turkishTutorState.analysis.error_explanation && <small className="turkish-tutor-error-note">{turkishTutorState.analysis.error_explanation}</small>}
-              </section>
-              <section className="turkish-tutor-section">
-                <span className="eyebrow">TRANSLATION · {turkishTutorState.analysis.detected_language === 'tr' ? 'ITALIAN' : 'TURKISH'}</span>
-                <p lang={turkishTutorState.analysis.detected_language === 'tr' ? 'it' : 'tr'}>{turkishTutorState.analysis.translation}</p>
-              </section>
-              <section className="turkish-tutor-section">
-                <span className="eyebrow">WORD-BY-WORD MORPHEMES</span>
-                <ol className="turkish-tutor-morphemes">
-                  {(turkishTutorState.analysis.morpheme_breakdown ?? []).map((item, index) => <li key={`${item.word}-${index}`}>
-                    <strong lang="tr">{item.word}</strong>
-                    <span>{item.breakdown}</span>
-                    <small>{item.meaning}</small>
-                  </li>)}
-                </ol>
-              </section>
-              <section className="turkish-tutor-section turkish-tutor-rule">
-                <span className="eyebrow">GRAMMAR RULE</span>
-                <p>{turkishTutorState.analysis.grammar_rule}</p>
-              </section>
-            </>}
+            {turkishTutorState.analysis && <TutorAnalysisDetails analysis={turkishTutorState.analysis} originalText={turkishTutorState.originalText} />}
           </div>
           <aside className="ai-result-disclaimer">
             <ShieldCheck size={16} aria-hidden="true" />
             <p>Analysis uses the local AI endpoint configured in Settings. No Matrix message is sent.</p>
           </aside>
           <footer className="room-info-footer ai-result-footer">
-            {turkishTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" disabled={!turkishTutorState.analysis || turkishTutorState.busy || Boolean(editTarget)} onClick={useTurkishTutorDraft}>Replace draft with Turkish</button>}
+            {turkishTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" disabled={!turkishTutorState.analysis || turkishTutorState.busy || Boolean(editTarget)} onClick={useTurkishTutorDraft}>Replace draft with {tutorLanguageName(turkishTutorState.analysis?.target_language || resolveTutorLanguages(preferences).target)}</button>}
             <button className="settings-command" type="button" onClick={closeTurkishTutor}>Close</button>
           </footer>
         </DialogSurface>
@@ -5402,7 +5205,6 @@ function App() {
             {relationshipDecayContacts.length === 0 && <p className="room-info-state">No tracked relationships yet.</p>}
             {relationshipDecayContacts.map((contact) => {
               const roomIDs = contact.roomIds ?? []
-              const contactRoom = rooms.find((candidate) => roomIDs.includes(candidate.id))
               const busy = relationshipDecayBusy === contact.contactId
               return <article className="relationship-contact" key={contact.contactId}>
                 <div className="relationship-contact-heading">
@@ -5418,9 +5220,7 @@ function App() {
                   </label>
                 </div>
                 <span className="relationship-last-contact">{contact.lastInteractionTimestamp > 0 ? `Last interaction ${new Date(contact.lastInteractionTimestamp).toLocaleDateString()}` : 'No interactions recorded'}</span>
-                {contact.nudge && <p className="relationship-nudge">{contact.nudge}</p>}
                 <div className="relationship-contact-actions">
-                  {contact.nudge && contactRoom && <button className="settings-command" type="button" onClick={() => draftRelationshipNudge(contact)}><Pencil size={14} />Send Nudge</button>}
                   {contact.alerted && <button className="settings-command" type="button" disabled={busy} onClick={() => void snoozeRelationshipContact(contact)}><Clock3 size={14} />Snooze for a week</button>}
                 </div>
               </article>
@@ -5517,11 +5317,6 @@ function App() {
           <div className="room-info-content">
             <div className="room-info-fact"><span>Room ID</span><strong>{selectedRoom.id}</strong></div>
             {selectedRoom.topic && <div className="room-info-fact"><span>Topic</span><strong>{selectedRoom.topic}</strong></div>}
-            <section className="room-agent-settings" aria-label="Tone Guard">
-              <div className="room-members-heading"><h3>Tone Guard</h3></div>
-              <p className="room-agent-note">When triggered, the draft and up to two recent incoming messages are checked by a local loopback model. A missing or unavailable local model never blocks sending.</p>
-              <PreferenceToggle label="Check messages in this room" checked={preferenceBoolean(preferences, `room.tone_guard.${selectedRoom.id}`)} onChange={(value) => { void setPreference(`room.tone_guard.${selectedRoom.id}`, value) }} />
-            </section>
             <section className="room-agent-settings" aria-label="Chat agents">
               <div className="room-members-heading"><h3>Chat agents</h3><span>{roomAgents.agents.length}/{MAX_CHAT_AGENTS}</span></div>
               <p className="room-agent-note">Profiles are saved to this account for this room. Profile instructions and included chat text are sent to the configured endpoint, which may be remote.</p>
@@ -5891,11 +5686,11 @@ function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, 
         <button className="icon-button audio-download" type="button" title={`Download ${filename}`} aria-label={`Download ${filename}`} disabled={loading} onClick={() => void downloadFile()}><Download size={15} /></button>
       </div>}
       {isAudio && <div className="audio-transcription-controls">
-        <button className="audio-transcribe-button" type="button" title={aiEnabled ? 'Upload this audio to the configured endpoint for transcription.' : 'Set an AI endpoint in Settings > Integrations.'} disabled={!aiEnabled || transcriptionLoading} onClick={() => void transcribeAudio()}>
+        <button className="audio-transcribe-button" type="button" title={aiEnabled ? 'Upload this audio to the configured endpoint for transcription.' : 'Set an AI endpoint in Settings > AI.'} disabled={!aiEnabled || transcriptionLoading} onClick={() => void transcribeAudio()}>
           {transcriptionLoading ? <span className="loading-mark" /> : <Sparkles size={14} />}
           {transcriptionLoading ? 'Transcribing…' : 'Transcribe with AI'}
         </button>
-        <small>{aiEnabled ? 'Audio is sent to the configured endpoint, which may be remote.' : 'Set an AI endpoint in Settings > Integrations to transcribe audio.'}</small>
+        <small>{aiEnabled ? 'Audio is sent to the configured endpoint, which may be remote.' : 'Set an AI endpoint in Settings > AI to transcribe audio.'}</small>
       </div>}
       {transcriptionLoading && <p className="audio-transcription-status" role="status">Transcribing audio…</p>}
       {transcriptionError && <span className="media-error" role="alert">{transcriptionError}</span>}
@@ -6290,6 +6085,41 @@ function AboutPinger() {
   )
 }
 
+function TutorAnalysisDetails({ analysis, originalText }: { analysis: TutorAnalysis; originalText: string }) {
+  const targetCode = analysis.target_language || TUTOR_DEFAULT_LANGUAGE
+  const explanationCode = analysis.explanation_language || TUTOR_DEFAULT_EXPLANATION_LANGUAGE
+  const translationCode = analysis.detected_language === targetCode ? explanationCode : targetCode
+  return <>
+    <section className="turkish-tutor-section">
+      <span className="eyebrow">ORIGINAL · {tutorLanguageName(analysis.detected_language).toUpperCase()}</span>
+      <p>{originalText}</p>
+    </section>
+    <section className="turkish-tutor-section">
+      <span className="eyebrow">CORRECTED {tutorLanguageName(targetCode).toUpperCase()}</span>
+      <p lang={targetCode}>{analysis.corrected_text}</p>
+      {analysis.has_grammar_errors && analysis.error_explanation && <small className="turkish-tutor-error-note">{analysis.error_explanation}</small>}
+    </section>
+    <section className="turkish-tutor-section">
+      <span className="eyebrow">TRANSLATION · {tutorLanguageName(translationCode).toUpperCase()}</span>
+      <p lang={translationCode}>{analysis.translation}</p>
+    </section>
+    <section className="turkish-tutor-section">
+      <span className="eyebrow">WORD-BY-WORD MORPHEMES</span>
+      <ol className="turkish-tutor-morphemes">
+        {(analysis.morpheme_breakdown ?? []).map((item, index) => <li key={`${item.word}-${index}`}>
+          <strong lang={targetCode}>{item.word}</strong>
+          <span>{item.breakdown}</span>
+          <small>{item.meaning}</small>
+        </li>)}
+      </ol>
+    </section>
+    <section className="turkish-tutor-section turkish-tutor-rule">
+      <span className="eyebrow">GRAMMAR RULE</span>
+      <p>{analysis.grammar_rule}</p>
+    </section>
+  </>
+}
+
 function LocalAISettings({ endpoint, model, transcriptionModel, translateLanguage, onSave }: {
   endpoint: string
   model: string
@@ -6464,11 +6294,12 @@ function SettingsDialog({
       ? 'System default follows your OS preference.'
       : ''
   const fontSize = preferenceString(preferences, 'appearance.font_size', 'Medium')
-  const bubbleColor = preferenceString(preferences, 'appearance.bubble_color', '#236b52')
-  const activeAccentPalette = accentPalettes.find((palette) => palette.name === preferenceString(preferences, 'appearance.accent_color', 'Forest')) ?? accentPalettes[0]
+  const accentPreference = preferenceString(preferences, 'appearance.accent_color', DEFAULT_ACCENT_NAME)
+  const activeAccentPalette = accentPaletteFor(accentPreference)
+  const bubbleColor = preferenceString(preferences, 'appearance.bubble_color', activeAccentPalette.base)
   const activeWallpaper = chatWallpapers.find((wallpaper) => wallpaper.name === preferenceString(preferences, 'appearance.chat_wallpaper', 'None')) ?? chatWallpapers[0]
   const answeredShortcut = preferenceString(preferences, 'shortcuts.mark_answered', 'E').trim().toUpperCase() || 'E'
-  const safeBubbleColor = /^#[0-9a-fA-F]{6}$/.test(bubbleColor) ? bubbleColor : '#236b52'
+  const safeBubbleColor = /^#[0-9a-fA-F]{6}$/.test(bubbleColor) ? bubbleColor : activeAccentPalette.base
   const ghostwriterProviderValue = preferenceString(preferences, 'ghostwriter.provider', 'ollama')
   const ghostwriterProvider: GhostwriterProvider = ghostwriterProviderValue === 'openai-compatible' ? 'openai-compatible' : 'ollama'
   const downloadFolder = preferenceString(preferences, 'downloads.folder', '')
@@ -6537,7 +6368,7 @@ function SettingsDialog({
     ['Ctrl / ⌘ + 0', 'Reset app zoom'],
     ['Ctrl / ⌘ + Shift + P', 'Toggle content blur'],
     ['Ctrl / ⌘ + Shift + I', 'Toggle hiding images and videos'],
-    ['Ctrl + Shift + T', 'Analyze draft with Turkish Tutor'],
+    ['Ctrl + Shift + T', 'Analyze draft with Language Tutor'],
     ['Ctrl / ⌘ + Shift + A', 'Show all rooms'],
     ['Ctrl / ⌘ + Shift + U', 'Show needs-reply rooms'],
     ['Ctrl / ⌘ + Shift + M', 'Open Local AI chat'],
@@ -7042,11 +6873,15 @@ function SettingsDialog({
               <label className="setting-row"><span><strong>Outgoing message color</strong><small>Choose a color for your messages.</small></span>
                 <input className="color-input" type="color" value={safeBubbleColor} onChange={(event) => onPreferenceChange('appearance.bubble_color', event.target.value)} aria-label="Outgoing message color" />
               </label>
-              <div className="setting-row accent-setting-row"><span><strong>Theme accent</strong><small>Choose an accent independent of message color.</small></span>
+              <div className="setting-row accent-setting-row"><span><strong>Theme accent</strong><small>Choose an accent. Message color follows it until you pick one.</small></span>
                 <div className="accent-palette" role="group" aria-label="Theme accent color">
-                  {accentPalettes.map((palette) => <button key={palette.name} className="accent-swatch" type="button" aria-label={`${palette.name} accent color`} aria-pressed={activeAccentPalette.name === palette.name} title={palette.name} style={{ '--swatch': palette.base } as React.CSSProperties} onClick={() => onPreferenceChange('appearance.accent_color', palette.name)}>
+                  {accentPresets.map((palette) => <button key={palette.name} className="accent-swatch" type="button" aria-label={`${palette.name} accent color`} aria-pressed={activeAccentPalette.name === palette.name} title={palette.name} style={{ '--swatch': palette.base } as React.CSSProperties} onClick={() => onPreferenceChange('appearance.accent_color', palette.name)}>
                     {activeAccentPalette.name === palette.name && <Check size={14} />}
                   </button>)}
+                  <label className={`accent-swatch accent-swatch-custom${isAccentHex(accentPreference) ? ' is-selected' : ''}`} title="Custom color" style={{ '--swatch': activeAccentPalette.base } as React.CSSProperties}>
+                    <input type="color" value={activeAccentPalette.base} aria-label="Custom accent color" onChange={(event) => onPreferenceChange('appearance.accent_color', event.target.value)} />
+                    {isAccentHex(accentPreference) && <Check size={14} />}
+                  </label>
                 </div>
               </div>
               <div className="setting-row accent-setting-row"><span><strong>Chat wallpaper</strong><small>Add a subtle background to conversations.</small></span>
@@ -7142,25 +6977,6 @@ function SettingsDialog({
             <div className="settings-section">
               <h3>Keyboard</h3>
               <PreferenceToggle label="Use Ctrl + Enter to send" checked={preferenceBoolean(preferences, 'composer.ctrl_enter')} onChange={(value) => onPreferenceChange('composer.ctrl_enter', value)} />
-              <PreferenceToggle label="Enable undo send" checked={preferenceBoolean(preferences, 'composer.undo_send_enabled', Number(preferenceString(preferences, 'composer.undo_send_seconds', '0')) > 0)} onChange={(enabled) => {
-                if (!enabled) {
-                  void onPreferenceChange('composer.undo_send_enabled', false)
-                  return
-                }
-                const seconds = Number(preferenceString(preferences, 'composer.undo_send_seconds', '0')) || 0
-                if (seconds === 0) {
-                  void onPreferenceChange('composer.undo_send_seconds', '5').then((saved) => {
-                    if (saved) void onPreferenceChange('composer.undo_send_enabled', true)
-                  })
-                } else {
-                  void onPreferenceChange('composer.undo_send_enabled', true)
-                }
-              }} />
-              <label className="setting-row"><span><strong>Undo send window</strong><small>Time to cancel a message before it is sent.</small></span>
-                <select aria-label="Undo send window" disabled={!preferenceBoolean(preferences, 'composer.undo_send_enabled', Number(preferenceString(preferences, 'composer.undo_send_seconds', '0')) > 0)} value={Number(preferenceString(preferences, 'composer.undo_send_seconds', '0')) > 0 ? preferenceString(preferences, 'composer.undo_send_seconds', '5') : '5'} onChange={(event) => onPreferenceChange('composer.undo_send_seconds', event.target.value)}>
-                  {['5', '10', '20', '30'].map((seconds) => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
-                </select>
-              </label>
               <PreferenceToggle label="Spellcheck messages" checked={preferenceBoolean(preferences, 'composer.spellcheck', true)} onChange={(value) => onPreferenceChange('composer.spellcheck', value)} />
               <PreferenceToggle label="Show formatting toolbar" checked={preferenceBoolean(preferences, 'composer.formatting_toolbar')} onChange={(value) => onPreferenceChange('composer.formatting_toolbar', value)} />
               <PreferenceToggle label="Suggest emoji for :shortcodes:" checked={preferenceBoolean(preferences, 'emoji.autocomplete')} onChange={(value) => onPreferenceChange('emoji.autocomplete', value)} />
@@ -7307,10 +7123,14 @@ function SettingsDialog({
               {keyStatus && <p className="settings-note" role="status">{keyStatus}</p>}
             </div>
           )}
-          {tab === 'Integrations' && (
+          {tab === 'AI' && (
             <div className="settings-section">
-              <h3>Integrations</h3>
-              <p className="settings-note">Chat networks are detected from the active account's chats, using room names and DM users. This is a best-effort view. Connecting a network requires a bridge set up on your homeserver; Pinger cannot create bridge logins.</p>
+              <h3>AI</h3>
+              <p className="settings-note">Configure the local AI endpoint, Ghostwriter, and the instructions and tuning for each AI feature. AI replies are drafts and are never sent automatically.</p>
+              <div className="integration-status" aria-label="AI status">
+                <div className="account-details"><span>Endpoint</span><strong>{preferenceString(preferences, 'ai.endpoint', '').trim() ? 'Set' : 'Not set'}</strong></div>
+                <div className="account-details"><span>Ghostwriter</span><strong>{preferenceBoolean(preferences, 'ghostwriter.enabled') ? 'On' : 'Off'}</strong></div>
+              </div>
               <LocalAISettings
                 endpoint={preferenceString(preferences, 'ai.endpoint', '')}
                 model={preferenceString(preferences, 'ai.model', '')}
@@ -7318,6 +7138,7 @@ function SettingsDialog({
                 translateLanguage={preferenceString(preferences, 'ai.translate_language', 'English')}
                 onSave={onPreferenceChange}
               />
+              <TutorLanguageSettings languages={resolveTutorLanguages(preferences)} onSave={onPreferenceChange} />
               <GhostwriterSettings
                 enabled={preferenceBoolean(preferences, 'ghostwriter.enabled')}
                 provider={ghostwriterProvider}
@@ -7326,6 +7147,12 @@ function SettingsDialog({
                 onSave={onPreferenceChange}
               />
               <AIPromptSettings preferences={preferences} onSave={onPreferenceChange} />
+            </div>
+          )}
+          {tab === 'Integrations' && (
+            <div className="settings-section">
+              <h3>Integrations</h3>
+              <p className="settings-note">Chat networks are detected from the active account's chats, using room names and DM users. This is a best-effort view. Connecting a network requires a bridge set up on your homeserver; Pinger cannot create bridge logins.</p>
               <section className="ai-settings-form relationship-health-settings">
                 <h4>Keep in Touch</h4>
                 <p className="settings-note">Uses recent direct-chat messages for tracked contacts with your configured local Ghostwriter model. Requests are restricted to localhost. Suggestions stay as drafts; no message is sent automatically.</p>
@@ -7351,7 +7178,7 @@ function SettingsDialog({
               <p className="settings-note">Answers to common questions about Pinger.</p>
               <article className="help-item"><h4>Keyboard shortcuts</h4><p>The Keyboard tab lists every shortcut. Single-key shortcuts can be turned off there.</p><button className="settings-command" type="button" onClick={() => onTabChange('Keyboard')}>Open keyboard shortcuts</button></article>
               <article className="help-item"><h4>Storage and media</h4><p>Clearing media removes cached files only. Messages and encryption keys stay, and media downloads again when you open it.</p><button className="settings-command" type="button" onClick={() => onTabChange('Storage')}>Open storage</button></article>
-              <article className="help-item"><h4>Local AI</h4><p>Pinger connects to a llama-server you run yourself. Set its address in Integrations. AI replies are drafts and are never sent automatically.</p></article>
+              <article className="help-item"><h4>Local AI</h4><p>Pinger connects to a llama-server you run yourself. Set its address in AI settings. AI replies are drafts and are never sent automatically.</p></article>
               <article className="help-item"><h4>Chat networks</h4><p>WhatsApp, Telegram and other networks appear when your homeserver has bridges set up. Pinger cannot create bridge logins.</p></article>
               <article className="help-item"><h4>Encryption and room keys</h4><p>Export room keys from Security and protect the file with a passphrase. Keep the backup somewhere safe.</p></article>
               <a className="settings-link" href="https://github.com/cataWalter/pinger/issues" target="_blank" rel="noreferrer">Report an issue</a>
