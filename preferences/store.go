@@ -682,8 +682,6 @@ var aiFeatureIDs = map[string]bool{
 	"local_chat":            true,
 	"turkish_tutor":         true,
 	"contact_dossier":       true,
-	"relationship_health":   true,
-	"relationship_decay":    true,
 	"ask_ai":                true,
 	"summarize":             true,
 	"translate":             true,
