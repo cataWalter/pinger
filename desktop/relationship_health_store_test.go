@@ -31,17 +31,17 @@ func TestRelationshipHealthStoreMigratesDecayColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var tier, nudge string
+	var tier string
 	var lastInteraction, lastAlert, snoozedUntil int64
 	err = store.db.QueryRow(`
-		SELECT tier, last_interaction_timestamp, last_decay_alert_timestamp, decay_nudge, snoozed_until
+		SELECT tier, last_interaction_timestamp, last_decay_alert_timestamp, snoozed_until
 		FROM contacts WHERE contact_id = ?
-	`, contactID).Scan(&tier, &lastInteraction, &lastAlert, &nudge, &snoozedUntil)
+	`, contactID).Scan(&tier, &lastInteraction, &lastAlert, &snoozedUntil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tier != "NONE" || lastInteraction != 0 || lastAlert != 0 || nudge != "" || snoozedUntil != 0 {
-		t.Fatalf("migrated contact defaults = %q, %d, %d, %q, %d", tier, lastInteraction, lastAlert, nudge, snoozedUntil)
+	if tier != "NONE" || lastInteraction != 0 || lastAlert != 0 || snoozedUntil != 0 {
+		t.Fatalf("migrated contact defaults = %q, %d, %d, %d", tier, lastInteraction, lastAlert, snoozedUntil)
 	}
 	var indexCount int
 	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'relationship_decay_candidates_idx'`).Scan(&indexCount); err != nil {
@@ -211,7 +211,7 @@ func TestRelationshipHealthStoreFiltersDecayCandidates(t *testing.T) {
 			vipCandidate = candidate
 		}
 	}
-	saved, err := store.saveDecayAlert(vipCandidate, "Ask how the garden project went.", now.UnixMilli(), now)
+	saved, err := store.saveDecayAlert(vipCandidate, now.UnixMilli(), now)
 	if err != nil || !saved {
 		t.Fatalf("saveDecayAlert() = %v, %v", saved, err)
 	}
@@ -225,7 +225,7 @@ func TestRelationshipHealthStoreFiltersDecayCandidates(t *testing.T) {
 			vipContact = contact
 		}
 	}
-	if !vipContact.Alerted || vipContact.Nudge != "Ask how the garden project went." {
+	if !vipContact.Alerted {
 		t.Fatalf("saved alert was not active: %+v", vipContact)
 	}
 	if err := store.snoozeDecayAlert(vipContact.ContactID, now.Add(relationshipDecayCooldown).UnixMilli()); err != nil {
@@ -239,7 +239,7 @@ func TestRelationshipHealthStoreFiltersDecayCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, contact := range contactsAfterReply {
-		if contact.ContactID == vipContact.ContactID && (contact.Alerted || contact.Nudge != "" || contact.SnoozedUntil != 0) {
+		if contact.ContactID == vipContact.ContactID && (contact.Alerted || contact.SnoozedUntil != 0) {
 			t.Fatalf("new interaction did not clear stale alert state: %+v", contact)
 		}
 	}
@@ -352,7 +352,12 @@ func TestRelationshipHealthStorePersistsDailyHistory(t *testing.T) {
 		LastAnalyzedMessageID:  "$latest",
 		UpdatedAt:              updatedAt,
 	}
-	if err := store.saveHealth(row); err != nil {
+	if _, err := store.db.Exec(`
+		INSERT INTO relationship_health (
+			contact_id, window_date, sentiment_score, status, detected_friction_points,
+			trend, reasoning, last_analyzed_room_id, last_analyzed_message_id, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, contactID, row.WindowDate, row.SentimentScore, row.Status, `["short replies after missed deadline"]`, row.Trend, row.Reasoning, row.LastAnalyzedRoomID, row.LastAnalyzedMessageID, row.UpdatedAt); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := store.recentHealth(contactID, 28)
@@ -361,10 +366,6 @@ func TestRelationshipHealthStorePersistsDailyHistory(t *testing.T) {
 	}
 	if rows[0].SentimentScore != row.SentimentScore || rows[0].Status != row.Status || rows[0].DetectedFrictionPoints[0] != row.DetectedFrictionPoints[0] {
 		t.Fatalf("stored row = %+v", rows[0])
-	}
-	checkpoint, err := store.checkpoint(contactID)
-	if err != nil || checkpoint.MessageID != "$latest" || checkpoint.RoomID != row.LastAnalyzedRoomID {
-		t.Fatalf("checkpoint = %+v, error = %v", checkpoint, err)
 	}
 }
 
@@ -388,7 +389,12 @@ func TestRelationshipHealthStoreEnforcesForeignKeyAndScoreRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.saveHealth(relationshipHealthRow{ContactID: contactID, WindowDate: "2026-10-21", SentimentScore: 1.1, Status: "WARM", Trend: "STABLE"}); err == nil {
-		t.Fatal("saveHealth accepted a score outside [-1, 1]")
+	_, err = store.db.Exec(`
+		INSERT INTO relationship_health (
+			contact_id, window_date, sentiment_score, status, detected_friction_points, trend, updated_at
+		) VALUES (?, '2026-10-21', 1.1, 'WARM', '[]', 'STABLE', 1)
+	`, contactID)
+	if err == nil {
+		t.Fatal("relationship_health accepted a score outside [-1, 1]")
 	}
 }
