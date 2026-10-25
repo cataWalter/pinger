@@ -42,4 +42,12 @@ describe('MarkdownMessage', () => {
 
     expect((await screen.findByRole('status')).textContent).toBe('Could not open link: launcher failed')
   })
+
+  it('applies the message body class by default and accepts a custom class', () => {
+    const { container, rerender } = render(<MarkdownMessage body="Hello" />)
+    expect(container.querySelector('.markdown-message')?.className).toBe('markdown-message message-body')
+
+    rerender(<MarkdownMessage body="Hello" className="custom-markdown" />)
+    expect(container.querySelector('.markdown-message')?.className).toBe('markdown-message custom-markdown')
+  })
 })

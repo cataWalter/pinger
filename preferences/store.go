@@ -517,7 +517,7 @@ func Validate(key string, value any) error {
 	if strings.HasPrefix(key, "ai.feature.") {
 		return validateAIFeaturePreference(key, value)
 	}
-	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted.", "room.tone_guard.", "room.ghostwriter."} {
+	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted.", "room.needs_reply.", "room.tone_guard.", "room.ghostwriter."} {
 		if strings.HasPrefix(key, prefix) {
 			if strings.TrimPrefix(key, prefix) == "" {
 				return errors.New("room preference requires a room ID")
@@ -543,6 +543,10 @@ func Validate(key string, value any) error {
 		}
 		if folder != "" && (!filepath.IsAbs(folder) || strings.ContainsRune(folder, 0)) {
 			return errors.New("download folder must be an absolute path")
+		}
+	case "ai.thinking_level":
+		if !oneOf(value, "none", "low", "medium", "high") {
+			return errors.New("AI thinking level has an unsupported value")
 		}
 	case "ai.endpoint":
 		endpoint, ok := value.(string)
@@ -584,21 +588,51 @@ func Validate(key string, value any) error {
 			return fmt.Errorf("preference %q must be a JSON string", key)
 		}
 		return validateAIAgentCollection(serialized)
-	case "ai.translate_language":
-		language, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("preference %q must be a string", key)
-		}
-		if len(language) > 40 {
-			return errors.New("AI translation language must be 40 characters or fewer")
-		}
-	case "ai.tutor_language", "ai.tutor_explanation_language":
+	case "ai.tutor_language", "ai.default_language":
 		code, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("preference %q must be a string", key)
 		}
 		if _, known := tutorLanguageNames[code]; code != "" && !known {
-			return errors.New("AI tutor language is not supported")
+			return errors.New("AI language is not supported")
+		}
+	case "ai.known_languages":
+		return validateKnownLanguages(value)
+	case "ai.image.binary_path", "ai.image.model_path":
+		path, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("preference %q must be a string", key)
+		}
+		if path != "" && (!filepath.IsAbs(path) || strings.ContainsRune(path, 0)) {
+			return fmt.Errorf("preference %q must be an absolute path", key)
+		}
+	case "ai.image.idle_minutes":
+		if !oneOf(value, "", "1", "3", "5", "10", "30") {
+			return errors.New("image engine idle timeout has an unsupported value")
+		}
+	case "ai.image.size":
+		if !oneOf(value, "", "512x512", "512x768", "768x512", "768x768", "768x1024", "1024x768", "1024x1024") {
+			return errors.New("image size has an unsupported value")
+		}
+	case "ai.image.steps":
+		if !oneOf(value, "", "4", "8", "12", "20", "30", "40") {
+			return errors.New("image steps has an unsupported value")
+		}
+	case "ai.image.cfg_scale":
+		if !oneOf(value, "", "1", "3", "5", "7", "9") {
+			return errors.New("image guidance scale has an unsupported value")
+		}
+	case "ai.image.sampler":
+		if !oneOf(value, "", "euler", "euler_a", "heun", "dpm2", "dpm++2m", "lcm") {
+			return errors.New("image sampler has an unsupported value")
+		}
+	case "ai.image.negative_prompt":
+		prompt, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("preference %q must be a string", key)
+		}
+		if utf8.RuneCountInString(prompt) > 1000 || strings.ContainsRune(prompt, 0) {
+			return errors.New("image negative prompt must be 1000 characters or fewer")
 		}
 	case "notifications.sound_direct", "notifications.sound_mention", "notifications.sound_group":
 		if !oneOf(value, "Chime", "Pulse", "Soft", "Silent") {
@@ -722,16 +756,52 @@ func TutorLanguageName(code string) (string, bool) {
 	return name, ok
 }
 
+// TutorLanguageCode returns the code for an English language name such as "Turkish", ignoring case.
+func TutorLanguageCode(name string) (string, bool) {
+	name = strings.TrimSpace(name)
+	for code, language := range tutorLanguageNames {
+		if strings.EqualFold(language, name) {
+			return code, true
+		}
+	}
+	return "", false
+}
+
+// validateKnownLanguages checks ai.known_languages, a JSON array of distinct supported language codes.
+func validateKnownLanguages(value any) error {
+	serialized, ok := value.(string)
+	if !ok {
+		return errors.New("AI known languages must be a JSON string")
+	}
+	var codes []string
+	if err := json.Unmarshal([]byte(serialized), &codes); err != nil {
+		return errors.New("AI known languages must be a JSON array of language codes")
+	}
+	if len(codes) == 0 || len(codes) > len(tutorLanguageNames) {
+		return errors.New("AI known languages must contain 1 to 16 languages")
+	}
+	seen := make(map[string]bool, len(codes))
+	for _, code := range codes {
+		if _, known := tutorLanguageNames[code]; !known {
+			return errors.New("AI known languages contains an unsupported language")
+		}
+		if seen[code] {
+			return errors.New("AI known languages must not repeat a language")
+		}
+		seen[code] = true
+	}
+	return nil
+}
+
 // aiFeatureIDs lists the AI features whose prompt, temperature, and token limit can be tuned from settings.
 // The IDs must match the feature catalog in desktop/ai_settings.go and frontend/src/aiSettings.ts.
 var aiFeatureIDs = map[string]bool{
 	"ghostwriter":           true,
 	"local_chat":            true,
-	"turkish_tutor":         true,
+	"language_tutor":        true,
 	"contact_dossier":       true,
 	"ask_ai":                true,
 	"summarize":             true,
-	"translate":             true,
 	"draft_reply":           true,
 	"rewrite":               true,
 	"shorten":               true,

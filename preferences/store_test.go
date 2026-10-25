@@ -45,6 +45,72 @@ func TestValidateBusyModePreference(t *testing.T) {
 	}
 }
 
+func TestValidateImageEnginePreferences(t *testing.T) {
+	for _, key := range []string{"ai.image.binary_path", "ai.image.model_path"} {
+		if err := Validate(key, ""); err != nil {
+			t.Errorf("Validate(%q, empty) error = %v", key, err)
+		}
+		if err := Validate(key, filepath.Join(t.TempDir(), "sd-server")); err != nil {
+			t.Errorf("Validate(%q, absolute path) error = %v", key, err)
+		}
+		if err := Validate(key, "relative/sd-server"); err == nil {
+			t.Errorf("Validate(%q) accepted a relative path", key)
+		}
+		if err := Validate(key, 42); err == nil {
+			t.Errorf("Validate(%q) accepted a non-string value", key)
+		}
+	}
+	for _, value := range []string{"", "1", "3", "5", "10", "30"} {
+		if err := Validate("ai.image.idle_minutes", value); err != nil {
+			t.Errorf("Validate(ai.image.idle_minutes, %q) error = %v", value, err)
+		}
+	}
+	if err := Validate("ai.image.idle_minutes", "7"); err == nil {
+		t.Fatal("Validate() accepted an unsupported image idle timeout")
+	}
+	for _, value := range []string{"", "512x512", "512x768", "768x512", "768x768", "768x1024", "1024x768", "1024x1024"} {
+		if err := Validate("ai.image.size", value); err != nil {
+			t.Errorf("Validate(ai.image.size, %q) error = %v", value, err)
+		}
+	}
+	if err := Validate("ai.image.size", "640x640"); err == nil {
+		t.Fatal("Validate() accepted an unsupported image size")
+	}
+	for _, value := range []string{"", "4", "8", "12", "20", "30", "40"} {
+		if err := Validate("ai.image.steps", value); err != nil {
+			t.Errorf("Validate(ai.image.steps, %q) error = %v", value, err)
+		}
+	}
+	if err := Validate("ai.image.steps", "25"); err == nil {
+		t.Fatal("Validate() accepted an unsupported image step count")
+	}
+	for _, value := range []string{"", "1", "3", "5", "7", "9"} {
+		if err := Validate("ai.image.cfg_scale", value); err != nil {
+			t.Errorf("Validate(ai.image.cfg_scale, %q) error = %v", value, err)
+		}
+	}
+	if err := Validate("ai.image.cfg_scale", "2.2"); err == nil {
+		t.Fatal("Validate() accepted an unsupported image guidance scale")
+	}
+	for _, value := range []string{"", "euler", "euler_a", "heun", "dpm2", "dpm++2m", "lcm"} {
+		if err := Validate("ai.image.sampler", value); err != nil {
+			t.Errorf("Validate(ai.image.sampler, %q) error = %v", value, err)
+		}
+	}
+	if err := Validate("ai.image.sampler", "ddpm"); err == nil {
+		t.Fatal("Validate() accepted an unsupported image sampler")
+	}
+	if err := Validate("ai.image.negative_prompt", "blurry, low quality"); err != nil {
+		t.Errorf("Validate(ai.image.negative_prompt) error = %v", err)
+	}
+	if err := Validate("ai.image.negative_prompt", strings.Repeat("a", 1001)); err == nil {
+		t.Fatal("Validate() accepted an image negative prompt over 1000 characters")
+	}
+	if err := Validate("ai.image.negative_prompt", 42); err == nil {
+		t.Fatal("Validate() accepted a non-string image negative prompt")
+	}
+}
+
 func TestValidateMessageBookmarkPreference(t *testing.T) {
 	const key = "message.bookmark.%21room%3Aexample.org.%24event%3Aexample.org"
 	for _, value := range []bool{true, false} {
@@ -97,18 +163,32 @@ func TestValidateAITranscriptionModelPreference(t *testing.T) {
 }
 
 func TestValidateTutorLanguagePreferences(t *testing.T) {
-	for _, key := range []string{"ai.tutor_language", "ai.tutor_explanation_language"} {
+	for _, key := range []string{"ai.tutor_language", "ai.default_language"} {
 		for _, value := range []string{"", "es", "tr"} {
 			if err := Validate(key, value); err != nil {
 				t.Errorf("Validate(%q, %q) error = %v", key, value, err)
 			}
 		}
 		if err := Validate(key, "xx"); err == nil {
-			t.Errorf("Validate(%q) accepted an unsupported tutor language", key)
+			t.Errorf("Validate(%q) accepted an unsupported language", key)
 		}
 		if err := Validate(key, true); err == nil {
-			t.Errorf("Validate(%q) accepted a non-string tutor language", key)
+			t.Errorf("Validate(%q) accepted a non-string language", key)
 		}
+	}
+
+	for _, value := range []string{`["en"]`, `["en","it","tr"]`} {
+		if err := Validate("ai.known_languages", value); err != nil {
+			t.Errorf("Validate(ai.known_languages, %s) error = %v", value, err)
+		}
+	}
+	for _, value := range []string{``, `[]`, `not json`, `["xx"]`, `["en","en"]`, `"en"`} {
+		if err := Validate("ai.known_languages", value); err == nil {
+			t.Errorf("Validate(ai.known_languages, %q) accepted invalid languages", value)
+		}
+	}
+	if err := Validate("ai.known_languages", []string{"en"}); err == nil {
+		t.Error("Validate(ai.known_languages) accepted a non-string value")
 	}
 }
 
@@ -117,7 +197,7 @@ func TestValidateAIFeaturePreferences(t *testing.T) {
 		"ai.feature.agent.prompt",
 		"ai.feature.tone_guard.temperature",
 		"ai.feature.chat_translation.max_tokens",
-		"ai.feature.turkish_tutor.prompt",
+		"ai.feature.language_tutor.prompt",
 	} {
 		if err := Validate(key, ""); err != nil {
 			t.Errorf("Validate(%q, blank) error = %v", key, err)
@@ -440,6 +520,21 @@ func TestValidateRoomToneGuardPreference(t *testing.T) {
 	}
 	if err := Validate("room.tone_guard.", true); err == nil {
 		t.Fatal("Validate(room tone guard) accepted a missing room ID")
+	}
+}
+
+func TestValidateRoomNeedsReplyPreference(t *testing.T) {
+	if err := Validate("room.needs_reply.!room:example.org", true); err != nil {
+		t.Fatalf("Validate(room needs reply) error = %v", err)
+	}
+	if err := Validate("room.needs_reply.!room:example.org", false); err != nil {
+		t.Fatalf("Validate(cleared room needs reply) error = %v", err)
+	}
+	if err := Validate("room.needs_reply.!room:example.org", "true"); err == nil {
+		t.Fatal("Validate(room needs reply) accepted a string value")
+	}
+	if err := Validate("room.needs_reply.", true); err == nil {
+		t.Fatal("Validate(room needs reply) accepted a missing room ID")
 	}
 }
 

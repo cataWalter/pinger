@@ -43,7 +43,6 @@ type ContactDossierSnapshot struct {
 	RoomID                string   `json:"roomId"`
 	ContactID             string   `json:"contactId"`
 	DisplayName           string   `json:"displayName"`
-	Tier                  string   `json:"tier"`
 	LinkedChannels        []string `json:"linkedChannels"`
 	LinkedRoomIDs         []string `json:"linkedRoomIds"`
 	Enabled               bool     `json:"enabled"`
@@ -129,7 +128,7 @@ func contactDossierSnapshot(accountID, roomID, contactID string, roomIDs []strin
 	snapshot.LinkedRoomIDs = append([]string(nil), roomIDs...)
 	snapshot.KeyFacts = []string{}
 	snapshot.UnresolvedCommitments = []string{}
-	if err := store.db.QueryRow(`SELECT display_name, tier FROM contacts WHERE contact_id = ?`, contactID).Scan(&snapshot.DisplayName, &snapshot.Tier); err != nil {
+	if err := store.db.QueryRow(`SELECT display_name FROM contacts WHERE contact_id = ?`, contactID).Scan(&snapshot.DisplayName); err != nil {
 		return snapshot, fmt.Errorf("read dossier contact: %w", err)
 	}
 	cache, found, err := store.readContactDossier(contactID)

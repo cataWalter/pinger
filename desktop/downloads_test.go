@@ -43,3 +43,31 @@ func TestUniqueDownloadPathAvoidsOverwrite(t *testing.T) {
 		t.Fatalf("third path = %q, want %q", third, want)
 	}
 }
+
+func TestRevealFileRequiresHookAndExistingAbsolutePath(t *testing.T) {
+	saved := filepath.Join(t.TempDir(), "photo.png")
+	if err := os.WriteFile(saved, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service := &AppService{}
+	if err := service.RevealFile(saved); err == nil {
+		t.Fatal("RevealFile() without a file manager returned nil error")
+	}
+	var revealed string
+	service.revealFile = func(path string) error {
+		revealed = path
+		return nil
+	}
+	if err := service.RevealFile("photo.png"); err == nil {
+		t.Fatal("RevealFile() accepted a relative path")
+	}
+	if err := service.RevealFile(filepath.Join(t.TempDir(), "missing.png")); err == nil {
+		t.Fatal("RevealFile() accepted a missing file")
+	}
+	if err := service.RevealFile(saved); err != nil {
+		t.Fatalf("RevealFile() error = %v", err)
+	}
+	if revealed != saved {
+		t.Fatalf("revealed = %q, want %q", revealed, saved)
+	}
+}

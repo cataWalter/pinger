@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
-import type { AIMessage, LocalAIChatAttachment, LocalAIChatMessage, LocalAIChatSummary, Room } from '../bindings/mychat/desktop/models.js'
+import type { AIMessage, LocalAIChatAttachment, LocalAIChatFolder, LocalAIChatMessage, LocalAIChatSummary, Room } from '../bindings/mychat/desktop/models.js'
 
 export const LOCAL_AI_HISTORY_TURN_LIMIT = 40
 export const LOCAL_AI_ATTACHMENT_LIMIT = 6
 export const LOCAL_AI_IMAGE_LIMIT = 4
 export const LOCAL_AI_IMAGE_BYTES = 8 * 1024 * 1024
 export const LOCAL_AI_TEXT_BYTES = 32 * 1024
-export const LOCAL_AI_MESSAGE_CHARACTERS = 48_000
+export const LOCAL_AI_MESSAGE_CHARACTERS = 512 * 1024
 export const LOCAL_AI_ATTACHMENT_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp,text/*,.md,.markdown,.csv,.json,.yaml,.yml,.toml,.xml,.log,.go,.ts,.tsx,.js,.jsx,.py,.rs,.java,.kt,.swift,.c,.h,.cpp,.hpp,.sh,.sql'
 
 const LOCAL_AI_NAME_CHARACTERS = 200
@@ -23,8 +23,10 @@ export const LOCAL_AI_STARTER_PROMPTS = [
 ]
 
 export const LOCAL_AI_TITLE_CHARACTERS = 120
+export const LOCAL_AI_FOLDER_NAME_CHARACTERS = 60
 export const LOCAL_AI_ROOM_PREFIX = 'local-ai:'
 export const LOCAL_AI_FAVORITE_PREFIX = 'ai.local_chat.favorite.'
+export const LOCAL_AI_IN_ALL_CHATS_PREFIX = 'ai.local_chat.in_all.'
 
 export function localAIRoomID(chatID: string) {
     return `${LOCAL_AI_ROOM_PREFIX}${chatID}`
@@ -41,6 +43,19 @@ export function localAIChatIDFromRoomID(roomID: string) {
 
 export function localAIFavoritePreference(chatID: string) {
     return `${LOCAL_AI_FAVORITE_PREFIX}${chatID}`
+}
+
+export function localAIIncludeInAllPreference(chatID: string) {
+    return `${LOCAL_AI_IN_ALL_CHATS_PREFIX}${chatID}`
+}
+
+export type LocalAIChatKind = 'chat' | 'summary'
+export type LocalAIChatIcon = 'chat' | 'summary' | 'agent'
+
+// Summaries and chats with an agent get their own row icon. Everything else uses the plain chat icon.
+export function localAIChatIcon(chat: Pick<LocalAIChatSummary, 'kind' | 'agentId'>): LocalAIChatIcon {
+    if (chat.kind === 'summary') return 'summary'
+    return chat.agentId ? 'agent' : 'chat'
 }
 
 // Shapes a private model chat as a chat-list row. Local rows have no account, read state, or Matrix event.
@@ -82,11 +97,19 @@ export function localAIMessageLength(content: string, attachments: LocalAIChatAt
     return Array.from(localAIMessageText(content, attachments)).length
 }
 
+// Generated images are stored as assistant turns. The chat model gets only this note, never the image bytes.
+export const LOCAL_AI_GENERATED_IMAGE_NOTE = '[Generated image]'
+
+export function isLocalAIImageTurn(message: Pick<LocalAIChatMessage, 'role' | 'attachments'>) {
+    return message.role === 'assistant' && (message.attachments ?? []).some((attachment) => attachment.kind === 'image')
+}
+
 // Keeps the last turns, starting on a user turn, with text and images expanded for the model.
 export function buildLocalAIModelMessages(history: LocalAIChatMessage[]): AIMessage[] {
     const turns = history.slice(-LOCAL_AI_HISTORY_TURN_LIMIT)
     while (turns[0]?.role === 'assistant') turns.shift()
     return turns.map((message) => {
+        if (isLocalAIImageTurn(message)) return { role: message.role, content: LOCAL_AI_GENERATED_IMAGE_NOTE }
         const attachments = message.attachments ?? []
         const images = attachments
             .filter((attachment) => attachment.kind === 'image' && attachment.data)
@@ -158,16 +181,18 @@ export function localAIErrorMessage(error: unknown, fallback: string) {
 
 export function useLocalAIChatList(enabled: boolean) {
     const [chats, setChats] = useState<LocalAIChatSummary[]>([])
+    const [folders, setFolders] = useState<LocalAIChatFolder[]>([])
     const [error, setError] = useState('')
     const [revision, setRevision] = useState(0)
 
     useEffect(() => {
         if (!enabled) return undefined
         let active = true
-        AppService.ListLocalAIChats()
-            .then((list) => {
+        Promise.all([AppService.ListLocalAIChats(), AppService.ListLocalAIChatFolders()])
+            .then(([list, folderList]) => {
                 if (!active) return
                 setChats(list ?? [])
+                setFolders(folderList ?? [])
                 setError('')
             })
             .catch((listError: unknown) => {
@@ -179,5 +204,5 @@ export function useLocalAIChatList(enabled: boolean) {
     }, [enabled, revision])
 
     const reload = useCallback(() => setRevision((current) => current + 1), [])
-    return { chats, error, reload }
+    return { chats, folders, error, reload }
 }

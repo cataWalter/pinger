@@ -133,7 +133,6 @@ export default function ContactHUD({ accountID, roomID, rooms, onClose }: Contac
           <span className="eyebrow">LOCAL DOSSIER</span>
           <h2>{dossier?.displayName || 'Contact'}</h2>
           <div className="contact-hud-badges">
-            {dossier?.tier && dossier.tier !== 'NONE' && <span className="contact-hud-badge is-tier">{dossier.tier.replace(/_/g, ' ')}</span>}
             {(dossier?.linkedChannels ?? []).map((channel) => <span className="contact-hud-badge" key={channel}>{channel}</span>)}
           </div>
         </div>

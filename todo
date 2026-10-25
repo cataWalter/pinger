@@ -1,0 +1,159 @@
+La combinazione più efficiente in assoluto in Go consiste nell'usare **`stable-diffusion.cpp`** gestito da Go come **processo controllato on-demand**.
+
+### Perché questa è la soluzione migliore:
+1. **Zero Python / Zero PyTorch:** niente ambienti virtuali o dipendenze da 5 GB. `stable-diffusion.cpp` è un singolo binario nativo (C++/CUDA/Vulkan) di circa 20 MB.
+2. **Accetta solo il percorso del file:** dai direttamente il path al file `.safetensors` o `.gguf` presente sul disco (es. `./modelli/dreamshaper.safetensors`).
+3. **Gestione VRAM perfetta (Sleep sicuro):** In Go, tentare di liberare la VRAM di CUDA tramite binding CGo porta spesso a memory leak e frammentazione. Gestire il motore come **sottoprocesso** garantisce che, quando il processo viene arrestato, il driver GPU liberi il **100% della VRAM all'istante**.
+
+---
+
+### Passo 1: Procurati il binario di `stable-diffusion.cpp`
+Compilalo o scarica la release precompilata per il tuo sistema (con supporto CUDA o Vulkan/Metal):
+```bash
+# Esempio di compilazione su Linux con GPU Nvidia:
+git clone --recursive https://github.com/leejet/stable-diffusion.cpp
+cd stable-diffusion.cpp
+cmake -B build -DSD_CUDA=ON
+cmake --build build --config Release
+# Otterrai l'eseguibile 'sd'
+```
+
+---
+
+### Passo 2: Codice Go (Gestore On-Demand con Auto-Sleep)
+
+Questo manager Go:
+- Si avvia a consumo zero (modello "addormentato").
+- Quando la chat chiama `Generate()`, avvia il processo e genera l'immagine.
+- Resetta un timer di inattività (es. 3 minuti).
+- Se scade il tempo senza nuove richieste, termina il processo per azzerare la VRAM.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+type ImageModelManager struct {
+	mu           sync.Mutex
+	binaryPath   string        // Percorso dell'eseguibile 'sd'
+	modelPath    string        // Percorso del file .safetensors
+	idleTimeout  time.Duration // Tempo prima di andare a dormire
+	idleTimer    *time.Timer
+	activeCmd    *exec.Cmd     // Processo attualmente in esecuzione
+}
+
+func NewImageModelManager(binaryPath, modelPath string, idleTimeout time.Duration) *ImageModelManager {
+	return &ImageModelManager{
+		binaryPath:  binaryPath,
+		modelPath:   modelPath,
+		idleTimeout: idleTimeout,
+	}
+}
+
+// Generate richiama il modello solo quando necessario
+func (m *ImageModelManager) Generate(prompt string, outputPath string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Se c'è un timer di spegnimento attivo, resettalo
+	if m.idleTimer != nil {
+		m.idleTimer.Stop()
+	}
+
+	log.Printf("[AI] Avvio generazione per: %q\n", prompt)
+
+	// Eseguiamo il binario nativo passando ESCLUSIVAMENTE il percorso del file su disco
+	// Flag tipici di sd.cpp:
+	// -m: percorso modello .safetensors
+	// -p: prompt testuale
+	// -o: file immagine di destinazione
+	// --steps: passaggi di campionamento (es. 20)
+	ctx := context.Background()
+	cmd := exec.CommandContext(ctx, m.binaryPath,
+		"-m", m.modelPath,
+		"-p", prompt,
+		"-o", outputPath,
+		"--steps", "20",
+		"-W", "512",
+		"-H", "512",
+	)
+
+	// Cattura output se vuoi fare debug
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	m.activeCmd = cmd
+
+	// Esecuzione dell'inferenza
+	err := cmd.Run()
+	m.activeCmd = nil
+
+	if err != nil {
+		return fmt.Errorf("errore durante la generazione dell'immagine: %w", err)
+	}
+
+	log.Println("[AI] Immagine creata con successo:", outputPath)
+
+	// Una volta terminata la richiesta, la memoria di questo processo è già libera.
+	// Se invece usi la modalità server di sd.cpp (vedi sotto), programmiamo lo sleep qui:
+	m.scheduleSleep()
+
+	return nil
+}
+
+func (m *ImageModelManager) scheduleSleep() {
+	m.idleTimer = time.AfterFunc(m.idleTimeout, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		log.Println("[AI] Inattività rilevata: modello a riposo (0% VRAM utilizzata).")
+		// Se usi la modalità server/demone, qui chiami m.activeCmd.Process.Kill()
+	})
+}
+```
+
+---
+
+### Esempio d'uso nella tua app Chat:
+
+```go
+func main() {
+	// Configura i soli percorsi su disco
+	binary := "./sd" // Il file compilato di stable-diffusion.cpp
+	model := "/home/user/models/v1-5-pruned-emaonly.safetensors"
+
+	manager := NewImageModelManager(binary, model, 2*time.Minute)
+
+	// Simula la richiesta che arriva dalla chat:
+	userPrompt := "a futuristic cyberpunk cat, 8k resolution"
+	outImage := filepath.Join(os.TempDir(), fmt.Sprintf("gen_%d.png", time.Now().Unix()))
+
+	err := manager.Generate(userPrompt, outImage)
+	if err != nil {
+		log.Fatalf("Errore: %v", err)
+	}
+
+	fmt.Println("Immagine pronta da inviare alla chat:", outImage)
+}
+```
+
+---
+
+### Due modalità di funzionamento:
+
+1. **Modalità One-Shot CLI (Consigliata per semplicità):**
+   * Il codice sopra lancia il binario solo quando l'utente richiede l'immagine e lo chiude appena finisce.
+   * **Vantaggio:** Gestione memoria elementare e sicura. Nessun demone zombie in background. Quando non genera, occupa letteralmente **0 MB di RAM e 0 MB di VRAM**.
+   * Se usi dischi NVMe, modelli quantizzati o SD 1.5, il caricamento dura circa 1-2 secondi prima di iniziare a disegnare.
+
+2. **Modalità Server Persistent (Per latenza zero):**
+   * `stable-diffusion.cpp` include anche un eseguibile server (`sd-server`).
+   * Se 2 secondi di caricamento disco sono troppi, il manager in Go può lanciare `sd-server -m <file>` solo alla prima richiesta, lasciarlo aperto per ricevere chiamate HTTP rapide e far scattare `cmd.Process.Kill()` alla scadenza dell'`idleTimeout` per liberare la scheda video.

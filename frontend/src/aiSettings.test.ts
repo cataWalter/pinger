@@ -4,26 +4,28 @@ import {
   AI_MAX_TOKENS_LIMIT,
   AI_TEMPERATURE_MAX,
   AI_TEMPERATURE_MIN,
+  LANGUAGE_OPTIONS,
   aiFeatureDraftFromTuning,
   aiFeaturePreferenceEntries,
   aiFeatureResetEntries,
   aiFeatureSpec,
   buildAIFeatureSystemPrompt,
+  languageName,
   parseAIMaxTokens,
   parseAITemperature,
+  parseKnownLanguages,
   renderAITemplate,
   resolveAIFeatureTuning,
-  resolveTutorLanguages,
+  resolveLanguageRoles,
+  serializeKnownLanguages,
   tuningFromPreferences,
-  TUTOR_LANGUAGES,
-  tutorLanguageName,
   validateAIFeatureDraft,
 } from './aiSettings'
 
 describe('AI feature settings', () => {
   it('has one spec per tunable feature with placeholders present in the default prompt', () => {
-    expect(AI_FEATURE_SPECS).toHaveLength(12)
-    expect(new Set(AI_FEATURE_SPECS.map((spec) => spec.id)).size).toBe(12)
+    expect(AI_FEATURE_SPECS).toHaveLength(11)
+    expect(new Set(AI_FEATURE_SPECS.map((spec) => spec.id)).size).toBe(11)
     for (const spec of AI_FEATURE_SPECS) {
       expect(spec.prompt.trim()).not.toBe('')
       for (const placeholder of spec.placeholders) {
@@ -94,10 +96,9 @@ describe('AI feature settings', () => {
     expect(system).toContain('one valid JSON array of strings')
   })
 
-  it('uses the default prompt when instructions are blank and fills the language placeholder', () => {
+  it('uses the default prompt when instructions are blank', () => {
     const summarize = aiFeatureSpec('summarize')
     expect(buildAIFeatureSystemPrompt('summarize', '   ')).toBe(`${summarize.prompt} ${summarize.fixedRules}`)
-    expect(buildAIFeatureSystemPrompt('translate', '', { language: 'French' })).toContain('Translate the user\'s message into French.')
   })
 
   it('fills placeholders without reading substituted values again', () => {
@@ -140,30 +141,47 @@ describe('AI feature settings', () => {
     expect(aiFeatureDraftFromTuning({ prompt: 'p', temperature: 0.2, maxTokens: 0 })).toEqual({ prompt: 'p', temperature: '0.2', maxTokens: '' })
   })
 
-  it('lists unique tutor language codes including the Turkish and Italian defaults', () => {
-    const codes = TUTOR_LANGUAGES.map((language) => language.code)
+  it('lists every supported language once', () => {
+    const codes = LANGUAGE_OPTIONS.map((language) => language.code)
 
     expect(codes).toHaveLength(16)
     expect(new Set(codes).size).toBe(codes.length)
+    expect(codes).toContain('en')
     expect(codes).toContain('tr')
-    expect(codes).toContain('it')
   })
 
-  it('names tutor languages and returns unknown codes unchanged', () => {
-    expect(tutorLanguageName('es')).toBe('Spanish')
-    expect(tutorLanguageName('tr')).toBe('Turkish')
-    expect(tutorLanguageName('xx')).toBe('xx')
-    expect(tutorLanguageName()).toBe('')
+  it('names languages and returns unknown codes unchanged', () => {
+    expect(languageName('es')).toBe('Spanish')
+    expect(languageName('xx')).toBe('xx')
+    expect(languageName()).toBe('')
   })
 
-  it('resolves tutor languages from preferences and falls back to Turkish and Italian', () => {
-    expect(resolveTutorLanguages({})).toEqual({ target: 'tr', explanation: 'it' })
-    expect(resolveTutorLanguages({ 'ai.tutor_language': 'de', 'ai.tutor_explanation_language': 'en' })).toEqual({ target: 'de', explanation: 'en' })
-    expect(resolveTutorLanguages({ 'ai.tutor_language': 'xx', 'ai.tutor_explanation_language': 'fr' })).toEqual({ target: 'tr', explanation: 'fr' })
-    expect(resolveTutorLanguages({ 'ai.tutor_language': true, 'ai.tutor_explanation_language': 'de' })).toEqual({ target: 'tr', explanation: 'de' })
+  it('resolves the learning, default, and known languages with the backend fallbacks', () => {
+    expect(resolveLanguageRoles({})).toEqual({ learning: 'tr', defaultLanguage: 'en', known: ['en'] })
+    expect(resolveLanguageRoles({
+      'ai.tutor_language': 'de',
+      'ai.default_language': 'fr',
+      'ai.known_languages': '["en","fr"]',
+    })).toEqual({ learning: 'de', defaultLanguage: 'fr', known: ['en', 'fr'] })
+    expect(resolveLanguageRoles({ 'ai.default_language': 'fr', 'ai.known_languages': '["en"]' }).known).toEqual(['en', 'fr'])
+    expect(resolveLanguageRoles({ 'ai.tutor_language': 'xx', 'ai.default_language': 'tr' })).toEqual({ learning: 'es', defaultLanguage: 'tr', known: ['tr'] })
+    expect(resolveLanguageRoles({ 'ai.tutor_language': true, 'ai.default_language': 'de' })).toEqual({ learning: 'tr', defaultLanguage: 'de', known: ['de'] })
   })
 
-  it('falls back to the default pair when both languages are the same', () => {
-    expect(resolveTutorLanguages({ 'ai.tutor_language': 'es', 'ai.tutor_explanation_language': 'es' })).toEqual({ target: 'tr', explanation: 'it' })
+  it('chooses a different learning language when the learning and default languages match', () => {
+    expect(resolveLanguageRoles({ 'ai.tutor_language': 'es', 'ai.default_language': 'es' })).toEqual({ learning: 'tr', defaultLanguage: 'es', known: ['es'] })
+    expect(resolveLanguageRoles({ 'ai.tutor_language': 'tr', 'ai.default_language': 'tr' })).toEqual({ learning: 'es', defaultLanguage: 'tr', known: ['tr'] })
+  })
+
+  it('parses known languages and drops unsupported or repeated codes', () => {
+    expect(parseKnownLanguages('["tr","xx","tr","de",3]')).toEqual(['tr', 'de'])
+    expect(parseKnownLanguages('not json')).toEqual([])
+    expect(parseKnownLanguages('{"tr":true}')).toEqual([])
+    expect(parseKnownLanguages(undefined)).toEqual([])
+  })
+
+  it('serializes known languages in a stable order without unsupported codes', () => {
+    expect(serializeKnownLanguages(['tr', 'en', 'xx'])).toBe('["en","tr"]')
+    expect(serializeKnownLanguages([])).toBe('[]')
   })
 })

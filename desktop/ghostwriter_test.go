@@ -116,6 +116,7 @@ func TestLocalGhostwriterCompletionUsesOllamaGenerate(t *testing.T) {
 			System  string `json:"system"`
 			Prompt  string `json:"prompt"`
 			Stream  bool   `json:"stream"`
+			Think   *bool  `json:"think"`
 			Options struct {
 				Stop []string `json:"stop"`
 			} `json:"options"`
@@ -125,6 +126,9 @@ func TestLocalGhostwriterCompletionUsesOllamaGenerate(t *testing.T) {
 		}
 		if body.Model != "qwen2.5:3b" || body.Stream || body.System != "style profile" || body.Prompt != "complete this" {
 			t.Errorf("request body = %+v", body)
+		}
+		if body.Think == nil || *body.Think {
+			t.Error("Ollama request must disable hidden reasoning (think=false) so the reply is not consumed by reasoning tokens")
 		}
 		if len(body.Options.Stop) == 0 {
 			t.Error("Ollama request omitted stop sequences")
@@ -159,12 +163,16 @@ func TestLocalGhostwriterCompletionUsesOpenAICompatibleChat(t *testing.T) {
 			ResponseFormat struct {
 				Type string `json:"type"`
 			} `json:"response_format"`
+			ChatTemplateKwargs map[string]any `json:"chat_template_kwargs"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
 		if body.Model != "local-model" || body.Stream || len(body.Messages) != 2 || body.Messages[0].Role != "system" || len(body.Stop) == 0 || body.MaxTokens < 400 || body.ResponseFormat.Type != "json_object" {
 			t.Errorf("request body = %+v", body)
+		}
+		if body.ChatTemplateKwargs["enable_thinking"] != false {
+			t.Errorf("chat_template_kwargs = %+v, want enable_thinking=false so reasoning does not consume max_tokens", body.ChatTemplateKwargs)
 		}
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"{\"suggestions\":[{\"kind\":\"direct\",\"text\":\"A local draft\"}] }"}}]}`)
 	}))

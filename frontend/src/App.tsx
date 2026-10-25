@@ -22,11 +22,9 @@ import {
   FileText,
   LockKeyhole,
   MessageCircleMore,
-  MessageCircleQuestion,
+  MessageSquare,
   Paperclip,
-  Pause,
   Pencil,
-  Play,
   Reply,
   RotateCcw,
   ScrollText,
@@ -43,18 +41,19 @@ import {
   X,
   Download,
   EyeOff,
+  Folder,
+  FolderPlus,
   GraduationCap,
   HardDrive,
   Heading1,
-  HeartHandshake,
   Images,
+  ImagePlus,
   Italic,
   Link,
   List,
   ListOrdered,
   LogOut,
   Mic,
-  Minimize2,
   PanelRight,
   Plus,
   Quote,
@@ -62,15 +61,14 @@ import {
   Square,
   SquareCode,
   Strikethrough,
-  Tags,
   Video,
   ZoomIn,
   ZoomOut,
   WandSparkles,
 } from 'lucide-react'
 import EmojiPicker from 'emoji-picker-react'
-import { AppService, GhostwriterMode as GhostwriterRequestMode, TurkishTutorService } from '../bindings/mychat/desktop'
-import type { AIMessage, AppBuildInfo, Device, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, RelationshipDecayContact, RelationshipDecaySnapshot, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, TutorAnalysis, UpdateStatus } from '../bindings/mychat/desktop/models.js'
+import { AppService, GhostwriterMode as GhostwriterRequestMode, LanguageTutorService } from '../bindings/mychat/desktop'
+import type { AIMessage, AppBuildInfo, ChatExportResult, Device, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, TutorAnalysis, UpdateStatus } from '../bindings/mychat/desktop/models.js'
 import { createBusyReplyForLanguage, detectBusyReplyLanguage, detectConversationLanguage } from './busyMode'
 import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, type ComposerFormat, type EmojiQuery, type EmoticonReplacement } from './composerText'
 import { fuzzyScore } from './fuzzy'
@@ -81,18 +79,21 @@ import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, 
 import { SnippetPopover } from './SnippetPopover'
 import { loadSnippets, saveSnippets, type Snippet } from './snippets'
 import { useSnippetExpander } from './useSnippetExpander'
-import { ChatTranslationResponseError, EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, boundedTranscript, buildAgentPrompt, buildAskAIPrompt, buildChatTranslationPrompt, buildConversationAnalysisPrompt, buildExplainPrompt, buildReplyPrompt, buildRewritePrompt, buildSummaryPrompt, buildTopicInsightsPrompt, buildTranslationPrompt, parseChatAgents, parseChatTranslationResponse, serializeChatAgents, splitChatTranslationBatches, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage } from './aiPrompts'
-import { resolveAIFeatureTuning, resolveTutorLanguages, tutorLanguageName, TUTOR_DEFAULT_EXPLANATION_LANGUAGE, TUTOR_DEFAULT_LANGUAGE, type AIFeatureID } from './aiSettings'
-import { TutorLanguageSettings } from './TutorLanguageSettings'
+import { ConnectionStatusBanner } from './ConnectionStatusBanner'
+import { useConnectionProblem } from './useConnectionProblem'
+import { ChatTranslationResponseError, EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, buildChatTranslationPrompt, buildExplainPrompt, buildReplyPrompt, buildSummaryChatDraft, parseChatAgents, parseChatTranslationResponse, serializeChatAgents, splitChatTranslationBatches, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage } from './aiPrompts'
+import { languageName, resolveAIFeatureTuning, resolveLanguageRoles, type AIFeatureID } from './aiSettings'
+import { LanguageSettings } from './LanguageSettings'
 import { AIPromptSettings } from './AIPromptSettings'
 import { matrixMediaURL, matrixMXCMediaURL } from './ChatMediaRenderer'
+import { VoiceMessagePlayer } from './VoiceMessagePlayer'
 import { useMatrixBatch } from './useMatrixBatch'
 import { DialogSurface } from './DialogSurface'
 import { SnippetSettingsModal } from './SnippetSettingsModal'
 import ContactHUD from './ContactHUD'
 import LocalAIChat from './LocalAIChat'
 import LocalAIAgentSettings from './LocalAIAgentSettings'
-import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIRoomID, LOCAL_AI_TITLE_CHARACTERS, useLocalAIChatList } from './localAIChats'
+import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID, LOCAL_AI_FOLDER_NAME_CHARACTERS, LOCAL_AI_TITLE_CHARACTERS, type LocalAIChatIcon, type LocalAIChatKind, useLocalAIChatList } from './localAIChats'
 const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
 
 type MatrixUpdate = {
@@ -138,10 +139,12 @@ type AIPanel = {
 }
 type AIStreamChunk = { requestId: string; text: string; reset?: boolean }
 type AIStreamHandler = (chunk: AIStreamChunk) => void
-type TurkishTutorState = { mode: 'draft' | 'message'; originalText: string; analysis: TutorAnalysis | null; busy: boolean; error: string; requestID: string; preview: string }
-type ChatTranslationState = { requestID: number; roomID: string; targetMessageIDs: string[]; translations: Record<string, string>; busy: boolean; status: string; error: string; errorResponse: string | null }
+type LanguageTutorState = { mode: 'draft' | 'message'; originalText: string; explanationLanguage: string; analysis: TutorAnalysis | null; busy: boolean; error: string; requestID: string; preview: string }
+type ChatTranslationState = { requestID: number; roomID: string; targetLanguage: string; targetMessageIDs: string[]; translations: Record<string, string>; busy: boolean; status: string; error: string; errorResponse: string | null }
 type GhostwriterCompletionState = { roomID: string; draft: string; text: string; requestID: string }
 type GhostwriterStreamChunk = { requestId: string; roomId: string; text: string }
+type ChatExportState = { roomID: string; phase: 'running' | 'done' | 'failed'; stage: string; mediaDone: number; mediaTotal: number; result: ChatExportResult | null; error: string }
+type ChatExportProgressEvent = { roomId: string; stage: string; messages: number; mediaDone: number; mediaTotal: number }
 type ScheduledDraft =
   | { kind: 'message'; roomID: string; text: string; replyToEventID?: string; replyToSender?: string; replyToPreview?: string }
   | { kind: 'reminder'; roomID: string; eventID: string; text: string; archiveAfter?: boolean }
@@ -181,6 +184,7 @@ type TimelineMessageActions = {
   onUseTranscript: (text: string) => void
   onSendReaction: (message: Message, emoji: string) => void
   onRemoveReaction: (message: Message, emoji: string) => void
+  onStartDirectChat: (message: Message) => void
 }
 type RoomButtonActions = {
   onSelect: (room: Room, index: number, event: React.MouseEvent<HTMLButtonElement>) => void
@@ -253,6 +257,13 @@ function describeError(error: unknown) {
   return error instanceof Error ? error.message : String(error)
 }
 
+function chatExportStatusText(state: ChatExportState) {
+  if (state.stage === 'media') return `Saving media ${state.mediaDone} of ${state.mediaTotal}`
+  if (state.stage === 'finishing') return 'Writing transcript'
+  if (state.stage === 'history') return 'Reading room history'
+  return 'Starting export'
+}
+
 function isTextEntryTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || Boolean(target.closest('input, textarea, select, [contenteditable="true"]')))
 }
@@ -264,6 +275,9 @@ function displayMessageBody(message: Message) {
   }
   return message.body
 }
+
+// Matrix uses the filename as the body of an uncaptioned image. The inline preview already shows it.
+const imageFileNameBodyPattern = /^\S+\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/i
 
 function initials(label: string) {
   const words = label.trim().split(/\s+/).filter(Boolean)
@@ -530,16 +544,17 @@ function isDirectLikeRoom(room: Room) {
   return room.direct || room.bridge === 'IG'
 }
 
-function canBeNeedsReplyRoom(room: Room) {
-  return isDirectLikeRoom(room)
-}
-
-function isNeedsReplyRoom(room: Room) {
-  return isUnansweredRoom(room) && canBeNeedsReplyRoom(room)
-}
-
+// The Matrix-derived "unanswered" flag only applies to direct-like chats. Any room can be added to Needs reply manually.
 function isUnansweredRoom(room: Room) {
-  return room.unanswered && canBeNeedsReplyRoom(room)
+  return room.unanswered && isDirectLikeRoom(room)
+}
+
+function needsReplyPreferenceKey(roomID: string) {
+  return `room.needs_reply.${roomID}`
+}
+
+function isNeedsReplyRoom(room: Room, preferences: PreferenceValues) {
+  return preferenceBoolean(preferences, needsReplyPreferenceKey(room.id)) || isUnansweredRoom(room)
 }
 
 function isUnreadRoom(room: Room) {
@@ -599,6 +614,8 @@ const TimelineMessageList = memo(function TimelineMessageList({
       const lastInGroup = !nextIsGrouped
       const showDayDivider = !previous || !isSameDay(previous.timestamp, message.timestamp)
       const displayBody = displayMessageBody(message)
+      const showsImagePreview = Boolean(message.mediaUri && !message.redacted && !message.decryptionError && !hideImagesAndVideos && (message.mediaMime.startsWith('image/') || message.mediaType === 'm.image'))
+      const hideFileNameBody = showsImagePreview && imageFileNameBodyPattern.test(displayBody.trim())
       const isContextTarget = (message.id || message.transactionId) === contextMessageID
       const showSender = groupChat && !ownMessage && !grouped
       const senderName = message.senderName || message.sender
@@ -618,7 +635,7 @@ const TimelineMessageList = memo(function TimelineMessageList({
             {showSender && <Avatar uri={message.avatar} label={senderName} className="message-sender-avatar" deferLoad />}
             <div className="message-body-wrap">
               {!grouped && <div className="message-meta">
-                {showSender && <strong className="message-sender-name">{senderName}</strong>}
+                {showSender && <button className="message-sender-name" type="button" title={`Start a direct chat with ${senderName}`} aria-label={`Start a direct chat with ${senderName}`} onClick={() => actionsRef.current.onStartDirectChat(message)}>{senderName}</button>}
                 {message.timestamp > 0 && preferenceBoolean(preferences, 'appearance.show_timestamps', true) && <time>{formatTimelineTime(message.timestamp, preferences)}</time>}
                 {message.edited && <span className="edited-mark" title={message.editHistory?.length ? message.editHistory.join('\n') : 'Edited message'}>edited{(message.editHistory?.length ?? 0) > 0 && ` (${message.editHistory?.length} prior)`}</span>}
               </div>}
@@ -626,7 +643,7 @@ const TimelineMessageList = memo(function TimelineMessageList({
                 <span className="reply-preview-sender">{message.replyToSender || 'Reply'}</span>
                 <span className="reply-preview-text">{message.replyToPreview || 'Original message unavailable'}</span>
               </button>}
-              {!isAudioAttachment && !isFileAttachment && <Suspense fallback={<div className="message-body">{displayBody}</div>}>
+              {!isAudioAttachment && !isFileAttachment && !hideFileNameBody && <Suspense fallback={<div className="message-body">{displayBody}</div>}>
                 <MarkdownMessage body={displayBody} />
               </Suspense>}
               {message.mediaUri && !message.redacted && !message.decryptionError && !(hideImagesAndVideos && isImageOrVideoAttachment) && (
@@ -654,8 +671,8 @@ const TimelineMessageList = memo(function TimelineMessageList({
                 {quickReactionOptions(preferences).map((emoji) => <button key={emoji} type="button" aria-label={`React with ${emoji}`} title={`React with ${emoji}`} onClick={() => actionsRef.current.onSendReaction(message, emoji)}>{emoji}</button>)}
               </div>}
             </div>
-            {showTranslation && <aside className="message-translation" role="note" aria-label="English translation" aria-live="polite">
-              <span className="message-translation-label">English</span>
+            {showTranslation && <aside className="message-translation" role="note" aria-label={`${chatTranslation?.targetLanguage || 'Translation'} translation`} aria-live="polite">
+              <span className="message-translation-label">{chatTranslation?.targetLanguage || 'Translation'}</span>
               <p>{translatedBody || 'Translating…'}</p>
             </aside>}
           </article>
@@ -825,8 +842,25 @@ function quickReactionOptions(preferences: PreferenceValues) {
 
 type CaptureKind = 'voice' | 'video'
 type RecordedUpload = { kind: CaptureKind; durationMilliseconds: number }
+type StagedAttachment = { id: string; roomID: string; file: File; previewURL: string }
+type MediaApprovalItem = { key: string; name: string; kind: 'image' | 'video' | 'audio' | 'file'; sizeBytes: number; previewURL: string }
+type MediaApprovalRequest = { items: MediaApprovalItem[]; onApprove: () => void; onCancel?: () => void }
+const mediaApprovalKindLabels: Record<MediaApprovalItem['kind'], string> = { image: 'Image', video: 'Video', audio: 'Audio', file: 'File' }
+
+// mediaKindForFile returns the approval category for a file. Anything that is not an image, video, or audio file is a plain file.
+function mediaKindForFile(file: File): MediaApprovalItem['kind'] {
+  if (file.type.startsWith('image/')) return 'image'
+  if (file.type.startsWith('video/')) return 'video'
+  if (file.type.startsWith('audio/')) return 'audio'
+  return 'file'
+}
+
+function mediaApprovalItemFromFile(key: string, file: File, previewURL: string): MediaApprovalItem {
+  return { key, name: file.name || 'Attachment', kind: mediaKindForFile(file), sizeBytes: file.size, previewURL }
+}
 
 const maxVideoMessageMilliseconds = 3 * 60 * 1000
+const maxAttachmentBytes = 50 * 1024 * 1024
 
 function preferredVideoMimeType() {
   return ['video/mp4', 'video/webm'].find((type) => MediaRecorder.isTypeSupported?.(type)) ?? ''
@@ -874,16 +908,24 @@ function encodeVoiceNoteWav(audio: AudioBuffer) {
 
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
+  const connectionProblem = useConnectionProblem(snapshot?.connectionState === 'offline')
   const [systemPrefersDark, setSystemPrefersDark] = useState(() =>
     typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches,
   )
   const [selectedRoomID, setSelectedRoomID] = useState('')
   const [localAIChatOpen, setLocalAIChatOpen] = useState(false)
   const [localAIChatId, setLocalAIChatId] = useState<string | null>(null)
+  const localAIInitialDraftVersion = useRef(0)
+  const [localAIInitialDraft, setLocalAIInitialDraft] = useState({ version: 0, content: '' })
   const [localAINewChatAgentId, setLocalAINewChatAgentId] = useState('')
+  const [localAINewChatKind, setLocalAINewChatKind] = useState<LocalAIChatKind>('chat')
   const localAIChatList = useLocalAIChatList(true)
   const [localAIRenameDraft, setLocalAIRenameDraft] = useState<string | null>(null)
   const [localAIDeleteArmedID, setLocalAIDeleteArmedID] = useState('')
+  // null shows every AI chat, '' shows unfiled chats, and any other value is a folder ID.
+  const [localAIFolderFilter, setLocalAIFolderFilter] = useState<string | null>(null)
+  const [localAIFolderDraft, setLocalAIFolderDraft] = useState<{ folderID: string; name: string } | null>(null)
+  const [localAIFolderDeleteArmedID, setLocalAIFolderDeleteArmedID] = useState('')
   const [mobilePane, setMobilePane] = useState<'rooms' | 'conversation'>('rooms')
   const [search, setSearch] = useState('')
   const [roomScope, setRoomScope] = useState<RoomScope>('all')
@@ -899,16 +941,17 @@ function App() {
   // handler calling loadOlderMessages() could start several fetches before
   // `loadingOlder` re-renders. This ref closes that window.
   const loadingOlderRef = useRef(false)
+  // Loading older room history before a Local AI summary chat opens.
+  const [summaryStatus, setSummaryStatus] = useState('')
+  const summaryLoadingRef = useRef(false)
   const [composeText, setComposeText] = useState('')
+  const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([])
+  const [mediaApproval, setMediaApproval] = useState<MediaApprovalRequest | null>(null)
   const [snippets, setSnippets] = useState<Snippet[]>(() => loadSnippets())
   const [ghostwriterCompletion, setGhostwriterCompletion] = useState<GhostwriterCompletionState | null>(null)
   const [ghostwriterAutocompleteStatus, setGhostwriterAutocompleteStatus] = useState<'idle' | 'loading' | 'offline'>('idle')
   const [ghostwriterDraftStatus, setGhostwriterDraftStatus] = useState('')
   const [ghostwriterDraftBusy, setGhostwriterDraftBusy] = useState(false)
-  const [relationshipDecay, setRelationshipDecay] = useState<RelationshipDecaySnapshot | null>(null)
-  const [relationshipsOpen, setRelationshipsOpen] = useState(false)
-  const [relationshipDecayBusy, setRelationshipDecayBusy] = useState('')
-  const [relationshipDecayError, setRelationshipDecayError] = useState('')
   const [contactHUDOpen, setContactHUDOpen] = useState(false)
   const [mentionBindings, setMentionBindings] = useState<{ token: string; userID: string }[]>([])
   const [mentionStart, setMentionStart] = useState(-1)
@@ -932,9 +975,6 @@ function App() {
   const [mediaGalleryError, setMediaGalleryError] = useState('')
   const mediaGalleryRequestRef = useRef(0)
   const [agentEditor, setAgentEditor] = useState<ChatAgentProfile | null>(null)
-  const [agentPickerOpen, setAgentPickerOpen] = useState(false)
-  const [agentPickerID, setAgentPickerID] = useState('')
-  const [agentRequest, setAgentRequest] = useState('')
   const [agentSettingsError, setAgentSettingsError] = useState('')
   const [roomMembers, setRoomMembers] = useState<Member[]>([])
   const [roomMembersLoading, setRoomMembersLoading] = useState(false)
@@ -943,6 +983,7 @@ function App() {
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false)
   const [leaveRoomError, setLeaveRoomError] = useState('')
   const [leavingRoom, setLeavingRoom] = useState(false)
+  const [chatExport, setChatExport] = useState<ChatExportState | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [messageSearch, setMessageSearch] = useState('')
   const [searchRoomID, setSearchRoomID] = useState('')
@@ -1009,6 +1050,7 @@ function App() {
   const pendingHistoryRefreshRoomIDRef = useRef('')
   const editTargetRef = useRef<Message | null>(null)
   const markRoomAnsweredRef = useRef<(roomID: string) => Promise<void>>(async () => { })
+  const needsReplyUndoRef = useRef({ manual: false, auto: false })
   const preferencesRef = useRef<PreferenceValues>({})
   const setPreferenceRef = useRef<(key: string, value: boolean | string) => Promise<boolean>>(async () => false)
   const automaticArchiveInFlightRef = useRef(false)
@@ -1043,6 +1085,7 @@ function App() {
   // that pin, or from content growing below it, so it must not count as the reader scrolling away.
   const pinnedScrollTopRef = useRef<number | null>(null)
   const timelineResizeObserverRef = useRef<ResizeObserver | null>(null)
+  const startingDirectChatRef = useRef(false)
   const timelineMessageActionsRef = useRef<TimelineMessageActions>({
     onDoubleClick: () => { },
     onOpenContextMenu: () => { },
@@ -1051,6 +1094,7 @@ function App() {
     onUseTranscript: () => { },
     onSendReaction: () => { },
     onRemoveReaction: () => { },
+    onStartDirectChat: () => { },
   })
   const roomButtonActionsRef = useRef<RoomButtonActions>({
     onSelect: () => { },
@@ -1082,8 +1126,12 @@ function App() {
   const roomSearchInputRef = useRef<HTMLInputElement>(null)
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
   const [aiPanel, setAIPanel] = useState<AIPanel | null>(null)
-  const [turkishTutorState, setTurkishTutorState] = useState<TurkishTutorState | null>(null)
-  const turkishTutorRequestRef = useRef('')
+  const [languageTutorState, setLanguageTutorState] = useState<LanguageTutorState | null>(null)
+  const languageTutorRequestRef = useRef('')
+  // imageSendRun tracks an image being generated from the composer draft for roomID. Progress arrives on local-ai:image-progress.
+  const [imageSendRun, setImageSendRun] = useState<{ requestID: string; roomID: string; stage: string; step: number; totalSteps: number } | null>(null)
+  // generatedImageReview holds a generated image that waits for approval before it is sent.
+  const [generatedImageReview, setGeneratedImageReview] = useState<{ roomID: string; prompt: string; sourceDraft: string; encoded: string } | null>(null)
   const [chatTranslation, setChatTranslation] = useState<ChatTranslationState | null>(null)
   // activeAIRequestRef holds the request the AI panel is waiting on. stoppedAIRequestRef marks a request the user stopped.
   const activeAIRequestRef = useRef('')
@@ -1110,6 +1158,8 @@ function App() {
   }, [])
 
   const preferences = useMemo(() => snapshot?.preferences ?? {}, [snapshot?.preferences])
+  const languageRoles = resolveLanguageRoles(preferences)
+  const translateRecentLabel = `Translate latest 10 received messages to ${languageName(languageRoles.defaultLanguage)}`
   const rooms = snapshot?.rooms ?? EMPTY_ROOMS
   const selectedRoom = useMemo(() => rooms.find((room) => room.id === selectedRoomID), [rooms, selectedRoomID])
   const selectedRoomAvatar = useMemo(() => selectedRoom?.avatar || (
@@ -1119,13 +1169,11 @@ function App() {
   ), [messages, selectedRoom?.avatar, selectedRoomID, historyRoomIDRef.current])
   const selectedRoomAvatarSource = useMemo(() => matrixMXCMediaURL(selectedRoomAvatar), [selectedRoomAvatar])
   const typingStatus = formatTypingStatus(typingUsers, roomMembers, messages, selectedRoom?.direct ? selectedRoom.name : '')
-  const currentRelationshipDecay = relationshipDecay?.accountId === snapshot?.activeAccountId ? relationshipDecay : null
-  const relationshipDecayContacts = currentRelationshipDecay?.contacts ?? []
-  const relationshipDecayAlertCount = relationshipDecayContacts.filter((contact) => contact.alerted).length
   const ghostwriterEnabled = preferenceBoolean(preferences, 'ghostwriter.enabled')
-  const ghostwriterRoomPreference = selectedRoom ? `room.ghostwriter.${selectedRoom.id}` : ''
-  const ghostwriterRoomEnabled = ghostwriterRoomPreference ? preferenceBoolean(preferences, ghostwriterRoomPreference) : false
-  const ghostwriterActive = ghostwriterEnabled && ghostwriterRoomEnabled
+  const imageEngineReady = preferenceString(preferences, 'ai.image.binary_path', '') !== '' && preferenceString(preferences, 'ai.image.model_path', '') !== ''
+  const imageRunHere = imageSendRun !== null && imageSendRun.roomID === selectedRoomID ? imageSendRun : null
+  const imageRunStatus = imageRunHere?.stage === 'generating' ? `Generating image · step ${imageRunHere.step} of ${imageRunHere.totalSteps}` : 'Starting image engine…'
+  const imageButtonTooltip = imageRunHere ? 'Stop image generation' : imageEngineReady ? 'Generate an image from the draft to review before sending' : 'Generate an image from the draft · set up the image engine in Settings > AI first'
   const ghostwriterRewriteText = ghostwriterCompletion?.roomID === selectedRoomID && ghostwriterCompletion.draft === composeText
     ? ghostwriterCompletion.text
     : ''
@@ -1136,10 +1184,20 @@ function App() {
   const localAIAgentCandidate = localAIActiveChat ? localAIActiveChat.agentId : localAINewChatAgentId
   const localAIAgentId = localAIAgents.agents.some((agent) => agent.id === localAIAgentCandidate) ? localAIAgentCandidate : ''
 
-  function startLocalAIChat() {
+  function startLocalAIChat(initialDraft = '', kind: LocalAIChatKind = 'chat') {
     setLocalAIChatId(null)
     setLocalAINewChatAgentId(localAIAgents.defaultAgentId)
+    setLocalAINewChatKind(kind)
+    localAIInitialDraftVersion.current++
+    setLocalAIInitialDraft({ version: localAIInitialDraftVersion.current, content: initialDraft })
     openLocalAIChatView()
+  }
+
+  // Saves a chat agent to the shared list. The size check matters: an oversized list is dropped on read.
+  async function createLocalAIAgent(agent: ChatAgentProfile) {
+    const serialized = serializeChatAgents({ ...localAIAgents, agents: [...localAIAgents.agents, agent] })
+    if (new TextEncoder().encode(serialized).byteLength > MAX_AGENT_COLLECTION_LENGTH) return false
+    return setPreference('ai.local_agents', serialized)
   }
 
   function selectLocalAIChat(chatID: string) {
@@ -1173,8 +1231,50 @@ function App() {
 
   async function deleteLocalAIChat(chatID: string) {
     await AppService.DeleteLocalAIChat(chatID)
-    if (chatID === localAIChatId) setLocalAIChatId(null)
+    if (chatID === localAIChatId) {
+      setLocalAIChatId(null)
+      setLocalAINewChatKind('chat')
+    }
     localAIChatList.reload()
+  }
+
+  // An empty folderID creates a folder, and the new folder becomes the active filter.
+  async function saveLocalAIFolderDraft(folderID: string, draftName: string) {
+    setLocalAIFolderDraft(null)
+    const name = draftName.trim()
+    if (!name || (folderID && name === localAIChatList.folders.find((folder) => folder.id === folderID)?.name)) return
+    try {
+      if (folderID) {
+        await AppService.RenameLocalAIChatFolder(folderID, name)
+      } else {
+        const folder = await AppService.CreateLocalAIChatFolder(name)
+        setLocalAIFolderFilter(folder.id)
+      }
+      localAIChatList.reload()
+    } catch (folderError) {
+      setError(localAIErrorMessage(folderError, 'The folder could not be saved.'))
+    }
+  }
+
+  // Chats in a deleted folder stay saved and become unfiled.
+  async function deleteLocalAIFolder(folderID: string) {
+    setLocalAIFolderDeleteArmedID('')
+    try {
+      await AppService.DeleteLocalAIChatFolder(folderID)
+      setLocalAIFolderFilter((current) => current === folderID ? null : current)
+      localAIChatList.reload()
+    } catch (folderError) {
+      setError(localAIErrorMessage(folderError, 'The folder could not be deleted.'))
+    }
+  }
+
+  async function moveLocalAIChatToFolder(chatID: string, folderID: string) {
+    try {
+      await AppService.SetLocalAIChatFolder(chatID, folderID)
+      localAIChatList.reload()
+    } catch (moveError) {
+      setError(localAIErrorMessage(moveError, 'The chat could not be moved.'))
+    }
   }
 
   const appZoom = preferenceNumber(preferences, 'appearance.zoom', 100, 75, 125)
@@ -1194,34 +1294,6 @@ function App() {
   currentDisplayNameRef.current = snapshot?.profile.displayName ?? ''
 
   useEffect(() => {
-    const accountID = snapshot?.activeAccountId
-    if (!accountID) {
-      setRelationshipDecay(null)
-      return
-    }
-    let active = true
-    void AppService.RelationshipDecayContacts()
-      .then((decay) => {
-        if (active && decay.accountId === accountID) setRelationshipDecay(decay)
-      })
-      .catch((decayError: unknown) => {
-        if (active) setRelationshipDecayError(describeError(decayError))
-      })
-    return () => { active = false }
-  }, [snapshot?.activeAccountId])
-
-  useEffect(() => {
-    const accountID = snapshot?.activeAccountId
-    const unsubscribe = Events.On('relationship-decay:update', (event: { data: unknown }) => {
-      const decay = event.data as RelationshipDecaySnapshot | undefined
-      if (!decay || decay.accountId !== accountID) return
-      setRelationshipDecay(decay)
-      setRelationshipDecayError('')
-    })
-    return unsubscribe
-  }, [snapshot?.activeAccountId])
-
-  useEffect(() => {
     const requestID = ++ghostwriterAutocompleteRequestRef.current
     ghostwriterStreamRequestRef.current = ''
     setGhostwriterCompletion(null)
@@ -1229,7 +1301,7 @@ function App() {
     return () => {
       if (ghostwriterAutocompleteRequestRef.current === requestID) ghostwriterAutocompleteRequestRef.current++
     }
-  }, [composeText, editTarget, ghostwriterActive, selectedRoomID])
+  }, [composeText, editTarget, ghostwriterEnabled, selectedRoomID])
 
   useEffect(() => Events.On('ghostwriter:stream', (event: { data: unknown }) => {
     const chunk = event.data as GhostwriterStreamChunk | undefined
@@ -1243,6 +1315,31 @@ function App() {
     if (!chunk?.requestId) return
     aiStreamHandlersRef.current.get(chunk.requestId)?.(chunk)
   }), [])
+  // Progress is only listened to while an image from the composer is generating.
+  const imageRunRequestID = imageSendRun?.requestID ?? ''
+  useEffect(() => {
+    if (!imageRunRequestID) return
+    return Events.On('local-ai:image-progress', (event: { data: unknown }) => {
+      const update = event.data as { requestId?: string; stage?: string; step?: number; totalSteps?: number } | undefined
+      if (update?.requestId !== imageRunRequestID) return
+      setImageSendRun((current) => current?.requestID === imageRunRequestID
+        ? { ...current, stage: update.stage ?? current.stage, step: update.step ?? current.step, totalSteps: update.totalSteps ?? current.totalSteps }
+        : current)
+    })
+  }, [imageRunRequestID])
+  // Export progress is only listened to while a room export is running.
+  const runningChatExportRoomID = chatExport?.phase === 'running' ? chatExport.roomID : ''
+  const chatExportForSelectedRoom = chatExport && chatExport.roomID === selectedRoom?.id ? chatExport : null
+  useEffect(() => {
+    if (!runningChatExportRoomID) return
+    return Events.On('chat-export:progress', (event: { data: unknown }) => {
+      const update = event.data as ChatExportProgressEvent | undefined
+      if (update?.roomId !== runningChatExportRoomID) return
+      setChatExport((current) => current?.phase === 'running' && current.roomID === runningChatExportRoomID
+        ? { ...current, stage: update.stage, mediaDone: update.mediaDone, mediaTotal: update.mediaTotal }
+        : current)
+    })
+  }, [runningChatExportRoomID])
   timelineMessageActionsRef.current = {
     onDoubleClick: handleMessageDoubleClick,
     onOpenContextMenu: openMessageContextMenu,
@@ -1254,6 +1351,7 @@ function App() {
     },
     onSendReaction: sendReaction,
     onRemoveReaction: removeReaction,
+    onStartDirectChat: startDirectChat,
   }
 
   useEffect(() => {
@@ -1314,7 +1412,14 @@ function App() {
     [rooms, crossAccountRooms, effectiveAccountScope, activeAccountID])
   const localAIRooms = useMemo(() => localAIChatList.chats.map((chat) => localAIChatToRoom(chat, preferenceBoolean(preferences, localAIFavoritePreference(chat.id)))), [localAIChatList.chats, preferences])
   // Private model chats belong to no Matrix account, so they are hidden while the list is limited to one account.
-  const listRooms = useMemo(() => effectiveAccountScope === 'all' ? [...scopedRooms, ...localAIRooms] : scopedRooms, [scopedRooms, localAIRooms, effectiveAccountScope])
+  const localAIRoomsForList = useMemo(() => roomScope === 'local-ai' ? localAIRooms : localAIRooms.filter((room) => {
+    const chatID = localAIChatIDFromRoomID(room.id)
+    return chatID !== null && preferenceBoolean(preferences, localAIIncludeInAllPreference(chatID))
+  }), [localAIRooms, preferences, roomScope])
+  const localAIIconByRoomID = useMemo(() => new Map(localAIChatList.chats.map((chat) => [localAIRoomID(chat.id), localAIChatIcon(chat)] as const)), [localAIChatList.chats])
+  const localAIFolderIDByRoomID = useMemo(() => new Map(localAIChatList.chats.map((chat) => [localAIRoomID(chat.id), chat.folderId] as const)), [localAIChatList.chats])
+  const localAIActiveFolder = localAIFolderFilter ? localAIChatList.folders.find((folder) => folder.id === localAIFolderFilter) ?? null : null
+  const listRooms = useMemo(() => effectiveAccountScope === 'all' ? [...scopedRooms, ...localAIRoomsForList] : scopedRooms, [scopedRooms, localAIRoomsForList, effectiveAccountScope])
   const filteredRooms = useMemo(() => {
     const query = search.trim().toLowerCase()
     const today = Date.now()
@@ -1324,35 +1429,38 @@ function App() {
       const archived = !localAI && preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
       const matchesArchive = roomScope === 'local-ai' ? localAI : roomScope === 'archived' ? archived : !archived || Boolean(query)
       const matchesRefinements = (!roomRefinements.unanswered || isUnansweredRoom(room))
-        && (!roomRefinements.needsReply || isNeedsReplyRoom(room))
+        && (!roomRefinements.needsReply || isNeedsReplyRoom(room, preferences))
         && (!roomRefinements.favorite || room.favorite)
-      return matchesQuery && matchesArchive && matchesRefinements
+      const matchesFolder = roomScope !== 'local-ai' || localAIFolderFilter === null || (localAIFolderIDByRoomID.get(room.id) ?? '') === localAIFolderFilter
+      return matchesQuery && matchesArchive && matchesRefinements && matchesFolder
     }).sort((left, right) => {
       const favoriteOrder = preferenceString(preferences, 'sidebar.pinned_style', 'Top of list') === 'Top of list'
         ? Number(right.favorite) - Number(left.favorite)
         : 0
       return favoriteOrder || compareRoomActivity(left, right, today)
     })
-  }, [listRooms, search, preferences, roomScope, roomRefinements])
+  }, [listRooms, search, preferences, roomScope, roomRefinements, localAIFolderFilter, localAIFolderIDByRoomID])
   // The open private chat takes the highlight, because the Matrix selection is cleared while it is open.
   const activeListRoomID = localAIChatOpen ? (localAIChatId ? localAIRoomID(localAIChatId) : '') : selectedRoomID
   const selectedRoomListIndex = filteredRooms.findIndex((room) => room.id === activeListRoomID && isActiveAccountRoom(room))
   const quickSwitcherRooms = useMemo(() => rankQuickSwitcherRooms(rooms, quickSwitcherQuery), [rooms, quickSwitcherQuery])
-  const needsReplyCount = useMemo(() => scopedRooms.filter((room) => isNeedsReplyRoom(room) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences])
+  const needsReplyCount = useMemo(() => scopedRooms.filter((room) => isNeedsReplyRoom(room, preferences) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences])
   const readRoomCount = useMemo(() => rooms.filter((room) => room.unread === 0 && !room.markedUnread && !preferenceBoolean(preferences, archivedPreferenceKey(room.id))).length, [rooms, preferences])
   const contextMenuRooms = roomContextMenu
     ? (selectedRoomIDs.includes(roomContextMenu.roomID) ? selectedRoomIDs : [roomContextMenu.roomID])
       .map((roomID) => rooms.find((room) => room.id === roomID))
       .filter((room): room is Room => Boolean(room))
     : []
-  const contextMenuNeedsReplyRooms = contextMenuRooms.filter((room) => canBeNeedsReplyRoom(room))
-  const contextMenuNeedsReplyAddCount = contextMenuNeedsReplyRooms.filter((room) => !room.unanswered).length
+  const contextMenuNeedsReplyAddRooms = contextMenuRooms.filter((room) => !isNeedsReplyRoom(room, preferences))
+  const contextMenuNeedsReplyAddCount = contextMenuNeedsReplyAddRooms.length
   const contextMenuIsBulk = contextMenuRooms.length > 1
   const contextMenuHasUnread = contextMenuRooms.some((room) => room.unread > 0 || room.markedUnread)
   const contextMenuNeedsArchive = contextMenuRooms.some((room) => !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId)))
   const contextMenuNeedsFavorite = contextMenuRooms.some((room) => !room.favorite)
   const contextMenuChatID = roomContextMenu ? localAIChatIDFromRoomID(roomContextMenu.roomID) : null
   const contextMenuLocalAIRoom = contextMenuChatID === null ? null : localAIRooms.find((room) => room.id === roomContextMenu?.roomID) ?? null
+  const contextMenuLocalAIInAll = contextMenuChatID !== null && preferenceBoolean(preferences, localAIIncludeInAllPreference(contextMenuChatID))
+  const contextMenuLocalAIFolderID = contextMenuChatID === null ? '' : localAIChatList.chats.find((chat) => chat.id === contextMenuChatID)?.folderId ?? ''
   const scheduledJobCount = scheduledJobs.length
 
   roomButtonActionsRef.current = {
@@ -1426,35 +1534,6 @@ function App() {
     void refreshScheduledJobs()
   }
 
-  async function updateRelationshipTier(contact: RelationshipDecayContact, tier: string) {
-    const roomIDs = contact.roomIds ?? []
-    const roomID = roomIDs[0]
-    if (!roomID) return
-    setRelationshipDecayBusy(contact.contactId)
-    setRelationshipDecayError('')
-    try {
-      const decay = await AppService.SetRelationshipTier(roomID, tier)
-      if (decay.accountId === snapshot?.activeAccountId) setRelationshipDecay(decay)
-    } catch (tierError) {
-      setRelationshipDecayError(describeError(tierError))
-    } finally {
-      setRelationshipDecayBusy('')
-    }
-  }
-
-  async function snoozeRelationshipContact(contact: RelationshipDecayContact) {
-    setRelationshipDecayBusy(contact.contactId)
-    setRelationshipDecayError('')
-    try {
-      const decay = await AppService.SnoozeRelationshipDecay(contact.contactId)
-      if (decay.accountId === snapshot?.activeAccountId) setRelationshipDecay(decay)
-    } catch (snoozeError) {
-      setRelationshipDecayError(describeError(snoozeError))
-    } finally {
-      setRelationshipDecayBusy('')
-    }
-  }
-
   function openScheduleMessage() {
     if (!selectedRoomID || !composeText.trim() || editTarget) return
     setScheduledDraft({
@@ -1517,7 +1596,8 @@ function App() {
       if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [contenteditable="true"]'))) return
       if (settingsOpen || roomInfoOpen || leaveConfirmOpen || redactTarget || quickSwitcherOpen) return
       const roomID = roomContextMenu?.roomID ?? selectedRoomID
-      if (!roomID || !roomsRef.current.find((room) => room.id === roomID)?.unanswered) return
+      const room = roomsRef.current.find((candidate) => candidate.id === roomID)
+      if (!room || !isNeedsReplyRoom(room, preferencesRef.current)) return
       event.preventDefault()
       void markRoomAnsweredRef.current(roomID)
     }
@@ -1711,8 +1791,6 @@ function App() {
     setSearchStatus('')
     setRoomInfoOpen(false)
     setAgentEditor(null)
-    setAgentPickerOpen(false)
-    setAgentRequest('')
     setAgentSettingsError('')
     setLeaveConfirmOpen(false)
     setMentionBindings([])
@@ -2347,30 +2425,6 @@ function App() {
 
   setPreferenceRef.current = setPreference
 
-  async function toggleGhostwriter(enabled: boolean): Promise<boolean> {
-    if (!enabled) {
-      return setPreference('ghostwriter.enabled', false)
-    }
-
-    const hasGhostwriterConfiguration = ['ghostwriter.provider', 'ghostwriter.endpoint', 'ghostwriter.model']
-      .some((key) => preferenceString(preferences, key, '').trim() !== '')
-    const localEndpoint = preferenceString(preferences, 'ai.endpoint', '').trim()
-    if (!hasGhostwriterConfiguration && isLoopbackEndpoint(localEndpoint)) {
-      const providerSaved = await setPreference('ghostwriter.provider', 'openai-compatible')
-      const endpointSaved = providerSaved && await setPreference('ghostwriter.endpoint', localEndpoint.replace(/\/+$/, ''))
-      const localModel = preferenceString(preferences, 'ai.model', '').trim()
-      if (!endpointSaved || (localModel && !await setPreference('ghostwriter.model', localModel))) return false
-    }
-
-    return setPreference('ghostwriter.enabled', true)
-  }
-
-  async function toggleRoomGhostwriter(enabled: boolean) {
-    if (!selectedRoom) return
-    if (enabled && !ghostwriterEnabled && !await toggleGhostwriter(true)) return
-    await setPreference(`room.ghostwriter.${selectedRoom.id}`, enabled)
-  }
-
   function archivedPreferenceKey(roomID: string, accountID = '') {
     return `room.archived.${accountID || snapshot?.activeAccountId || 'primary'}.${roomID}`
   }
@@ -2531,7 +2585,7 @@ function App() {
 
   function openRoomContextMenu(roomID: string, x: number, y: number) {
     const menuWidth = 232
-    const menuHeight = selectedRoomIDs.includes(roomID) && selectedRoomIDs.length > 1 ? 232 : 200
+    const menuHeight = isLocalAIRoomID(roomID) ? 340 : selectedRoomIDs.includes(roomID) && selectedRoomIDs.length > 1 ? 232 : 200
     if (!isLocalAIRoomID(roomID) && !selectedRoomIDs.includes(roomID)) {
       setSelectedRoomIDs([roomID])
       roomSelectionAnchorRef.current = roomID
@@ -2598,8 +2652,7 @@ function App() {
       { key: 'forward', label: 'Forward...', ariaLabel: 'Forward message', icon: <ArrowUpRight size={14} />, disabled: !manageable || !body || Boolean(message.mediaUri || message.mediaType || message.mediaMime) || !canForward, run: () => openMessageForward(message) },
       { key: 'received-at', label: `Received at ${receivedAt}`, ariaLabel: `Received at ${receivedAt}`, icon: <Clock3 size={14} />, disabled: true, separatorBefore: true, run: () => { } },
       { key: 'remind', label: 'Set reminder', ariaLabel: 'Set reminder for message', icon: <BellRing size={14} />, disabled: !manageable, separatorBefore: true, run: () => openReminder(message) },
-      { key: 'translate', label: 'Translate', ariaLabel: 'Translate message with local AI', icon: <Languages size={14} />, disabled: !aiEnabled || !message.body || Boolean(message.redacted), run: () => translateMessage(message) },
-      { key: 'turkish-tutor', label: 'Analyze with Language Tutor', ariaLabel: 'Analyze message with Language Tutor', icon: <Languages size={14} />, disabled: !aiEnabled || !body || Boolean(message.redacted), run: () => void analyzeWithTurkishTutor(body, 'message') },
+      { key: 'language-tutor', label: 'Analyze with Language Tutor', ariaLabel: 'Analyze message with Language Tutor', icon: <Languages size={14} />, disabled: !aiEnabled || !body || Boolean(message.redacted), run: () => void analyzeWithLanguageTutor(body, 'message') },
       { key: 'ai-reply', label: 'Draft reply with AI', ariaLabel: 'Draft reply with local AI', icon: <Reply size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => draftAIReply(message) },
       { key: 'ai-explain', label: 'Explain message', ariaLabel: 'Explain message with local AI', icon: <Sparkles size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => explainMessage(message) },
     ]
@@ -2654,10 +2707,22 @@ function App() {
     }
   }
 
+  // Clears the manual flag and, for direct chats, the Matrix-derived flag. Returns false when the manual flag could not be saved.
+  async function clearNeedsReply(room: Room) {
+    const manualKey = needsReplyPreferenceKey(room.id)
+    if (preferenceBoolean(preferencesRef.current, manualKey) && !(await setPreference(manualKey, false))) return false
+    if (isUnansweredRoom(room)) {
+      await AppService.SetRoomUnanswered(room.id, false)
+      updateRoomUnanswered(room.id, false)
+    }
+    return true
+  }
+
   async function markRoomAnswered(roomID: string) {
     setRoomContextMenu(null)
     clearRoomSelection()
-    if (triageBusyRef.current || !roomsRef.current.find((room) => room.id === roomID)?.unanswered) return
+    const targetRoom = roomsRef.current.find((room) => room.id === roomID)
+    if (triageBusyRef.current || !targetRoom || !isNeedsReplyRoom(targetRoom, preferencesRef.current)) return
     triageBusyRef.current = true
     setError('')
     const wasSelected = selectedRoomRef.current === roomID
@@ -2665,9 +2730,11 @@ function App() {
     const nextRoom = visibleIndex >= 0 && filteredRooms.length > 1
       ? filteredRooms[(visibleIndex + 1) % filteredRooms.length]
       : roomsRef.current.find((room) => room.id !== roomID)
+    const wasManual = preferenceBoolean(preferencesRef.current, needsReplyPreferenceKey(roomID))
+    const wasAuto = isUnansweredRoom(targetRoom)
     try {
-      await AppService.SetRoomUnanswered(roomID, false)
-      updateRoomUnanswered(roomID, false)
+      if (!(await clearNeedsReply(targetRoom))) return
+      needsReplyUndoRef.current = { manual: wasManual, auto: wasAuto }
       showUndoToast(roomID)
       if (wasSelected && nextRoom && isActiveAccountRoom(nextRoom)) showRoom(nextRoom.id)
     } catch (triageError) {
@@ -2691,10 +2758,9 @@ function App() {
     if (action === 'answered') {
       let changed = false
       for (const room of targetRooms) {
-        if (!room.unanswered) continue
+        if (!isNeedsReplyRoom(room, preferencesRef.current)) continue
         try {
-          await AppService.SetRoomUnanswered(room.id, false)
-          updateRoomUnanswered(room.id, false)
+          if (!(await clearNeedsReply(room))) continue
           changed = true
         } catch (actionError) {
           setError(describeError(actionError))
@@ -2713,13 +2779,8 @@ function App() {
 
     if (action === 'needs-reply') {
       for (const room of targetRooms) {
-        if (!canBeNeedsReplyRoom(room) || room.unanswered) continue
-        try {
-          await AppService.SetRoomUnanswered(room.id, true)
-          updateRoomUnanswered(room.id, true)
-        } catch (actionError) {
-          setError(describeError(actionError))
-        }
+        if (isNeedsReplyRoom(room, preferencesRef.current)) continue
+        await setPreference(needsReplyPreferenceKey(room.id), true)
       }
       return
     }
@@ -2778,7 +2839,8 @@ function App() {
 
   function handleMarkAnsweredKeyDown(event: KeyboardEvent<HTMLElement>, roomID: string) {
     if (!singleKeyShortcuts || event.altKey || event.metaKey || event.ctrlKey || event.key.toUpperCase() !== answeredShortcut) return
-    if (!roomsRef.current.find((room) => room.id === roomID)?.unanswered) return
+    const room = roomsRef.current.find((candidate) => candidate.id === roomID)
+    if (!room || !isNeedsReplyRoom(room, preferencesRef.current)) return
     event.preventDefault()
     event.stopPropagation()
     void markRoomAnswered(roomID)
@@ -2793,7 +2855,7 @@ function App() {
     let actionRooms = targetRooms
     if (key === 'n') {
       action = 'needs-reply'
-      actionRooms = targetRooms.filter((room) => canBeNeedsReplyRoom(room) && !room.unanswered)
+      actionRooms = targetRooms.filter((room) => !isNeedsReplyRoom(room, preferences))
       if (actionRooms.length === 0) return false
     } else if (key === 'u') {
       action = targetRooms.some(isUnreadRoom) ? 'read' : 'unread'
@@ -2813,9 +2875,13 @@ function App() {
     if (!roomID || triageBusyRef.current) return
     triageBusyRef.current = true
     setError('')
+    const restore = needsReplyUndoRef.current
     try {
-      await AppService.SetRoomUnanswered(roomID, true)
-      updateRoomUnanswered(roomID, true)
+      if (restore.manual && !(await setPreference(needsReplyPreferenceKey(roomID), true))) return
+      if (restore.auto) {
+        await AppService.SetRoomUnanswered(roomID, true)
+        updateRoomUnanswered(roomID, true)
+      }
       clearUndoToast()
       showRoom(roomID)
     } catch (triageError) {
@@ -2872,7 +2938,7 @@ function App() {
   }
 
   function selectRoomByOffset(direction: number, unansweredOnly = false) {
-    const availableRooms = filteredRooms.filter((room) => !unansweredOnly || isNeedsReplyRoom(room))
+    const availableRooms = filteredRooms.filter((room) => !unansweredOnly || isNeedsReplyRoom(room, preferences))
     if (availableRooms.length === 0) return
     const currentIndex = availableRooms.findIndex((room) => room.id === selectedRoomRef.current && isActiveAccountRoom(room))
     const nextIndex = currentIndex < 0
@@ -2886,6 +2952,12 @@ function App() {
     if (event.key === 'Escape' && searchOpen) {
       event.preventDefault()
       closeMessageSearch()
+      return
+    }
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'g' && localAIChatOpen && localAIChatId) {
+      event.preventDefault()
+      const preferenceKey = localAIIncludeInAllPreference(localAIChatId)
+      void setPreference(preferenceKey, !preferenceBoolean(preferences, preferenceKey))
       return
     }
     if (isTextEntryTarget(event.target)) return
@@ -3208,6 +3280,9 @@ function App() {
     if (message.replyTo) await AppService.SendReply(message.roomID, message.text, message.replyTo.id)
     else if (message.mentionUserIDs.length > 0) await AppService.SendMessageWithMentions(message.roomID, message.text, message.mentionUserIDs)
     else await AppService.SendMessage(message.roomID, message.text)
+    // Sending into a room answers it, so drop any manual Needs reply flag.
+    const needsReplyKey = needsReplyPreferenceKey(message.roomID)
+    if (preferenceBoolean(preferencesRef.current, needsReplyKey)) void setPreferenceRef.current(needsReplyKey, false)
     if (preferenceString(preferencesRef.current, 'sounds.effects', 'Off') === 'Sent messages') {
       playNotificationSound(preferenceNumber(preferencesRef.current, 'notifications.volume', 50), 'Soft')
     }
@@ -3338,6 +3413,10 @@ function App() {
     setAutoPlayNextMessageId(null)
   }
 
+  // Staged files are sent with the next message and are held back while a message is being edited.
+  const stagedRoomAttachments = stagedAttachments.filter((item) => item.roomID === selectedRoomID)
+  const sendableStagedAttachments = editTarget ? [] : stagedRoomAttachments
+
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const roomID = selectedRoomID
@@ -3347,10 +3426,6 @@ function App() {
       if (!roomID || busy || ghostwriterDraftBusy) return
       if (!ghostwriterEnabled) {
         setGhostwriterDraftStatus('Enable Ghostwriter in Settings > AI first.')
-        return
-      }
-      if (!ghostwriterActive) {
-        setGhostwriterDraftStatus('Enable suggestions in this chat first.')
         return
       }
       if (!ghostIntent) {
@@ -3391,11 +3466,43 @@ function App() {
     }
     const customReplacements = parseCustomEmoticonReplacements(preferenceString(preferences, 'emoji.emoticon_replacements', ''))
     const text = (preferenceBoolean(preferences, 'emoji.replace_emoticons', true) ? replaceEmoticons(composeText, customReplacements) : composeText).trim()
-    if (!roomID || !text || busy || ghostwriterDraftBusy) return
+    if (!roomID || (!text && sendableStagedAttachments.length === 0) || busy || ghostwriterDraftBusy) return
     const mentionUserIDs = [...new Set(mentionBindings.filter(({ token }) => text.includes(token)).map(({ userID }) => userID))]
+    const attachments = sendableStagedAttachments
+    if (attachments.some((item) => mediaKindForFile(item.file) !== 'file')) {
+      setMediaApproval({
+        items: attachments.map((item) => mediaApprovalItemFromFile(item.id, item.file, item.previewURL)),
+        onApprove: () => void sendComposerDraft(roomID, text, mentionUserIDs, attachments),
+      })
+      return
+    }
+    await sendComposerDraft(roomID, text, mentionUserIDs, attachments)
+  }
+
+  // resolveMediaApproval closes the media approval dialog and runs the pending send only when approved. Cancelling keeps staged attachments in the composer.
+  function resolveMediaApproval(approved: boolean) {
+    const request = mediaApproval
+    setMediaApproval(null)
+    if (!request) return
+    if (approved) request.onApprove()
+    else request.onCancel?.()
+  }
+
+  // sendComposerDraft uploads staged attachments, then sends the text message or edit. Media sends reach it only after the approval dialog is accepted.
+  async function sendComposerDraft(roomID: string, text: string, mentionUserIDs: string[], attachments: StagedAttachment[]) {
     setBusy(true)
     setError('')
     try {
+      for (const item of attachments) {
+        await uploadAttachmentFile(roomID, item.file)
+        removeStagedAttachment(item)
+      }
+      if (!text) {
+        stickToBottomRef.current = true
+        scrollTimelineToBottom()
+        setHistoryRevision((revision) => revision + 1)
+        return
+      }
       if (editTarget) {
         await AppService.EditMessage(roomID, text, editTarget.id)
       } else {
@@ -3419,6 +3526,22 @@ function App() {
     }
   }
 
+  async function uploadAttachmentFile(roomID: string, file: File, recording?: RecordedUpload) {
+    const query = new URLSearchParams({
+      filename: file.name,
+      voiceNote: String(recording?.kind === 'voice'),
+      videoMessage: String(recording?.kind === 'video'),
+      durationMs: String(recording?.durationMilliseconds ?? 0),
+    })
+    // WKWebView can deliver a File body as an empty stream on the app's custom scheme; raw bytes arrive intact.
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    await requestLocalAsset(`/media/ipc/attachment/${encodeURIComponent(roomID)}?${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: bytes,
+    })
+  }
+
   async function sendAttachmentFiles(files: File[], roomID = selectedRoomID, recording?: RecordedUpload) {
     if (files.length === 0) return
     if (!roomID) {
@@ -3431,21 +3554,11 @@ function App() {
     try {
       let uploadedAny = false
       for (const file of files) {
-        if (file.size > 50 * 1024 * 1024) {
+        if (file.size > maxAttachmentBytes) {
           setError(`${file.name || 'Attachments'} cannot exceed 50 MiB.`)
           continue
         }
-        const query = new URLSearchParams({
-          filename: file.name,
-          voiceNote: String(recording?.kind === 'voice'),
-          videoMessage: String(recording?.kind === 'video'),
-          durationMs: String(recording?.durationMilliseconds ?? 0),
-        })
-        await requestLocalAsset(`/media/ipc/attachment/${encodeURIComponent(roomID)}?${query}`, {
-          method: 'POST',
-          headers: { 'Content-Type': file.type || 'application/octet-stream' },
-          body: file,
-        })
+        await uploadAttachmentFile(roomID, file, recording)
         uploadedAny = true
       }
       if (uploadedAny) setHistoryRevision((revision) => revision + 1)
@@ -3456,10 +3569,38 @@ function App() {
     }
   }
 
-  function uploadAttachment(event: React.ChangeEvent<HTMLInputElement>) {
+  function stageAttachmentFiles(files: File[]) {
+    const roomID = selectedRoomID
+    if (!roomID) {
+      setError('Select a room before attaching files.')
+      return
+    }
+    setError('')
+    const staged: StagedAttachment[] = []
+    for (const file of files) {
+      if (file.size > maxAttachmentBytes) {
+        setError(`${file.name || 'Attachments'} cannot exceed 50 MiB.`)
+        continue
+      }
+      staged.push({
+        id: globalThis.crypto?.randomUUID?.() ?? `staged-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        roomID,
+        file,
+        previewURL: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
+      })
+    }
+    if (staged.length > 0) setStagedAttachments((current) => [...current, ...staged])
+  }
+
+  function removeStagedAttachment(item: StagedAttachment) {
+    if (item.previewURL) URL.revokeObjectURL(item.previewURL)
+    setStagedAttachments((current) => current.filter((staged) => staged.id !== item.id))
+  }
+
+  function handleAttachmentInput(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0]
     event.currentTarget.value = ''
-    if (file) void sendAttachmentFiles([file])
+    if (file) stageAttachmentFiles([file])
   }
 
   async function startRecording(kind: CaptureKind) {
@@ -3508,7 +3649,11 @@ function App() {
           const durationMilliseconds = Math.max(1, Math.min(Date.now() - startedAt, maxVideoMessageMilliseconds))
           const extension = recorder.mimeType.includes('mp4') ? 'mp4' : 'webm'
           const file = new File(chunks, `video-message-${Date.now()}.${extension}`, { type: recorder.mimeType || `video/${extension}` })
-          void sendAttachmentFiles([file], roomID, { kind, durationMilliseconds }).finally(() => setVoiceCaptureStatus(null))
+          setMediaApproval({
+            items: [mediaApprovalItemFromFile(file.name, file, '')],
+            onApprove: () => void sendAttachmentFiles([file], roomID, { kind, durationMilliseconds }).finally(() => setVoiceCaptureStatus(null)),
+            onCancel: () => setVoiceCaptureStatus(null),
+          })
           return
         }
         void (async () => {
@@ -3518,12 +3663,16 @@ function App() {
             const wav = encodeVoiceNoteWav(decoded)
             const durationMilliseconds = Math.round(decoded.duration * 1000)
             const file = new File([wav], `voice-note-${Date.now()}.wav`, { type: 'audio/wav' })
-            await sendAttachmentFiles([file], roomID, { kind, durationMilliseconds })
+            setMediaApproval({
+              items: [mediaApprovalItemFromFile(file.name, file, '')],
+              onApprove: () => void sendAttachmentFiles([file], roomID, { kind, durationMilliseconds }).finally(() => setVoiceCaptureStatus(null)),
+              onCancel: () => setVoiceCaptureStatus(null),
+            })
           } catch (recordError) {
             setError(describeError(recordError))
+            setVoiceCaptureStatus(null)
           } finally {
             await audioContext.close().catch(() => { })
-            setVoiceCaptureStatus(null)
           }
         })()
       }
@@ -3562,9 +3711,16 @@ function App() {
     const image = imageItem?.getAsFile()
     if (!image) return
     event.preventDefault()
+    // Clipboard files can lose their bytes once the paste event ends, so read them now.
+    const bytesRead = image.arrayBuffer()
     const extension = image.type === 'image/jpeg' ? 'jpg' : image.type.split('/')[1]?.split('+')[0] || 'png'
-    const file = image.name ? image : new File([image], `pasted-image-${Date.now()}.${extension}`, { type: image.type })
-    void sendAttachmentFiles([file])
+    const name = image.name || `pasted-image-${Date.now()}.${extension}`
+    void bytesRead
+      .then((buffer) => {
+        if (buffer.byteLength === 0) throw new Error('The pasted image could not be read. Copy it again or attach it with the attach button.')
+        stageAttachmentFiles([new File([buffer], name, { type: image.type })])
+      })
+      .catch((pasteError: unknown) => setError(describeError(pasteError)))
   }
 
   function handleFileDragEnter(event: DragEvent<HTMLElement>) {
@@ -3593,7 +3749,7 @@ function App() {
     event.preventDefault()
     dragDepthRef.current = 0
     setIsDraggingFiles(false)
-    void sendAttachmentFiles(files)
+    stageAttachmentFiles(files)
   }
 
   async function sendReaction(message: Message, emoji: string) {
@@ -3604,6 +3760,20 @@ function App() {
       setHistoryRevision((revision) => revision + 1)
     } catch (reactionError) {
       setError(describeError(reactionError))
+    }
+  }
+
+  async function startDirectChat(message: Message) {
+    if (!message.sender || startingDirectChatRef.current) return
+    startingDirectChatRef.current = true
+    try {
+      const roomID = await AppService.StartDirectChat(message.sender)
+      showRoom(roomID)
+      setSnapshot(await AppService.Snapshot())
+    } catch (directChatError) {
+      setError(describeError(directChatError))
+    } finally {
+      startingDirectChatRef.current = false
     }
   }
 
@@ -3713,18 +3883,6 @@ function App() {
 
   const aiEndpoint = preferenceString(preferences, 'ai.endpoint', '')
   const aiEnabled = aiEndpoint !== ''
-  const askAILabel = !aiEnabled
-    ? 'Ask AI · unavailable'
-    : !selectedRoom
-      ? 'Select a room first'
-      : editTarget
-        ? 'Finish editing first'
-        : busy
-          ? 'Wait until sending finishes'
-          : !composeText.trim()
-            ? 'Write a question first'
-            : 'Ask AI about draft'
-
   function promptMessages(source: Message[]): PromptMessage[] {
     return source.map((message) => ({
       senderName: message.senderName,
@@ -3823,7 +3981,55 @@ function App() {
     void runAIRequest(aiPanel.title, [...aiPanel.conversation, { role: 'user', content: question }], aiPanel.featureID, aiPanel.acceptAction)
   }
 
-  async function analyzeWithTurkishTutor(text: string, mode: TurkishTutorState['mode']) {
+  // generateImageToRoom generates an image from the draft for review. Nothing is sent until the review is approved.
+  async function generateImageToRoom() {
+    const roomID = selectedRoomID
+    const sourceDraft = composeText
+    const prompt = sourceDraft.trim()
+    if (!roomID || !prompt || busy || editTarget || imageSendRun || generatedImageReview) return
+    const requestID = newAIRequestID()
+    setError('')
+    setImageSendRun({ requestID, roomID, stage: 'starting', step: 0, totalSteps: 0 })
+    try {
+      const encoded = await AppService.GenerateRoomImage(prompt, requestID)
+      setGeneratedImageReview({ roomID, prompt, sourceDraft, encoded })
+    } catch (imageError) {
+      setError(describeError(imageError))
+    } finally {
+      setImageSendRun(null)
+    }
+  }
+
+  // approveGeneratedImage sends the reviewed image. The draft is cleared only if it was not edited while the image was generating.
+  async function approveGeneratedImage() {
+    const review = generatedImageReview
+    if (!review) return
+    setGeneratedImageReview(null)
+    setBusy(true)
+    setError('')
+    try {
+      await AppService.SendRoomImage(review.roomID, review.encoded)
+      if (draftsRef.current.get(review.roomID) === review.sourceDraft) draftsRef.current.delete(review.roomID)
+      if (selectedRoomRef.current === review.roomID && composeTextRef.current === review.sourceDraft) {
+        setComposeText('')
+        setMentionBindings([])
+        setMentionStart(-1)
+      }
+      stickToBottomRef.current = true
+      scrollTimelineToBottom()
+      setHistoryRevision((revision) => revision + 1)
+    } catch (sendError) {
+      setError(describeError(sendError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function stopImageGeneration() {
+    if (imageSendRun) cancelAIRequest(imageSendRun.requestID)
+  }
+
+  async function analyzeWithLanguageTutor(text: string, mode: LanguageTutorState['mode'], explanationLanguage?: string) {
     const originalText = text.trim()
     if (!originalText) {
       setError(mode === 'draft' ? 'Write a draft first.' : 'This message has no text to analyze.')
@@ -3833,40 +4039,43 @@ function App() {
       setError('Set a local AI endpoint in Settings > AI to use Language Tutor.')
       return
     }
+    const explanation = explanationLanguage || languageRoles.defaultLanguage
+    // A new run replaces the one in progress, such as when the explanation language changes.
+    cancelAIRequest(languageTutorRequestRef.current)
     const requestID = newAIRequestID()
-    turkishTutorRequestRef.current = requestID
-    setTurkishTutorState({ mode, originalText, analysis: null, busy: true, error: '', requestID, preview: '' })
+    languageTutorRequestRef.current = requestID
+    setLanguageTutorState({ mode, originalText, explanationLanguage: explanation, analysis: null, busy: true, error: '', requestID, preview: '' })
     const unregister = registerAIStream(requestID, (chunk) => {
-      setTurkishTutorState((current) => current?.requestID === requestID
+      setLanguageTutorState((current) => current?.requestID === requestID
         ? { ...current, preview: (chunk.reset ? '' : current.preview) + chunk.text }
         : current)
     })
     try {
-      const analysis = await TurkishTutorService.Analyze(originalText, requestID)
-      if (turkishTutorRequestRef.current === requestID) {
-        setTurkishTutorState((current) => current ? { ...current, analysis, busy: false, preview: '' } : current)
+      const analysis = await LanguageTutorService.Analyze(originalText, mode, explanation, requestID)
+      if (languageTutorRequestRef.current === requestID) {
+        setLanguageTutorState((current) => current ? { ...current, analysis, busy: false, preview: '' } : current)
       }
     } catch (analysisError) {
-      if (turkishTutorRequestRef.current === requestID) {
-        setTurkishTutorState((current) => current ? { ...current, busy: false, error: describeError(analysisError) } : current)
+      if (languageTutorRequestRef.current === requestID) {
+        setLanguageTutorState((current) => current ? { ...current, busy: false, error: describeError(analysisError) } : current)
       }
     } finally {
       unregister()
-      if (turkishTutorRequestRef.current === requestID) turkishTutorRequestRef.current = ''
+      if (languageTutorRequestRef.current === requestID) languageTutorRequestRef.current = ''
     }
   }
 
-  function closeTurkishTutor() {
-    cancelAIRequest(turkishTutorRequestRef.current)
-    turkishTutorRequestRef.current = ''
-    setTurkishTutorState(null)
+  function closeLanguageTutor() {
+    cancelAIRequest(languageTutorRequestRef.current)
+    languageTutorRequestRef.current = ''
+    setLanguageTutorState(null)
   }
 
-  function useTurkishTutorDraft() {
-    const text = turkishTutorState?.analysis?.text_to_insert.trim()
-    if (turkishTutorState?.mode !== 'draft' || !text || editTarget) return
+  function useLanguageTutorDraft() {
+    const text = languageTutorState?.analysis?.text_to_insert.trim()
+    if (languageTutorState?.mode !== 'draft' || !text || editTarget) return
     setComposeDraft(text)
-    closeTurkishTutor()
+    closeLanguageTutor()
     requestAnimationFrame(() => composerInputRef.current?.focus())
   }
 
@@ -3876,35 +4085,64 @@ function App() {
     setAIPanel(null)
   }
 
-  function askAI() {
-    const question = composeText.trim()
-    if (!question) {
-      setError('Type a question in the composer, then choose Ask AI.')
+  // Prepare a Local AI chat with the full room transcript and an editable summary request.
+  async function summarizeRoom() {
+    if (!selectedRoomID || !aiEnabled || summaryLoadingRef.current) return
+    if (loadingOlderRef.current) {
+      setError('Wait for older messages to finish loading.')
       return
     }
-    void runAIRequest('Ask AI', buildAskAIPrompt(question, promptMessages(messages), aiInstructions('ask_ai')), 'ask_ai', { kind: 'draft' })
-  }
-
-  function summarizeRoom() {
-    const context = promptMessages(messages)
-    if (boundedTranscript(context).length === 0) {
-      setError('There are no messages to summarize yet.')
-      return
+    const roomID = selectedRoomID
+    let fetched: Message[] = []
+    let cursor = olderCursor
+    let moreHistory = hasOlder
+    const loadedMessages = () => mergeTimelineMessages(messages, fetched)
+    const pagingHistory = moreHistory
+    summaryLoadingRef.current = true
+    if (pagingHistory) {
+      loadingOlderRef.current = true
+      setLoadingOlder(true)
     }
-    void runAIRequest('Summarize room', buildSummaryPrompt(context, aiInstructions('summarize')), 'summarize')
+    setSummaryStatus(pagingHistory ? 'Loading older messages…' : 'Preparing Local AI chat…')
+
+    try {
+      while (moreHistory) {
+        if (selectedRoomRef.current !== roomID) return
+        const page = await AppService.History(roomID, cursor)
+        if (selectedRoomRef.current !== roomID) return
+        if (page.before === cursor && page.hasMore) throw new Error('Could not continue loading the rest of this chat history.')
+        fetched = mergeTimelineMessages(fetched, page.messages ?? [])
+        cursor = page.before
+        moreHistory = page.hasMore
+        setSummaryStatus(`Loading older messages… (${loadedMessages().length.toLocaleString()} loaded)`)
+      }
+
+      if (selectedRoomRef.current !== roomID) return
+      const context = promptMessages(loadedMessages())
+      if (!context.some((message) => message.body.trim() && !message.redacted)) {
+        setError('There are no messages to summarize yet.')
+        return
+      }
+      startLocalAIChat(buildSummaryChatDraft(context, aiInstructions('summarize')), 'summary')
+    } catch (summaryError) {
+      if (selectedRoomRef.current === roomID) setError(describeError(summaryError))
+    } finally {
+      summaryLoadingRef.current = false
+      setSummaryStatus('')
+      if (pagingHistory) {
+        loadingOlderRef.current = false
+        setLoadingOlder(false)
+      }
+    }
   }
 
-  function translateMessage(message: Message) {
-    const language = preferenceString(preferences, 'ai.translate_language', '').trim() || 'English'
-    void runAIRequest('Translate message', buildTranslationPrompt(message.body, language, aiInstructions('translate')), 'translate', { kind: 'draft' })
-  }
-
-  async function translateRoomToEnglish() {
+  async function translateRecentMessages() {
     if (!selectedRoomID || !aiEnabled || (!hasAIConversationContext && !hasOlder)) return
     const roomID = selectedRoomID
     const requestID = chatTranslationRequestRef.current + 1
     chatTranslationRequestRef.current = requestID
     const currentUserID = snapshot?.profile.userId ?? ''
+    const targetLanguage = languageName(resolveLanguageRoles(preferencesRef.current).defaultLanguage)
     let allMessages = [...messages]
     let cursor = olderCursor
     let moreHistory = hasOlder
@@ -3917,6 +4155,7 @@ function App() {
     setChatTranslation({
       requestID,
       roomID,
+      targetLanguage,
       targetMessageIDs: [],
       translations: {},
       busy: true,
@@ -3983,7 +4222,7 @@ function App() {
         try {
           showBatchProgress()
           response = await AppService.AIComplete(
-            buildChatTranslationPrompt(batch, batchStart, chatTuning.prompt),
+            buildChatTranslationPrompt(batch, targetLanguage, batchStart, chatTuning.prompt),
             batchRequestID,
             chatTuning.temperature,
             chatTuning.maxTokens,
@@ -4042,30 +4281,6 @@ function App() {
     void runAIRequest('Explain message', buildExplainPrompt(promptMessages([message])[0], aiInstructions('explain')), 'explain')
   }
 
-  function rewriteDraft(mode: 'rewrite' | 'shorten') {
-    const draft = composeText.trim()
-    if (!draft) return
-    void runAIRequest(mode === 'rewrite' ? 'Rewrite draft' : 'Shorten draft', buildRewritePrompt(draft, mode, aiInstructions(mode)), mode, { kind: 'rewrite' })
-  }
-
-  function analyzeTopics() {
-    const context = promptMessages(messages)
-    if (boundedTranscript(context).length === 0) {
-      setError('There are no messages to analyze yet.')
-      return
-    }
-    void runAIRequest('Chat topics and themes', buildTopicInsightsPrompt(context, aiInstructions('topics')), 'topics')
-  }
-
-  function analyzeConversation() {
-    const context = promptMessages(messages)
-    if (boundedTranscript(context).length === 0) {
-      setError('There are no messages to analyze yet.')
-      return
-    }
-    void runAIRequest('Conversation analysis', buildConversationAnalysisPrompt(context, aiInstructions('conversation_analysis')), 'conversation_analysis')
-  }
-
   async function persistRoomAgents(collection: ChatAgentCollection) {
     if (!roomAgentsPreferenceKey) return false
     const serialized = serializeChatAgents(collection)
@@ -4109,33 +4324,10 @@ function App() {
     await persistRoomAgents({ agents, defaultAgentId: roomAgents.defaultAgentId === profile.id ? '' : roomAgents.defaultAgentId })
   }
 
-  function openAgentPicker() {
-    setAgentPickerID(roomAgents.defaultAgentId || roomAgents.agents[0]?.id || '')
-    setAgentRequest('')
-    setAgentPickerOpen(true)
-  }
-
-  function openChatAgentAction() {
-    if (roomAgents.agents.length > 0) {
-      openAgentPicker()
-      return
-    }
-    openRoomInfo()
-    createAgentProfile()
-  }
-
   function createAgentProfile() {
     const id = globalThis.crypto?.randomUUID?.() ?? `agent-${Date.now()}`
     setAgentSettingsError('')
     setAgentEditor({ id, name: '', instructions: '' })
-  }
-
-  function runSelectedAgent(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const profile = roomAgents.agents.find((agent) => agent.id === agentPickerID)
-    if (!profile) return
-    setAgentPickerOpen(false)
-    void runAIRequest(`Agent: ${profile.name}`, buildAgentPrompt(profile, agentRequest, promptMessages(messages), composeText, aiInstructions('agent')), 'agent', { kind: 'draft' })
   }
 
   function acceptAIResult() {
@@ -4167,7 +4359,7 @@ function App() {
   async function requestGhostwriterCompletion() {
     const roomID = selectedRoomID
     const draft = composeText
-    if (!ghostwriterActive || !roomID || !draft.trim() || editTarget || busy || ghostwriterDraftBusy || isGhostCommandDraft(draft) || ghostwriterAutocompleteStatus === 'loading') return
+    if (!ghostwriterEnabled || !roomID || !draft.trim() || editTarget || busy || ghostwriterDraftBusy || isGhostCommandDraft(draft) || ghostwriterAutocompleteStatus === 'loading') return
 
     const requestID = ++ghostwriterAutocompleteRequestRef.current
     const streamRequestID = `${roomID}:${Date.now()}:${requestID}`
@@ -4284,6 +4476,42 @@ function App() {
     }
   }
 
+  async function exportSelectedRoomChat() {
+    if (!selectedRoom || chatExport?.phase === 'running') return
+    const roomID = selectedRoom.id
+    let folder: string
+    try {
+      folder = await AppService.ChooseDownloadFolder()
+    } catch (folderError) {
+      setChatExport({ roomID, phase: 'failed', stage: '', mediaDone: 0, mediaTotal: 0, result: null, error: describeError(folderError) })
+      return
+    }
+    if (!folder) return
+    setChatExport({ roomID, phase: 'running', stage: '', mediaDone: 0, mediaTotal: 0, result: null, error: '' })
+    try {
+      const result = await AppService.ExportRoomChat(roomID, folder)
+      setChatExport((current) => current?.roomID === roomID ? { ...current, phase: 'done', result } : current)
+    } catch (exportError) {
+      setChatExport((current) => current?.roomID === roomID ? { ...current, phase: 'failed', error: describeError(exportError) } : current)
+    }
+  }
+
+  async function cancelChatExport() {
+    try {
+      await AppService.CancelChatExport()
+    } catch (cancelError) {
+      setChatExport((current) => current ? { ...current, error: describeError(cancelError) } : current)
+    }
+  }
+
+  async function revealChatExport(path: string) {
+    try {
+      await AppService.RevealFile(path)
+    } catch (revealError) {
+      setChatExport((current) => current ? { ...current, error: describeError(revealError) } : current)
+    }
+  }
+
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     const snippetHandled = snippetExpander.handleKeyDown(
       event,
@@ -4292,7 +4520,7 @@ function App() {
     if (snippetHandled) return
     if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 't') {
       event.preventDefault()
-      void analyzeWithTurkishTutor(composeText, 'draft')
+      void analyzeWithLanguageTutor(composeText, 'draft')
       return
     }
     if (event.key === 'ArrowUp' && !composeText && preferenceBoolean(preferences, 'composer.arrow_up_focus_timeline')) {
@@ -4382,11 +4610,11 @@ function App() {
           <form className="auth-form" onSubmit={submitLogin}>
             <label>
               <span>Homeserver</span>
-              <input value={homeserver} onChange={(event) => setHomeserver(event.target.value)} type="url" autoComplete="url" required />
+              <input value={homeserver} onChange={(event) => setHomeserver(event.target.value)} type="url" autoComplete="url" spellCheck={false} autoCorrect="off" autoCapitalize="off" required />
             </label>
             <label>
               <span>Username</span>
-              <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" autoCapitalize="none" required />
+              <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} autoCorrect="off" required />
             </label>
             <label>
               <span>Password</span>
@@ -4479,6 +4707,7 @@ function App() {
       } as React.CSSProperties}
     >
       <aside className="sidebar">
+        <ConnectionStatusBanner problem={connectionProblem} />
         <>
           <label className="room-search">
             <Search size={16} />
@@ -4505,11 +4734,39 @@ function App() {
               <button type="button" className={roomScope === 'local-ai' ? 'is-active' : ''} aria-label="Local AI chats" aria-pressed={roomScope === 'local-ai'} title="Private model chats" onClick={() => setRoomScope((current) => current === 'local-ai' ? 'all' : 'local-ai')}><Sparkles size={14} /><span className="filter-label">Local AI</span></button>
             </div>
           </div>
-          <button className="relationship-shortcut" type="button" onClick={() => { setRelationshipDecayError(''); setRelationshipsOpen(true) }}>
-            <HeartHandshake size={15} />
-            <span>Keep in Touch</span>
-            {relationshipDecayAlertCount > 0 && <span className="relationship-alert-count" aria-label={`${relationshipDecayAlertCount} check-ins due`}>{relationshipDecayAlertCount}</span>}
-          </button>
+          {roomScope === 'local-ai' && <div className="local-ai-folder-bar" role="group" aria-label="AI chat folders">
+            <button type="button" className={localAIFolderFilter === null ? 'is-active' : ''} aria-label="All AI chats" aria-pressed={localAIFolderFilter === null} onClick={() => setLocalAIFolderFilter(null)}>All</button>
+            <button type="button" className={localAIFolderFilter === '' ? 'is-active' : ''} aria-label="Unfiled AI chats" aria-pressed={localAIFolderFilter === ''} onClick={() => setLocalAIFolderFilter('')}>Unfiled</button>
+            {localAIChatList.folders.map((folder) => (
+              <button key={folder.id} type="button" className={localAIFolderFilter === folder.id ? 'is-active' : ''} title={folder.name} aria-pressed={localAIFolderFilter === folder.id} onClick={() => setLocalAIFolderFilter(folder.id)}>
+                <Folder size={12} /><span>{folder.name}</span>
+              </button>
+            ))}
+            <button type="button" className="local-ai-folder-action" aria-label="New folder" title="New folder" onClick={() => {
+              setLocalAIFolderDeleteArmedID('')
+              setLocalAIFolderDraft({ folderID: '', name: '' })
+            }}><FolderPlus size={13} /></button>
+            {localAIActiveFolder && <button type="button" className="local-ai-folder-action" aria-label="Rename folder" title="Rename folder" onClick={() => {
+              setLocalAIFolderDeleteArmedID('')
+              setLocalAIFolderDraft({ folderID: localAIActiveFolder.id, name: localAIActiveFolder.name })
+            }}><Pencil size={13} /></button>}
+            {localAIActiveFolder && <button type="button" className={`local-ai-folder-action${localAIFolderDeleteArmedID === localAIActiveFolder.id ? ' is-armed' : ''}`} aria-label={localAIFolderDeleteArmedID === localAIActiveFolder.id ? 'Confirm delete folder' : 'Delete folder'} title="Delete folder. Its chats stay in the list." onClick={() => {
+              if (localAIFolderDeleteArmedID !== localAIActiveFolder.id) {
+                setLocalAIFolderDeleteArmedID(localAIActiveFolder.id)
+                return
+              }
+              void deleteLocalAIFolder(localAIActiveFolder.id)
+            }}><Trash2 size={13} />{localAIFolderDeleteArmedID === localAIActiveFolder.id && <span>Confirm</span>}</button>}
+            {localAIFolderDraft && <input className="local-ai-folder-input" aria-label={localAIFolderDraft.folderID ? 'Folder name' : 'New folder name'} placeholder="Folder name" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={localAIFolderDraft.name} maxLength={LOCAL_AI_FOLDER_NAME_CHARACTERS} autoFocus onChange={(event) => setLocalAIFolderDraft({ folderID: localAIFolderDraft.folderID, name: event.currentTarget.value })} onBlur={() => setLocalAIFolderDraft(null)} onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setLocalAIFolderDraft(null)
+              } else if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                void saveLocalAIFolderDraft(localAIFolderDraft.folderID, event.currentTarget.value)
+              }
+            }} />}
+          </div>}
           <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : roomScope === 'local-ai' ? 'AI CHATS' : 'ROOMS'}</span><span className="room-section-actions">{roomScope === 'all' && <button className="room-archive-all" type="button" aria-label="Archive all read rooms" title="Archive all read rooms" disabled={readRoomCount === 0} onClick={() => void archiveAllReadRooms()}><Archive size={13} /></button>}{roomScope === 'local-ai' && <button className="room-archive-all" type="button" aria-label="New private chat" title="New private chat (Ctrl / ⌘ + Shift + M)" onClick={() => startLocalAIChat()}><Plus size={13} /></button>}{filteredRooms.length.toString().padStart(2, '0')}</span></div>
           <VirtualRoomList
             listRef={roomListRef}
@@ -4525,17 +4782,18 @@ function App() {
                 room={room}
                 index={index}
                 active={room.id === activeListRoomID && isActiveAccountRoom(room)}
-                needsReply={isNeedsReplyRoom(room)}
+                needsReply={isNeedsReplyRoom(room, preferences)}
                 multiSelected={selectedRoomIDs.length > 1 && selectedRoomIDs.includes(room.id)}
                 lastMessageByMe={isLastMessageByCurrentUser(room)}
                 use24Hour={preferenceBoolean(preferences, 'appearance.time_24_hour')}
                 showNetwork={preferenceBoolean(preferences, 'sidebar.network_icons')}
                 showUnreadCounts={preferenceBoolean(preferences, 'sidebar.show_unread_counts', true)}
+                aiIcon={localAIIconByRoomID.get(room.id)}
                 actionsRef={roomButtonActionsRef}
               />
             )}
             emptyContent={filteredRooms.length === 0 && (
-              <div className="room-empty">{listRooms.length === 0 ? 'No rooms yet' : search ? 'No matching rooms' : roomScope === 'archived' ? 'No archived rooms' : roomScope === 'local-ai' ? 'No private model chats yet' : 'No rooms match these filters'}</div>
+              <div className="room-empty">{listRooms.length === 0 ? 'No rooms yet' : search ? 'No matching rooms' : roomScope === 'archived' ? 'No archived rooms' : roomScope === 'local-ai' ? (localAIFolderFilter === null ? 'No private model chats yet' : 'No chats in this folder') : 'No rooms match these filters'}</div>
             )}
           />
           {roomContextMenu && contextMenuChatID !== null && contextMenuLocalAIRoom && <div className="room-context-menu" role="menu" style={{ left: roomContextMenu.x, top: roomContextMenu.y }}>
@@ -4547,6 +4805,13 @@ function App() {
             }}>
               <Pencil size={15} /><span>Rename chat</span>
             </button>
+            <button type="button" role="menuitem" aria-keyshortcuts="Control+Shift+G Meta+Shift+G" title={`${contextMenuLocalAIInAll ? 'Remove from' : 'Add to'} All rooms (Ctrl / ⌘ + Shift + G)`} onClick={() => {
+              setRoomContextMenu(null)
+              const preferenceKey = localAIIncludeInAllPreference(contextMenuChatID)
+              void setPreference(preferenceKey, !contextMenuLocalAIInAll)
+            }}>
+              <MessageCircleMore size={15} /><span>{contextMenuLocalAIInAll ? 'Remove from All rooms' : 'Add to All rooms'}</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧G</kbd>
+            </button>
             <button type="button" role="menuitem" onClick={() => {
               setRoomContextMenu(null)
               clearRoomSelection()
@@ -4554,6 +4819,25 @@ function App() {
             }}>
               <Star size={15} /><span>{contextMenuLocalAIRoom.favorite ? 'Remove from Favorites' : 'Add to Favorites'}</span>
             </button>
+            <div className="room-context-menu-group" role="group" aria-label="Move to folder">
+              <div className="room-context-menu-label">Move to folder</div>
+              <button type="button" role="menuitemradio" aria-checked={contextMenuLocalAIFolderID === ''} onClick={() => {
+                setRoomContextMenu(null)
+                void moveLocalAIChatToFolder(contextMenuChatID, '')
+              }}>
+                <Folder size={15} /><span>No folder</span>
+              </button>
+              <div className="room-context-menu-folders">
+                {localAIChatList.folders.map((folder) => (
+                  <button key={folder.id} type="button" role="menuitemradio" aria-checked={contextMenuLocalAIFolderID === folder.id} onClick={() => {
+                    setRoomContextMenu(null)
+                    void moveLocalAIChatToFolder(contextMenuChatID, folder.id)
+                  }}>
+                    <Folder size={15} /><span>{folder.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <button type="button" role="menuitem" onClick={() => {
               if (localAIDeleteArmedID !== contextMenuChatID) {
                 setLocalAIDeleteArmedID(contextMenuChatID)
@@ -4569,10 +4853,10 @@ function App() {
           </div>}
           {roomContextMenu && contextMenuChatID === null && <div className="room-context-menu" role="menu" style={{ left: roomContextMenu.x, top: roomContextMenu.y }}>
             {contextMenuIsBulk && <div className="room-context-menu-count">{contextMenuRooms.length} chats selected</div>}
-            {contextMenuNeedsReplyAddCount > 0 && <button type="button" role="menuitem" aria-keyshortcuts="N" title="Add to Needs reply (N)" onClick={() => void applyBulkRoomAction('needs-reply', contextMenuNeedsReplyRooms)}>
+            {contextMenuNeedsReplyAddCount > 0 && <button type="button" role="menuitem" aria-keyshortcuts="N" title="Add to Needs reply (N)" onClick={() => void applyBulkRoomAction('needs-reply', contextMenuNeedsReplyAddRooms)}>
               <Reply size={15} /><span>{contextMenuIsBulk ? `Add ${contextMenuNeedsReplyAddCount} to Needs reply` : 'Add to Needs reply'}</span><kbd aria-hidden="true">N</kbd>
             </button>}
-            {contextMenuRooms.some((room) => room.unanswered) && <button type="button" role="menuitem" aria-keyshortcuts={answeredShortcut} onClick={() => contextMenuIsBulk ? void applyBulkRoomAction('answered', contextMenuRooms) : void markRoomAnswered(roomContextMenu.roomID)} onKeyDown={(event) => {
+            {contextMenuRooms.some((room) => isNeedsReplyRoom(room, preferences)) && <button type="button" role="menuitem" aria-keyshortcuts={answeredShortcut} onClick={() => contextMenuIsBulk ? void applyBulkRoomAction('answered', contextMenuRooms) : void markRoomAnswered(roomContextMenu.roomID)} onKeyDown={(event) => {
               if (!contextMenuIsBulk) {
                 handleMarkAnsweredKeyDown(event, roomContextMenu.roomID)
                 return
@@ -4634,7 +4918,7 @@ function App() {
           {localAIChatOpen ? (
             <>
               <div className="conversation-title">
-                {localAIRenameDraft === null ? <h2>{localAIActiveChat?.title || 'Local AI'}</h2> : <input className="local-ai-title-input" aria-label="Chat title" value={localAIRenameDraft} maxLength={LOCAL_AI_TITLE_CHARACTERS} autoFocus onChange={(event) => setLocalAIRenameDraft(event.currentTarget.value)} onBlur={() => setLocalAIRenameDraft(null)} onKeyDown={(event) => {
+                {localAIRenameDraft === null ? <h2>{localAIActiveChat?.title || 'Local AI'}</h2> : <input className="local-ai-title-input" aria-label="Chat title" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={localAIRenameDraft} maxLength={LOCAL_AI_TITLE_CHARACTERS} autoFocus onChange={(event) => setLocalAIRenameDraft(event.currentTarget.value)} onBlur={() => setLocalAIRenameDraft(null)} onKeyDown={(event) => {
                   if (event.key === 'Escape') {
                     event.preventDefault()
                     setLocalAIRenameDraft(null)
@@ -4688,7 +4972,7 @@ function App() {
                       <MessageCircleMore size={16} />
                     </button>
                   </IconTooltip>
-                  {selectedRoom.unanswered && <IconTooltip label="Mark room answered"><button className="icon-button" type="button" aria-label="Mark room answered" onClick={() => void markRoomAnswered(selectedRoom.id)}><Check size={16} /></button></IconTooltip>}
+                  {isNeedsReplyRoom(selectedRoom, preferences) && <IconTooltip label="Mark room answered"><button className="icon-button" type="button" aria-label="Mark room answered" onClick={() => void markRoomAnswered(selectedRoom.id)}><Check size={16} /></button></IconTooltip>}
                   <IconTooltip label={selectedRoom.favorite ? 'Remove from Favorites' : 'Add to Favorites'}>
                     <button
                       className={`icon-button ${selectedRoom.favorite ? 'is-selected' : ''}`}
@@ -4755,13 +5039,17 @@ function App() {
             chatTitle={localAIActiveChat?.title ?? ''}
             agentId={localAIAgentId}
             agents={localAIAgents.agents}
+            initialDraft={localAIInitialDraft.content}
+            initialDraftVersion={localAIInitialDraft.version}
             onAgentChange={setLocalAINewChatAgentId}
+            onCreateAgent={createLocalAIAgent}
             onChatCreated={(chat) => {
               setLocalAIChatId(chat.id)
               setLocalAINewChatAgentId(chat.agentId)
               localAIChatList.reload()
             }}
             onChatsChanged={localAIChatList.reload}
+            newChatKind={localAINewChatKind}
           />
           {localAIChatOpen ? null : <>
             <div className="conversation-thread">
@@ -4921,7 +5209,7 @@ function App() {
                 ))}
               </div>}
               <form className="composer" onSubmit={submitMessage}>
-                <input ref={attachmentInputRef} className="visually-hidden" type="file" aria-hidden="true" tabIndex={-1} onChange={(event) => void uploadAttachment(event)} />
+                <input ref={attachmentInputRef} className="visually-hidden" type="file" aria-hidden="true" tabIndex={-1} onChange={handleAttachmentInput} />
                 {emojiOptions.length > 0 && <div className="mention-menu emoji-menu" role="listbox" aria-label="Emoji suggestions">
                   {emojiOptions.map(([name, emoji], index) => <button key={name} className={`mention-option ${index === emojiActiveIndex ? 'is-active' : ''}`} type="button" role="option" aria-selected={index === emojiActiveIndex} onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setEmojiActiveIndex(index)} onClick={() => applyEmojiSuggestion(emoji)}><span aria-hidden="true">{emoji}</span> :{name}:</button>)}
                 </div>}
@@ -4947,11 +5235,22 @@ function App() {
                     setMentionStart(-1)
                   }}><X size={14} /></button>
                 </div>}
+                {stagedRoomAttachments.length > 0 && <ul className="composer-staged-attachments" aria-label="Attachments to send">
+                  {stagedRoomAttachments.map((item) => (
+                    <li key={item.id}>
+                      {item.previewURL ? <img src={item.previewURL} alt="" /> : <Paperclip size={12} />}
+                      <span>{item.file.name || 'Attachment'}</span>
+                      <button className="icon-button" type="button" aria-label={`Remove ${item.file.name || 'attachment'}`} disabled={busy} onClick={() => removeStagedAttachment(item)}><X size={12} /></button>
+                    </li>
+                  ))}
+                </ul>}
                 <div className="composer-input-wrap">
                   <textarea
                     ref={composerInputRef}
                     value={composeText}
-                    spellCheck={preferenceBoolean(preferences, 'composer.spellcheck', true)}
+                    spellCheck={false}
+                    autoCorrect="off"
+                    autoCapitalize="off"
                     onChange={(event) => {
                       const rawValue = event.currentTarget.value
                       const rawCursor = event.currentTarget.selectionStart
@@ -4962,7 +5261,8 @@ function App() {
                       const value = converted.text
                       if (value !== rawValue) {
                         requestAnimationFrame(() => {
-                          if (document.activeElement === composerInputRef.current) composerInputRef.current?.setSelectionRange(converted.cursor, converted.cursor)
+                          // Skip the restore when the user has typed again, so a stale cursor cannot move the caret back.
+                          if (composeTextRef.current === value && document.activeElement === composerInputRef.current) composerInputRef.current?.setSelectionRange(converted.cursor, converted.cursor)
                         })
                       }
                       ghostwriterDraftRequestRef.current++
@@ -5006,7 +5306,7 @@ function App() {
                     onSelect={snippetExpander.select}
                   />}
                 </div>
-                {ghostwriterActive && ghostwriterRewriteText && <div className="ghostwriter-rewrite-preview" role="group" aria-label="Suggested draft edit">
+                {ghostwriterEnabled && ghostwriterRewriteText && <div className="ghostwriter-rewrite-preview" role="group" aria-label="Suggested draft edit">
                   <div className="ghostwriter-rewrite-copy">
                     <span className="ghostwriter-rewrite-label">Suggested edit</span>
                     <span className="ghostwriter-rewrite-text">{ghostwriterRewriteText}</span>
@@ -5020,8 +5320,8 @@ function App() {
                   }}><X size={14} /></button></IconTooltip>
                 </div>}
                 {ghostwriterDraftStatus && <p className="ghostwriter-composer-status" role="status">{ghostwriterDraftStatus}</p>}
-                {ghostwriterActive && ghostwriterAutocompleteStatus === 'loading' && <p className="ghostwriter-composer-status" role="status">Local model is correcting your draft…</p>}
-                {ghostwriterActive && ghostwriterRewriteText && ghostwriterAutocompleteStatus !== 'loading' && <span className="visually-hidden" role="status">Draft correction ready. Press Tab to replace the draft.</span>}
+                {ghostwriterEnabled && ghostwriterAutocompleteStatus === 'loading' && <p className="ghostwriter-composer-status" role="status">Local model is correcting your draft…</p>}
+                {ghostwriterEnabled && ghostwriterRewriteText && ghostwriterAutocompleteStatus !== 'loading' && <span className="visually-hidden" role="status">Draft correction ready. Press Tab to replace the draft.</span>}
                 {ghostwriterAutocompleteStatus === 'offline' && <p className="ghostwriter-composer-status" role="status">Local draft correction unavailable. Check that the model is running.</p>}
                 {videoRecordingActive && <div className="video-capture-preview"><video ref={videoPreviewRef} muted playsInline autoPlay aria-label="Camera preview" /></div>}
                 <div className="composer-footer">
@@ -5073,26 +5373,20 @@ function App() {
                     <div className="composer-tool-group composer-tool-group-ai" role="group" aria-label="AI tools">
                       <span className="composer-tool-group-label" aria-hidden="true"><Sparkles size={13} />AI</span>
                       <div className="composer-tool-cluster" role="group" aria-label="Draft assistance">
-                        <IconTooltip label={aiEnabled ? 'Analyze draft with Language Tutor · Ctrl+Shift+T' : 'Analyze draft with Language Tutor · set up a local AI endpoint'}><button className="composer-tutor-button" type="button" aria-label="Analyze draft with Language Tutor" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => void analyzeWithTurkishTutor(composeText, 'draft')}><GraduationCap size={14} /><span>Tutor</span></button></IconTooltip>
-                        <IconTooltip label={ghostwriterActive ? 'Disable suggestions in this chat' : ghostwriterEnabled ? 'Enable suggestions in this chat' : 'Enable suggestions in this chat and configure the local model'}><button className={`composer-tutor-button ghostwriter-toggle ${ghostwriterActive ? 'is-enabled' : ''}`} type="button" aria-label={ghostwriterActive ? 'Disable suggestions in this chat' : 'Enable suggestions in this chat'} aria-pressed={ghostwriterActive} disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => void toggleRoomGhostwriter(!ghostwriterActive)}><Sparkles size={14} /><span>Suggest</span></button></IconTooltip>
-                        <IconTooltip label={ghostwriterActive ? 'Suggest one draft edit' : 'Enable suggestions in this chat first'}><button className="composer-tutor-button" type="button" aria-label="Suggest draft edit" disabled={!selectedRoom || !ghostwriterActive || !composeText.trim() || busy || ghostwriterDraftBusy || Boolean(editTarget) || isGhostCommandDraft(composeText) || ghostwriterAutocompleteStatus === 'loading'} onClick={() => void requestGhostwriterCompletion()}><WandSparkles size={14} /><span>Suggest edit</span></button></IconTooltip>
-                        <IconTooltip label={askAILabel}><button className="icon-button" type="button" aria-label="Ask AI about the composer text" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={askAI}><MessageCircleQuestion size={15} /></button></IconTooltip>
-                        <IconTooltip label={aiEnabled ? 'Rewrite draft' : 'Rewrite · unavailable'}><button className="icon-button" type="button" aria-label="Rewrite composer draft" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => rewriteDraft('rewrite')}><Pencil size={15} /></button></IconTooltip>
-                        <IconTooltip label={aiEnabled ? 'Shorten draft' : 'Shorten · unavailable'}><button className="icon-button" type="button" aria-label="Shorten composer draft" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => rewriteDraft('shorten')}><Minimize2 size={15} /></button></IconTooltip>
+                        <IconTooltip label={aiEnabled ? 'Analyze draft with Language Tutor · Ctrl+Shift+T' : 'Analyze draft with Language Tutor · set up a local AI endpoint'}><button className="composer-assist-button" type="button" aria-label="Analyze draft with Language Tutor" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => void analyzeWithLanguageTutor(composeText, 'draft')}><GraduationCap size={14} /><span>Tutor</span></button></IconTooltip>
+                        <IconTooltip label={ghostwriterEnabled ? 'Suggest one draft edit' : 'Enable Ghostwriter in Settings > AI first'}><button className="composer-assist-button" type="button" aria-label="Suggest draft edit" disabled={!selectedRoom || !ghostwriterEnabled || !composeText.trim() || busy || ghostwriterDraftBusy || Boolean(editTarget) || isGhostCommandDraft(composeText) || ghostwriterAutocompleteStatus === 'loading'} onClick={() => void requestGhostwriterCompletion()}><WandSparkles size={14} /><span>Suggest edit</span></button></IconTooltip>
+                        <IconTooltip label={imageButtonTooltip}><button className="composer-assist-button" type="button" aria-label={imageRunHere ? 'Stop image generation' : 'Generate image from draft'} disabled={!imageRunHere && (!selectedRoom || !imageEngineReady || !composeText.trim() || busy || Boolean(editTarget) || imageSendRun !== null || generatedImageReview !== null)} onClick={imageRunHere ? stopImageGeneration : () => void generateImageToRoom()}>{imageRunHere ? <Square size={14} /> : <ImagePlus size={14} />}<span>{imageRunHere ? 'Stop' : 'Image'}</span></button></IconTooltip>
                       </div>
                       <div className="composer-tool-cluster" role="group" aria-label="Conversation analysis and translation">
-                        <IconTooltip label={aiEnabled ? 'Summarize recent messages' : 'Summarize recent messages · unavailable'}><button className="icon-button" type="button" aria-label="Summarize recent messages" disabled={!selectedRoom || busy || !aiEnabled || messages.length === 0} onClick={summarizeRoom}><ScrollText size={15} /></button></IconTooltip>
-                        <IconTooltip label={aiEnabled ? 'Analyze chat topics' : 'Analyze chat topics · unavailable'}><button className="icon-button" type="button" aria-label="Analyze chat topics" disabled={!selectedRoom || busy || !aiEnabled || messages.length === 0} onClick={analyzeTopics}><Tags size={15} /></button></IconTooltip>
-                        {selectedRoom?.direct && <IconTooltip label={aiEnabled ? 'Analyze conversation' : 'Analyze conversation · unavailable'}><button className="icon-button" type="button" aria-label="Analyze conversation" disabled={busy || !aiEnabled || !hasAIConversationContext} onClick={analyzeConversation}><MessageCircleMore size={15} /></button></IconTooltip>}
-                        <IconTooltip label={aiEnabled ? 'Translate latest 10 received messages to English' : 'Translate latest 10 received messages to English · unavailable'}><button className="icon-button" type="button" aria-label="Translate latest 10 received messages to English" disabled={!selectedRoom || busy || loadingOlder || !aiEnabled || (!hasAIConversationContext && !hasOlder)} onClick={() => void translateRoomToEnglish()}><Languages size={15} /></button></IconTooltip>
-                        {chatTranslation?.roomID === selectedRoomID && <IconTooltip label="Clear message translations"><button className="icon-button" type="button" aria-label="Clear message translations" onClick={clearChatTranslation}><X size={15} /></button></IconTooltip>}
-                        <IconTooltip label={roomAgents.agents.length === 0 ? 'Create a chat agent' : aiEnabled ? 'Run a chat agent' : 'Run a chat agent · unavailable'}><button className="icon-button" type="button" aria-label={roomAgents.agents.length === 0 ? 'Create a chat agent' : 'Run a chat agent'} disabled={!selectedRoom || busy || (roomAgents.agents.length > 0 && !aiEnabled)} onClick={openChatAgentAction}><Bot size={15} /></button></IconTooltip>
+                        <IconTooltip label={summaryStatus || (aiEnabled ? 'Prepare a summary in Local AI' : 'Prepare a summary in Local AI · unavailable')}><button className="composer-assist-button" type="button" aria-label="Summarize with Local AI" aria-busy={Boolean(summaryStatus)} disabled={!selectedRoom || busy || loadingOlder || Boolean(summaryStatus) || !aiEnabled || (!hasAIConversationContext && !hasOlder)} onClick={() => void summarizeRoom()}>{summaryStatus ? <span className="loading-mark" aria-hidden="true" /> : <ScrollText size={14} />}<span>Summarize</span></button></IconTooltip>
+                        <IconTooltip label={aiEnabled ? translateRecentLabel : `${translateRecentLabel} · unavailable`}><button className="composer-assist-button" type="button" aria-label={translateRecentLabel} disabled={!selectedRoom || busy || loadingOlder || !aiEnabled || (!hasAIConversationContext && !hasOlder)} onClick={() => void translateRecentMessages()}><Languages size={14} /><span>Translate</span></button></IconTooltip>
+                        {chatTranslation?.roomID === selectedRoomID && <IconTooltip label="Clear message translations"><button className="composer-assist-button" type="button" aria-label="Clear message translations" onClick={clearChatTranslation}><X size={14} /><span>Clear translations</span></button></IconTooltip>}
                       </div>
                     </div>
-                    <span className={`composer-hint${voiceCaptureStatus !== null || busy ? ' is-status' : ''}`}>{voiceCaptureStatus === 'recording' ? `Recording ${captureNoun} · click stop to send` : voiceCaptureStatus === 'processing' ? `Preparing ${captureNoun}…` : selectedRoom ? busy ? 'Sending…' : preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter to send' : 'Enter to send · Shift + Enter for a new line' : ' '}</span>
+                    <span className={`composer-hint${voiceCaptureStatus !== null || busy || imageRunHere ? ' is-status' : ''}`}>{voiceCaptureStatus === 'recording' ? `Recording ${captureNoun} · click stop to send` : voiceCaptureStatus === 'processing' ? `Preparing ${captureNoun}…` : imageRunHere ? imageRunStatus : selectedRoom ? busy ? 'Sending…' : preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter to send' : 'Enter to send · Shift + Enter for a new line' : ' '}</span>
                   </div>
                   <IconTooltip label="Send message" className="send-tooltip">
-                    <button className="send-button" type="submit" aria-label="Send message" disabled={!selectedRoom || !composeText.trim() || busy || voiceCaptureStatus !== null}>
+                    <button className="send-button" type="submit" aria-label="Send message" disabled={!selectedRoom || (!composeText.trim() && sendableStagedAttachments.length === 0) || busy || voiceCaptureStatus !== null}>
                       <Send size={17} />
                     </button>
                   </IconTooltip>
@@ -5135,7 +5429,7 @@ function App() {
             {aiPanel.stopped && !aiPanel.busy && <p className="settings-note ai-result-stopped" role="status">Generation stopped. The text above may be incomplete.</p>}
           </div>
           {!aiPanel.busy && endsWithAssistantTurn(aiPanel.conversation) && <form className="ai-result-followup" onSubmit={sendAIFollowUp}>
-            <textarea aria-label="Follow-up question" value={aiPanel.followUp} maxLength={2000} rows={2} placeholder="Ask a follow-up about this result" onChange={(event) => setAIFollowUp(event.target.value)} />
+            <textarea aria-label="Follow-up question" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={aiPanel.followUp} maxLength={2000} rows={2} placeholder="Ask a follow-up about this result" onChange={(event) => setAIFollowUp(event.target.value)} />
             <button className="settings-command" type="submit" disabled={!aiPanel.followUp.trim()}>Send follow-up</button>
           </form>}
           <aside className="ai-result-disclaimer">
@@ -5153,25 +5447,28 @@ function App() {
           </footer>
         </DialogSurface>
       </div>}
-      {turkishTutorState && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeTurkishTutor() }}>
-        <DialogSurface className="room-info-dialog ai-result-dialog turkish-tutor-dialog" labelledBy="turkish-tutor-title" onClose={closeTurkishTutor} onClick={(event) => event.stopPropagation()}>
+      {languageTutorState && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeLanguageTutor() }}>
+        <DialogSurface className="room-info-dialog ai-result-dialog language-tutor-dialog" labelledBy="language-tutor-title" onClose={closeLanguageTutor} onClick={(event) => event.stopPropagation()}>
           <header className="room-info-header ai-result-header">
-            <div><span className="eyebrow">LANGUAGE TUTOR</span><h2 id="turkish-tutor-title">{turkishTutorState.mode === 'draft' ? 'Tutor this draft' : 'Analyze message'}</h2></div>
-            <button className="icon-button" type="button" aria-label="Close Language Tutor" title="Close Language Tutor" onClick={closeTurkishTutor}><X size={16} /></button>
+            <div><span className="eyebrow">LANGUAGE TUTOR</span><h2 id="language-tutor-title">{languageTutorState.mode === 'draft' ? 'Tutor this draft' : 'Analyze message'}</h2></div>
+            <button className="icon-button" type="button" aria-label="Close Language Tutor" title="Close Language Tutor" onClick={closeLanguageTutor}><X size={16} /></button>
           </header>
-          <div className="ai-result-content turkish-tutor-content" aria-live="polite" aria-busy={turkishTutorState.busy}>
-            {turkishTutorState.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with the local model…</p>}
-            {turkishTutorState.busy && turkishTutorState.preview !== '' && <pre className="turkish-tutor-preview">{turkishTutorState.preview}</pre>}
-            {turkishTutorState.error && <p className="settings-error" role="alert">{turkishTutorState.error}</p>}
-            {turkishTutorState.analysis && <TutorAnalysisDetails analysis={turkishTutorState.analysis} originalText={turkishTutorState.originalText} />}
+          <div className="ai-result-content language-tutor-content" aria-live="polite" aria-busy={languageTutorState.busy}>
+            <label className="language-tutor-explain-in"><span>Explain in</span><select aria-label="Explain in" value={languageTutorState.explanationLanguage} disabled={languageTutorState.busy} onChange={(event) => void analyzeWithLanguageTutor(languageTutorState.originalText, languageTutorState.mode, event.target.value)}>
+              {languageRoles.known.map((code) => <option key={code} value={code}>{languageName(code)}</option>)}
+            </select></label>
+            {languageTutorState.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with the local model…</p>}
+            {languageTutorState.busy && languageTutorState.preview !== '' && <pre className="language-tutor-preview">{languageTutorState.preview}</pre>}
+            {languageTutorState.error && <p className="settings-error" role="alert">{languageTutorState.error}</p>}
+            {languageTutorState.analysis && <LanguageTutorAnalysisDetails analysis={languageTutorState.analysis} originalText={languageTutorState.originalText} />}
           </div>
           <aside className="ai-result-disclaimer">
             <ShieldCheck size={16} aria-hidden="true" />
             <p>Analysis uses the local AI endpoint configured in Settings. No Matrix message is sent.</p>
           </aside>
           <footer className="room-info-footer ai-result-footer">
-            {turkishTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" disabled={!turkishTutorState.analysis || turkishTutorState.busy || Boolean(editTarget)} onClick={useTurkishTutorDraft}>Replace draft with {tutorLanguageName(turkishTutorState.analysis?.target_language || resolveTutorLanguages(preferences).target)}</button>}
-            <button className="settings-command" type="button" onClick={closeTurkishTutor}>Close</button>
+            {languageTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" disabled={!languageTutorState.analysis || languageTutorState.busy || Boolean(editTarget)} onClick={useLanguageTutorDraft}>Replace draft with {languageName(languageTutorState.analysis?.target_language || languageRoles.learning)}</button>}
+            <button className="settings-command" type="button" onClick={closeLanguageTutor}>Close</button>
           </footer>
         </DialogSurface>
       </div>}
@@ -5186,13 +5483,13 @@ function App() {
             <div className="account-add-field-group">
               <label className="field" htmlFor="account-homeserver">
                 <span>Homeserver</span>
-                <input id="account-homeserver" type="url" value={accountHomeserver} onChange={(event) => setAccountHomeserver(event.target.value)} autoComplete="url" aria-describedby="account-homeserver-help" required />
+                <input id="account-homeserver" type="url" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={accountHomeserver} onChange={(event) => setAccountHomeserver(event.target.value)} autoComplete="url" aria-describedby="account-homeserver-help" required />
               </label>
               <p className="field-help" id="account-homeserver-help">Example: https://matrix.org</p>
             </div>
             <label className="field" htmlFor="account-username">
               <span>Username</span>
-              <input id="account-username" value={accountUsername} onChange={(event) => setAccountUsername(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} required />
+              <input id="account-username" value={accountUsername} onChange={(event) => setAccountUsername(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} autoCorrect="off" required />
             </label>
             <label className="field" htmlFor="account-password">
               <span>Password</span>
@@ -5243,42 +5540,6 @@ function App() {
           onSnippetsChange={updateSnippets}
         />
       )}
-      {relationshipsOpen && <div className="room-info-scrim" role="presentation" onClick={() => setRelationshipsOpen(false)}>
-        <DialogSurface className="room-info-dialog relationship-dialog" labelledBy="relationships-title" onClose={() => setRelationshipsOpen(false)} onClick={(event) => event.stopPropagation()}>
-          <header className="room-info-header">
-            <div><span className="eyebrow">LOCAL CHECK-INS</span><h2 id="relationships-title">Keep in Touch</h2></div>
-            <button className="icon-button" type="button" aria-label="Close Keep in Touch" onClick={() => setRelationshipsOpen(false)}><X size={16} /></button>
-          </header>
-          <div className="room-info-content relationship-list" aria-live="polite">
-            {relationshipDecayError && <p className="room-info-state is-error" role="alert">{relationshipDecayError}</p>}
-            {!currentRelationshipDecay?.enabled && <p className="relationship-note">Enable relationship check-ins in Settings to receive local reminders.</p>}
-            {relationshipDecayContacts.length === 0 && <p className="room-info-state">No tracked relationships yet.</p>}
-            {relationshipDecayContacts.map((contact) => {
-              const roomIDs = contact.roomIds ?? []
-              const busy = relationshipDecayBusy === contact.contactId
-              return <article className="relationship-contact" key={contact.contactId}>
-                <div className="relationship-contact-heading">
-                  <div><strong>{contact.displayName || contact.contactId}</strong><span>{contact.alerted ? 'Check-in suggested' : 'No check-in due'}</span></div>
-                  <label className="relationship-tier-control">Tier
-                    <select aria-label={`Relationship tier for ${contact.displayName || contact.contactId}`} value={contact.tier || 'NONE'} disabled={busy || !roomIDs.length} onChange={(event) => void updateRelationshipTier(contact, event.target.value)}>
-                      <option value="VIP">VIP</option>
-                      <option value="CLOSE_FRIEND">Close friend</option>
-                      <option value="CASUAL">Casual</option>
-                      <option value="CLIENT">Client</option>
-                      <option value="NONE">Not tracked</option>
-                    </select>
-                  </label>
-                </div>
-                <span className="relationship-last-contact">{contact.lastInteractionTimestamp > 0 ? `Last interaction ${new Date(contact.lastInteractionTimestamp).toLocaleDateString()}` : 'No interactions recorded'}</span>
-                <div className="relationship-contact-actions">
-                  {contact.alerted && <button className="settings-command" type="button" disabled={busy} onClick={() => void snoozeRelationshipContact(contact)}><Clock3 size={14} />Snooze for a week</button>}
-                </div>
-              </article>
-            })}
-          </div>
-          <footer className="room-info-footer"><button className="settings-command" type="button" onClick={() => setRelationshipsOpen(false)}>Close</button></footer>
-        </DialogSurface>
-      </div>}
       {scheduledJobsOpen && <div className="room-info-scrim" role="presentation" onClick={() => setScheduledJobsOpen(false)}>
         <DialogSurface className="room-info-dialog scheduled-dialog" labelledBy="scheduled-jobs-title" onClose={() => setScheduledJobsOpen(false)} onClick={(event) => event.stopPropagation()}>
           <header className="room-info-header">
@@ -5337,7 +5598,7 @@ function App() {
                   <p className="scheduled-draft-preview">{scheduledDraft.text}</p>
                 </>
                 : <>
-                  <label>Reminder note <input type="text" value={scheduledDraft.text} onChange={(event) => setScheduledDraft((current) => current?.kind === 'reminder' ? { ...current, text: event.target.value } : current)} placeholder="Optional note" /></label>
+                  <label>Reminder note <input type="text" value={scheduledDraft.text} onChange={(event) => setScheduledDraft((current) => current?.kind === 'reminder' ? { ...current, text: event.target.value } : current)} placeholder="Optional note" spellCheck={false} autoCorrect="off" autoCapitalize="off" /></label>
                   <label className="scheduled-archive-toggle">
                     <input type="checkbox" aria-label="Archive room after setting reminder" checked={Boolean(scheduledDraft.archiveAfter)} disabled={scheduledSaving} onChange={(event) => setScheduledDraft((current) => current?.kind === 'reminder' ? { ...current, archiveAfter: event.target.checked } : current)} />
                     <span>Archive this room after setting the reminder</span>
@@ -5382,8 +5643,8 @@ function App() {
               {roomAgents.agents.length === 0 && <p className="room-info-state">No chat agents are set up for this room.</p>}
               {agentSettingsError && <p className="settings-error" role="alert">{agentSettingsError}</p>}
               {agentEditor && <form className="room-agent-editor" onSubmit={(event) => void saveAgentProfile(event)}>
-                <label className="room-agent-field"><span>Name</span><input autoFocus maxLength={MAX_AGENT_NAME_LENGTH} value={agentEditor.name} onChange={(event) => setAgentEditor({ ...agentEditor, name: event.target.value })} required /></label>
-                <label className="room-agent-field"><span>Instructions</span><textarea maxLength={MAX_AGENT_INSTRUCTIONS_LENGTH} rows={4} value={agentEditor.instructions} onChange={(event) => setAgentEditor({ ...agentEditor, instructions: event.target.value })} required /></label>
+                <label className="room-agent-field"><span>Name</span><input autoFocus maxLength={MAX_AGENT_NAME_LENGTH} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={agentEditor.name} onChange={(event) => setAgentEditor({ ...agentEditor, name: event.target.value })} required /></label>
+                <label className="room-agent-field"><span>Instructions</span><textarea maxLength={MAX_AGENT_INSTRUCTIONS_LENGTH} rows={4} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={agentEditor.instructions} onChange={(event) => setAgentEditor({ ...agentEditor, instructions: event.target.value })} required /></label>
                 <div className="room-agent-editor-actions"><button className="settings-command" type="submit">Save agent</button><button className="settings-command" type="button" onClick={() => setAgentEditor(null)}>Cancel</button></div>
               </form>}
               {!agentEditor && <button className="settings-command room-agent-add" type="button" disabled={roomAgents.agents.length >= MAX_CHAT_AGENTS} onClick={createAgentProfile}><Plus size={14} />Add agent</button>}
@@ -5396,6 +5657,21 @@ function App() {
                     <span className="room-member-avatar">{initials(member.displayName || member.id)}</span>
                     <span><strong>{member.displayName || member.id}</strong>{member.displayName && <small>{member.id}</small>}</span>
                   </div>)}</div>}
+            <section className="room-export" aria-label="Export chat">
+              <div className="room-members-heading"><h3>Export chat</h3></div>
+              <p className="room-agent-note">Saves every message and media file in this room to a new folder you choose, with an HTML transcript.</p>
+              {chatExport?.phase === 'running' && chatExport.roomID !== selectedRoom.id && <p className="room-info-state">An export is running for another room.</p>}
+              {chatExportForSelectedRoom?.phase === 'running' && <p className="room-export-status" role="status">{chatExportStatusText(chatExportForSelectedRoom)}</p>}
+              {chatExportForSelectedRoom?.phase === 'done' && chatExportForSelectedRoom.result && <p className="room-export-status" role="status">
+                Exported {chatExportForSelectedRoom.result.messages} messages and {chatExportForSelectedRoom.result.media} media files{chatExportForSelectedRoom.result.mediaFailed > 0 ? `, ${chatExportForSelectedRoom.result.mediaFailed} could not be saved` : ''}.{' '}
+                <button className="media-reveal" type="button" title="Show in file manager" onClick={() => void revealChatExport(chatExportForSelectedRoom.result?.path ?? '')}>{chatExportForSelectedRoom.result.path}</button>
+              </p>}
+              {chatExportForSelectedRoom?.error && <p className="settings-error" role="alert">{chatExportForSelectedRoom.error}</p>}
+              <div className="room-export-actions">
+                <button className="settings-command" type="button" disabled={chatExport?.phase === 'running'} onClick={() => void exportSelectedRoomChat()}><Download size={14} />Export chat</button>
+                {chatExportForSelectedRoom?.phase === 'running' && <button className="settings-command" type="button" onClick={() => void cancelChatExport()}>Cancel export</button>}
+              </div>
+            </section>
           </div>
           <footer className="room-info-footer">
             <button className="settings-command is-danger" type="button" onClick={() => { setLeaveRoomError(''); setLeaveConfirmOpen(true) }}><LogOut size={15} />Leave room</button>
@@ -5436,20 +5712,31 @@ function App() {
           </div>
         </DialogSurface>
       </div>}
-      {agentPickerOpen && selectedRoom && <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAgentPickerOpen(false) }}>
-        <DialogSurface className="room-info-dialog agent-picker-dialog" labelledBy="agent-picker-title" onClose={() => setAgentPickerOpen(false)} onClick={(event) => event.stopPropagation()}>
-          <header className="room-info-header">
-            <div><span className="eyebrow">CHAT AGENT</span><h2 id="agent-picker-title">Run an agent</h2></div>
-            <button className="icon-button" type="button" aria-label="Close agent picker" onClick={() => setAgentPickerOpen(false)}><X size={16} /></button>
-          </header>
-          <form className="room-info-content agent-picker-content" onSubmit={runSelectedAgent}>
-            <label className="room-agent-field"><span>Profile</span><select aria-label="Chat agent profile" value={agentPickerID} onChange={(event) => setAgentPickerID(event.target.value)} required>
-              {roomAgents.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-            </select></label>
-            <label className="room-agent-field"><span>Request (optional)</span><textarea rows={3} value={agentRequest} onChange={(event) => setAgentRequest(event.target.value)} placeholder="Add a specific request" /></label>
-            <p className="room-agent-note">The profile, request, current composer draft, and recent chat context are sent to the configured endpoint, which may be remote. The result is only a suggestion; no Matrix message is sent automatically.</p>
-            <footer className="room-info-footer"><button className="settings-command" type="submit" disabled={!aiEnabled || roomAgents.agents.length === 0}>{aiEnabled ? 'Run agent' : 'Set up an AI endpoint first'}</button></footer>
-          </form>
+      {mediaApproval && <div className="confirm-scrim" role="presentation">
+        <DialogSurface className="confirm-dialog media-approval-dialog" role="alertdialog" labelledBy="media-approval-title" onClose={() => resolveMediaApproval(false)}>
+          <h2 id="media-approval-title">Send media to this room?</h2>
+          <p>Review each item. Nothing is uploaded until you approve.</p>
+          <ul className="media-approval-list" aria-label="Media to send">
+            {mediaApproval.items.map((item) => (
+              <li key={item.key}>
+                {item.previewURL ? <img src={item.previewURL} alt="" /> : <Paperclip size={14} />}
+                <span className="media-approval-name" title={item.name}>{item.name}</span>
+                <small>{mediaApprovalKindLabels[item.kind]} · {formatBytes(item.sizeBytes)}</small>
+              </li>
+            ))}
+          </ul>
+          <div><button type="button" onClick={() => resolveMediaApproval(false)}>Cancel</button><button type="button" onClick={() => resolveMediaApproval(true)}>Approve and send</button></div>
+        </DialogSurface>
+      </div>}
+      {generatedImageReview && <div className="confirm-scrim" role="presentation">
+        <DialogSurface className="confirm-dialog generated-image-dialog" role="alertdialog" labelledBy="generated-image-title" onClose={() => setGeneratedImageReview(null)}>
+          <h2 id="generated-image-title">Send generated image to this room?</h2>
+          <p>Discarding keeps your draft. Nothing is sent until you approve.</p>
+          <figure className="generated-image-preview">
+            <img src={`data:image/png;base64,${generatedImageReview.encoded}`} alt="Generated image preview" />
+            <figcaption>{generatedImageReview.prompt}</figcaption>
+          </figure>
+          <div><button type="button" onClick={() => setGeneratedImageReview(null)}>Discard</button><button type="button" onClick={() => void approveGeneratedImage()}>Approve and send</button></div>
         </DialogSurface>
       </div>}
       {leaveConfirmOpen && selectedRoom && <div className="confirm-scrim" role="presentation">
@@ -5521,15 +5808,6 @@ function App() {
   )
 }
 
-function formatAudioTime(seconds: number) {
-  const totalSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const remainingSeconds = totalSeconds % 60
-  if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
-  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
-}
-
 function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, canUseDraft, onUseDraft }: {
   roomID: string
   message: Message
@@ -5542,20 +5820,16 @@ function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, 
   const [source, setSource] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [downloadStatus, setDownloadStatus] = useState('')
+  const [savedPath, setSavedPath] = useState('')
   const [transcription, setTranscription] = useState('')
   const [transcriptionLoading, setTranscriptionLoading] = useState(false)
   const [transcriptionError, setTranscriptionError] = useState('')
   const [transcriptCopyFeedback, setTranscriptCopyFeedback] = useState('')
-  const [audioPlaying, setAudioPlaying] = useState(false)
-  const [audioCurrentTime, setAudioCurrentTime] = useState(0)
-  const [audioDuration, setAudioDuration] = useState(Math.max(0, message.mediaDurationMs / 1000))
   const [viewerOpen, setViewerOpen] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [copyFeedback, setCopyFeedback] = useState('')
   const [nearViewport, setNearViewport] = useState(false)
   const attachmentRef = useRef<HTMLDivElement>(null)
-  const audioPlayerRef = useRef<HTMLAudioElement>(null)
   const sourceRef = useRef('')
   const mountedRef = useRef(false)
   const nearViewportRef = useRef(false)
@@ -5645,16 +5919,34 @@ function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, 
     loadingRef.current = true
     setLoading(true)
     setError('')
-    setDownloadStatus('')
+    setSavedPath('')
     try {
-      const savedPath = await AppService.SaveMedia(message.mediaUri, filename)
-      if (savedPath) setDownloadStatus(`Saved to ${savedPath}`)
+      const path = await AppService.SaveMedia(message.mediaUri, filename)
+      if (path) setSavedPath(path)
     } catch (downloadError) {
       setError(describeError(downloadError))
     } finally {
       loadingRef.current = false
       setLoading(false)
     }
+  }
+
+  async function revealSavedFile() {
+    if (!savedPath) return
+    try {
+      await AppService.RevealFile(savedPath)
+    } catch (revealError) {
+      setError(describeError(revealError))
+    }
+  }
+
+  function renderSavedFile() {
+    return (
+      <>
+        Saved to{' '}
+        <button className="media-reveal" type="button" title="Show in file manager" onClick={() => void revealSavedFile()}>{savedPath}</button>
+      </>
+    )
   }
 
   async function transcribeAudio() {
@@ -5685,25 +5977,6 @@ function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, 
     }
   }
 
-  function toggleAudioPlayback() {
-    const player = audioPlayerRef.current
-    if (!player) return
-    setError('')
-    if (player.paused) {
-      if (player.ended) player.currentTime = 0
-      void player.play().catch((playError) => setError(describeError(playError)))
-    } else {
-      player.pause()
-    }
-  }
-
-  function seekAudio(value: number) {
-    const player = audioPlayerRef.current
-    if (!player) return
-    player.currentTime = value
-    setAudioCurrentTime(value)
-  }
-
   async function copyImage() {
     setCopyFeedback('')
     try {
@@ -5730,8 +6003,9 @@ function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, 
   }
 
   return (
-    <div ref={attachmentRef} className={`message-attachment ${isAudio ? 'audio-attachment' : ''}`}>
-      {isAudio && <div className="audio-attachment-header">
+    <div ref={attachmentRef} className={`message-attachment ${isAudio ? 'audio-attachment' : ''} ${isImage ? 'is-image' : ''}`}>
+      {isAudio && <VoiceMessagePlayer key={message.id} label={filename} waveformKey={message.mediaUri} durationMs={message.mediaDurationMs} sizeBytes={message.mediaSize} source={source} autoPlay={autoPlayNext} onRequestSource={prepareMedia} onEnded={onAudioEnded} />}
+      {isAudio && <div className="audio-attachment-footer">
         <span className="audio-filename" title={filename}>{filename}</span>
         <button className="icon-button audio-download" type="button" title={`Download ${filename}`} aria-label={`Download ${filename}`} disabled={loading} onClick={() => void downloadFile()}><Download size={15} /></button>
       </div>}
@@ -5755,8 +6029,8 @@ function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, 
         <p>{transcription}</p>
         {transcriptCopyFeedback && <span className="audio-transcript-feedback" role="status">{transcriptCopyFeedback}</span>}
       </section>}
-      {!source && (isImage || isAudio || isVideo) && <button className="media-load" type="button" title={loading ? 'Loading media' : `Load ${filename}`} disabled={loading} onClick={() => void prepareMedia()}>
-        <Download size={14} />{loading ? 'Loading media…' : isImage ? `Preview ${filename}` : isAudio ? 'Load audio' : isVideo ? 'Load video' : `Prepare ${filename}`}
+      {!source && (isImage || isVideo) && <button className="media-load" type="button" title={loading ? 'Loading media' : `Load ${filename}`} disabled={loading} onClick={() => void prepareMedia()}>
+        <Download size={14} />{loading ? 'Loading media…' : isImage ? `Preview ${filename}` : 'Load video'}
         {message.mediaSize > 0 && <span>{formatBytes(message.mediaSize)}</span>}
       </button>}
       {error && <span className="media-error" role="status">{error}</span>}
@@ -5764,40 +6038,16 @@ function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, 
         <button className="media-preview-button" type="button" aria-label={`Open image ${filename}`} title={`Open image ${filename}`} onClick={() => void openImage()}>
           <img className="media-preview" src={source} alt={filename} loading="lazy" onError={() => setError('This image could not be loaded.')} />
         </button>
-        <div className="media-toolbar"><span>{filename}</span><a className="media-download" href={source} download={filename} aria-label={`Download ${filename}`}><Download size={13} />Download</a></div>
-      </>}
-      {source && isAudio && <>
-        <div className="audio-player-bar">
-          <button className="audio-play-button" type="button" aria-label={audioPlaying ? 'Pause audio' : 'Play audio'} title={audioPlaying ? 'Pause audio' : 'Play audio'} aria-pressed={audioPlaying} onClick={toggleAudioPlayback}>
-            {audioPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
-          </button>
-          <span className="audio-time audio-current-time">{formatAudioTime(audioCurrentTime)}</span>
-          <input className="audio-seek" type="range" min="0" max={Math.max(audioDuration, 1)} step="0.1" value={Math.min(audioCurrentTime, audioDuration)} aria-label={`Seek ${filename}`} aria-valuetext={`${formatAudioTime(audioCurrentTime)} of ${formatAudioTime(audioDuration)}`} disabled={audioDuration <= 0} onChange={(event) => seekAudio(Number(event.currentTarget.value))} />
-          <span className="audio-time audio-duration">{formatAudioTime(audioDuration)}</span>
-        </div>
-        <audio
-          ref={audioPlayerRef}
-          className="audio-playback"
-          preload="metadata"
-          src={source}
-          aria-hidden="true"
-          tabIndex={-1}
-          autoPlay={autoPlayNext}
-          onLoadedMetadata={(event) => setAudioDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
-          onTimeUpdate={(event) => setAudioCurrentTime(event.currentTarget.currentTime)}
-          onPlay={() => setAudioPlaying(true)}
-          onPause={() => setAudioPlaying(false)}
-          onEnded={() => { setAudioPlaying(false); onAudioEnded?.() }}
-          onError={() => setError('This audio file could not be played.')}
-        />
+        <div className="media-toolbar"><button className="media-download" type="button" aria-label={`Download ${filename}`} onClick={() => void downloadFile()}><Download size={13} />Download</button>{savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}</div>
       </>}
       {source && isVideo && <>
         <video className="media-player" controls preload="metadata" src={source} aria-label={filename} onError={() => setError('This video could not be played.')} />
-        <a className="media-download" href={source} download={filename}><Download size={13} />Download {filename}</a>
+        <button className="media-download" type="button" onClick={() => void downloadFile()}><Download size={13} />Download {filename}</button>
+        {savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}
       </>}
       {!isImage && !isAudio && !isVideo && <div className="file-card">
         <span className="file-card-icon"><FileText size={17} /></span>
-        <span className="file-card-copy"><strong title={filename}>{filename}</strong><small>{fileType}{message.mediaSize > 0 && ` · ${formatBytes(message.mediaSize)}`}</small>{downloadStatus && <small className="media-download-status" title={downloadStatus} role="status">{downloadStatus}</small>}</span>
+        <span className="file-card-copy"><strong title={filename}>{filename}</strong><small>{fileType}{message.mediaSize > 0 && ` · ${formatBytes(message.mediaSize)}`}</small>{savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}</span>
         <button className="icon-button" type="button" title={loading ? `Saving ${filename}` : `Download ${filename}`} aria-label={loading ? `Saving ${filename}` : `Download ${filename}`} disabled={loading} onClick={() => void downloadFile()}>{loading ? <span className="loading-mark" /> : <Download size={15} />}</button>
       </div>}
       {viewerOpen && source && createPortal(
@@ -5809,11 +6059,12 @@ function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, 
                 <button className="icon-button" type="button" title="Zoom out" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => setZoom((current) => Math.max(1, current / 1.25))}><ZoomOut size={15} /></button>
                 <button className="icon-button" type="button" title="Zoom in" aria-label="Zoom in" disabled={zoom >= 4} onClick={() => setZoom((current) => Math.min(4, current * 1.25))}><ZoomIn size={15} /></button>
                 <button className="icon-button" type="button" title="Copy image" aria-label="Copy image" onClick={() => void copyImage()}><Copy size={14} /></button>
-                <a className="media-download" href={source} download={filename}><Download size={14} />Download</a>
+                <button className="media-download" type="button" onClick={() => void downloadFile()}><Download size={14} />Download</button>
                 <button className="icon-button" type="button" aria-label="Close image preview" title="Close image preview" onClick={() => setViewerOpen(false)}><X size={15} /></button>
               </div>
             </header>
             {copyFeedback && <span className="media-viewer-feedback" role="status">{copyFeedback}</span>}
+            {savedPath && <span className="media-viewer-feedback" role="status">{renderSavedFile()}</span>}
             <div className="media-viewer-image-wrap">
               <img className="media-viewer-image" src={source} alt={filename} style={{ maxWidth: zoom === 1 ? '100%' : 'none', maxHeight: zoom === 1 ? 'calc(100vh - 100px)' : 'none', transform: `scale(${zoom})` }} />
             </div>
@@ -5825,14 +6076,17 @@ function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, 
   )
 }
 
-const RoomButton = memo(function RoomButton({ room, index, active, needsReply, multiSelected, lastMessageByMe, use24Hour, showNetwork, showUnreadCounts, actionsRef }: { room: Room; index: number; active: boolean; needsReply: boolean; multiSelected: boolean; lastMessageByMe: boolean; use24Hour: boolean; showNetwork: boolean; showUnreadCounts: boolean; actionsRef: { current: RoomButtonActions } }) {
+const LOCAL_AI_ROW_ICONS: Record<LocalAIChatIcon, typeof MessageSquare> = { agent: Bot, chat: MessageSquare, summary: FileText }
+
+const RoomButton = memo(function RoomButton({ room, index, active, needsReply, multiSelected, lastMessageByMe, use24Hour, showNetwork, showUnreadCounts, aiIcon, actionsRef }: { room: Room; index: number; active: boolean; needsReply: boolean; multiSelected: boolean; lastMessageByMe: boolean; use24Hour: boolean; showNetwork: boolean; showUnreadCounts: boolean; aiIcon?: LocalAIChatIcon; actionsRef: { current: RoomButtonActions } }) {
+  const RowIcon = LOCAL_AI_ROW_ICONS[aiIcon ?? 'chat']
   const hasUnread = room.unread > 0 || room.markedUnread
   // Rooms without a message time show their sorting time, which the sidebar is already ordered by.
   const activityAt = roomActivityAt(room)
   return (
     <button data-room-index={index} className={`room-button ${active ? 'is-active' : ''} ${multiSelected ? 'is-multiselected' : ''} ${room.muted ? 'is-muted' : ''} ${hasUnread ? 'has-unread' : ''}`} onClick={(event) => actionsRef.current.onSelect(room, index, event)} onKeyDown={(event) => actionsRef.current.onKeyDown(room, index, event)} onContextMenu={(event) => actionsRef.current.onContextMenu(room, event)} aria-current={active ? 'page' : undefined} title={room.name || room.id}>
       {isLocalAIRoomID(room.id)
-        ? <span className="room-avatar room-avatar-ai" aria-hidden="true"><Sparkles size={16} /></span>
+        ? <span className="room-avatar room-avatar-ai" aria-hidden="true"><RowIcon size={16} /></span>
         : <Avatar uri={room.avatar} label={room.name || room.id} className="room-avatar" style={avatarStyle(room.name || room.id)} deferLoad />}
       <span className="room-copy">
         <span className="room-name">{room.favorite && <Star size={10} fill="currentColor" aria-label="Favorite" />}<span className="room-name-text">{room.name || room.id}</span>{room.muted && <span className="room-muted-mark" title="Muted">· muted</span>}{showNetwork && room.bridge && <span className="room-network" style={{ '--network-hue': networkHue(room.bridge) } as React.CSSProperties}>{room.bridge}</span>}</span>
@@ -6137,52 +6391,53 @@ function AboutPinger() {
   )
 }
 
-function TutorAnalysisDetails({ analysis, originalText }: { analysis: TutorAnalysis; originalText: string }) {
-  const targetCode = analysis.target_language || TUTOR_DEFAULT_LANGUAGE
-  const explanationCode = analysis.explanation_language || TUTOR_DEFAULT_EXPLANATION_LANGUAGE
-  const translationCode = analysis.detected_language === targetCode ? explanationCode : targetCode
+function LanguageTutorAnalysisDetails({ analysis, originalText }: { analysis: TutorAnalysis; originalText: string }) {
+  const detectedCode = analysis.detected_language
+  const learningCode = analysis.target_language
+  const explanationCode = analysis.explanation_language
+  const morphemes = analysis.morpheme_breakdown ?? []
   return <>
-    <section className="turkish-tutor-section">
-      <span className="eyebrow">ORIGINAL · {tutorLanguageName(analysis.detected_language).toUpperCase()}</span>
-      <p>{originalText}</p>
+    <section className="language-tutor-section">
+      <span className="eyebrow">ORIGINAL · {languageName(detectedCode).toUpperCase()}</span>
+      <p lang={detectedCode}>{originalText}</p>
     </section>
-    <section className="turkish-tutor-section">
-      <span className="eyebrow">CORRECTED {tutorLanguageName(targetCode).toUpperCase()}</span>
-      <p lang={targetCode}>{analysis.corrected_text}</p>
-      {analysis.has_grammar_errors && analysis.error_explanation && <small className="turkish-tutor-error-note">{analysis.error_explanation}</small>}
+    {analysis.corrected_text && <section className="language-tutor-section">
+      <span className="eyebrow">CORRECTED · {languageName(learningCode).toUpperCase()}</span>
+      <p lang={learningCode}>{analysis.corrected_text}</p>
+      {analysis.has_grammar_errors && analysis.error_explanation && <small className="language-tutor-error-note">{analysis.error_explanation}</small>}
+    </section>}
+    <section className="language-tutor-section">
+      <span className="eyebrow">TRANSLATION · {languageName(explanationCode).toUpperCase()}</span>
+      <p lang={explanationCode}>{analysis.translation}</p>
     </section>
-    <section className="turkish-tutor-section">
-      <span className="eyebrow">TRANSLATION · {tutorLanguageName(translationCode).toUpperCase()}</span>
-      <p lang={translationCode}>{analysis.translation}</p>
-    </section>
-    <section className="turkish-tutor-section">
-      <span className="eyebrow">WORD-BY-WORD MORPHEMES</span>
-      <ol className="turkish-tutor-morphemes">
-        {(analysis.morpheme_breakdown ?? []).map((item, index) => <li key={`${item.word}-${index}`}>
-          <strong lang={targetCode}>{item.word}</strong>
+    {morphemes.length > 0 && <section className="language-tutor-section">
+      <span className="eyebrow">WORD-BY-WORD</span>
+      <ol className="language-tutor-morphemes">
+        {morphemes.map((item, index) => <li key={`${item.word}-${index}`}>
+          <strong lang={learningCode}>{item.word}</strong>
           <span>{item.breakdown}</span>
           <small>{item.meaning}</small>
         </li>)}
       </ol>
-    </section>
-    <section className="turkish-tutor-section turkish-tutor-rule">
+    </section>}
+    {analysis.grammar_rule && <section className="language-tutor-section language-tutor-rule">
       <span className="eyebrow">GRAMMAR RULE</span>
       <p>{analysis.grammar_rule}</p>
-    </section>
+    </section>}
   </>
 }
 
-function LocalAISettings({ endpoint, model, transcriptionModel, translateLanguage, onSave }: {
+function LocalAISettings({ endpoint, model, transcriptionModel, thinkingLevel, onSave }: {
   endpoint: string
   model: string
   transcriptionModel: string
-  translateLanguage: string
+  thinkingLevel: string
   onSave: (key: string, value: string) => Promise<boolean>
 }) {
   const [endpointDraft, setEndpointDraft] = useState(endpoint)
   const [modelDraft, setModelDraft] = useState(model)
   const [transcriptionModelDraft, setTranscriptionModelDraft] = useState(transcriptionModel)
-  const [languageDraft, setLanguageDraft] = useState(translateLanguage)
+  const [thinkingLevelDraft, setThinkingLevelDraft] = useState(thinkingLevel)
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
   const endpointUnsaved = endpointDraft.trim() !== endpoint
@@ -6193,8 +6448,8 @@ function LocalAISettings({ endpoint, model, transcriptionModel, translateLanguag
     setStatus('')
     let saved = await onSave('ai.endpoint', endpointDraft.trim())
     if (saved) saved = await onSave('ai.model', modelDraft.trim())
+    if (saved) saved = await onSave('ai.thinking_level', thinkingLevelDraft)
     if (saved) saved = await onSave('ai.transcription_model', transcriptionModelDraft.trim())
-    if (saved) saved = await onSave('ai.translate_language', languageDraft.trim())
     setStatus(saved ? 'AI settings saved.' : 'Not saved. The endpoint must be an http or https URL.')
     setBusy(false)
   }
@@ -6216,10 +6471,16 @@ function LocalAISettings({ endpoint, model, transcriptionModel, translateLanguag
     <form className="ai-settings-form" onSubmit={(event) => void saveSettings(event)}>
       <h4>OpenAI-compatible AI</h4>
       <p className="settings-note">Configure an HTTP or HTTPS endpoint, including a llama-server you run yourself. Audio transcription requires support for <code>/v1/audio/transcriptions</code>; audio is uploaded only when you request a transcript. Requests and uploads go to this endpoint, which may be remote. Results are suggestions and no Matrix message is sent automatically.</p>
-      <label><span>Endpoint</span><input type="url" value={endpointDraft} placeholder="http://localhost:8080" onChange={(event) => setEndpointDraft(event.target.value)} /></label>
-      <label><span>Model name (optional)</span><input type="text" value={modelDraft} placeholder="Uses the loaded model" onChange={(event) => setModelDraft(event.target.value)} /></label>
-      <label><span>Transcription model (optional)</span><input type="text" value={transcriptionModelDraft} placeholder="Uses the model above" onChange={(event) => setTranscriptionModelDraft(event.target.value)} /></label>
-      <label><span>Translate into</span><input type="text" value={languageDraft} placeholder="English" maxLength={40} onChange={(event) => setLanguageDraft(event.target.value)} /></label>
+      <label><span>Endpoint</span><input type="url" value={endpointDraft} placeholder="http://localhost:8080" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setEndpointDraft(event.target.value)} /></label>
+      <label><span>Model name (optional)</span><input type="text" value={modelDraft} placeholder="Uses the loaded model" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setModelDraft(event.target.value)} /></label>
+      <label><span>Thinking level</span><select aria-label="Model thinking level" value={thinkingLevelDraft} onChange={(event) => setThinkingLevelDraft(event.target.value)}>
+        <option value="none">None</option>
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+      </select></label>
+      <p className="settings-note">Gemma 4 12B supports thinking on or off; Low, Medium, and High all enable its model-default thinking. Other chat templates may honor the selected level. Thinking uses the response token budget.</p>
+      <label><span>Transcription model (optional)</span><input type="text" value={transcriptionModelDraft} placeholder="Uses the model above" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setTranscriptionModelDraft(event.target.value)} /></label>
       <div className="ai-settings-actions">
         <button className="settings-command" type="submit" disabled={busy}>Save</button>
         <button
@@ -6229,6 +6490,81 @@ function LocalAISettings({ endpoint, model, transcriptionModel, translateLanguag
           title={endpointUnsaved ? 'Save the endpoint before testing' : undefined}
           onClick={() => void testEndpoint()}
         >Test endpoint</button>
+      </div>
+      {status && <p className="settings-note" role="status">{status}</p>}
+    </form>
+  )
+}
+
+const imageIdleMinuteOptions = ['1', '3', '5', '10', '30']
+const imageSizeOptions = ['512x512', '512x768', '768x512', '768x768', '768x1024', '1024x768', '1024x1024']
+// An empty value means the engine's own default, which is what Pinger sends when the preference is unset.
+const imageStepOptions = ['', '4', '8', '12', '20', '30', '40']
+const imageGuidanceOptions = ['', '1', '3', '5', '7', '9']
+const imageSamplerOptions = ['', 'euler', 'euler_a', 'heun', 'dpm2', 'dpm++2m', 'lcm']
+
+function ImageGenerationSettings({ binaryPath, modelPath, idleMinutes, size, steps, guidanceScale, sampler, negativePrompt, onSave }: {
+  binaryPath: string
+  modelPath: string
+  idleMinutes: string
+  size: string
+  steps: string
+  guidanceScale: string
+  sampler: string
+  negativePrompt: string
+  onSave: (key: string, value: string) => Promise<boolean>
+}) {
+  const [binaryDraft, setBinaryDraft] = useState(binaryPath)
+  const [modelDraft, setModelDraft] = useState(modelPath)
+  const [idleDraft, setIdleDraft] = useState(idleMinutes || '3')
+  const [sizeDraft, setSizeDraft] = useState(size || '512x512')
+  const [stepsDraft, setStepsDraft] = useState(steps)
+  const [guidanceDraft, setGuidanceDraft] = useState(guidanceScale)
+  const [samplerDraft, setSamplerDraft] = useState(sampler)
+  const [negativeDraft, setNegativeDraft] = useState(negativePrompt)
+  const [status, setStatus] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function saveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setBusy(true)
+    setStatus('')
+    let saved = await onSave('ai.image.binary_path', binaryDraft.trim())
+    if (saved) saved = await onSave('ai.image.model_path', modelDraft.trim())
+    if (saved) saved = await onSave('ai.image.idle_minutes', idleDraft)
+    if (saved) saved = await onSave('ai.image.size', sizeDraft)
+    if (saved) saved = await onSave('ai.image.steps', stepsDraft)
+    if (saved) saved = await onSave('ai.image.cfg_scale', guidanceDraft)
+    if (saved) saved = await onSave('ai.image.sampler', samplerDraft)
+    if (saved) saved = await onSave('ai.image.negative_prompt', negativeDraft.trim())
+    setStatus(saved ? 'Image settings saved.' : 'Not saved. Check the values; paths must be absolute.')
+    setBusy(false)
+  }
+
+  return (
+    <form className="ai-settings-form" aria-label="Image generation settings" onSubmit={(event) => void saveSettings(event)}>
+      <h4>Image generation</h4>
+      <p className="settings-note">Generate images in the local AI chat with a stable-diffusion.cpp <code>sd-server</code> that you install yourself, along with its model checkpoint. Pinger starts the engine on 127.0.0.1 when you press Generate image, stops it after the idle timeout, and sends prompts only to that local process.</p>
+      <label><span>Image engine binary</span><input type="text" value={binaryDraft} placeholder="/path/to/sd-server" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setBinaryDraft(event.target.value)} /></label>
+      <label><span>Image model checkpoint</span><input type="text" value={modelDraft} placeholder="/path/to/model.safetensors" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setModelDraft(event.target.value)} /></label>
+      <label><span>Stop after idle</span><select aria-label="Image engine idle timeout" value={idleDraft} onChange={(event) => setIdleDraft(event.target.value)}>
+        {imageIdleMinuteOptions.map((minutes) => <option key={minutes} value={minutes}>{minutes === '1' ? '1 minute' : `${minutes} minutes`}</option>)}
+      </select></label>
+      <label><span>Image size</span><select aria-label="Image size" value={sizeDraft} onChange={(event) => setSizeDraft(event.target.value)}>
+        {imageSizeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select></label>
+      <label><span>Sampling steps</span><select aria-label="Image steps" value={stepsDraft} onChange={(event) => setStepsDraft(event.target.value)}>
+        {imageStepOptions.map((option) => <option key={option || 'default'} value={option}>{option === '' ? 'Default (20)' : `${option} steps`}</option>)}
+      </select></label>
+      <label><span>Guidance scale</span><select aria-label="Image guidance scale" value={guidanceDraft} onChange={(event) => setGuidanceDraft(event.target.value)}>
+        {imageGuidanceOptions.map((option) => <option key={option || 'default'} value={option}>{option === '' ? 'Default' : option}</option>)}
+      </select></label>
+      <label><span>Sampler</span><select aria-label="Image sampler" value={samplerDraft} onChange={(event) => setSamplerDraft(event.target.value)}>
+        {imageSamplerOptions.map((option) => <option key={option || 'default'} value={option}>{option === '' ? 'Model default' : option}</option>)}
+      </select></label>
+      <label><span>Default negative prompt</span><textarea rows={2} maxLength={1000} value={negativeDraft} placeholder="Things to avoid in every image" spellCheck={false} onChange={(event) => setNegativeDraft(event.target.value)} /></label>
+      <div className="ai-settings-actions">
+        <button className="settings-command" type="submit" disabled={busy}>Save image settings</button>
       </div>
       {status && <p className="settings-note" role="status">{status}</p>}
     </form>
@@ -6274,8 +6610,8 @@ function GhostwriterSettings({ enabled, provider, endpoint, model, onSave }: {
         <option value="ollama">Ollama</option>
         <option value="openai-compatible">llama.cpp / OpenAI-compatible</option>
       </select></label>
-      <label><span>Local endpoint</span><input type="url" value={endpointDraft} placeholder={ghostwriterDefaultEndpoints[providerDraft]} onChange={(event) => setEndpointDraft(event.target.value)} /></label>
-      <label><span>Model name</span><input type="text" value={modelDraft} placeholder={providerDraft === 'ollama' ? 'qwen2.5:3b' : 'Uses the loaded model'} onChange={(event) => setModelDraft(event.target.value)} /></label>
+      <label><span>Local endpoint</span><input type="url" value={endpointDraft} placeholder={ghostwriterDefaultEndpoints[providerDraft]} spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setEndpointDraft(event.target.value)} /></label>
+      <label><span>Model name</span><input type="text" value={modelDraft} placeholder={providerDraft === 'ollama' ? 'qwen2.5:3b' : 'Uses the loaded model'} spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setModelDraft(event.target.value)} /></label>
       <div className="ai-settings-actions"><button className="settings-command" type="submit" disabled={saving || !isLoopbackEndpoint(endpointDraft)}>{saving ? 'Saving…' : 'Save Ghostwriter settings'}</button></div>
       {status && <p className="settings-note" role="status">{status}</p>}
     </form>
@@ -6425,6 +6761,7 @@ function SettingsDialog({
     ['Ctrl / ⌘ + Shift + A', 'Show all rooms'],
     ['Ctrl / ⌘ + Shift + U', 'Show needs-reply rooms'],
     ['Ctrl / ⌘ + Shift + M', 'Start a private model chat'],
+    ['Ctrl / ⌘ + Shift + G', 'Add or remove private chat from All rooms'],
     ['Ctrl / ⌘ + Shift + L', 'Jump to latest messages'],
     ['↑ / ↓ / Home / End', 'Navigate the room list'],
     ['Shift + F10', 'Open room actions'],
@@ -6852,7 +7189,7 @@ function SettingsDialog({
                   </select>
                 </label>
                 <label className="setting-row"><span><strong>Custom quick reactions</strong><small>Up to 6 emoji, separated by spaces.</small></span>
-                  <input type="text" aria-label="Custom quick reactions" defaultValue={preferenceString(preferences, 'reactions.custom_emojis', '')} onBlur={(event) => onPreferenceChange('reactions.custom_emojis', event.target.value.trim())} />
+                  <input type="text" aria-label="Custom quick reactions" spellCheck={false} autoCorrect="off" autoCapitalize="off" defaultValue={preferenceString(preferences, 'reactions.custom_emojis', '')} onBlur={(event) => onPreferenceChange('reactions.custom_emojis', event.target.value.trim())} />
                 </label>
                 <label className="setting-row"><span><strong>After changing a room's read state</strong><small>Choose where to go after marking a room read or unread.</small></span>
                   <select aria-label="After changing a room's read state" value={preferenceString(preferences, 'inbox.after_read', 'stay')} onChange={(event) => onPreferenceChange('inbox.after_read', event.target.value)}>
@@ -6891,7 +7228,7 @@ function SettingsDialog({
                 </label>
                 {scheduleReminderDelayError && <p className="form-error" role="alert">{scheduleReminderDelayError}</p>}
                 <label className="setting-row"><span><strong>Schedule time suggestions</strong><small>Enter 1–6 comma-separated delays in minutes.</small></span>
-                  <input className="schedule-suggestions-input" type="text" inputMode="numeric" value={scheduleSuggestionsDraft} aria-label="Schedule time suggestions" aria-invalid={Boolean(scheduleSuggestionsError)} onChange={(event) => { setScheduleSuggestionsDraft(event.target.value); setScheduleSuggestionsError('') }} onBlur={() => {
+                  <input className="schedule-suggestions-input" type="text" inputMode="numeric" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={scheduleSuggestionsDraft} aria-label="Schedule time suggestions" aria-invalid={Boolean(scheduleSuggestionsError)} onChange={(event) => { setScheduleSuggestionsDraft(event.target.value); setScheduleSuggestionsError('') }} onBlur={() => {
                     const minutes = parseTimeSuggestionMinutes(scheduleSuggestionsDraft)
                     if (minutes.length === 0) {
                       setScheduleSuggestionsError('Use 1–6 unique values from 1 to 10080.')
@@ -7030,7 +7367,6 @@ function SettingsDialog({
               <div className="settings-section">
                 <h3>Keyboard</h3>
                 <PreferenceToggle label="Use Ctrl + Enter to send" checked={preferenceBoolean(preferences, 'composer.ctrl_enter')} onChange={(value) => onPreferenceChange('composer.ctrl_enter', value)} />
-                <PreferenceToggle label="Spellcheck messages" checked={preferenceBoolean(preferences, 'composer.spellcheck', true)} onChange={(value) => onPreferenceChange('composer.spellcheck', value)} />
                 <PreferenceToggle label="Show formatting toolbar" checked={preferenceBoolean(preferences, 'composer.formatting_toolbar')} onChange={(value) => onPreferenceChange('composer.formatting_toolbar', value)} />
                 <PreferenceToggle label="Suggest emoji for :shortcodes:" checked={preferenceBoolean(preferences, 'emoji.autocomplete')} onChange={(value) => onPreferenceChange('emoji.autocomplete', value)} />
                 <PreferenceToggle label="Replace emoticons as you type" checked={preferenceBoolean(preferences, 'emoji.replace_emoticons', true)} onChange={(value) => onPreferenceChange('emoji.replace_emoticons', value)} />
@@ -7042,9 +7378,9 @@ function SettingsDialog({
                   {customEmoticonDraft.length === 0 && <p className="settings-note">No custom replacements.</p>}
                   {customEmoticonDraft.map(([symbol, emoji], index) => (
                     <div className="emoticon-replacement-row" key={index}>
-                      <label><span>Symbol</span><input type="text" maxLength={16} value={symbol} aria-label={`Symbol for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 0, event.target.value)} /></label>
+                      <label><span>Symbol</span><input type="text" maxLength={16} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={symbol} aria-label={`Symbol for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 0, event.target.value)} /></label>
                       <span className="emoticon-replacement-arrow" aria-hidden="true">→</span>
-                      <label><span>Emoji</span><input type="text" maxLength={16} value={emoji} aria-label={`Emoji for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 1, event.target.value)} /></label>
+                      <label><span>Emoji</span><input type="text" maxLength={16} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={emoji} aria-label={`Emoji for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 1, event.target.value)} /></label>
                       <button type="button" className="icon-button" aria-label={`Remove replacement ${index + 1}`} title="Remove replacement" onClick={() => { setCustomEmoticonDraft((current) => current.filter((_, pairIndex) => pairIndex !== index)); setCustomEmoticonStatus('') }}><Trash2 size={14} /></button>
                     </div>
                   ))}
@@ -7060,7 +7396,7 @@ function SettingsDialog({
                 <PreferenceToggle label="Enable single-key shortcuts (N, U, A, F, R, J, K and the answered key)" checked={preferenceBoolean(preferences, 'shortcuts.single_keys', true)} onChange={(value) => onPreferenceChange('shortcuts.single_keys', value)} />
                 {!preferenceBoolean(preferences, 'shortcuts.single_keys', true) && <p className="settings-note" role="status">Single-key shortcuts are off. Use the message and room menus instead. Ctrl / ⌘ shortcuts still work.</p>}
                 <label className="setting-row"><span><strong>Mark answered shortcut</strong><small>Use one letter to mark the selected room answered.</small></span>
-                  <input className="shortcut-input" type="text" maxLength={1} value={preferenceString(preferences, 'shortcuts.mark_answered', 'E')} aria-label="Mark answered shortcut" onChange={(event) => { const value = event.target.value.toUpperCase(); if (value) onPreferenceChange('shortcuts.mark_answered', value) }} />
+                  <input className="shortcut-input" type="text" maxLength={1} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={preferenceString(preferences, 'shortcuts.mark_answered', 'E')} aria-label="Mark answered shortcut" onChange={(event) => { const value = event.target.value.toUpperCase(); if (value) onPreferenceChange('shortcuts.mark_answered', value) }} />
                 </label>
                 <button className="settings-command" type="button" onClick={() => setSnippetManagerOpen(true)}><FileText size={15} />Manage text snippets</button>
                 <p className="settings-note">Expand personal shortcuts while composing. Snippets are stored on this device.</p>
@@ -7188,11 +7524,22 @@ function SettingsDialog({
                   endpoint={preferenceString(preferences, 'ai.endpoint', '')}
                   model={preferenceString(preferences, 'ai.model', '')}
                   transcriptionModel={preferenceString(preferences, 'ai.transcription_model', '')}
-                  translateLanguage={preferenceString(preferences, 'ai.translate_language', 'English')}
+                  thinkingLevel={preferenceString(preferences, 'ai.thinking_level', 'none')}
+                  onSave={onPreferenceChange}
+                />
+                <ImageGenerationSettings
+                  binaryPath={preferenceString(preferences, 'ai.image.binary_path', '')}
+                  modelPath={preferenceString(preferences, 'ai.image.model_path', '')}
+                  idleMinutes={preferenceString(preferences, 'ai.image.idle_minutes', '3')}
+                  size={preferenceString(preferences, 'ai.image.size', '512x512')}
+                  steps={preferenceString(preferences, 'ai.image.steps', '')}
+                  guidanceScale={preferenceString(preferences, 'ai.image.cfg_scale', '')}
+                  sampler={preferenceString(preferences, 'ai.image.sampler', '')}
+                  negativePrompt={preferenceString(preferences, 'ai.image.negative_prompt', '')}
                   onSave={onPreferenceChange}
                 />
                 <LocalAIAgentSettings agents={localAIAgents} onSave={(collection) => onPreferenceChange('ai.local_agents', serializeChatAgents(collection))} />
-                <TutorLanguageSettings languages={resolveTutorLanguages(preferences)} onSave={onPreferenceChange} />
+                <LanguageSettings roles={resolveLanguageRoles(preferences)} onSave={onPreferenceChange} />
                 <GhostwriterSettings
                   enabled={preferenceBoolean(preferences, 'ghostwriter.enabled')}
                   provider={ghostwriterProvider}
@@ -7207,11 +7554,11 @@ function SettingsDialog({
               <div className="settings-section">
                 <h3>Integrations</h3>
                 <p className="settings-note">Chat networks are detected from the active account's chats, using room names and DM users. This is a best-effort view. Connecting a network requires a bridge set up on your homeserver; Pinger cannot create bridge logins.</p>
-                <section className="ai-settings-form relationship-health-settings">
-                  <h4>Keep in Touch</h4>
-                  <p className="settings-note">Uses recent direct-chat messages for tracked contacts with your configured local Ghostwriter model. Requests are restricted to localhost. Suggestions stay as drafts; no message is sent automatically.</p>
+                <section className="ai-settings-form contact-dossier-settings">
+                  <h4>Contact dossier analysis</h4>
+                  <p className="settings-note">Uses recent direct-chat messages with your configured local Ghostwriter model to summarize conversations and track key facts. Requests are restricted to localhost, and results stay local.</p>
                   <PreferenceToggle
-                    label="Enable relationship health and Keep in Touch"
+                    label="Enable contact dossier analysis"
                     checked={preferenceBoolean(preferences, 'relationship_health.enabled')}
                     onChange={(enabled) => void onPreferenceChange('relationship_health.enabled', enabled)}
                   />

@@ -139,6 +139,11 @@ type Message struct {
 	MediaType               string
 	MediaThumbnailURI       string
 	MediaThumbnailEncrypted *event.EncryptedFileInfo
+
+	// MediaName is the filename of the inline media when the event provides one.
+	MediaName string
+	// GalleryMedia holds the album items after the inline one, so exports keep every file.
+	GalleryMedia []MediaAttachment
 }
 
 type Member struct {
@@ -244,6 +249,7 @@ type Client struct {
 	eventMu         sync.Mutex
 	sendMu          sync.Mutex
 	startMu         sync.Mutex
+	directChatMu    sync.Mutex
 	slidingSyncMu   sync.RWMutex
 	slidingSync     *SlidingSyncManager
 	started         bool
@@ -1355,17 +1361,17 @@ func (c *Client) EditMessage(ctx context.Context, roomID, text, editID string) e
 }
 
 func (c *Client) SendAttachment(ctx context.Context, roomID, filename string, data []byte) error {
-	return c.sendAttachment(ctx, roomID, filename, data, 0)
+	return c.sendAttachment(ctx, roomID, filename, data, 0, 0)
 }
 
 func (c *Client) SendVoiceNote(ctx context.Context, roomID, filename string, data []byte, durationMilliseconds int64) error {
 	if durationMilliseconds <= 0 || durationMilliseconds > int64((4*time.Minute)/time.Millisecond) {
 		return errors.New("voice note duration must be between 1 ms and 4 minutes")
 	}
-	return c.sendAttachment(ctx, roomID, filename, data, durationMilliseconds)
+	return c.sendAttachment(ctx, roomID, filename, data, durationMilliseconds, 0)
 }
 
-func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, data []byte, voiceDurationMilliseconds int64) error {
+func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, data []byte, voiceDurationMilliseconds, videoDurationMilliseconds int64) error {
 	if len(data) == 0 {
 		return errors.New("attachment is empty")
 	}
@@ -1380,6 +1386,13 @@ func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, da
 	mimeType := http.DetectContentType(data)
 	if detected, _, err := mime.ParseMediaType(mimeType); err == nil {
 		mimeType = detected
+	}
+	if videoDurationMilliseconds > 0 {
+		videoMIME, err := videoMessageMIMEType(mimeType, filename)
+		if err != nil {
+			return err
+		}
+		mimeType = videoMIME
 	}
 	msgType := event.MsgFile
 	switch {
@@ -1419,6 +1432,12 @@ func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, da
 		content.Info.Duration = int(voiceDurationMilliseconds)
 		content.MSC1767Audio = &event.MSC1767Audio{Duration: int(voiceDurationMilliseconds), Waveform: []int{}}
 		content.MSC3245Voice = &event.MSC3245Voice{}
+	}
+	if videoDurationMilliseconds > 0 {
+		if msgType != event.MsgVideo {
+			return errors.New("video message data must have an MP4 or WebM MIME type")
+		}
+		content.Info.Duration = int(videoDurationMilliseconds)
 	}
 	uploadData := data
 	var encryptedFile *attachment.EncryptedFile
@@ -1585,10 +1604,11 @@ func (c *Client) MarkRead(ctx context.Context, roomID, eventID string) error {
 		return err
 	}
 	defer finish()
+	eventID = c.readReceiptTargetEventID(ctx, roomID, eventID)
 	c.mu.RLock()
 	markedUnread := c.rooms[roomID].MarkedUnread
 	c.mu.RUnlock()
-	if err = c.engine.MarkRead(ctx, id.RoomID(roomID), id.EventID(eventID), event.ReceiptTypeRead); err != nil {
+	if err = c.engine.MarkRead(ctx, id.RoomID(roomID), id.EventID(eventID), event.ReceiptTypeRead); err != nil && !isMissingMatrixReadTargetError(err) {
 		return fmt.Errorf("mark Matrix room as read: %w", err)
 	}
 	if markedUnread {
@@ -1609,6 +1629,39 @@ func (c *Client) MarkRead(ctx context.Context, roomID, eventID string) error {
 		c.publish(nil, "")
 	}
 	return nil
+}
+
+// readReceiptTargetEventID returns the event a read receipt should point at.
+// The engine counts unread timeline rows that sit after the own receipt's row,
+// while the caller's event ID comes from lastEventID, which only tracks message
+// events. If the newest timeline row is not a message (for example an
+// undecrypted event that still counts as unread), a receipt on the last message
+// leaves that row unread and the badge never clears. Use the newest
+// server-confirmed timeline row instead.
+func (c *Client) readReceiptTargetEventID(ctx context.Context, roomID, fallback string) string {
+	if c.engine == nil || c.engine.DB == nil {
+		return fallback
+	}
+	events, err := c.engine.DB.Timeline.Get(ctx, id.RoomID(roomID), 20, 0)
+	if err != nil {
+		return fallback
+	}
+	return newestReadTargetEventID(events, fallback)
+}
+
+// newestReadTargetEventID picks the first server-confirmed event from a
+// newest-first timeline slice. Local echoes do not have a server event ID yet,
+// so they are skipped.
+func newestReadTargetEventID(newestFirst []*database.Event, fallback string) string {
+	for _, evt := range newestFirst {
+		if evt == nil {
+			continue
+		}
+		if eventID := evt.ID.String(); strings.HasPrefix(eventID, "$") {
+			return eventID
+		}
+	}
+	return fallback
 }
 
 func (c *Client) MarkUnread(ctx context.Context, roomID string) error {
@@ -1770,6 +1823,83 @@ func (c *Client) LeaveRoom(ctx context.Context, roomID string) error {
 	return nil
 }
 
+const directAccountDataType = "m.direct"
+
+// StartDirectChat returns the joined one-to-one room with userID. When none exists it creates an
+// encrypted, invite-only direct chat and records it in m.direct so other clients see it too.
+func (c *Client) StartDirectChat(ctx context.Context, userID string) (string, error) {
+	userID = strings.TrimSpace(userID)
+	matrixUserID := id.UserID(userID)
+	if _, _, err := matrixUserID.ParseAndValidateRelaxed(); err != nil {
+		return "", fmt.Errorf("invalid Matrix user ID %q: %w", userID, err)
+	}
+	if userID == c.Profile().UserID {
+		return "", errors.New("cannot start a direct chat with yourself")
+	}
+	ctx, finish, err := c.beginOperation(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer finish()
+
+	c.directChatMu.Lock()
+	defer c.directChatMu.Unlock()
+	direct, err := c.directChatRooms(ctx)
+	if err != nil {
+		return "", err
+	}
+	if roomID, ok := c.joinedRoomID(direct[userID]); ok {
+		return roomID, nil
+	}
+
+	emptyStateKey := ""
+	resp, err := c.engine.Client.CreateRoom(ctx, &mautrix.ReqCreateRoom{
+		Preset:   "trusted_private_chat",
+		IsDirect: true,
+		Invite:   []id.UserID{matrixUserID},
+		InitialState: []*event.Event{{
+			Type:     event.StateEncryption,
+			StateKey: &emptyStateKey,
+			Content: event.Content{Parsed: &event.EncryptionEventContent{
+				Algorithm: id.AlgorithmMegolmV1,
+			}},
+		}},
+	})
+	if err != nil {
+		return "", fmt.Errorf("create Matrix direct chat: %w", err)
+	}
+	direct[userID] = append(direct[userID], resp.RoomID)
+	if err := c.engine.Client.SetAccountData(ctx, directAccountDataType, direct); err != nil {
+		// The room exists and is usable; only the m.direct bookkeeping failed.
+		log.Printf("record Matrix direct chat %s: %v", resp.RoomID, err)
+	}
+	return resp.RoomID.String(), nil
+}
+
+// directChatRooms reads the m.direct map of user IDs to their direct room IDs.
+func (c *Client) directChatRooms(ctx context.Context) (map[string][]id.RoomID, error) {
+	direct := make(map[string][]id.RoomID)
+	if err := c.engine.Client.GetAccountData(ctx, directAccountDataType, &direct); err != nil && !errors.Is(err, mautrix.MNotFound) {
+		return nil, fmt.Errorf("read Matrix direct chats: %w", err)
+	}
+	if direct == nil {
+		direct = make(map[string][]id.RoomID)
+	}
+	return direct, nil
+}
+
+// joinedRoomID returns the first candidate room that is present in the client's room cache.
+func (c *Client) joinedRoomID(candidates []id.RoomID) (string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, roomID := range candidates {
+		if _, ok := c.rooms[roomID.String()]; ok {
+			return roomID.String(), true
+		}
+	}
+	return "", false
+}
+
 func (c *Client) Logout(ctx context.Context) error {
 	ctx, finish, err := c.beginOperation(ctx)
 	if err != nil {
@@ -1810,6 +1940,10 @@ func (c *Client) DownloadAvatar(ctx context.Context, mxc string) ([]byte, error)
 }
 
 func isMissingMatrixMediaError(err error) bool {
+	return errors.Is(err, mautrix.MNotFound)
+}
+
+func isMissingMatrixReadTargetError(err error) bool {
 	return errors.Is(err, mautrix.MNotFound)
 }
 
@@ -2450,17 +2584,20 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 	mediaEncrypted := content.File
 	mediaInfo := content.Info
 	mediaType := content.MsgType
+	mediaName := content.FileName
+	if mediaName == "" {
+		mediaName = content.Body
+	}
 	if mediaURI == "" && content.File != nil {
 		mediaURI = string(content.File.URL)
 	}
+	var galleryMedia []MediaAttachment
 	if content.MsgType == string(event.MsgBeeperGallery) {
 		// The timeline row has one inline media slot, so display the first image in an album.
+		// Every other album item is kept in galleryMedia so exports include it.
+		inlineSet := false
 		for _, galleryImage := range content.BeeperGalleryImages {
 			if galleryImage == nil {
-				continue
-			}
-			galleryMIME := mediaMIME(galleryImage.Info)
-			if galleryImage.MsgType != event.MsgImage && !strings.HasPrefix(galleryMIME, "image/") {
 				continue
 			}
 			galleryURI := string(galleryImage.URL)
@@ -2470,11 +2607,27 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 			if galleryURI == "" {
 				continue
 			}
+			galleryMIME := mediaMIME(galleryImage.Info)
+			galleryName := galleryImage.FileName
+			if galleryName == "" {
+				galleryName = galleryImage.Body
+			}
+			inlineCandidate := galleryImage.MsgType == event.MsgImage || strings.HasPrefix(galleryMIME, "image/")
+			if inlineSet || !inlineCandidate {
+				galleryMedia = append(galleryMedia, MediaAttachment{
+					URI:       galleryURI,
+					MIME:      galleryMIME,
+					Name:      galleryName,
+					Encrypted: galleryImage.File,
+				})
+				continue
+			}
 			mediaURI = galleryURI
 			mediaEncrypted = galleryImage.File
 			mediaInfo = galleryImage.Info
 			mediaType = string(galleryImage.MsgType)
-			break
+			mediaName = galleryName
+			inlineSet = true
 		}
 	}
 	mediaMIMEType := mediaMIME(mediaInfo)
@@ -2581,6 +2734,8 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 		MediaType:               mediaType,
 		MediaThumbnailURI:       mediaThumbnailURI(mediaInfo),
 		MediaThumbnailEncrypted: mediaThumbnailEncrypted(mediaInfo),
+		MediaName:               mediaName,
+		GalleryMedia:            galleryMedia,
 	}, true
 }
 

@@ -24,6 +24,7 @@ import (
 
 const (
 	aiCompletionTimeout    = 60 * time.Second
+	aiMaxCompletionTimeout = 10 * time.Minute
 	aiToneGuardTimeout     = 1200 * time.Millisecond
 	aiToneGuardMaxTokens   = 192
 	aiHealthTimeout        = 10 * time.Second
@@ -36,18 +37,28 @@ const (
 // aiFFmpegFallbackPaths covers Homebrew installs when the app is launched outside a shell with Homebrew on PATH.
 var aiFFmpegFallbackPaths = []string{"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"}
 
+// AIImage is one base64-encoded image sent with a chat turn.
+type AIImage struct {
+	MediaType string `json:"mediaType"`
+	Data      string `json:"data"`
+}
+
 // AIMessage is one chat turn sent to the local model.
 type AIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string    `json:"role"`
+	Content string    `json:"content"`
+	Images  []AIImage `json:"images,omitempty"`
 }
 
 type aiChatRequest struct {
-	Model       string      `json:"model,omitempty"`
-	Messages    []AIMessage `json:"messages"`
-	Stream      bool        `json:"stream"`
-	Temperature *float64    `json:"temperature,omitempty"`
-	MaxTokens   int         `json:"max_tokens,omitempty"`
+	Model              string            `json:"model,omitempty"`
+	Messages           []aiOpenAIMessage `json:"messages"`
+	Stream             bool              `json:"stream"`
+	Temperature        *float64          `json:"temperature,omitempty"`
+	MaxTokens          int               `json:"max_tokens,omitempty"`
+	Stop               []string          `json:"stop,omitempty"`
+	ResponseFormat     json.RawMessage   `json:"response_format,omitempty"`
+	ChatTemplateKwargs map[string]any    `json:"chat_template_kwargs,omitempty"`
 }
 
 type aiChatResponse struct {
@@ -82,13 +93,17 @@ func aiChatCompletion(ctx context.Context, client *http.Client, endpoint, model 
 }
 
 func aiChatCompletionWithOptions(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, timeout time.Duration, temperature *float64, maxTokens int) (string, error) {
+	return aiChatCompletionWithThinking(ctx, client, endpoint, model, messages, timeout, temperature, maxTokens, aiThinkingDisabled())
+}
+
+func aiChatCompletionWithThinking(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, timeout time.Duration, temperature *float64, maxTokens int, chatTemplateKwargs map[string]any) (string, error) {
 	if err := validateAIEndpoint(endpoint); err != nil {
 		return "", err
 	}
 	if len(messages) == 0 {
 		return "", errors.New("AI request has no messages")
 	}
-	body, err := json.Marshal(aiChatRequest{Model: model, Messages: messages, Stream: false, Temperature: temperature, MaxTokens: maxTokens})
+	body, err := json.Marshal(aiChatRequest{Model: model, Messages: aiOpenAIMessages(messages), Stream: false, Temperature: temperature, MaxTokens: maxTokens, ChatTemplateKwargs: chatTemplateKwargs})
 	if err != nil {
 		return "", fmt.Errorf("encode AI request: %w", err)
 	}
@@ -342,13 +357,35 @@ func aiConvertAudioToWAV(ctx context.Context, audio []byte) ([]byte, error) {
 	return converted, nil
 }
 
+// aiCompletionTimeoutFor gives large prompts more time. A local model reads the whole prompt before its first token.
+// Each KiB of prompt text adds one second to aiCompletionTimeout, up to aiMaxCompletionTimeout.
+func aiCompletionTimeoutFor(messages []AIMessage) time.Duration {
+	promptBytes := 0
+	for _, message := range messages {
+		promptBytes += len(message.Content)
+		for _, image := range message.Images {
+			promptBytes += len(image.Data)
+		}
+	}
+	extra := time.Duration(promptBytes/1024) * time.Second
+	return min(aiCompletionTimeout+extra, aiMaxCompletionTimeout)
+}
+
 // AIComplete sends chat messages to the configured local endpoint and returns the reply text.
-func (s *AppService) AIComplete(messages []AIMessage) (string, error) {
+func (s *AppService) AIComplete(messages []AIMessage, requestID string, temperature float64, maxTokens int) (string, error) {
 	endpoint, model, err := s.aiEndpointSettings()
 	if err != nil {
 		return "", err
 	}
-	return aiChatCompletion(s.aiContext(), aiHTTPClient, endpoint, model, messages)
+	thinkingLevel := stringPreference(s.preferenceValues(), aiThinkingLevelPreference, aiThinkingLevelDefault)
+	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
+	defer release()
+	return aiChatCompletionWithThinking(ctx, aiHTTPClient, endpoint, model, messages, aiCompletionTimeoutFor(messages), &temperature, maxTokens, aiThinkingOptions(thinkingLevel))
+}
+
+// AICancel stops a running AI request.
+func (s *AppService) AICancel(requestID string) bool {
+	return s.aiRuns.cancel(requestID)
 }
 
 // CheckMessageTone classifies a draft using only a local loopback AI endpoint.

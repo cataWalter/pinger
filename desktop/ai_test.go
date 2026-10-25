@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -47,11 +48,93 @@ func TestPreferenceStoreAcceptsAIEndpointSettings(t *testing.T) {
 	if err := store.Set("ai.model", 3); err == nil {
 		t.Fatal("Set(ai.model) accepted a non-string value")
 	}
-	if err := store.Set("ai.translate_language", "Spanish"); err != nil {
-		t.Fatalf("Set(ai.translate_language) error = %v", err)
+	for _, level := range []string{"none", "low", "medium", "high"} {
+		if err := store.Set("ai.thinking_level", level); err != nil {
+			t.Errorf("Set(ai.thinking_level, %q) error = %v", level, err)
+		}
 	}
-	if err := store.Set("ai.translate_language", strings.Repeat("x", 41)); err == nil {
-		t.Fatal("Set(ai.translate_language) accepted an overlong value")
+	if err := store.Set("ai.thinking_level", "maximum"); err == nil {
+		t.Fatal("Set(ai.thinking_level) accepted an unsupported value")
+	}
+	if err := store.Set("ai.default_language", "es"); err != nil {
+		t.Fatalf("Set(ai.default_language) error = %v", err)
+	}
+	if err := store.Set("ai.known_languages", `["en","es"]`); err != nil {
+		t.Fatalf("Set(ai.known_languages) error = %v", err)
+	}
+	if err := store.Set("ai.known_languages", `["xx"]`); err == nil {
+		t.Fatal("Set(ai.known_languages) accepted an unsupported language")
+	}
+}
+
+func TestAIThinkingOptionsMapLevelsForProviders(t *testing.T) {
+	tests := []struct {
+		level  string
+		openAI map[string]any
+		ollama any
+	}{
+		{level: "none", openAI: map[string]any{"enable_thinking": false}, ollama: false},
+		{level: "low", openAI: map[string]any{"enable_thinking": true, "reasoning_effort": "low"}, ollama: "low"},
+		{level: "medium", openAI: map[string]any{"enable_thinking": true, "reasoning_effort": "medium"}, ollama: "medium"},
+		{level: "high", openAI: map[string]any{"enable_thinking": true, "reasoning_effort": "high"}, ollama: "high"},
+	}
+	for _, test := range tests {
+		options := aiThinkingOptions(test.level)
+		if !reflect.DeepEqual(options, test.openAI) {
+			t.Errorf("aiThinkingOptions(%q) = %#v, want %#v", test.level, options, test.openAI)
+		}
+		if got := aiOllamaThinkingOption(options); got != test.ollama {
+			t.Errorf("aiOllamaThinkingOption(%q) = %#v, want %#v", test.level, got, test.ollama)
+		}
+	}
+}
+
+func TestAIThinkingOptionsEncodeForProviders(t *testing.T) {
+	for _, test := range []struct {
+		provider GhostwriterProvider
+		level    string
+		want     any
+	}{
+		{provider: GhostwriterProviderOpenAICompatible, level: "none", want: false},
+		{provider: GhostwriterProviderOpenAICompatible, level: "high", want: "high"},
+		{provider: GhostwriterProviderOllama, level: "none", want: false},
+		{provider: GhostwriterProviderOllama, level: "high", want: "high"},
+	} {
+		body, _, err := encodeAICompletionRequest(test.provider, "gemma4:12b", []AIMessage{{Role: "user", Content: "test"}}, aiCompletionOptions{
+			Chat:               true,
+			ChatTemplateKwargs: aiThinkingOptions(test.level),
+		}, false)
+		if err != nil {
+			t.Fatalf("encodeAICompletionRequest(%q, %q) error = %v", test.provider, test.level, err)
+		}
+		var request map[string]json.RawMessage
+		if err := json.Unmarshal(body, &request); err != nil {
+			t.Fatalf("decode %q request: %v", test.provider, err)
+		}
+		var got any
+		if test.provider == GhostwriterProviderOllama {
+			if err := json.Unmarshal(request["think"], &got); err != nil {
+				t.Fatalf("decode Ollama think value: %v", err)
+			}
+		} else {
+			var kwargs map[string]any
+			if err := json.Unmarshal(request["chat_template_kwargs"], &kwargs); err != nil {
+				t.Fatalf("decode OpenAI-compatible template kwargs: %v", err)
+			}
+			if kwargs["enable_thinking"] != (test.level != "none") {
+				t.Errorf("%q enable_thinking = %v", test.provider, kwargs["enable_thinking"])
+			}
+			if effort := kwargs["reasoning_effort"]; test.level == "high" && effort != test.want {
+				t.Errorf("%q reasoning_effort = %v, want %v", test.provider, effort, test.want)
+			}
+			if test.level == "none" {
+				continue
+			}
+			continue
+		}
+		if !reflect.DeepEqual(got, test.want) {
+			t.Errorf("%q think value = %#v, want %#v", test.provider, got, test.want)
+		}
 	}
 }
 
@@ -61,9 +144,10 @@ func TestAIChatCompletionSendsMessagesAndReturnsReply(t *testing.T) {
 			t.Errorf("request = %s %s, want POST /v1/chat/completions", r.Method, r.URL.Path)
 		}
 		var body struct {
-			Model    string      `json:"model"`
-			Messages []AIMessage `json:"messages"`
-			Stream   bool        `json:"stream"`
+			Model              string         `json:"model"`
+			Messages           []AIMessage    `json:"messages"`
+			Stream             bool           `json:"stream"`
+			ChatTemplateKwargs map[string]any `json:"chat_template_kwargs"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request: %v", err)
@@ -71,16 +155,34 @@ func TestAIChatCompletionSendsMessagesAndReturnsReply(t *testing.T) {
 		if body.Model != "local.gguf" || body.Stream || len(body.Messages) != 1 || body.Messages[0].Content != "Translate hello" {
 			t.Errorf("unexpected body: %+v", body)
 		}
+		if body.ChatTemplateKwargs["enable_thinking"] != true || body.ChatTemplateKwargs["reasoning_effort"] != "high" {
+			t.Errorf("unexpected thinking settings: %+v", body.ChatTemplateKwargs)
+		}
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"  Hola  "}}]}`)
 	}))
 	defer server.Close()
 
-	reply, err := aiChatCompletion(context.Background(), server.Client(), server.URL+"/", "local.gguf", []AIMessage{{Role: "user", Content: "Translate hello"}})
+	reply, err := aiChatCompletionWithThinking(context.Background(), server.Client(), server.URL+"/", "local.gguf", []AIMessage{{Role: "user", Content: "Translate hello"}}, aiCompletionTimeout, nil, 0, aiThinkingOptions("high"))
 	if err != nil {
 		t.Fatalf("aiChatCompletion() error = %v", err)
 	}
 	if reply != "Hola" {
 		t.Fatalf("reply = %q, want %q", reply, "Hola")
+	}
+}
+
+func TestAICompletionTimeoutGrowsWithPromptSizeUpToCap(t *testing.T) {
+	short := []AIMessage{{Role: "user", Content: "Summarize this"}}
+	if got := aiCompletionTimeoutFor(short); got != aiCompletionTimeout {
+		t.Fatalf("short prompt timeout = %s, want %s", got, aiCompletionTimeout)
+	}
+	large := []AIMessage{{Role: "system", Content: "Summarize"}, {Role: "user", Content: strings.Repeat("x", 64<<10)}}
+	if got := aiCompletionTimeoutFor(large); got != aiCompletionTimeout+64*time.Second {
+		t.Fatalf("64 KiB prompt timeout = %s, want %s", got, aiCompletionTimeout+64*time.Second)
+	}
+	huge := []AIMessage{{Role: "user", Content: strings.Repeat("x", 4<<20)}}
+	if got := aiCompletionTimeoutFor(huge); got != aiMaxCompletionTimeout {
+		t.Fatalf("4 MiB prompt timeout = %s, want cap %s", got, aiMaxCompletionTimeout)
 	}
 }
 

@@ -1179,6 +1179,28 @@ func TestApplySyncUpdatesRoomsAndRemovesLeftRooms(t *testing.T) {
 	}
 }
 
+func TestNewestReadTargetEventIDPrefersNewestServerEvent(t *testing.T) {
+	newestFirst := []*database.Event{
+		nil,
+		{ID: id.EventID("~local-echo")},
+		{ID: id.EventID("$undecrypted-newer")},
+		{ID: id.EventID("$last-message")},
+	}
+	if got := newestReadTargetEventID(newestFirst, "$last-message"); got != "$undecrypted-newer" {
+		t.Fatalf("read target = %q, want newest server event %q", got, "$undecrypted-newer")
+	}
+}
+
+func TestNewestReadTargetEventIDFallsBackWithoutServerEvents(t *testing.T) {
+	if got := newestReadTargetEventID(nil, "$fallback"); got != "$fallback" {
+		t.Fatalf("read target with empty timeline = %q, want fallback", got)
+	}
+	localOnly := []*database.Event{{ID: id.EventID("~local-echo")}}
+	if got := newestReadTargetEventID(localOnly, "$fallback"); got != "$fallback" {
+		t.Fatalf("read target with only local echoes = %q, want fallback", got)
+	}
+}
+
 func TestUnreadMessageCountUsesNotificationFallbackWithoutDoubleCounting(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -1353,6 +1375,15 @@ func TestMissingMatrixMediaErrorIsRecognized(t *testing.T) {
 	}
 	if isMissingMatrixMediaError(fmt.Errorf("media server unavailable")) {
 		t.Fatal("non-404 error was treated as missing media")
+	}
+}
+
+func TestMissingMatrixReadTargetErrorIsRecognized(t *testing.T) {
+	if !isMissingMatrixReadTargetError(fmt.Errorf("send read receipt: %w", mautrix.MNotFound)) {
+		t.Fatal("wrapped M_NOT_FOUND read target error was not recognized")
+	}
+	if isMissingMatrixReadTargetError(fmt.Errorf("Matrix server unavailable")) {
+		t.Fatal("non-404 error was treated as a missing read target")
 	}
 }
 

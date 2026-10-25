@@ -11,7 +11,7 @@ import (
 const (
 	aiFeatureGhostwriter    = "ghostwriter"
 	aiFeatureLocalChat      = "local_chat"
-	aiFeatureTurkishTutor   = "turkish_tutor"
+	aiFeatureLanguageTutor  = "language_tutor"
 	aiFeatureContactDossier = "contact_dossier"
 )
 
@@ -64,12 +64,12 @@ var aiBackendFeatureDefaults = []AIFeatureDefault{
 		Temperature: 0.8,
 	},
 	{
-		ID:          aiFeatureTurkishTutor,
+		ID:          aiFeatureLanguageTutor,
 		Label:       "Language Tutor",
-		Description: "Translation, word-by-word analysis, and grammar notes for the tutor language.",
-		Prompt:      turkishTutorSystemPrompt,
-		Temperature: 0.6,
-		MaxTokens:   turkishTutorMaxTokens,
+		Description: "Translation, word-by-word analysis, and grammar notes for messages you read and drafts you write.",
+		Prompt:      languageTutorSystemPrompt,
+		Temperature: languageTutorTemperature,
+		MaxTokens:   languageTutorMaxTokens,
 	},
 	{
 		ID:          aiFeatureContactDossier,

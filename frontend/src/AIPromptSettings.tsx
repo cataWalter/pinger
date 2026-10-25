@@ -33,7 +33,7 @@ type PromptGroup = {
 // Feature ids listed here appear under their group title; any other feature appears under Other.
 const PROMPT_GROUPS: { title: string, ids: string[] }[] = [
   { title: 'Writing and assistants', ids: ['ask_ai', 'local_chat', 'agent', 'draft_reply', 'ghostwriter', 'rewrite', 'shorten'] },
-  { title: 'Translation and understanding', ids: ['translate', 'chat_translation', 'explain', 'summarize', 'topics', 'conversation_analysis', 'turkish_tutor'] },
+  { title: 'Translation and understanding', ids: ['chat_translation', 'explain', 'summarize', 'topics', 'conversation_analysis', 'language_tutor'] },
   { title: 'Checks and background tasks', ids: ['tone_guard', 'contact_dossier'] },
 ]
 
@@ -128,6 +128,9 @@ function AIPromptCard({ card, tuning, onSave }: {
           <span>Instructions</span>
           <textarea
             rows={5}
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
             maxLength={AI_PROMPT_MAX_CHARACTERS}
             value={draft.prompt}
             placeholder={card.defaults.prompt}

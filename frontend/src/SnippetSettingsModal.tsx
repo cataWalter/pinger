@@ -168,19 +168,19 @@ export function SnippetSettingsModal({ open, snippets, onSnippetsChange, onClose
         </div>
         <label className="settings-search snippet-manager-search">
           <Search size={15} />
-          <input type="search" value={search} placeholder="Search snippets" aria-label="Search snippets" onChange={(event) => setSearch(event.target.value)} />
+          <input type="search" value={search} placeholder="Search snippets" aria-label="Search snippets" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setSearch(event.target.value)} />
         </label>
         {managerError && <p className="settings-error" role="alert">{managerError}</p>}
         {managerStatus && <p className="settings-note" role="status">{managerStatus}</p>}
         {draft && <form className="snippet-manager-editor" onSubmit={saveSnippetDraft}>
           <h3>{editingID ? 'Edit snippet' : 'New snippet'}</h3>
           <div className="snippet-manager-fields">
-            <label className="snippet-manager-field"><span>Prefix</span><input aria-label="Snippet prefix" value={draft.prefix} maxLength={8} onChange={(event) => setDraft((current) => current ? { ...current, prefix: event.target.value } : current)} /></label>
-            <label className="snippet-manager-field"><span>Trigger</span><input aria-label="Snippet trigger" value={draft.trigger} maxLength={64} onChange={(event) => setDraft((current) => current ? { ...current, trigger: event.target.value } : current)} /></label>
-            <label className="snippet-manager-field"><span>Title</span><input aria-label="Snippet title" value={draft.title} maxLength={100} onChange={(event) => setDraft((current) => current ? { ...current, title: event.target.value } : current)} /></label>
-            <label className="snippet-manager-field"><span>Category</span><input aria-label="Snippet category" value={draft.category ?? ''} maxLength={40} onChange={(event) => setDraft((current) => current ? { ...current, category: event.target.value } : current)} /></label>
+            <label className="snippet-manager-field"><span>Prefix</span><input aria-label="Snippet prefix" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={draft.prefix} maxLength={8} onChange={(event) => setDraft((current) => current ? { ...current, prefix: event.target.value } : current)} /></label>
+            <label className="snippet-manager-field"><span>Trigger</span><input aria-label="Snippet trigger" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={draft.trigger} maxLength={64} onChange={(event) => setDraft((current) => current ? { ...current, trigger: event.target.value } : current)} /></label>
+            <label className="snippet-manager-field"><span>Title</span><input aria-label="Snippet title" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={draft.title} maxLength={100} onChange={(event) => setDraft((current) => current ? { ...current, title: event.target.value } : current)} /></label>
+            <label className="snippet-manager-field"><span>Category</span><input aria-label="Snippet category" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={draft.category ?? ''} maxLength={40} onChange={(event) => setDraft((current) => current ? { ...current, category: event.target.value } : current)} /></label>
           </div>
-          <label className="snippet-manager-field"><span>Content</span><textarea ref={contentRef} aria-label="Snippet content" value={draft.content} maxLength={10000} rows={5} onChange={(event) => setDraft((current) => current ? { ...current, content: event.target.value } : current)} /></label>
+          <label className="snippet-manager-field"><span>Content</span><textarea ref={contentRef} aria-label="Snippet content" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={draft.content} maxLength={10000} rows={5} onChange={(event) => setDraft((current) => current ? { ...current, content: event.target.value } : current)} /></label>
           <div className="snippet-variable-actions" aria-label="Insert snippet variable">
             <button className="settings-command" type="button" onClick={() => insertVariable('{date}')}>+ Insert {'{date}'}</button>
             <button className="settings-command" type="button" onClick={() => insertVariable('{time}')}>+ Insert {'{time}'}</button>

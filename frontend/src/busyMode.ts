@@ -22,7 +22,7 @@ const busyReplyTemplates: Record<string, string> = {
   ukr: 'Вітаю! Я ШІ-помічник {name}. Зараз ця людина зайнята, але ваше повідомлення отримано. Вона відповість, щойно зможе; це може зайняти трохи часу. Дякую за терпіння.',
 }
 
-export function detectBusyReplyLanguage(messages: string[]) {
+function detectLanguage(messages: string[], fallback: string) {
   const votes = new Map<string, { count: number; lastIndex: number }>()
   for (const [index, message] of messages.filter((text) => text.trim()).slice(-10).entries()) {
     const language = franc(message, { minLength: 10 })
@@ -33,7 +33,15 @@ export function detectBusyReplyLanguage(messages: string[]) {
     votes.set(language, vote)
   }
 
-  return [...votes.entries()].sort((left, right) => right[1].count - left[1].count || right[1].lastIndex - left[1].lastIndex)[0]?.[0] ?? 'eng'
+  return [...votes.entries()].sort((left, right) => right[1].count - left[1].count || right[1].lastIndex - left[1].lastIndex)[0]?.[0] ?? fallback
+}
+
+export function detectBusyReplyLanguage(messages: string[]) {
+  return detectLanguage(messages, 'eng')
+}
+
+export function detectConversationLanguage(messages: string[]) {
+  return detectLanguage(messages, '')
 }
 
 export function hasBusyReplyTemplate(language: string) {

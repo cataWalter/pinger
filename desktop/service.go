@@ -45,23 +45,31 @@ type AppService struct {
 	setMenuBarIcon           func(bool)
 	chooseSavePath           func(directory, filename string) (string, error)
 	chooseDownloadFolder     func() (string, error)
+	revealFile               func(string) error
 	activeRoomMu             sync.RWMutex
 	activeRoomID             string
 	activeRoomClient         *matrix.Client
+	localAIChatMu            sync.Mutex
+	localAIChats             *localAIChatStore
+	aiRuns                   aiRunRegistry
+	imageEngine              imageEngine
 	workers                  sync.WaitGroup
 	scheduled                *scheduledJobStore
 	relationshipHealthMu     sync.Mutex
 	relationshipHealthStores map[string]*relationshipHealthStore
 	relationshipHealthJobs   map[string]bool
 	contactDossierJobs       map[string]bool
-	relationshipDecayWorker  bool
-	relationshipDecayTrigger chan struct{}
+	chatExportMu             sync.Mutex
+	chatExportCancel         context.CancelFunc
 
-	emitUpdate             func(Update)
-	emitReminder           func(ScheduledJob)
-	emitRelationshipHealth func(RelationshipHealthSnapshot)
-	emitRelationshipDecay  func(RelationshipDecaySnapshot)
-	emitContactDossier     func(ContactDossierSnapshot)
+	emitUpdate               func(Update)
+	emitReminder             func(ScheduledJob)
+	emitRelationshipHealth   func(RelationshipHealthSnapshot)
+	emitContactDossier       func(ContactDossierSnapshot)
+	emitLocalAIChatStream    func(LocalAIChatStreamEvent)
+	emitLocalAIImageProgress func(LocalAIImageProgressEvent)
+	emitChatExportProgress   func(ChatExportProgress)
+	emitAIStream             func(AIStreamEvent)
 }
 
 func (s *AppService) OpenExternalURL(rawURL string) error {
@@ -534,6 +542,14 @@ func (s *AppService) LeaveRoom(roomID string) error {
 	return s.currentClient().LeaveRoom(s.ctx, roomID)
 }
 
+func (s *AppService) StartDirectChat(userID string) (string, error) {
+	client := s.currentClient()
+	if client == nil {
+		return "", errors.New("no Matrix account is active")
+	}
+	return client.StartDirectChat(s.ctx, userID)
+}
+
 func (s *AppService) Devices() ([]Device, error) {
 	devices, err := s.currentClient().Devices(s.ctx)
 	if err != nil {
@@ -560,7 +576,7 @@ func (s *AppService) RevokeDevice(deviceID, password string) error {
 	return s.currentClient().RevokeDevice(s.ctx, deviceID, password)
 }
 
-func (s *AppService) sendAttachment(ctx context.Context, roomID, filename string, data []byte, voiceNote bool, durationMilliseconds int64) error {
+func (s *AppService) sendAttachment(ctx context.Context, roomID, filename string, data []byte, voiceNote, videoMessage bool, durationMilliseconds int64) error {
 	if int64(len(data)) > maxAttachmentSize {
 		return fmt.Errorf("attachment exceeds the 50 MiB limit")
 	}
@@ -568,8 +584,14 @@ func (s *AppService) sendAttachment(ctx context.Context, roomID, filename string
 	if client == nil {
 		return errors.New("Matrix account unavailable")
 	}
+	if voiceNote && videoMessage {
+		return errors.New("attachment cannot be both a voice note and a video message")
+	}
 	if voiceNote {
 		return client.SendVoiceNote(ctx, roomID, filename, data, durationMilliseconds)
+	}
+	if videoMessage {
+		return client.SendVideoMessage(ctx, roomID, filename, data, durationMilliseconds)
 	}
 	return client.SendAttachment(ctx, roomID, filename, data)
 }
@@ -624,6 +646,19 @@ func (s *AppService) ChooseDownloadFolder() (string, error) {
 		return "", errors.New("folder picker is unavailable")
 	}
 	return s.chooseDownloadFolder()
+}
+
+func (s *AppService) RevealFile(path string) error {
+	if s.revealFile == nil {
+		return errors.New("file manager is unavailable")
+	}
+	if !filepath.IsAbs(path) {
+		return errors.New("reveal needs an absolute file path")
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("reveal file: %w", err)
+	}
+	return s.revealFile(path)
 }
 
 func safeDownloadName(filename string) string {
@@ -746,9 +781,6 @@ func (s *AppService) SetBooleanPreference(key string, value bool) error {
 	if key == "window.menu_bar_icon" && s.setMenuBarIcon != nil {
 		s.setMenuBarIcon(value)
 	}
-	if key == "relationship_health.enabled" {
-		s.triggerRelationshipDecay()
-	}
 	return nil
 }
 
@@ -819,7 +851,7 @@ func (s *AppService) sendDroppedFiles(paths []string) (string, bool, error) {
 			combinedErr = errors.Join(combinedErr, err)
 			continue
 		}
-		if err = s.sendAttachment(s.ctx, roomID, filename, data, false, 0); err != nil {
+		if err = s.sendAttachment(s.ctx, roomID, filename, data, false, false, 0); err != nil {
 			combinedErr = errors.Join(combinedErr, fmt.Errorf("send dropped file %q: %w", filename, err))
 			continue
 		}
@@ -1031,6 +1063,7 @@ func (s *AppService) processDueScheduledJobs() {
 
 func (s *AppService) close() {
 	s.cancel()
+	s.imageEngine.stop()
 	s.workers.Wait()
 	s.closeRelationshipHealthStores()
 	if s.preferencesUnsubscribe != nil {

@@ -95,10 +95,12 @@ const (
 )
 
 type GhostwriterRequest struct {
-	RoomID string          `json:"roomId"`
-	Mode   GhostwriterMode `json:"mode"`
-	Draft  string          `json:"draft"`
-	Intent string          `json:"intent"`
+	RoomID         string          `json:"roomId"`
+	RequestID      string          `json:"requestId,omitempty"`
+	Mode           GhostwriterMode `json:"mode"`
+	Draft          string          `json:"draft"`
+	Intent         string          `json:"intent"`
+	TargetLanguage string          `json:"targetLanguage,omitempty"`
 }
 
 type GhostSuggestion struct {
@@ -603,13 +605,14 @@ func localGhostwriterCompletion(ctx context.Context, client *http.Client, provid
 			System  string `json:"system"`
 			Prompt  string `json:"prompt"`
 			Stream  bool   `json:"stream"`
+			Think   any    `json:"think,omitempty"`
 			Format  string `json:"format,omitempty"`
 			Options struct {
 				Temperature float64  `json:"temperature"`
 				NumPredict  int      `json:"num_predict"`
 				Stop        []string `json:"stop"`
 			} `json:"options"`
-		}{Model: model, System: systemPrompt, Prompt: userPrompt, Stream: false}
+		}{Model: model, System: systemPrompt, Prompt: userPrompt, Stream: false, Think: false}
 		ollamaRequest.Options.Temperature = 0.35
 		ollamaRequest.Options.NumPredict = maxTokens
 		ollamaRequest.Options.Stop = ghostwriterStopSequences
@@ -627,14 +630,15 @@ func localGhostwriterCompletion(ctx context.Context, client *http.Client, provid
 			Type string `json:"type"`
 		}
 		openAIRequest := struct {
-			Model       string      `json:"model,omitempty"`
-			Messages    []AIMessage `json:"messages"`
-			Stream      bool        `json:"stream"`
-			Temperature float64     `json:"temperature"`
-			MaxTokens   int         `json:"max_tokens"`
-			Stop        []string    `json:"stop"`
-			ResponseFormat *responseFormat `json:"response_format,omitempty"`
-		}{Model: model, Messages: []AIMessage{{Role: "system", Content: systemPrompt}, {Role: "user", Content: userPrompt}}, Stream: false, Temperature: 0.35, MaxTokens: maxTokens, Stop: ghostwriterStopSequences}
+			Model              string          `json:"model,omitempty"`
+			Messages           []AIMessage     `json:"messages"`
+			Stream             bool            `json:"stream"`
+			Temperature        float64         `json:"temperature"`
+			MaxTokens          int             `json:"max_tokens"`
+			Stop               []string        `json:"stop"`
+			ResponseFormat     *responseFormat `json:"response_format,omitempty"`
+			ChatTemplateKwargs map[string]any  `json:"chat_template_kwargs,omitempty"`
+		}{Model: model, Messages: []AIMessage{{Role: "system", Content: systemPrompt}, {Role: "user", Content: userPrompt}}, Stream: false, Temperature: 0.35, MaxTokens: maxTokens, Stop: ghostwriterStopSequences, ChatTemplateKwargs: aiThinkingDisabled()}
 		if mode == GhostwriterModeChips {
 			openAIRequest.ResponseFormat = &responseFormat{Type: "json_object"}
 		}

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -80,7 +81,7 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 		Description: "A Matrix desktop client",
 		Services: []application.Service{
 			application.NewService(service),
-			application.NewService(NewTurkishTutorService(service)),
+			application.NewService(NewLanguageTutorService(service)),
 		},
 		Assets: application.AssetOptions{
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +115,16 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 			return fmt.Errorf("open link: %w", openErr)
 		}
 		return nil
+	}
+	service.revealFile = func(path string) error {
+		switch runtime.GOOS {
+		case "darwin":
+			return exec.Command("open", "-R", path).Run()
+		case "windows":
+			return exec.Command("explorer", "/select,"+path).Start()
+		default:
+			return app.Browser.OpenURL((&url.URL{Scheme: "file", Path: filepath.Dir(path)}).String())
+		}
 	}
 	if lifecycle, ok := notifier.(notifications.Lifecycle); ok {
 		if startErr := lifecycle.Start(ctx); startErr != nil {
@@ -353,11 +364,20 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 	service.emitRelationshipHealth = func(update RelationshipHealthSnapshot) {
 		app.Event.Emit(relationshipHealthEventName, update)
 	}
-	service.emitRelationshipDecay = func(update RelationshipDecaySnapshot) {
-		app.Event.Emit(relationshipDecayEventName, update)
-	}
 	service.emitContactDossier = func(update ContactDossierSnapshot) {
 		app.Event.Emit(contactDossierEventName, update)
+	}
+	service.emitLocalAIChatStream = func(chunk LocalAIChatStreamEvent) {
+		app.Event.Emit(localAIChatStreamEventName, chunk)
+	}
+	service.emitLocalAIImageProgress = func(update LocalAIImageProgressEvent) {
+		app.Event.Emit(localAIImageProgressEventName, update)
+	}
+	service.emitChatExportProgress = func(progress ChatExportProgress) {
+		app.Event.Emit(chatExportProgressEventName, progress)
+	}
+	service.emitAIStream = func(chunk AIStreamEvent) {
+		app.Event.Emit(aiStreamEventName, chunk)
 	}
 	service.startPreferencePump(func(state Snapshot) {
 		if theme, ok := state.Preferences["appearance.theme"].(string); ok {
@@ -367,8 +387,6 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 		app.Event.Emit(preferencesUpdateEventName, state)
 	})
 	service.startScheduledJobWorker()
-	service.startRelationshipDecayWorker()
-
 	service.startSync()
 
 	err = app.Run()

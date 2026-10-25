@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -36,15 +35,6 @@ type relationshipAnalysisCheckpoint struct {
 	RoomID     string
 	MessageID  string
 	AnalyzedAt int64
-}
-
-type relationshipDecayCandidate struct {
-	ContactID                string
-	DisplayName              string
-	Tier                     string
-	LastInteractionTimestamp int64
-	LastDecayAlertTimestamp  int64
-	SnoozedUntil             int64
 }
 
 func openRelationshipHealthStore(path string) (*relationshipHealthStore, error) {
@@ -76,12 +66,7 @@ func (s *relationshipHealthStore) initialize() error {
 		CREATE TABLE IF NOT EXISTS contacts (
 			contact_id TEXT PRIMARY KEY,
 			display_name TEXT NOT NULL DEFAULT '',
-			created_at INTEGER NOT NULL,
-			tier TEXT NOT NULL DEFAULT 'NONE' CHECK (tier IN ('VIP', 'CLOSE_FRIEND', 'CASUAL', 'CLIENT', 'NONE')),
-			last_interaction_timestamp INTEGER NOT NULL DEFAULT 0,
-			last_decay_alert_timestamp INTEGER NOT NULL DEFAULT 0,
-			decay_nudge TEXT NOT NULL DEFAULT '',
-			snoozed_until INTEGER NOT NULL DEFAULT 0
+			created_at INTEGER NOT NULL
 		);
 		CREATE TABLE IF NOT EXISTS dossier_cache (
 			contact_id TEXT PRIMARY KEY REFERENCES contacts(contact_id) ON DELETE CASCADE,
@@ -120,59 +105,6 @@ func (s *relationshipHealthStore) initialize() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("initialize relationship health schema: %w", err)
-	}
-	if err := ensureRelationshipDecayColumns(s.db); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(`
-		CREATE INDEX IF NOT EXISTS relationship_decay_candidates_idx
-			ON contacts(tier, last_interaction_timestamp, last_decay_alert_timestamp, snoozed_until);
-	`); err != nil {
-		return fmt.Errorf("index relationship decay contacts: %w", err)
-	}
-	return nil
-}
-
-func ensureRelationshipDecayColumns(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(contacts)`)
-	if err != nil {
-		return fmt.Errorf("inspect relationship contacts schema: %w", err)
-	}
-	columns := make(map[string]struct{})
-	for rows.Next() {
-		var cid, notNull, primaryKey int
-		var name, columnType string
-		var defaultValue sql.NullString
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("read relationship contacts schema: %w", err)
-		}
-		columns[name] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return fmt.Errorf("read relationship contacts schema: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close relationship contacts schema: %w", err)
-	}
-	definitions := []struct {
-		name       string
-		definition string
-	}{
-		{"tier", "TEXT NOT NULL DEFAULT 'NONE' CHECK (tier IN ('VIP', 'CLOSE_FRIEND', 'CASUAL', 'CLIENT', 'NONE'))"},
-		{"last_interaction_timestamp", "INTEGER NOT NULL DEFAULT 0"},
-		{"last_decay_alert_timestamp", "INTEGER NOT NULL DEFAULT 0"},
-		{"decay_nudge", "TEXT NOT NULL DEFAULT ''"},
-		{"snoozed_until", "INTEGER NOT NULL DEFAULT 0"},
-	}
-	for _, column := range definitions {
-		if _, exists := columns[column.name]; exists {
-			continue
-		}
-		if _, err := db.Exec(`ALTER TABLE contacts ADD COLUMN ` + column.name + ` ` + column.definition); err != nil {
-			return fmt.Errorf("add relationship contact column %s: %w", column.name, err)
-		}
 	}
 	return nil
 }
@@ -447,175 +379,4 @@ func (s *relationshipHealthStore) recentHealth(contactID string, limit int) ([]r
 		results = append(results, row)
 	}
 	return results, rows.Err()
-}
-
-func (s *relationshipHealthStore) setContactTier(contactID, tier string) error {
-	switch tier {
-	case "VIP", "CLOSE_FRIEND", "CASUAL", "CLIENT", "NONE":
-	default:
-		return fmt.Errorf("unknown relationship tier %q", tier)
-	}
-	result, err := s.db.Exec(`
-		UPDATE contacts SET
-			tier = ?,
-			decay_nudge = CASE WHEN tier <> ? THEN '' ELSE decay_nudge END,
-			last_decay_alert_timestamp = CASE WHEN tier <> ? THEN 0 ELSE last_decay_alert_timestamp END,
-			snoozed_until = CASE WHEN tier <> ? THEN 0 ELSE snoozed_until END
-		WHERE contact_id = ?
-	`, tier, tier, tier, tier, contactID)
-	if err != nil {
-		return fmt.Errorf("set relationship tier: %w", err)
-	}
-	if affected, err := result.RowsAffected(); err != nil {
-		return err
-	} else if affected == 0 {
-		return errors.New("relationship contact was not found")
-	}
-	return nil
-}
-
-func (s *relationshipHealthStore) updateContactInteraction(contactID string, timestamp int64) error {
-	if contactID == "" || timestamp <= 0 {
-		return nil
-	}
-	_, err := s.db.Exec(`
-		UPDATE contacts SET
-			last_interaction_timestamp = ?,
-			decay_nudge = '',
-			last_decay_alert_timestamp = 0,
-			snoozed_until = 0
-		WHERE contact_id = ? AND last_interaction_timestamp < ?
-	`, timestamp, contactID, timestamp)
-	if err != nil {
-		return fmt.Errorf("update relationship interaction: %w", err)
-	}
-	return nil
-}
-
-func (s *relationshipHealthStore) dueDecayCandidates(now time.Time, limit int) ([]relationshipDecayCandidate, error) {
-	if limit < 1 {
-		return []relationshipDecayCandidate{}, nil
-	}
-	nowMillis := now.UnixMilli()
-	cutoffMillis := now.Add(-relationshipDecayCooldown).UnixMilli()
-	vipThreshold, _ := relationshipDecayThreshold("VIP")
-	friendThreshold, _ := relationshipDecayThreshold("CLOSE_FRIEND")
-	casualThreshold, _ := relationshipDecayThreshold("CASUAL")
-	clientThreshold, _ := relationshipDecayThreshold("CLIENT")
-	rows, err := s.db.Query(`
-		SELECT contact_id, display_name, tier, last_interaction_timestamp, last_decay_alert_timestamp, snoozed_until
-		FROM contacts
-		WHERE last_interaction_timestamp > 0
-			AND snoozed_until <= ?
-			AND last_decay_alert_timestamp <= ?
-			AND (
-				(tier = 'VIP' AND last_interaction_timestamp < ?)
-				OR (tier = 'CLOSE_FRIEND' AND last_interaction_timestamp < ?)
-				OR (tier = 'CASUAL' AND last_interaction_timestamp < ?)
-				OR (tier = 'CLIENT' AND last_interaction_timestamp < ?)
-			)
-		ORDER BY last_interaction_timestamp ASC
-		LIMIT ?
-	`, nowMillis, cutoffMillis,
-		now.Add(-vipThreshold).UnixMilli(),
-		now.Add(-friendThreshold).UnixMilli(),
-		now.Add(-casualThreshold).UnixMilli(),
-		now.Add(-clientThreshold).UnixMilli(), limit)
-	if err != nil {
-		return nil, fmt.Errorf("query relationship decay candidates: %w", err)
-	}
-	defer rows.Close()
-	candidates := make([]relationshipDecayCandidate, 0)
-	for rows.Next() {
-		var candidate relationshipDecayCandidate
-		if err := rows.Scan(&candidate.ContactID, &candidate.DisplayName, &candidate.Tier, &candidate.LastInteractionTimestamp, &candidate.LastDecayAlertTimestamp, &candidate.SnoozedUntil); err != nil {
-			return nil, err
-		}
-		candidates = append(candidates, candidate)
-	}
-	return candidates, rows.Err()
-}
-
-func (s *relationshipHealthStore) saveDecayAlert(candidate relationshipDecayCandidate, nudge string, alertedAt int64, now time.Time) (bool, error) {
-	if candidate.ContactID == "" || strings.TrimSpace(nudge) == "" || alertedAt <= 0 {
-		return false, errors.New("relationship decay alert is invalid")
-	}
-	nowMillis := now.UnixMilli()
-	cutoffMillis := now.Add(-relationshipDecayCooldown).UnixMilli()
-	result, err := s.db.Exec(`
-		UPDATE contacts SET last_decay_alert_timestamp = ?, decay_nudge = ?
-		WHERE contact_id = ? AND tier = ? AND last_interaction_timestamp = ?
-			AND last_decay_alert_timestamp = ? AND snoozed_until = ?
-			AND last_decay_alert_timestamp <= ? AND snoozed_until <= ?
-	`, alertedAt, strings.TrimSpace(nudge), candidate.ContactID, candidate.Tier,
-		candidate.LastInteractionTimestamp, candidate.LastDecayAlertTimestamp, candidate.SnoozedUntil,
-		cutoffMillis, nowMillis)
-	if err != nil {
-		return false, fmt.Errorf("save relationship decay alert: %w", err)
-	}
-	affected, err := result.RowsAffected()
-	return affected > 0, err
-}
-
-func (s *relationshipHealthStore) snoozeDecayAlert(contactID string, until int64) error {
-	result, err := s.db.Exec(`UPDATE contacts SET snoozed_until = ? WHERE contact_id = ?`, until, contactID)
-	if err != nil {
-		return fmt.Errorf("snooze relationship decay alert: %w", err)
-	}
-	if affected, err := result.RowsAffected(); err != nil {
-		return err
-	} else if affected == 0 {
-		return errors.New("relationship contact was not found")
-	}
-	return nil
-}
-
-func (s *relationshipHealthStore) decayContacts(now time.Time) ([]RelationshipDecayContact, error) {
-	rows, err := s.db.Query(`
-		SELECT c.contact_id, c.display_name, c.tier, c.last_interaction_timestamp,
-			c.last_decay_alert_timestamp, c.snoozed_until, c.decay_nudge, l.room_id
-		FROM contacts c
-		LEFT JOIN contact_room_links l ON l.contact_id = c.contact_id
-		ORDER BY c.display_name COLLATE NOCASE, c.contact_id, l.room_id
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("list relationship contacts: %w", err)
-	}
-	defer rows.Close()
-	contacts := make([]RelationshipDecayContact, 0)
-	contactIndexes := make(map[string]int)
-	for rows.Next() {
-		var contactID, displayName, tier, nudge string
-		var lastInteraction, lastAlert, snoozedUntil int64
-		var roomID sql.NullString
-		if err := rows.Scan(&contactID, &displayName, &tier, &lastInteraction, &lastAlert, &snoozedUntil, &nudge, &roomID); err != nil {
-			return nil, err
-		}
-		index, exists := contactIndexes[contactID]
-		if !exists {
-			index = len(contacts)
-			contactIndexes[contactID] = index
-			contacts = append(contacts, RelationshipDecayContact{
-				ContactID:                contactID,
-				DisplayName:              displayName,
-				Tier:                     tier,
-				LastInteractionTimestamp: lastInteraction,
-				LastDecayAlertTimestamp:  lastAlert,
-				SnoozedUntil:             snoozedUntil,
-				Nudge:                    nudge,
-				RoomIDs:                  []string{},
-			})
-		}
-		if roomID.Valid {
-			contacts[index].RoomIDs = append(contacts[index].RoomIDs, roomID.String)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for index := range contacts {
-		contact := &contacts[index]
-		contact.Alerted = relationshipDecayAlertActive(*contact, now)
-	}
-	return contacts, nil
 }

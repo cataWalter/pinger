@@ -433,7 +433,6 @@ func (s *AppService) startAccountEventPump(accountID string, client *matrix.Clie
 	s.workers.Add(1)
 	go func() {
 		defer s.workers.Done()
-		wasConnected := false
 		for {
 			select {
 			case <-s.ctx.Done():
@@ -448,11 +447,6 @@ func (s *AppService) startAccountEventPump(accountID string, client *matrix.Clie
 						Str("detail", update.Error).
 						Msg("Matrix update reported an error")
 				}
-				connected := update.ConnectionState == matrix.StateConnected
-				if connected && !wasConnected {
-					s.triggerRelationshipDecay()
-				}
-				wasConnected = connected
 				if s.currentAccountID() == accountID {
 					mapped := mapUpdate(update, s.preferenceValuesForAccount(accountID))
 					tagRooms(mapped.Rooms, accountID)

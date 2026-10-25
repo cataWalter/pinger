@@ -46,7 +46,6 @@ const service = vi.hoisted(() => {
   const methods = {
     Snapshot: vi.fn(() => Promise.resolve(snapshot)),
     NativeNotificationsSupported: vi.fn(() => Promise.resolve(false)),
-    RelationshipDecayContacts: vi.fn(() => Promise.resolve({ accountId: 'primary', contacts: [] })),
     ScheduledJobs: vi.fn(() => Promise.resolve([])),
     AccountRooms: vi.fn(() => Promise.resolve([])),
     History: vi.fn(() => Promise.resolve({ messages: [], before: 0, hasMore: false })),
@@ -72,7 +71,7 @@ vi.mock('../bindings/mychat/desktop', () => ({
     GhostwriterModeAutocomplete: 'autocomplete',
     GhostwriterModeSlash: 'slash',
   },
-  TurkishTutorService: { Analyze: vi.fn(() => Promise.resolve({})) },
+  LanguageTutorService: { Analyze: vi.fn(() => Promise.resolve({})) },
 }))
 
 afterEach(() => {

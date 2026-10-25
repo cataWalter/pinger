@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createBusyReply, detectBusyReplyLanguage, hasBusyReplyTemplate } from './busyMode'
+import { createBusyReply, detectBusyReplyLanguage, detectConversationLanguage, hasBusyReplyTemplate } from './busyMode'
 
 describe('busy replies', () => {
   it('detects the majority language from the latest ten messages', () => {
@@ -8,6 +8,8 @@ describe('busy replies', () => {
 
     expect(detectBusyReplyLanguage([spanish, spanish, english, english, english, english, english, english, english, english, spanish])).toBe('eng')
     expect(detectBusyReplyLanguage([spanish, spanish, spanish, english, spanish])).toBe('spa')
+    expect(detectConversationLanguage([spanish, spanish, english])).toBe('spa')
+    expect(detectConversationLanguage(['', '👍'])).toBe('')
   })
 
   it('returns a polished localized reply with the account name', () => {

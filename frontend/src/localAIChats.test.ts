@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIRoomID } from './localAIChats'
+import { buildLocalAIModelMessages, isLocalAIImageTurn, isLocalAIRoomID, localAIChatIcon, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIRoomID } from './localAIChats'
 
 vi.mock('../bindings/mychat/desktop', () => ({
     AppService: {},
@@ -29,7 +29,7 @@ describe('localAIErrorMessage', () => {
 })
 
 describe('local AI chat rows', () => {
-    const chat = { id: 'chat-1', title: 'Trip plan', agentId: 'tutor', updatedAt: 1_700_000_000_000, preview: 'Here is a draft' }
+    const chat = { id: 'chat-1', title: 'Trip plan', agentId: 'tutor', kind: 'chat', folderId: '', updatedAt: 1_700_000_000_000, preview: 'Here is a draft' }
 
     it('maps a chat to a list row with its preview and activity time', () => {
         expect(localAIChatToRoom(chat, true)).toMatchObject({
@@ -50,6 +50,13 @@ describe('local AI chat rows', () => {
         expect(localAIChatToRoom({ ...chat, title: '' }, false).name).toBe('Untitled chat')
     })
 
+    it('picks a row icon from the chat kind and agent', () => {
+        expect(localAIChatIcon({ kind: 'chat', agentId: '' })).toBe('chat')
+        expect(localAIChatIcon({ kind: 'chat', agentId: 'tutor' })).toBe('agent')
+        expect(localAIChatIcon({ kind: 'summary', agentId: '' })).toBe('summary')
+        expect(localAIChatIcon({ kind: 'summary', agentId: 'tutor' })).toBe('summary')
+    })
+
     it('tells local rows apart from Matrix room IDs', () => {
         expect(isLocalAIRoomID(localAIRoomID('chat-1'))).toBe(true)
         expect(isLocalAIRoomID('!room:example.org')).toBe(false)
@@ -59,5 +66,38 @@ describe('local AI chat rows', () => {
 
     it('stores favorites under the local AI chat preference key', () => {
         expect(localAIFavoritePreference('chat-1')).toBe('ai.local_chat.favorite.chat-1')
+    })
+})
+
+describe('buildLocalAIModelMessages', () => {
+    const image = { name: 'generated-image.png', kind: 'image', mediaType: 'image/png', size: 4, data: 'iVBORw0KGgo=' }
+
+    it('keeps only a note for generated images so the model never receives image bytes', () => {
+        const messages = buildLocalAIModelMessages([
+            { seq: 1, role: 'user', content: 'A red fox', status: 'complete', attachments: [], createdAt: 1 },
+            { seq: 2, role: 'assistant', content: '', status: 'complete', attachments: [image], createdAt: 2 },
+            { seq: 3, role: 'user', content: 'Make it blue', status: 'complete', attachments: [], createdAt: 3 },
+        ])
+
+        expect(messages).toEqual([
+            { role: 'user', content: 'A red fox' },
+            { role: 'assistant', content: '[Generated image]' },
+            { role: 'user', content: 'Make it blue' },
+        ])
+        expect(messages.some((message) => 'images' in message)).toBe(false)
+    })
+
+    it('still sends images attached to user turns', () => {
+        const messages = buildLocalAIModelMessages([
+            { seq: 1, role: 'user', content: 'Describe this', status: 'complete', attachments: [image], createdAt: 1 },
+        ])
+
+        expect(messages).toEqual([{ role: 'user', content: 'Describe this', images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }] }])
+    })
+
+    it('identifies assistant turns that carry an image', () => {
+        expect(isLocalAIImageTurn({ role: 'assistant', attachments: [image] })).toBe(true)
+        expect(isLocalAIImageTurn({ role: 'assistant', attachments: [] })).toBe(false)
+        expect(isLocalAIImageTurn({ role: 'user', attachments: [image] })).toBe(false)
     })
 })

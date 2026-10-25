@@ -28,7 +28,6 @@ const dossier: ContactDossierSnapshot = {
   roomId: '!room:example.org',
   contactId: '@alex:example.org',
   displayName: 'Alex Rivera',
-  tier: 'VIP',
   linkedChannels: ['Matrix', 'Telegram'],
   linkedRoomIds: ['!room:example.org'],
   enabled: true,
@@ -71,11 +70,10 @@ describe('ContactHUD', () => {
     harness.service.RefreshContactDossier.mockResolvedValue({ ...dossier, lastRecap: 'They chose a neighborhood. They plan to visit it next month.' })
   })
 
-  it('shows contact badges and its dossier accordion sections', async () => {
+  it('shows contact and channel badges with dossier sections', async () => {
     render(<ContactHUD accountID="primary" roomID={dossier.roomId} rooms={rooms} onClose={vi.fn()} />)
 
     expect(await screen.findByRole('heading', { name: 'Alex Rivera' })).toBeTruthy()
-    expect(screen.getByText('VIP')).toBeTruthy()
     expect(screen.getByText('Telegram')).toBeTruthy()
     expect(screen.getByText('Moving to Berlin')).toBeTruthy()
     expect(screen.getByText('Likes Rust')).toBeTruthy()

@@ -20,6 +20,7 @@ import (
 const mediaAssetPathPrefix = "/media/"
 const mediaIPCPathPrefix = "/media/ipc/"
 const maxRoomKeyBackupSize = 100 << 20
+const maxVideoMessageDurationMilliseconds = 3 * 60 * 1000
 
 type mediaAssetSource interface {
 	OpenMediaFileForEvent(context.Context, string, string) (*os.File, string, error)
@@ -30,7 +31,7 @@ type mediaAssetHandler struct {
 	currentClient    func() mediaAssetSource
 	exportRoomKeysFn func(context.Context, string) ([]byte, error)
 	importRoomKeysFn func(context.Context, string, []byte) (RoomKeyImportResult, error)
-	sendAttachmentFn func(context.Context, string, string, []byte, bool, int64) error
+	sendAttachmentFn func(context.Context, string, string, []byte, bool, bool, int64) error
 }
 
 func newMediaAssetHandler(service *AppService) http.Handler {
@@ -232,6 +233,15 @@ func (handler mediaAssetHandler) uploadAttachment(w http.ResponseWriter, r *http
 		http.Error(w, "invalid voice-note flag", http.StatusBadRequest)
 		return
 	}
+	videoMessage, err := strconv.ParseBool(r.URL.Query().Get("videoMessage"))
+	if err != nil && r.URL.Query().Get("videoMessage") != "" {
+		http.Error(w, "invalid video-message flag", http.StatusBadRequest)
+		return
+	}
+	if voiceNote && videoMessage {
+		http.Error(w, "attachment cannot be both a voice note and a video message", http.StatusBadRequest)
+		return
+	}
 	durationMilliseconds := int64(0)
 	if rawDuration := r.URL.Query().Get("durationMs"); rawDuration != "" {
 		durationMilliseconds, err = strconv.ParseInt(rawDuration, 10, 64)
@@ -239,6 +249,10 @@ func (handler mediaAssetHandler) uploadAttachment(w http.ResponseWriter, r *http
 			http.Error(w, "invalid voice-note duration", http.StatusBadRequest)
 			return
 		}
+	}
+	if videoMessage && (durationMilliseconds < 1 || durationMilliseconds > maxVideoMessageDurationMilliseconds) {
+		http.Error(w, "video-message duration must be between 1 ms and 3 minutes", http.StatusBadRequest)
+		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentSize)
 	data, err := io.ReadAll(r.Body)
@@ -260,7 +274,7 @@ func (handler mediaAssetHandler) uploadAttachment(w http.ResponseWriter, r *http
 		http.Error(w, "Matrix service unavailable", http.StatusInternalServerError)
 		return
 	}
-	if err = handler.sendAttachmentFn(r.Context(), roomID, safeDownloadName(filename), data, voiceNote, durationMilliseconds); err != nil {
+	if err = handler.sendAttachmentFn(r.Context(), roomID, safeDownloadName(filename), data, voiceNote, videoMessage, durationMilliseconds); err != nil {
 		log.Printf("send Matrix attachment to %q: %v", roomID, err)
 		http.Error(w, "attachment upload failed", http.StatusInternalServerError)
 		return

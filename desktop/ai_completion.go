@@ -15,12 +15,24 @@ import (
 )
 
 const aiStreamEventName = "ai:stream"
+const aiThinkingLevelPreference = "ai.thinking_level"
+const aiThinkingLevelDefault = "none"
 
 var (
 	errAIResponseTooLarge = errors.New("AI response exceeded the size limit")
 	errAIEmptyResponse    = errors.New("AI endpoint returned an empty response")
 	errAIRunStopped       = errors.New("AI request was stopped")
 )
+
+func doAIRequest(client *http.Client, endpoint string, request *http.Request) (*http.Response, error) {
+	if err := validateAIEndpoint(endpoint); err != nil {
+		return nil, err
+	}
+	if client == nil {
+		return nil, errors.New("AI client is unavailable")
+	}
+	return client.Do(request)
+}
 
 // AIStreamEvent carries one streamed text delta for a running AI request.
 // Reset tells the UI to discard text already shown for the request, which happens when a request is retried.
@@ -41,16 +53,42 @@ type aiCompletionOptions struct {
 	JSONObject     bool
 	JSONSchemaName string
 	JSONSchema     json.RawMessage
-	// ChatTemplateKwargs is passed to OpenAI-compatible servers, for example to disable hidden reasoning.
+	// ChatTemplateKwargs is passed to OpenAI-compatible servers to control model thinking.
 	ChatTemplateKwargs map[string]any
 	// MaxResponseBytes limits the accepted reply size. Zero uses aiMaxResponseBytes.
 	MaxResponseBytes int64
 }
 
-// aiThinkingDisabled returns the chat template arguments that turn off hidden reasoning on OpenAI-compatible servers.
-// The app never shows reasoning, and reasoning counts against max_tokens, so every request turns it off.
+// aiThinkingDisabled returns the default chat template arguments for no hidden reasoning.
 func aiThinkingDisabled() map[string]any {
 	return map[string]any{"enable_thinking": false}
+}
+
+func aiThinkingOptions(level string) map[string]any {
+	level = strings.ToLower(strings.TrimSpace(level))
+	if level == "none" || level == "" {
+		return aiThinkingDisabled()
+	}
+	switch level {
+	case "low", "medium", "high":
+		return map[string]any{"enable_thinking": true, "reasoning_effort": level}
+	default:
+		return aiThinkingDisabled()
+	}
+}
+
+func aiOllamaThinkingOption(kwargs map[string]any) any {
+	enabled, ok := kwargs["enable_thinking"].(bool)
+	if !ok {
+		return nil
+	}
+	if !enabled {
+		return false
+	}
+	if level, ok := kwargs["reasoning_effort"].(string); ok {
+		return level
+	}
+	return true
 }
 
 type aiOllamaOptions struct {
@@ -61,6 +99,7 @@ type aiOllamaOptions struct {
 
 type aiOllamaRequest struct {
 	Model    string            `json:"model"`
+	Think    any               `json:"think,omitempty"`
 	Messages []aiOllamaMessage `json:"messages,omitempty"`
 	System   string            `json:"system,omitempty"`
 	Prompt   string            `json:"prompt,omitempty"`
@@ -218,6 +257,7 @@ func encodeAICompletionRequest(provider GhostwriterProvider, model string, messa
 	case GhostwriterProviderOllama:
 		request := aiOllamaRequest{
 			Model:   model,
+			Think:   aiOllamaThinkingOption(options.ChatTemplateKwargs),
 			Stream:  stream,
 			Format:  aiOllamaFormat(options),
 			Options: aiOllamaOptions{Temperature: options.Temperature, NumPredict: options.MaxTokens, Stop: options.Stop},

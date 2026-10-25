@@ -127,7 +127,7 @@ func TestMediaAssetHandlerServesMXCURI(t *testing.T) {
 func TestMediaAssetHandlerUsesRawHTTPForBinaryOperations(t *testing.T) {
 	var importedPassphrase, importedData string
 	var uploadedRoomID, uploadedFilename, uploadedData string
-	var uploadedVoiceNote bool
+	var uploadedVoiceNote, uploadedVideoMessage bool
 	var uploadedDuration int64
 	handler := mediaAssetHandler{
 		exportRoomKeysFn: func(_ context.Context, passphrase string) ([]byte, error) {
@@ -141,11 +141,12 @@ func TestMediaAssetHandlerUsesRawHTTPForBinaryOperations(t *testing.T) {
 			importedData = string(append([]byte(nil), data...))
 			return RoomKeyImportResult{Imported: 2, Total: 3}, nil
 		},
-		sendAttachmentFn: func(_ context.Context, roomID, filename string, data []byte, voiceNote bool, duration int64) error {
+		sendAttachmentFn: func(_ context.Context, roomID, filename string, data []byte, voiceNote, videoMessage bool, duration int64) error {
 			uploadedRoomID = roomID
 			uploadedFilename = filename
 			uploadedData = string(append([]byte(nil), data...))
 			uploadedVoiceNote = voiceNote
+			uploadedVideoMessage = videoMessage
 			uploadedDuration = duration
 			return nil
 		},
@@ -171,10 +172,17 @@ func TestMediaAssetHandlerUsesRawHTTPForBinaryOperations(t *testing.T) {
 		t.Fatalf("key import result = %q", importResponse.Body.String())
 	}
 
-	attachmentRequest := httptest.NewRequest(http.MethodPost, "/media/ipc/attachment/%21room%3Aexample.org?filename=voice.ogg&voiceNote=true&durationMs=1250", strings.NewReader("voice bytes"))
+	attachmentRequest := httptest.NewRequest(http.MethodPost, "/media/ipc/attachment/%21room%3Aexample.org?filename=voice.ogg&voiceNote=true&videoMessage=false&durationMs=1250", strings.NewReader("voice bytes"))
 	attachmentResponse := httptest.NewRecorder()
 	handler.ServeHTTP(attachmentResponse, attachmentRequest)
-	if attachmentResponse.Code != http.StatusNoContent || uploadedRoomID != "!room:example.org" || uploadedFilename != "voice.ogg" || uploadedData != "voice bytes" || !uploadedVoiceNote || uploadedDuration != 1250 {
-		t.Fatalf("attachment upload = %d, room=%q filename=%q data=%q voice=%t duration=%d", attachmentResponse.Code, uploadedRoomID, uploadedFilename, uploadedData, uploadedVoiceNote, uploadedDuration)
+	if attachmentResponse.Code != http.StatusNoContent || uploadedRoomID != "!room:example.org" || uploadedFilename != "voice.ogg" || uploadedData != "voice bytes" || !uploadedVoiceNote || uploadedVideoMessage || uploadedDuration != 1250 {
+		t.Fatalf("voice upload = %d, room=%q filename=%q data=%q voice=%t video=%t duration=%d", attachmentResponse.Code, uploadedRoomID, uploadedFilename, uploadedData, uploadedVoiceNote, uploadedVideoMessage, uploadedDuration)
+	}
+
+	videoRequest := httptest.NewRequest(http.MethodPost, "/media/ipc/attachment/%21room%3Aexample.org?filename=clip.webm&voiceNote=false&videoMessage=true&durationMs=2500", strings.NewReader("video bytes"))
+	videoResponse := httptest.NewRecorder()
+	handler.ServeHTTP(videoResponse, videoRequest)
+	if videoResponse.Code != http.StatusNoContent || uploadedRoomID != "!room:example.org" || uploadedFilename != "clip.webm" || uploadedData != "video bytes" || uploadedVoiceNote || !uploadedVideoMessage || uploadedDuration != 2500 {
+		t.Fatalf("video upload = %d, room=%q filename=%q data=%q voice=%t video=%t duration=%d", videoResponse.Code, uploadedRoomID, uploadedFilename, uploadedData, uploadedVoiceNote, uploadedVideoMessage, uploadedDuration)
 	}
 }

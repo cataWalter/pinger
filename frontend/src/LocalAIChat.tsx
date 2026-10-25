@@ -1,9 +1,9 @@
 import { Events } from '@wailsio/runtime'
-import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
-import { ArrowDown, CircleAlert, Copy, Download, FileText, Paperclip, Pencil, RotateCcw, RotateCw, Send, Sparkles, Square, X } from 'lucide-react'
+import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { ArrowDown, CircleAlert, Copy, Download, FileText, ImagePlus, Paperclip, Pencil, Plus, RotateCcw, RotateCw, Send, Sparkles, Square, X } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
 import type { LocalAIChatAttachment, LocalAIChatMessage, LocalAIChatSummary } from '../bindings/mychat/desktop/models.js'
-import type { ChatAgentProfile } from './aiPrompts'
+import { MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, chatAgentDraftError, newChatAgentID, type ChatAgentProfile } from './aiPrompts'
 import {
   LOCAL_AI_ATTACHMENT_ACCEPT,
   LOCAL_AI_ATTACHMENT_LIMIT,
@@ -13,10 +13,12 @@ import {
   LOCAL_AI_STARTER_PROMPTS,
   buildLocalAIModelMessages,
   exportLocalAIChat,
+  isLocalAIImageTurn,
   localAIErrorMessage,
   localAIMessageLength,
   newLocalAIMessage,
   readLocalAIAttachment,
+  type LocalAIChatKind,
 } from './localAIChats'
 
 const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
@@ -33,6 +35,24 @@ type LocalAIRun = {
   stopping: boolean
 }
 
+type LocalAIImageRun = {
+  chatId: string
+  requestId: string
+  stage: string
+  step: number
+  totalSteps: number
+  preview: string
+  stopping: boolean
+}
+
+type LocalAIImageProgress = {
+  requestId: string
+  stage: string
+  step: number
+  totalSteps: number
+  preview?: string
+}
+
 type LocalAIFailure = {
   chatId: string
   message: string
@@ -45,24 +65,62 @@ type LocalAIEdit = {
   content: string
 }
 
+type LocalAIAgentDraft = {
+  name: string
+  instructions: string
+}
+
 export type LocalAIChatProps = {
   chatId: string | null
   chatTitle: string
   agentId: string
   agents: ChatAgentProfile[]
   hidden: boolean
+  initialDraft?: string
+  initialDraftVersion?: number
   onAgentChange: (agentId: string) => void
+  onCreateAgent: (agent: ChatAgentProfile) => Promise<boolean>
   onChatCreated: (chat: LocalAIChatSummary) => void
   onChatsChanged: () => void
+  newChatKind?: LocalAIChatKind
 }
 
 function createLocalAIRequestID() {
   return globalThis.crypto?.randomUUID?.() ?? `local-ai-${Date.now()}-${Math.random()}`
 }
 
+function localAIImageURL(attachment: LocalAIChatAttachment) {
+  return `data:${attachment.mediaType ?? ''};base64,${attachment.data ?? ''}`
+}
+
+// Clipboard screenshots often arrive without a usable file name.
+function namePastedImage(file: File, index: number) {
+  if (file.name.trim()) return file
+  const extension = file.type.split('/')[1] || 'png'
+  return new File([file], `pasted-image-${Date.now()}-${index + 1}.${extension}`, { type: file.type })
+}
+
+// User turns that asked for an image. Editing one would send its prompt to the text model, so Edit is hidden for them.
+function localAIImagePromptSeqs(messages: LocalAIChatMessage[]) {
+  const seqs = new Set<number>()
+  messages.forEach((message, index) => {
+    const next = messages[index + 1]
+    if (message.role === 'user' && next && isLocalAIImageTurn(next)) seqs.add(message.seq)
+  })
+  return seqs
+}
+
+function imageRunStatus(run: LocalAIImageRun) {
+  if (run.stopping) return 'Stopping…'
+  if (run.stage === 'starting') return 'Starting the image engine…'
+  if (run.totalSteps > 0) return `Generating image, step ${run.step} of ${run.totalSteps}`
+  return 'Generating image…'
+}
+
 type LocalAIMessageViewProps = {
   message: LocalAIChatMessage
   idle: boolean
+  imagePrompt: boolean
   editContent: string | null
   onStartEdit: () => void
   onEditChange: (content: string) => void
@@ -72,14 +130,15 @@ type LocalAIMessageViewProps = {
   onRegenerate: () => void
 }
 
-function LocalAIMessageView({ message, idle, editContent, onStartEdit, onEditChange, onCancelEdit, onSaveEdit, onCopy, onRegenerate }: LocalAIMessageViewProps) {
+function LocalAIMessageView({ message, idle, imagePrompt, editContent, onStartEdit, onEditChange, onCancelEdit, onSaveEdit, onCopy, onRegenerate }: LocalAIMessageViewProps) {
   const isUser = message.role === 'user'
+  const imageTurn = isLocalAIImageTurn(message)
   const attachments = message.attachments ?? []
   if (editContent !== null) {
     return (
       <article className="local-ai-message is-user is-editing">
         <span className="local-ai-message-label">You</span>
-        <textarea className="local-ai-edit-input" aria-label="Edit message" value={editContent} onChange={(event) => onEditChange(event.currentTarget.value)} rows={3} />
+        <textarea className="local-ai-edit-input" aria-label="Edit message" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={editContent} onChange={(event) => onEditChange(event.currentTarget.value)} rows={3} />
         <div className="local-ai-edit-actions">
           <button type="button" onClick={onCancelEdit}>Cancel</button>
           <button type="button" onClick={onSaveEdit} disabled={editContent.trim() === '' && attachments.length === 0}>Save and send</button>
@@ -96,7 +155,11 @@ function LocalAIMessageView({ message, idle, editContent, onStartEdit, onEditCha
       {attachments.length > 0 && (
         <ul className="local-ai-attachment-list" aria-label="Attachments">
           {attachments.map((attachment, index) => (
-            <li key={`${attachment.name}:${index}`}><FileText size={12} /><span>{attachment.name}</span></li>
+            attachment.kind === 'image' && attachment.data ? (
+              <li key={`${attachment.name}:${index}`} className="is-image"><img className="local-ai-message-image" src={localAIImageURL(attachment)} alt={attachment.name} /></li>
+            ) : (
+              <li key={`${attachment.name}:${index}`}><FileText size={12} /><span>{attachment.name}</span></li>
+            )
           ))}
         </ul>
       )}
@@ -108,15 +171,15 @@ function LocalAIMessageView({ message, idle, editContent, onStartEdit, onEditCha
         </Suspense>
       ))}
       <div className="local-ai-message-actions">
-        <button className="icon-button" type="button" aria-label="Copy message" title="Copy" onClick={onCopy}><Copy size={13} /></button>
-        {idle && !isUser && <button className="icon-button" type="button" aria-label="Regenerate response" title="Regenerate" onClick={onRegenerate}><RotateCw size={13} /></button>}
-        {idle && isUser && <button className="icon-button" type="button" aria-label="Edit message" title="Edit" onClick={onStartEdit}><Pencil size={13} /></button>}
+        {message.content && <button className="icon-button" type="button" aria-label="Copy message" title="Copy" onClick={onCopy}><Copy size={13} /></button>}
+        {idle && !isUser && !imageTurn && <button className="icon-button" type="button" aria-label="Regenerate response" title="Regenerate" onClick={onRegenerate}><RotateCw size={13} /></button>}
+        {idle && isUser && !imagePrompt && <button className="icon-button" type="button" aria-label="Edit message" title="Edit" onClick={onStartEdit}><Pencil size={13} /></button>}
       </div>
     </article>
   )
 }
 
-export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden, onAgentChange, onChatCreated, onChatsChanged }: LocalAIChatProps) {
+export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden, initialDraft = '', initialDraftVersion = 0, onAgentChange, onCreateAgent, onChatCreated, onChatsChanged, newChatKind = 'chat' }: LocalAIChatProps) {
   const [messages, setMessages] = useState<LocalAIChatMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [draft, setDraft] = useState('')
@@ -126,17 +189,25 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
   const [failure, setFailure] = useState<LocalAIFailure | null>(null)
   const [edit, setEdit] = useState<LocalAIEdit | null>(null)
   const [composerError, setComposerError] = useState('')
+  const [agentDraft, setAgentDraft] = useState<LocalAIAgentDraft | null>(null)
+  const [agentError, setAgentError] = useState('')
+  const [savingAgent, setSavingAgent] = useState(false)
   const [showJump, setShowJump] = useState(false)
+  const [imageRun, setImageRun] = useState<LocalAIImageRun | null>(null)
   const chatIdRef = useRef<string | null>(chatId)
   const loadedChatIdRef = useRef<string | null>(null)
   const runRef = useRef<LocalAIRun | null>(null)
+  const imageRunRef = useRef<LocalAIImageRun | null>(null)
   const shouldFollowRef = useRef(true)
   const transcriptRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const busy = submitting || loading || runView !== null
+  const busy = submitting || loading || runView !== null || imageRun !== null
   const runHere = runView !== null && runView.chatId === chatId
   const runElsewhere = runView !== null && !runHere
+  const imageHere = imageRun !== null && imageRun.chatId === chatId
+  const imageElsewhere = imageRun !== null && !imageHere
+  const imagePromptSeqs = localAIImagePromptSeqs(messages)
   const canSend = !busy && (draft.trim() !== '' || attachments.length > 0)
   const trimmed = messages.length > LOCAL_AI_HISTORY_TURN_LIMIT
 
@@ -147,6 +218,30 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     run.text += chunk.text
     setRunView({ ...run })
   }), [])
+
+  useEffect(() => Events.On('local-ai:image-progress', (event: { data: unknown }) => {
+    const update = event.data as LocalAIImageProgress | undefined
+    const run = imageRunRef.current
+    if (!run || !update || update.requestId !== run.requestId) return
+    run.stage = update.stage
+    run.step = update.step
+    run.totalSteps = update.totalSteps
+    if (update.preview) run.preview = update.preview
+    setImageRun({ ...run })
+  }), [])
+
+  useEffect(() => {
+    setDraft(initialDraft)
+    setAttachments([])
+    setComposerError('')
+  }, [initialDraft, initialDraftVersion])
+
+  useEffect(() => {
+    const textarea = composerRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${textarea.scrollHeight}px`
+  }, [draft])
 
   useEffect(() => {
     chatIdRef.current = chatId
@@ -202,6 +297,11 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     if (chatIdRef.current === chatID) setMessages((current) => (current.some((item) => item.seq === saved.seq) ? current : [...current, saved]))
   }
 
+  // Runs after each complete reply. The server replaces only a title that still comes from the first user turn.
+  function generateTitle(titleChatID: string) {
+    void AppService.GenerateLocalAIChatTitle(titleChatID).then(() => onChatsChanged()).catch(() => undefined)
+  }
+
   async function runModel(runChatID: string, history: LocalAIChatMessage[], runAgentID: string) {
     const run: LocalAIRun = { chatId: runChatID, requestId: createLocalAIRequestID(), text: '', stopping: false }
     const agentInstructions = agents.find((agent) => agent.id === runAgentID)?.instructions ?? ''
@@ -214,6 +314,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
       const reply = await AppService.LocalAIChat({ messages: buildLocalAIModelMessages(history), requestId: run.requestId, agentInstructions })
       if (!reply.trim()) throw new Error('The local model returned an empty reply.')
       await saveAssistantTurn(runChatID, reply, 'complete')
+      generateTitle(runChatID)
     } catch (runError) {
       if (!run.stopping) {
         setFailure({ chatId: runChatID, message: localAIErrorMessage(runError, 'The local model could not complete this message.'), history, agentId: runAgentID })
@@ -239,6 +340,61 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     void AppService.AICancel(run.requestId).catch(() => undefined)
   }
 
+  function stopImage() {
+    const run = imageRunRef.current
+    if (!run || run.stopping) return
+    run.stopping = true
+    setImageRun({ ...run })
+    void AppService.AICancel(run.requestId).catch(() => undefined)
+  }
+
+  // Creates the chat for the first message. The new chat is reported through onChatCreated.
+  async function ensureChatID() {
+    const existing = chatIdRef.current
+    if (existing) return existing
+    const chat = await AppService.CreateLocalAIChat(agentId, newChatKind)
+    chatIdRef.current = chat.id
+    loadedChatIdRef.current = chat.id
+    setMessages([])
+    onChatCreated(chat)
+    return chat.id
+  }
+
+  // Runs only from the image button. The draft is the prompt, and pending attachments stay for the next message.
+  // A stopped or failed run restores the draft, because nothing was saved.
+  async function generateImage() {
+    const prompt = draft.trim()
+    if (busy || prompt === '') return
+    if (Array.from(prompt).length > LOCAL_AI_MESSAGE_CHARACTERS) {
+      setComposerError(`Keep each message under ${LOCAL_AI_MESSAGE_CHARACTERS.toLocaleString()} characters.`)
+      return
+    }
+    shouldFollowRef.current = true
+    setComposerError('')
+    setFailure(null)
+    setDraft('')
+    setSubmitting(true)
+    let run: LocalAIImageRun | null = null
+    try {
+      const chatID = await ensureChatID()
+      run = { chatId: chatID, requestId: createLocalAIRequestID(), stage: 'starting', step: 0, totalSteps: 0, preview: '', stopping: false }
+      imageRunRef.current = run
+      setImageRun({ ...run })
+      const saved = await AppService.LocalAIChatGenerateImage(chatID, prompt, run.requestId)
+      if (chatIdRef.current === chatID) {
+        setMessages((current) => [...current, ...(saved ?? []).filter((item) => !current.some((existing) => existing.seq === item.seq))])
+      }
+    } catch (imageError) {
+      setDraft((current) => (current === '' ? prompt : current))
+      setComposerError(run?.stopping ? 'Image generation stopped.' : localAIErrorMessage(imageError, 'The image could not be generated.'))
+    } finally {
+      if (run && imageRunRef.current === run) imageRunRef.current = null
+      setImageRun(null)
+      setSubmitting(false)
+      onChatsChanged()
+    }
+  }
+
   function retryRun() {
     if (!failure || busy || failure.chatId !== chatId) return
     void runModel(failure.chatId, failure.history, failure.agentId)
@@ -259,15 +415,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     setAttachments([])
     setSubmitting(true)
     try {
-      let activeChatID = chatIdRef.current
-      if (!activeChatID) {
-        const chat = await AppService.CreateLocalAIChat(agentId)
-        activeChatID = chat.id
-        chatIdRef.current = chat.id
-        loadedChatIdRef.current = chat.id
-        setMessages([])
-        onChatCreated(chat)
-      }
+      const activeChatID = await ensureChatID()
       const userTurn = await AppService.AppendLocalAIChatMessage(activeChatID, newLocalAIMessage('user', content, 'complete', pending))
       const history = [...messages, userTurn]
       setMessages(history)
@@ -292,6 +440,48 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
       event.preventDefault()
       void sendMessage()
     }
+  }
+
+  async function saveNewAgent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!agentDraft || savingAgent) return
+    const name = agentDraft.name.trim()
+    const instructions = agentDraft.instructions.trim()
+    const problem = chatAgentDraftError(name, instructions)
+    if (problem) {
+      setAgentError(problem)
+      return
+    }
+    if (agents.length >= MAX_CHAT_AGENTS) {
+      setAgentError(`Keep up to ${MAX_CHAT_AGENTS} agents.`)
+      return
+    }
+    const agent: ChatAgentProfile = { id: newChatAgentID(), name, instructions }
+    setAgentError('')
+    setSavingAgent(true)
+    try {
+      if (!(await onCreateAgent(agent))) {
+        setAgentError('The agent could not be saved.')
+        return
+      }
+      setAgentDraft(null)
+      await changeAgent(agent.id)
+    } catch (createError) {
+      setAgentError(localAIErrorMessage(createError, 'The agent could not be saved.'))
+    } finally {
+      setSavingAgent(false)
+    }
+  }
+
+  // Images paste as attachments. Text pastes fall through to the textarea unchanged.
+  function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const images = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null)
+    if (images.length === 0) return
+    event.preventDefault()
+    void attachFiles(images.map(namePastedImage))
   }
 
   function insertStarter(prompt: string) {
@@ -426,14 +616,64 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
             </select>
           </label>
         )}
+        <button
+          className="local-ai-new-agent"
+          type="button"
+          aria-label="New agent"
+          title="Create an agent for chats"
+          aria-expanded={agentDraft !== null}
+          onClick={() => {
+            setAgentError('')
+            setAgentDraft(agentDraft ? null : { name: '', instructions: '' })
+          }}
+          disabled={busy || agents.length >= MAX_CHAT_AGENTS}
+        >
+          <Plus size={13} />
+          <span>New agent</span>
+        </button>
         <button className="icon-button" type="button" aria-label="Export local AI chat" title="Export chat" onClick={() => void exportCurrentChat()} disabled={messages.length === 0 || loading}>
           <Download size={15} />
         </button>
       </div>
-      <div className="local-ai-transcript" ref={transcriptRef} onScroll={handleTranscriptScroll} role="log" aria-label="Local AI conversation" aria-live="polite" aria-busy={runHere}>
+      {agentDraft && (
+        <form className="ai-settings-form local-ai-agent-create" aria-label="Create agent" onSubmit={(event) => void saveNewAgent(event)}>
+          <label>
+            <span>Name</span>
+            <input
+              aria-label="Agent name"
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+              value={agentDraft.name}
+              maxLength={MAX_AGENT_NAME_LENGTH}
+              autoFocus
+              onChange={(event) => setAgentDraft({ ...agentDraft, name: event.currentTarget.value })}
+            />
+          </label>
+          <label>
+            <span>Instructions</span>
+            <textarea
+              aria-label="Agent instructions"
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+              value={agentDraft.instructions}
+              maxLength={MAX_AGENT_INSTRUCTIONS_LENGTH}
+              rows={3}
+              onChange={(event) => setAgentDraft({ ...agentDraft, instructions: event.currentTarget.value })}
+            />
+          </label>
+          {agentError && <p className="local-ai-composer-error" role="alert">{agentError}</p>}
+          <div className="ai-settings-actions">
+            <button className="settings-command" type="button" onClick={() => setAgentDraft(null)}>Cancel</button>
+            <button className="settings-command" type="submit" disabled={busy || savingAgent || agentDraft.name.trim() === '' || agentDraft.instructions.trim() === ''}>Save agent</button>
+          </div>
+        </form>
+      )}
+      <div className="local-ai-transcript" ref={transcriptRef} onScroll={handleTranscriptScroll} role="log" aria-label="Local AI conversation" aria-live="polite" aria-busy={runHere || imageHere}>
         {trimmed && <p className="local-ai-notice">Only the latest {LOCAL_AI_HISTORY_TURN_LIMIT} messages are sent to the model.</p>}
         {loading && messages.length === 0 && <p className="local-ai-status" role="status">Loading chat…</p>}
-        {!loading && messages.length === 0 && !runHere && (
+        {!loading && messages.length === 0 && !runHere && !imageHere && (
           <div className="local-ai-empty">
             <Sparkles size={24} />
             <p>Start a conversation</p>
@@ -449,6 +689,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
             key={message.seq}
             message={message}
             idle={!busy}
+            imagePrompt={imagePromptSeqs.has(message.seq)}
             editContent={edit && edit.seq === message.seq ? edit.content : null}
             onStartEdit={() => setEdit({ seq: message.seq, content: message.content })}
             onEditChange={(content) => setEdit((current) => (current ? { ...current, content } : current))}
@@ -470,6 +711,14 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
             )}
           </article>
         )}
+        {imageHere && imageRun && (
+          <article className="local-ai-message is-assistant local-ai-image-run">
+            <span className="local-ai-message-label">Local AI</span>
+            <p className="local-ai-status" role="status">{imageRunStatus(imageRun)}</p>
+            {imageRun.totalSteps > 0 && <progress className="local-ai-image-progress" value={imageRun.step} max={imageRun.totalSteps} aria-label="Image generation progress" />}
+            {imageRun.preview && <img className="local-ai-image-preview" src={`data:image/png;base64,${imageRun.preview}`} alt="Image generation preview" />}
+          </article>
+        )}
         {failure && failure.chatId === chatId && (
           <div className="local-ai-error" role="alert">
             <CircleAlert size={16} aria-hidden="true" />
@@ -483,43 +732,59 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
       </div>
       {showJump && <button className="local-ai-jump" type="button" aria-label="Scroll to latest message" onClick={jumpToLatest}><ArrowDown size={14} />Latest</button>}
       <form className="local-ai-composer" onSubmit={handleSubmit}>
-        {attachments.length > 0 && (
-          <ul className="local-ai-attachment-list is-pending" aria-label="Pending attachments">
-            {attachments.map((attachment, index) => (
-              <li key={`${attachment.name}:${index}`}>
-                <FileText size={12} />
-                <span>{attachment.name}</span>
-                <button className="icon-button" type="button" aria-label={`Remove ${attachment.name}`} onClick={() => removeAttachment(index)} disabled={busy}><X size={12} /></button>
-              </li>
-            ))}
-          </ul>
-        )}
         {composerError && <p className="local-ai-composer-error" role="alert">{composerError}</p>}
         {runElsewhere && <p className="local-ai-notice" role="status">Local AI is replying in another chat.</p>}
+        {imageElsewhere && <p className="local-ai-notice" role="status">Image generation is running in another chat.</p>}
         <div className="local-ai-composer-row">
-          <button className="icon-button" type="button" aria-label="Attach files" title="Attach images or text files" onClick={() => fileInputRef.current?.click()} disabled={busy || attachments.length >= LOCAL_AI_ATTACHMENT_LIMIT}>
-            <Paperclip size={16} />
-          </button>
-          <input ref={fileInputRef} type="file" multiple accept={LOCAL_AI_ATTACHMENT_ACCEPT} hidden onChange={handleFileInput} />
+          {attachments.length > 0 && (
+            <ul className="local-ai-attachment-list is-pending" aria-label="Pending attachments">
+              {attachments.map((attachment, index) => (
+                <li key={`${attachment.name}:${index}`}>
+                  {attachment.kind === 'image' && attachment.data ? (
+                    <img className="local-ai-attachment-thumb" src={localAIImageURL(attachment)} alt="" />
+                  ) : (
+                    <FileText size={12} />
+                  )}
+                  <span>{attachment.name}</span>
+                  <button className="icon-button" type="button" aria-label={`Remove ${attachment.name}`} onClick={() => removeAttachment(index)} disabled={busy}><X size={12} /></button>
+                </li>
+              ))}
+            </ul>
+          )}
           <textarea
             ref={composerRef}
             value={draft}
             onChange={(event) => setDraft(event.currentTarget.value)}
             onKeyDown={handleComposerKeyDown}
+            onPaste={handleComposerPaste}
             placeholder="Message your local model"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
             aria-label="Message local AI"
-            rows={2}
+            rows={1}
             disabled={busy}
           />
-          {runHere ? (
-            <button className="local-ai-stop" type="button" aria-label="Stop generating" title="Stop generating" onClick={stopRun} disabled={runView?.stopping ?? false}>
-              <Square size={13} />
-            </button>
-          ) : (
-            <button className="send-button" type="submit" aria-label="Send to local AI" disabled={!canSend}>
-              <Send size={17} />
-            </button>
-          )}
+          <div className="local-ai-composer-footer">
+            <div className="local-ai-composer-tools">
+              <button className="icon-button" type="button" aria-label="Attach files" title="Attach images or text files" onClick={() => fileInputRef.current?.click()} disabled={busy || attachments.length >= LOCAL_AI_ATTACHMENT_LIMIT}>
+                <Paperclip size={16} />
+              </button>
+              <input ref={fileInputRef} type="file" multiple accept={LOCAL_AI_ATTACHMENT_ACCEPT} hidden onChange={handleFileInput} />
+              <button className="icon-button" type="button" aria-label="Generate image" title="Generate an image from the message text" onClick={() => void generateImage()} disabled={busy || draft.trim() === ''}>
+                <ImagePlus size={16} />
+              </button>
+            </div>
+            {runHere || imageHere ? (
+              <button className="local-ai-stop" type="button" aria-label="Stop generating" title="Stop generating" onClick={runHere ? stopRun : stopImage} disabled={runHere ? (runView?.stopping ?? false) : (imageRun?.stopping ?? false)}>
+                <Square size={13} />
+              </button>
+            ) : (
+              <button className="send-button" type="submit" aria-label="Send to local AI" disabled={!canSend}>
+                <Send size={17} />
+              </button>
+            )}
+          </div>
         </div>
       </form>
     </section>
