@@ -44,7 +44,7 @@ export function VoiceMessagePlayer({ label, waveformKey, durationMs, sizeBytes, 
   const audioRef = useRef<HTMLAudioElement>(null)
   const pendingPlayRef = useRef(false)
   const autoPlayAttemptedRef = useRef(false)
-  const requestAndPlayRef = useRef<() => void>(() => {})
+  const requestAndPlayRef = useRef<() => void>(() => { })
   const scrubbingRef = useRef(false)
   const placeholder = useMemo(() => placeholderWaveform(waveformKey || label, WAVEFORM_BARS), [waveformKey, label])
   const bars = peaks ?? placeholder

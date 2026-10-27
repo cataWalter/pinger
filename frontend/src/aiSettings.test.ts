@@ -24,8 +24,8 @@ import {
 
 describe('AI feature settings', () => {
   it('has one spec per tunable feature with placeholders present in the default prompt', () => {
-    expect(AI_FEATURE_SPECS).toHaveLength(11)
-    expect(new Set(AI_FEATURE_SPECS.map((spec) => spec.id)).size).toBe(11)
+    expect(AI_FEATURE_SPECS).toHaveLength(10)
+    expect(new Set(AI_FEATURE_SPECS.map((spec) => spec.id)).size).toBe(10)
     for (const spec of AI_FEATURE_SPECS) {
       expect(spec.prompt.trim()).not.toBe('')
       for (const placeholder of spec.placeholders) {
@@ -90,10 +90,9 @@ describe('AI feature settings', () => {
   })
 
   it('keeps the fixed rules after custom instructions', () => {
-    const system = buildAIFeatureSystemPrompt('chat_translation', 'Translate into Turkish.')
+    const system = buildAIFeatureSystemPrompt('summarize', 'Use short bullets.')
 
-    expect(system).toBe(`Translate into Turkish. ${aiFeatureSpec('chat_translation').fixedRules}`)
-    expect(system).toContain('one valid JSON array of strings')
+    expect(system).toBe(`Use short bullets. ${aiFeatureSpec('summarize').fixedRules}`)
   })
 
   it('uses the default prompt when instructions are blank', () => {

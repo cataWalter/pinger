@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -140,7 +141,7 @@ func TestLocalGhostwriterCompletionUsesOllamaGenerate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply, err := localGhostwriterCompletion(context.Background(), ghostwriterHTTPClient, GhostwriterProviderOllama, endpoint, "qwen2.5:3b", "style profile", "complete this", GhostwriterModeAutocomplete)
+	reply, err := localGhostwriterCompletion(context.Background(), ghostwriterHTTPClient, GhostwriterProviderOllama, endpoint, "qwen2.5:3b", "style profile", "complete this", GhostwriterModeSlash)
 	if err != nil {
 		t.Fatalf("localGhostwriterCompletion() error = %v", err)
 	}
@@ -198,38 +199,9 @@ func TestParseGhostwriterSuggestions(t *testing.T) {
 	if len(chips) != 3 || chips[0].Type != "chip" || chips[0].Label != "Direct" || chips[2].Label != "Alternative" {
 		t.Fatalf("chips = %+v", chips)
 	}
-	completion, err := parseGhostwriterSuggestions(GhostwriterModeAutocomplete, "Pazar o zaman ?", "", "Pazar, o zaman mı?")
-	if err != nil || len(completion) != 1 || completion[0].Text != "Pazar, o zaman mı?" {
-		t.Fatalf("autocomplete = %+v, error = %v", completion, err)
-	}
 	slash, err := parseGhostwriterSuggestions(GhostwriterModeSlash, "", "decline politely", "I appreciate the offer, but I can't make it.")
 	if err != nil || len(slash) != 1 || slash[0].Type != "slash_result" || slash[0].Label != "decline politely" {
 		t.Fatalf("slash result = %+v, error = %v", slash, err)
-	}
-}
-
-func TestBuildGhostwriterAutocompletePromptEditsInsteadOfAppending(t *testing.T) {
-	_, userPrompt, err := buildGhostwriterPrompts(
-		GhostwriterRequest{RoomID: "room", Mode: GhostwriterModeAutocomplete, Draft: "Pazar o zaman ?"},
-		MessageContext{},
-		UserStyleProfile{},
-		nil,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, instruction := range []string{
-		"Edit the user's entire draft in the same language",
-		"improve wording that sounds awkward, stilted, or unnatural even when technically correct",
-		"Prefer natural, idiomatic phrasing that fits this chat",
-		"Preserve the intended meaning",
-		"Do not answer the conversation, continue the thought",
-		"If the draft is already clear and natural for this context, return it unchanged",
-		"Return only the complete revised draft",
-	} {
-		if !strings.Contains(userPrompt, instruction) {
-			t.Errorf("autocomplete prompt missing %q: %s", instruction, userPrompt)
-		}
 	}
 }
 
@@ -304,5 +276,69 @@ func TestBuildGhostwriterPromptsKeepRoomIdentifiersOutOfPrompt(t *testing.T) {
 	}
 	if strings.Contains(systemPrompt, context.ContactID) || !strings.Contains(systemPrompt, "WhatsApp") || !strings.Contains(systemPrompt, "sounds good") || !strings.Contains(userPrompt, "decline politely") {
 		t.Fatalf("unexpected prompts:\nsystem: %s\nuser: %s", systemPrompt, userPrompt)
+	}
+}
+
+func TestSelectGhostwriterMessagesKeepsLatestUsableMessages(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	messages := make([]matrix.Message, 0, 512)
+	for index := 0; index < 510; index++ {
+		messages = append(messages, matrix.Message{Sender: "@contact:example.org", SenderName: "Contact", Own: index%2 == 1, Body: fmt.Sprintf("message %d", index), Timestamp: base.Add(time.Duration(index) * time.Minute)})
+	}
+	messages = append(messages, matrix.Message{Body: "photo", MediaURI: "mxc://example.org/photo"}, matrix.Message{Body: "   "})
+	conversation, _ := selectGhostwriterMessages(messages, ghostwriterNextReplyContextLimit)
+	if len(conversation) != 500 || conversation[0].Body != "message 10" || conversation[499].Body != "message 509" {
+		t.Fatalf("conversation window = %d messages, first %q, last %q", len(conversation), conversation[0].Body, conversation[len(conversation)-1].Body)
+	}
+	hasSent, hasReceived := false, false
+	for _, message := range conversation {
+		hasSent = hasSent || message.Own
+		hasReceived = hasReceived || !message.Own
+	}
+	if !hasSent || !hasReceived {
+		t.Fatalf("conversation window sent=%t received=%t, want both", hasSent, hasReceived)
+	}
+}
+
+func TestBuildGhostwriterNextReplyPromptUsesTranscriptAndNewestIncomingMessage(t *testing.T) {
+	if err := validateGhostwriterRequest(GhostwriterRequest{RoomID: "room", Mode: GhostwriterModeNext}); err != nil {
+		t.Fatalf("validateGhostwriterRequest(next) error = %v", err)
+	}
+	messageContext := MessageContext{
+		ContactName: "Maya",
+		Platform:    "Matrix",
+		Messages: []MessageContextEntry{
+			{Sender: "Maya", Text: "Are we still on for Friday?", Timestamp: 1},
+			{Sender: "You", Text: "I'll check the calendar and let you know", Timestamp: 2, Own: true},
+			{Sender: "Maya", Text: "great,\nwhat time?", Timestamp: 3},
+		},
+	}
+	systemPrompt, userPrompt, err := buildGhostwriterPrompts(
+		GhostwriterRequest{RoomID: "room", Mode: GhostwriterModeNext},
+		messageContext,
+		UserStyleProfile{Casing: "mostly lowercase", AverageWordCount: 8},
+		[]string{"sounds good"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(systemPrompt, `"messages":`) || !strings.Contains(systemPrompt, "Maya: great, what time?") || !strings.Contains(systemPrompt, "You: I'll check the calendar") {
+		t.Fatalf("system prompt does not use transcript context:\n%s", systemPrompt)
+	}
+	if !strings.Contains(userPrompt, "Promises the owner made are still pending") || !strings.Contains(userPrompt, `The newest message to answer is from Maya: "great, what time?"`) {
+		t.Fatalf("user prompt does not target the newest incoming message:\n%s", userPrompt)
+	}
+	if _, _, err := buildGhostwriterPrompts(GhostwriterRequest{RoomID: "room", Mode: GhostwriterModeNext}, MessageContext{Messages: []MessageContextEntry{{Sender: "You", Text: "hi", Own: true}}}, UserStyleProfile{}, nil); err == nil {
+		t.Fatal("next reply prompt accepted a chat without an incoming message")
+	}
+}
+
+func TestParseGhostwriterNextReplyReturnsOneCleanSuggestion(t *testing.T) {
+	suggestions, err := parseGhostwriterSuggestions(GhostwriterModeNext, "", "", "  \"Sounds good, I'll confirm tonight.\"  ")
+	if err != nil || len(suggestions) != 1 || suggestions[0].Type != "next_reply" || suggestions[0].Text != "Sounds good, I'll confirm tonight." {
+		t.Fatalf("next reply = %+v, error = %v", suggestions, err)
+	}
+	if _, err := parseGhostwriterSuggestions(GhostwriterModeNext, "", "", " \" \" "); err == nil {
+		t.Fatal("parseGhostwriterSuggestions(next) accepted an empty reply")
 	}
 }

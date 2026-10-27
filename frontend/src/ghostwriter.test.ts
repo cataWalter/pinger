@@ -23,6 +23,7 @@ describe('Ghostwriter helpers', () => {
 
   it('narrows generated binding suggestions to supported modes', () => {
     expect(isGhostSuggestion({ type: 'chip' })).toBe(true)
+    expect(isGhostSuggestion({ type: 'next_reply' })).toBe(true)
     expect(isGhostSuggestion({ type: 'unknown' })).toBe(false)
   })
 })

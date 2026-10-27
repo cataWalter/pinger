@@ -61,7 +61,7 @@ func TestAnalyzeLanguageTutorUsesLocalStructuredRequest(t *testing.T) {
 		if !strings.Contains(request.Messages[1].Content, `"Ben okula gidiyorum"`) {
 			t.Errorf("user prompt did not safely quote input: %q", request.Messages[1].Content)
 		}
-		content := "```json\n" + `{"detected_language":"tr","corrected_text":"Ben okula gidiyorum.","translation":"Vado a scuola.","has_grammar_errors":false,"morpheme_breakdown":[{"word":"okula","breakdown":"okul-a -> scuola-verso","meaning":"to school"}],"grammar_rule":"Turkish uses SOV order.","text_to_insert":""}` + "\n```"
+		content := "```json\n" + `{"detected_language":"tr","corrected_text":"Ben okula gidiyorum.","translation":"Vado a scuola.","has_grammar_errors":false,"phrases":[{"text":"Ben okula gidiyorum.","meaning":"I go to school.","words":[{"word":"okula","breakdown":"okul-a -> scuola-verso","meaning":"to school"}]}],"grammar_rule":"Turkish uses SOV order.","text_to_insert":""}` + "\n```"
 		if err := json.NewEncoder(w).Encode(chatCompletionResponse(content)); err != nil {
 			t.Errorf("encode response: %v", err)
 		}
@@ -79,8 +79,8 @@ func TestAnalyzeLanguageTutorUsesLocalStructuredRequest(t *testing.T) {
 	if analysis.TextToInsert != "" {
 		t.Fatalf("incoming message produced text to insert: %q", analysis.TextToInsert)
 	}
-	if len(analysis.MorphemeBreakdown) != 1 || analysis.MorphemeBreakdown[0].Word != "okula" {
-		t.Fatalf("morpheme breakdown = %+v", analysis.MorphemeBreakdown)
+	if len(analysis.Phrases) != 1 || len(analysis.Phrases[0].Words) != 1 || analysis.Phrases[0].Words[0].Word != "okula" {
+		t.Fatalf("phrases = %+v", analysis.Phrases)
 	}
 }
 
@@ -105,23 +105,26 @@ func TestAnalyzeLanguageTutorRejectsEmptyAndRemoteInput(t *testing.T) {
 
 func TestParseTutorAnalysisValidatesDraftOutput(t *testing.T) {
 	draft := mustLanguageTutorRequest(t, "Merhaba", languageTutorModeDraft, "it")
-	valid := `{"detected_language":"Turkish","corrected_text":"Merhaba.","translation":"Ciao.","morpheme_breakdown":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}],"grammar_rule":"Vowel harmony.","text_to_insert":"Merhaba."}`
+	valid := `{"detected_language":"Turkish","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}]}],"grammar_rule":"Vowel harmony.","text_to_insert":"Merhaba."}`
 	analysis, err := parseTutorAnalysis(valid, draft)
 	if err != nil {
 		t.Fatalf("parseTutorAnalysis() error = %v", err)
 	}
-	if analysis.DetectedLanguage != "tr" || analysis.OriginalText != "Merhaba" || analysis.TextToInsert != "Merhaba." || len(analysis.MorphemeBreakdown) != 1 {
+	if analysis.DetectedLanguage != "tr" || analysis.OriginalText != "Merhaba" || analysis.TextToInsert != "Merhaba." || len(analysis.Phrases) != 1 {
 		t.Fatalf("normalized analysis = %+v", analysis)
 	}
 
 	for _, response := range []string{
 		`not json`,
-		`{"detected_language":"xyz-unknown","corrected_text":"Merhaba.","translation":"Ciao.","morpheme_breakdown":[{"word":"Merhaba","breakdown":"x"}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"","translation":"Ciao.","morpheme_breakdown":[{"word":"Merhaba","breakdown":"x"}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"","morpheme_breakdown":[{"word":"Merhaba","breakdown":"x"}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","morpheme_breakdown":[],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","morpheme_breakdown":[{"word":"Merhaba"}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","morpheme_breakdown":[{"word":"Merhaba","breakdown":"x"}],"grammar_rule":"","text_to_insert":"Merhaba."}`,
+		`{"detected_language":"xyz-unknown","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
+		`{"detected_language":"tr","corrected_text":"","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
+		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
+		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
+		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
+		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
+		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
+		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
+		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"","text_to_insert":"Merhaba."}`,
 	} {
 		if _, err := parseTutorAnalysis(response, draft); err == nil {
 			t.Errorf("parseTutorAnalysis(%q) accepted invalid output", response)
@@ -131,7 +134,7 @@ func TestParseTutorAnalysisValidatesDraftOutput(t *testing.T) {
 
 func TestParseTutorAnalysisHandlesIncomingMessages(t *testing.T) {
 	incoming := mustLanguageTutorRequest(t, "Ciao, come stai?", languageTutorModeMessage, "en")
-	response := `{"detected_language":"it","translation":"Hi, how are you?","has_grammar_errors":true,"error_explanation":"ignored","morpheme_breakdown":[],"grammar_rule":"","text_to_insert":"Merhaba"}`
+	response := `{"detected_language":"it","translation":"Hi, how are you?","has_grammar_errors":true,"error_explanation":"ignored","phrases":[],"grammar_rule":"","text_to_insert":"Merhaba"}`
 	analysis, err := parseTutorAnalysis(response, incoming)
 	if err != nil {
 		t.Fatalf("parseTutorAnalysis() error = %v", err)
@@ -145,20 +148,32 @@ func TestParseTutorAnalysisHandlesIncomingMessages(t *testing.T) {
 	if analysis.TextToInsert != "" {
 		t.Fatalf("incoming message produced text to insert: %q", analysis.TextToInsert)
 	}
-	if analysis.MorphemeBreakdown == nil || len(analysis.MorphemeBreakdown) != 0 {
-		t.Fatalf("morpheme breakdown = %#v, want an empty list", analysis.MorphemeBreakdown)
+	if analysis.Phrases == nil || len(analysis.Phrases) != 0 {
+		t.Fatalf("phrases = %#v, want an empty list", analysis.Phrases)
 	}
 }
 
 func TestParseTutorAnalysisFindsWrappedJSONAndDefaultsTextToInsert(t *testing.T) {
 	draft := mustLanguageTutorRequest(t, "Merhaba.", languageTutorModeDraft, "it")
-	response := "Here is the analysis:\n```json\n" + `{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","morpheme_breakdown":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}],"grammar_rule":"Turkish uses vowel harmony."}` + "\n```\n"
+	response := "Here is the analysis:\n```json\n" + `{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}]}],"grammar_rule":"Turkish uses vowel harmony."}` + "\n```\n"
 	analysis, err := parseTutorAnalysis(response, draft)
 	if err != nil {
 		t.Fatalf("parseTutorAnalysis() error = %v", err)
 	}
 	if analysis.OriginalText != "Merhaba." || analysis.CorrectedText != "Merhaba." || analysis.TextToInsert != "Merhaba." {
 		t.Fatalf("normalized analysis = %+v", analysis)
+	}
+}
+
+func TestParseTutorAnalysisKeepsPhraseBoundaries(t *testing.T) {
+	request := mustLanguageTutorRequest(t, "Yaa ben seni arzuluyorum", languageTutorModeMessage, "it")
+	response := `{"detected_language":"tr","corrected_text":"Yaa ben seni arzuluyorum","translation":"Sì, ti desidero.","phrases":[{"text":"Yaa","meaning":"Sì","words":[{"word":"Yaa","breakdown":"Yaa","meaning":"yeah (interjection)"}]},{"text":"ben seni arzuluyorum","meaning":"ti desidero","words":[{"word":"ben","breakdown":"ben","meaning":"I"},{"word":"seni","breakdown":"sen-i","meaning":"you (accusative)"},{"word":"arzuluyorum","breakdown":"arzu-la-yor-um","meaning":"I desire"}]}],"grammar_rule":"Turkish places the verb last.","text_to_insert":""}`
+	analysis, err := parseTutorAnalysis(response, request)
+	if err != nil {
+		t.Fatalf("parseTutorAnalysis() error = %v", err)
+	}
+	if len(analysis.Phrases) != 2 || analysis.Phrases[0].Text != "Yaa" || analysis.Phrases[1].Text != "ben seni arzuluyorum" || len(analysis.Phrases[1].Words) != 3 {
+		t.Fatalf("phrases = %+v", analysis.Phrases)
 	}
 }
 
@@ -178,7 +193,7 @@ func TestAnalyzeLanguageTutorRetriesMalformedResponseAndResetsStream(t *testing.
 			if request.MaxTokens != languageTutorRetryMaxTokens || len(request.Messages) != 2 || !strings.Contains(request.Messages[1].Content, "Re-analyze the original source text") {
 				t.Errorf("unexpected retry request: %+v", request)
 			}
-			content = `{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","morpheme_breakdown":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}],"grammar_rule":"Turkish uses vowel harmony.","text_to_insert":""}`
+			content = `{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}]}],"grammar_rule":"Turkish uses vowel harmony.","text_to_insert":""}`
 		}
 		if err := json.NewEncoder(w).Encode(chatCompletionResponse(content)); err != nil {
 			t.Errorf("encode response: %v", err)

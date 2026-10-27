@@ -763,7 +763,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
             autoCapitalize="off"
             aria-label="Message local AI"
             rows={1}
-            disabled={busy}
+            disabled={loading}
           />
           <div className="local-ai-composer-footer">
             <div className="local-ai-composer-tools">

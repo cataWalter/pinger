@@ -33,7 +33,7 @@ type PromptGroup = {
 // Feature ids listed here appear under their group title; any other feature appears under Other.
 const PROMPT_GROUPS: { title: string, ids: string[] }[] = [
   { title: 'Writing and assistants', ids: ['ask_ai', 'local_chat', 'agent', 'draft_reply', 'ghostwriter', 'rewrite', 'shorten'] },
-  { title: 'Translation and understanding', ids: ['chat_translation', 'explain', 'summarize', 'topics', 'conversation_analysis', 'language_tutor'] },
+  { title: 'Translation and understanding', ids: ['explain', 'summarize', 'topics', 'conversation_analysis', 'language_tutor'] },
   { title: 'Checks and background tasks', ids: ['tone_guard', 'contact_dossier'] },
 ]
 

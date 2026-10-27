@@ -33,7 +33,7 @@ Rules:
 1. Translation: always translate the source text into the explanation language named in the request.
 2. Learning-language text: when the source is written in the learning language, correct real grammatical, syntax, and spelling errors and give the corrected sentence. Ignore missing diacritics that come from keyboard limits, such as c, g, i, o, s, u for the Turkish letters ç, ğ, ı, ö, ş, ü, and write the correct form. Do not report those as errors.
 3. Drafts: when the source is an outgoing draft, corrected_text is the learner's text in the learning language, ready to send.
-4. Word-by-word analysis: for each word in corrected_text, split it into roots, affixes, particles, and inflections, and explain each part in the explanation language. For agglutinative languages, separate every suffix (for example Turkish ev-de-yim: ev "house", -de "at", -yim "I am").
+4. Word-by-word analysis: split corrected_text into phrases, each one unit of meaning such as a clause, interjection, or verb phrase. Keep every word in order and in exactly one phrase. For each word, split it into roots, affixes, particles, and inflections, and explain each part in the explanation language. For agglutinative languages, separate every suffix (for example Turkish ev-de-yim: ev "house", -de "at", -yim "I am").
 5. Grammar explanation: name the core grammar rule in the explanation language, such as vowel harmony, word order, or verb tense.
 6. Strict non-interference: NEVER suggest what to say next or draft follow-up opinions.
 7. Tone: extremely concise. No introductory pleasantries.
@@ -49,17 +49,24 @@ const (
 )
 
 type TutorAnalysis struct {
-	DetectedLanguage    string         `json:"detected_language"`
-	TargetLanguage      string         `json:"target_language"`
-	ExplanationLanguage string         `json:"explanation_language"`
-	OriginalText        string         `json:"original_text"`
-	CorrectedText       string         `json:"corrected_text"`
-	Translation         string         `json:"translation"`
-	HasGrammarErrors    bool           `json:"has_grammar_errors"`
-	ErrorExplanation    string         `json:"error_explanation,omitempty"`
-	MorphemeBreakdown   []MorphemeItem `json:"morpheme_breakdown"`
-	GrammarRule         string         `json:"grammar_rule"`
-	TextToInsert        string         `json:"text_to_insert"`
+	DetectedLanguage    string        `json:"detected_language"`
+	TargetLanguage      string        `json:"target_language"`
+	ExplanationLanguage string        `json:"explanation_language"`
+	OriginalText        string        `json:"original_text"`
+	CorrectedText       string        `json:"corrected_text"`
+	Translation         string        `json:"translation"`
+	HasGrammarErrors    bool          `json:"has_grammar_errors"`
+	ErrorExplanation    string        `json:"error_explanation,omitempty"`
+	Phrases             []TutorPhrase `json:"phrases"`
+	GrammarRule         string        `json:"grammar_rule"`
+	TextToInsert        string        `json:"text_to_insert"`
+}
+
+// TutorPhrase is one unit of meaning in corrected_text, such as a clause or interjection.
+type TutorPhrase struct {
+	Text    string         `json:"text"`
+	Meaning string         `json:"meaning"`
+	Words   []MorphemeItem `json:"words"`
 }
 
 type MorphemeItem struct {
@@ -246,7 +253,7 @@ func analyzeLanguageTutor(ctx context.Context, client *http.Client, endpoint, mo
 
 	retryMessages := []AIMessage{
 		messages[0],
-		{Role: "user", Content: userPrompt + "\nYour previous response did not satisfy the required JSON schema (" + parseErr.Error() + "). Re-analyze the original source text from scratch. Return one complete JSON object only, with every required field and one morpheme item per word of corrected_text. Do not include markdown or commentary."},
+		{Role: "user", Content: userPrompt + "\nYour previous response did not satisfy the required JSON schema (" + parseErr.Error() + "). Re-analyze the original source text from scratch. Return one complete JSON object only, with every required field and every word of corrected_text inside a phrase. Do not include markdown or commentary."},
 	}
 	response, err = complete(retryMessages, max(maxTokens, languageTutorRetryMaxTokens), true)
 	if err != nil {
@@ -283,13 +290,13 @@ The source text is %s.
 Field rules:
 - detected_language: the ISO 639-1 code of the source text's language.
 - translation: the meaning of the source text in %s.
-- If the source is written in %s or is an outgoing draft, corrected_text is the learner's text in %s. For a draft in another language, write its %s version. For text already in %s, correct only real errors. morpheme_breakdown has one item per word of corrected_text, and grammar_rule names the core rule.
-- Otherwise, corrected_text is "", grammar_rule is "", and morpheme_breakdown is [].
+- If the source is written in %s or is an outgoing draft, corrected_text is the learner's text in %s. For a draft in another language, write its %s version. For text already in %s, correct only real errors. phrases splits corrected_text into phrases in order, and every word appears in exactly one phrase's words. grammar_rule names the core rule.
+- Otherwise, corrected_text is "", grammar_rule is "", and phrases is [].
 - has_grammar_errors is true only for real errors in %s text. error_explanation describes them in %s. Otherwise, has_grammar_errors is false and error_explanation is "".
 - text_to_insert: for an outgoing draft, the same as corrected_text. For an incoming message, "".
 
 Return exactly this JSON shape:
-{"detected_language":"<code>","corrected_text":"...","translation":"...","has_grammar_errors":false,"error_explanation":"","morpheme_breakdown":[{"word":"...","breakdown":"...","meaning":"..."}],"grammar_rule":"...","text_to_insert":"..."}
+{"detected_language":"<code>","corrected_text":"...","translation":"...","has_grammar_errors":false,"error_explanation":"","phrases":[{"text":"...","meaning":"...","words":[{"word":"...","breakdown":"...","meaning":"..."}]}],"grammar_rule":"...","text_to_insert":"..."}
 
 Source text (JSON string): %s`,
 		languageTutorLabel(learning), explanation, explanation,
@@ -416,25 +423,33 @@ func normalizeTutorAnalysis(analysis *TutorAnalysis, request languageTutorReques
 		analysis.TextToInsert = ""
 	}
 
-	// Drafts and learning-language messages need a corrected form, a word breakdown, and a grammar rule.
+	// Drafts and learning-language messages need a corrected form, phrases, and a grammar rule.
 	needsLearningText := request.Mode == languageTutorModeDraft || detected == learning
-	if analysis.Translation == "" || (needsLearningText && (analysis.CorrectedText == "" || analysis.GrammarRule == "" || len(analysis.MorphemeBreakdown) == 0)) {
+	if analysis.Translation == "" || (needsLearningText && (analysis.CorrectedText == "" || analysis.GrammarRule == "" || len(analysis.Phrases) == 0)) {
 		return errors.New("Language Tutor returned an incomplete analysis")
 	}
 	if analysis.CorrectedText == "" {
-		analysis.MorphemeBreakdown = nil
+		analysis.Phrases = nil
 	}
-	for index := range analysis.MorphemeBreakdown {
-		item := &analysis.MorphemeBreakdown[index]
-		item.Word = strings.TrimSpace(item.Word)
-		item.Breakdown = strings.TrimSpace(item.Breakdown)
-		item.Meaning = strings.TrimSpace(item.Meaning)
-		if item.Word == "" || item.Breakdown == "" {
-			return errors.New("Language Tutor returned an incomplete morpheme breakdown")
+	for index := range analysis.Phrases {
+		phrase := &analysis.Phrases[index]
+		phrase.Text = strings.TrimSpace(phrase.Text)
+		phrase.Meaning = strings.TrimSpace(phrase.Meaning)
+		if phrase.Text == "" || phrase.Meaning == "" || len(phrase.Words) == 0 {
+			return errors.New("Language Tutor returned an incomplete phrase")
+		}
+		for wordIndex := range phrase.Words {
+			item := &phrase.Words[wordIndex]
+			item.Word = strings.TrimSpace(item.Word)
+			item.Breakdown = strings.TrimSpace(item.Breakdown)
+			item.Meaning = strings.TrimSpace(item.Meaning)
+			if item.Word == "" || item.Breakdown == "" {
+				return errors.New("Language Tutor returned an incomplete word breakdown")
+			}
 		}
 	}
-	if analysis.MorphemeBreakdown == nil {
-		analysis.MorphemeBreakdown = []MorphemeItem{}
+	if analysis.Phrases == nil {
+		analysis.Phrases = []TutorPhrase{}
 	}
 	return nil
 }

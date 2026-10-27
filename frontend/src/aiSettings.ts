@@ -12,7 +12,6 @@ export type AIFeatureID =
   | 'topics'
   | 'conversation_analysis'
   | 'agent'
-  | 'chat_translation'
   | 'tone_guard'
 
 export interface AIFeatureTuning {
@@ -208,16 +207,6 @@ export const AI_FEATURE_SPECS: readonly AIFeatureSpec[] = [
     prompt: 'You are the chat assistant profile “{name}”. Apply the user-defined instructions below to this request, and keep your answer focused on the conversation:\n{instructions}',
     fixedRules: `Return exactly one suggestion for the user to review, with no preface, labels, alternatives, or translations unless the instructions above ask for them. Do not claim to have sent or performed any action. ${UNTRUSTED_CHAT_RULE}`,
     temperature: 0.8,
-    maxTokens: 0,
-  },
-  {
-    id: 'chat_translation',
-    label: 'Translate recent messages',
-    description: 'Translates the latest incoming messages in the open room, batch by batch.',
-    placeholders: [],
-    prompt: 'Translate every message body into the target language named in the request. Keep one translation per input, in the same order, and do not summarize, merge, split, or omit messages. Leave messages already in the target language unchanged, and keep names, links, numbers, and emoji as they are.',
-    fixedRules: `Return only one valid JSON array of strings, with exactly one string per input entry in exactly the same order. Example for two inputs: ["first translation", "second translation"]. Keep times, dates, and numbers exactly as written, and never convert between 12-hour and 24-hour formats. Never return an object, duplicate keys, numbered list, or commentary. ${UNTRUSTED_CHAT_RULE}`,
-    temperature: 0.6,
     maxTokens: 0,
   },
   {

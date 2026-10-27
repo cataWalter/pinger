@@ -43,6 +43,8 @@ type AppService struct {
 	restartRequested         atomic.Bool
 	setAutostart             func(bool) error
 	setMenuBarIcon           func(bool)
+	menuStateChanged         func(MenuState)
+	menuAccountsChanged      func()
 	chooseSavePath           func(directory, filename string) (string, error)
 	chooseDownloadFolder     func() (string, error)
 	revealFile               func(string) error

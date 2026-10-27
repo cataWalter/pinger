@@ -91,7 +91,7 @@ describe('ContactHUD', () => {
   })
 
   it('ignores a late refresh result after switching contacts', async () => {
-    let resolveRefresh: (value: ContactDossierSnapshot) => void = () => {}
+    let resolveRefresh: (value: ContactDossierSnapshot) => void = () => { }
     harness.service.RefreshContactDossier.mockImplementation(() => new Promise((resolve) => { resolveRefresh = resolve }))
     const user = userEvent.setup()
     const { rerender } = render(<ContactHUD accountID="primary" roomID={dossier.roomId} rooms={rooms} onClose={vi.fn()} />)

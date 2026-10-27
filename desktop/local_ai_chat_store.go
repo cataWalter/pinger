@@ -108,9 +108,11 @@ func (s *localAIChatStore) ensureColumn(table, column, definition string) error 
 	return nil
 }
 
+// list returns chats newest first. Unanswered is set when the newest saved turn is the model's, so the user has not replied yet.
 func (s *localAIChatStore) list() ([]LocalAIChatSummary, error) {
 	rows, err := s.db.Query(`SELECT c.chat_id, c.title, c.agent_id, c.kind, c.folder_id, c.updated_at,
-		COALESCE((SELECT substr(m.content, 1, 160) FROM local_ai_chat_messages m WHERE m.chat_id = c.chat_id ORDER BY m.seq DESC LIMIT 1), '')
+		COALESCE((SELECT substr(m.content, 1, 160) FROM local_ai_chat_messages m WHERE m.chat_id = c.chat_id ORDER BY m.seq DESC LIMIT 1), ''),
+		COALESCE((SELECT m.role FROM local_ai_chat_messages m WHERE m.chat_id = c.chat_id ORDER BY m.seq DESC LIMIT 1), '')
 		FROM local_ai_chats c ORDER BY c.updated_at DESC, c.chat_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list local AI chats: %w", err)
@@ -119,9 +121,11 @@ func (s *localAIChatStore) list() ([]LocalAIChatSummary, error) {
 	chats := make([]LocalAIChatSummary, 0)
 	for rows.Next() {
 		var chat LocalAIChatSummary
-		if err := rows.Scan(&chat.ID, &chat.Title, &chat.AgentID, &chat.Kind, &chat.FolderID, &chat.UpdatedAt, &chat.Preview); err != nil {
+		var lastRole string
+		if err := rows.Scan(&chat.ID, &chat.Title, &chat.AgentID, &chat.Kind, &chat.FolderID, &chat.UpdatedAt, &chat.Preview, &lastRole); err != nil {
 			return nil, fmt.Errorf("read local AI chat: %w", err)
 		}
+		chat.Unanswered = lastRole == "assistant"
 		chats = append(chats, chat)
 	}
 	if err := rows.Err(); err != nil {

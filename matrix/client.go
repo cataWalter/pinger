@@ -2816,8 +2816,8 @@ func (c *Client) startPreviewBackfill() {
 // fillMissingPreviews sets the sidebar preview of rooms that have none, most
 // recent room first. The newest message already stored locally is used first.
 // When allowNetwork is true, the remaining rooms read older server history.
-// Only empty previews are filled. LastSeen and LastEventSender never change,
-// so sidebar order and reply state stay as they are.
+// Only empty previews are filled. LastSeen never changes, so sidebar order
+// stays as it is.
 func (c *Client) fillMissingPreviews(ctx context.Context, allowNetwork bool) {
 	if c.engine == nil {
 		return
@@ -2903,8 +2903,8 @@ func (c *Client) previewFromHistory(ctx context.Context, roomID id.RoomID, page 
 }
 
 // applyRoomPreview sets the preview of a room that has none. It also sets the
-// room's last event when the message is not older than it, so history never
-// moves a room backwards. LastSeen and LastEventSender are left unchanged.
+// room's last event and its sender when the message is not older than it, so
+// history never moves a room backwards. LastSeen is left unchanged.
 func (c *Client) applyRoomPreview(roomID string, message Message) bool {
 	if message.Body == "" {
 		return false
@@ -2919,6 +2919,7 @@ func (c *Client) applyRoomPreview(roomID string, message Message) bool {
 	if !message.Timestamp.Before(room.LastEventAt) {
 		room.LastEventAt = message.Timestamp
 		room.LastEventID = message.ID
+		room.LastEventSender = message.Sender
 	}
 	room.Unanswered = roomNeedsReply(room, c.currentUserID(), c.dismissedEvents[roomID])
 	c.rooms[roomID] = room

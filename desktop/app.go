@@ -227,10 +227,6 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 			app.Event.Emit(notificationOpenRoomName, roomID)
 		})
 	}
-	menu := application.NewMenu()
-	menu.Add("Open").OnClick(func(_ *application.Context) {
-		showMainWindow()
-	})
 	markAllRoomsRead := func() {
 		go func() {
 			if markErr := service.markAllRead(); markErr != nil && service.ctx.Err() == nil {
@@ -239,49 +235,20 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 			}
 		}()
 	}
-	menu.Add("Mark All as Read").OnClick(func(_ *application.Context) {
-		markAllRoomsRead()
-	})
-	menu.AddSeparator()
-	menu.Add("Quit").OnClick(func(_ *application.Context) {
-		app.Quit()
-	})
-	tray.SetMenu(menu)
+	menus := newApplicationMenus(service, app, showMainWindow, markAllRoomsRead)
+	tray.SetMenu(menus.trayMenu())
 	if runtime.GOOS == "darwin" {
-		applicationMenu := application.NewMenu()
-		appMenu := applicationMenu.AddSubmenu("Pinger")
-		appMenu.Add("About Pinger").OnClick(func(_ *application.Context) {
-			showMainWindow()
-			app.Event.Emit(applicationMenuAboutName)
+		app.Menu.SetApplicationMenu(menus.applicationMenu())
+		menus.refreshAccounts()
+		menus.syncPreferences(service.preferenceValues())
+	}
+	service.menuStateChanged = func(state MenuState) {
+		application.InvokeAsync(func() {
+			menus.applyState(state)
 		})
-		appMenu.AddSeparator()
-		appMenu.Add("Settings...").SetAccelerator("CmdOrCtrl+,").OnClick(func(_ *application.Context) {
-			showMainWindow()
-			app.Event.Emit(applicationMenuSettingsName)
-		})
-		appMenu.AddSeparator()
-		appMenu.AddRole(application.ServicesMenu)
-		appMenu.AddSeparator()
-		appMenu.AddRole(application.Hide)
-		appMenu.AddRole(application.HideOthers)
-		appMenu.AddRole(application.UnHide)
-		appMenu.AddSeparator()
-		appMenu.AddRole(application.Quit)
-
-		applicationMenu.AddRole(application.FileMenu)
-		applicationMenu.AddRole(application.EditMenu)
-		messagesMenu := applicationMenu.AddSubmenu("Messages")
-		messagesMenu.Add("Search Messages").SetAccelerator("CmdOrCtrl+f").OnClick(func(_ *application.Context) {
-			showMainWindow()
-			app.Event.Emit(applicationMenuSearchName)
-		})
-		messagesMenu.Add("Mark All as Read").OnClick(func(_ *application.Context) {
-			markAllRoomsRead()
-		})
-		applicationMenu.AddRole(application.ViewMenu)
-		applicationMenu.AddRole(application.WindowMenu)
-		applicationMenu.AddRole(application.HelpMenu)
-		app.Menu.SetApplicationMenu(applicationMenu)
+	}
+	service.menuAccountsChanged = func() {
+		application.InvokeAsync(menus.refreshAccounts)
 	}
 	// Tray Show and Hide are no-ops until the native tray exists, so the initial state is applied after launch.
 	if !menuBarIconEnabled() {
@@ -384,6 +351,9 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 			trayDarkMode.Store(trayIconUsesDarkVariant(theme, app.Env.IsDarkMode()))
 			setTrayIcon()
 		}
+		application.InvokeAsync(func() {
+			menus.syncPreferences(state.Preferences)
+		})
 		app.Event.Emit(preferencesUpdateEventName, state)
 	})
 	service.startScheduledJobWorker()

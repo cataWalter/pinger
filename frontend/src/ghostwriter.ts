@@ -1,6 +1,6 @@
 export type GhostwriterProvider = 'ollama' | 'openai-compatible'
-export type GhostwriterMode = 'chips' | 'autocomplete' | 'slash'
-export type GhostSuggestionType = 'chip' | 'autocomplete' | 'slash_result'
+export type GhostwriterMode = 'chips' | 'slash' | 'next'
+export type GhostSuggestionType = 'chip' | 'slash_result' | 'next_reply'
 
 export interface GhostwriterRequest {
   roomId: string
@@ -77,5 +77,5 @@ export function isGhostCommandDraft(value: string) {
 }
 
 export function isGhostSuggestion(value: { type: string }): value is GhostSuggestion {
-  return value.type === 'chip' || value.type === 'autocomplete' || value.type === 'slash_result'
+  return value.type === 'chip' || value.type === 'slash_result' || value.type === 'next_reply'
 }

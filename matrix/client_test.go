@@ -504,7 +504,7 @@ func TestPreviewFromHistoryReadsOnlyWithinBudget(t *testing.T) {
 	})
 }
 
-func TestApplyRoomPreviewKeepsSortingAndReplyState(t *testing.T) {
+func TestApplyRoomPreviewKeepsSortingAndSetsLastSender(t *testing.T) {
 	sortedAt := time.Date(2026, time.October, 12, 9, 0, 0, 0, time.UTC)
 	historyAt := time.Date(2024, time.March, 1, 12, 0, 0, 0, time.UTC)
 	client := &Client{
@@ -535,10 +535,11 @@ func TestApplyRoomPreviewKeepsSortingAndReplyState(t *testing.T) {
 	if hasEvent.Preview != "old text" || hasEvent.LastEventID != "$live" || !hasEvent.LastEventAt.Equal(sortedAt) {
 		t.Fatalf("room with a newer event = %+v, want its last event kept", hasEvent)
 	}
-	for _, room := range []Room{noEvent, hasEvent} {
-		if !room.LastSeen.Equal(sortedAt) || room.LastEventSender != "" || room.Unanswered {
-			t.Fatalf("sorting or reply state changed: %+v", room)
-		}
+	if !noEvent.LastSeen.Equal(sortedAt) || noEvent.LastEventSender != "@friend:example.org" || !noEvent.Unanswered {
+		t.Fatalf("room without an event time = %+v, want the friend's message as the reply state", noEvent)
+	}
+	if !hasEvent.LastSeen.Equal(sortedAt) || hasEvent.LastEventSender != "" || hasEvent.Unanswered {
+		t.Fatalf("room with a newer event = %+v, want its reply state kept", hasEvent)
 	}
 	if kept := client.rooms["!set:example.org"]; kept.Preview != "kept" {
 		t.Fatalf("existing preview = %q, want kept", kept.Preview)

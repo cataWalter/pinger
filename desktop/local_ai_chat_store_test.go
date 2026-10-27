@@ -113,6 +113,37 @@ func TestLocalAIChatStoreListPreviewsLatestMessage(t *testing.T) {
 	}
 }
 
+func TestLocalAIChatStoreFlagsChatsAwaitingUserReply(t *testing.T) {
+	store, _ := openTestLocalAIChatStore(t)
+	chat, err := store.create("", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.appendMessage(chat.ID, LocalAIChatMessage{Role: "user", Content: "Question", Status: "complete"}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.appendMessage(chat.ID, LocalAIChatMessage{Role: "assistant", Content: "Answer", Status: "complete"}, 3); err != nil {
+		t.Fatal(err)
+	}
+	chats, err := store.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chats) != 1 || !chats[0].Unanswered {
+		t.Fatalf("after assistant reply chats = %+v, want unanswered", chats)
+	}
+	if _, err := store.appendMessage(chat.ID, LocalAIChatMessage{Role: "user", Content: "Thanks", Status: "complete"}, 4); err != nil {
+		t.Fatal(err)
+	}
+	chats, err = store.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chats) != 1 || chats[0].Unanswered {
+		t.Fatalf("after user reply chats = %+v, want answered", chats)
+	}
+}
+
 func TestLocalAIChatStoreTruncateRemovesTurnsAndResetsTitle(t *testing.T) {
 	store, _ := openTestLocalAIChatStore(t)
 	chat, err := store.create("", 1)

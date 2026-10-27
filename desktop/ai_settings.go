@@ -52,7 +52,7 @@ var aiBackendFeatureDefaults = []AIFeatureDefault{
 	{
 		ID:          aiFeatureGhostwriter,
 		Label:       "Ghostwriter drafts",
-		Description: "Reply chips, autocomplete, and /ghost drafts. The instructions apply to every Ghostwriter mode.",
+		Description: "Reply chips and /ghost drafts. The instructions apply to every Ghostwriter mode.",
 		Prompt:      ghostwriterDefaultInstructions,
 		Temperature: 0.8,
 	},

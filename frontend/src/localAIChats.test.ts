@@ -29,7 +29,7 @@ describe('localAIErrorMessage', () => {
 })
 
 describe('local AI chat rows', () => {
-    const chat = { id: 'chat-1', title: 'Trip plan', agentId: 'tutor', kind: 'chat', folderId: '', updatedAt: 1_700_000_000_000, preview: 'Here is a draft' }
+    const chat = { id: 'chat-1', title: 'Trip plan', agentId: 'tutor', kind: 'chat', folderId: '', updatedAt: 1_700_000_000_000, preview: 'Here is a draft', unanswered: false }
 
     it('maps a chat to a list row with its preview and activity time', () => {
         expect(localAIChatToRoom(chat, true)).toMatchObject({
@@ -44,6 +44,10 @@ describe('local AI chat rows', () => {
             unanswered: false,
             direct: false,
         })
+    })
+
+    it('marks a chat unanswered when the model spoke last', () => {
+        expect(localAIChatToRoom({ ...chat, unanswered: true }, false)).toMatchObject({ unanswered: true, direct: false })
     })
 
     it('uses a fallback name for untitled chats', () => {

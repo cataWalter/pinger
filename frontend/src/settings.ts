@@ -82,6 +82,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'notifications.sound-effects', tab: 'Notifications', title: 'Sound effects', description: 'Play a short sound when a message is sent.', keywords: 'sound effects sent message' },
 
   { id: 'keyboard.ctrl-enter', tab: 'Keyboard', title: 'Use Ctrl + Enter to send', description: 'Send a message with Ctrl + Enter.', keywords: 'send enter composer' },
+  { id: 'keyboard.spellcheck', tab: 'Keyboard', title: 'Spellcheck messages', description: 'Check spelling while you type.', keywords: 'spellcheck spell check' },
   { id: 'keyboard.formatting-toolbar', tab: 'Keyboard', title: 'Show formatting toolbar', description: 'Show bold, italic and link controls.', keywords: 'formatting toolbar bold italic' },
   { id: 'keyboard.emoji-autocomplete', tab: 'Keyboard', title: 'Suggest emoji for :shortcodes:', description: 'Complete :shortcodes: as you type.', keywords: 'emoji autocomplete shortcode' },
   { id: 'keyboard.emoticon-replacement', tab: 'Keyboard', title: 'Replace emoticons as you type', description: 'Turn :-) into an emoji while typing and when sending. On by default.', keywords: 'emoticon emoji replace' },
@@ -114,7 +115,8 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'ai.connection', tab: 'AI', title: 'OpenAI-compatible AI', description: 'Connect Pinger to a llama-server or other OpenAI-compatible endpoint.', keywords: 'ai llm model endpoint local', anchor: '.ai-settings-form' },
   { id: 'ai.endpoint', tab: 'AI', title: 'Endpoint', description: 'Address of the OpenAI-compatible endpoint.', keywords: 'ai endpoint url server address' },
   { id: 'ai.model', tab: 'AI', title: 'Model name (optional)', description: 'Model served by the endpoint.', keywords: 'ai model name' },
-  { id: 'ai.language-settings', tab: 'AI', title: 'Languages', description: 'Choose the language you are learning, the default language for translations and explanations, and the languages you know.', keywords: 'ai language languages tutor learn study explanation default known translate translation grammar', anchor: '.language-settings' },
+  { id: 'ai.translate', tab: 'AI', title: 'Translate into', description: 'Language used for translations.', keywords: 'ai translate language' },
+  { id: 'ai.tutor-language', tab: 'AI', title: 'Language Tutor languages', description: 'Choose the language you are learning and the language used for explanations.', keywords: 'ai tutor language learn study explanation turkish italian translation grammar', anchor: '.tutor-language-settings' },
   { id: 'ai.test', tab: 'AI', title: 'Test endpoint', description: 'Check that the endpoint answers.', keywords: 'ai test connection endpoint' },
   { id: 'ai.agents', tab: 'AI', title: 'Chat agents', description: 'Create named agents with instructions for private model chats, and choose a default for new chats.', keywords: 'agent agents role persona instructions private local ai chat default', anchor: '.local-ai-agent-settings' },
   { id: 'ai.prompts', tab: 'AI', title: 'AI prompts and tuning', description: 'Edit the instructions, temperature (0.6 to 2), and token limit for each AI feature.', keywords: 'ai prompt prompts instructions system temperature max tokens tune agent summarize translate reply tone', anchor: '.ai-prompts-settings' },
@@ -123,7 +125,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'ai.ghostwriter-provider', tab: 'AI', title: 'Ghostwriter provider', description: 'Choose Ollama or an OpenAI-compatible local server.', keywords: 'ollama llama.cpp local provider', anchor: '.ghostwriter-settings select' },
   { id: 'ai.ghostwriter-endpoint', tab: 'AI', title: 'Ghostwriter local endpoint', description: 'Must use localhost or a loopback IP address.', keywords: 'ghostwriter endpoint localhost privacy', anchor: '.ghostwriter-settings input[type="url"]' },
   { id: 'ai.ghostwriter-model', tab: 'AI', title: 'Ghostwriter model', description: 'Model loaded by Ollama or your local server.', keywords: 'ghostwriter model qwen llama gguf', anchor: '.ghostwriter-settings input[type="text"]' },
-  { id: 'integrations.contact-dossier', tab: 'Integrations', title: 'Contact dossier analysis', description: 'Analyze direct chats and maintain local contact dossiers.', keywords: 'contact dossier relationship analysis insights local', anchor: '.contact-dossier-settings .setting-toggle' },
+  { id: 'integrations.relationship-health', tab: 'Integrations', title: 'Keep in Touch reminders', description: 'Show local reminders when tracked contacts are due for a check-in.', keywords: 'keep in touch relationship health decay follow-up reminders local', anchor: '.relationship-health-settings .setting-toggle' },
   { id: 'integrations.networks', tab: 'Integrations', title: 'Detected chat networks', description: 'Bridged networks found in your chats.', keywords: 'bridges whatsapp telegram signal integration', anchor: '.integration-status' },
 
   { id: 'help.keyboard', tab: 'Help', title: 'Keyboard shortcuts', description: 'A quick tour of the shortcuts Pinger uses.', keywords: 'help shortcuts' },

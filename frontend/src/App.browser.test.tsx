@@ -61,14 +61,13 @@ const service = vi.hoisted(() => {
 })
 
 vi.mock('@wailsio/runtime', () => ({
-  Events: { On: vi.fn(() => () => {}) },
+  Events: { On: vi.fn(() => () => { }) },
 }))
 
 vi.mock('../bindings/mychat/desktop', () => ({
   AppService: service,
   GhostwriterMode: {
     GhostwriterModeChips: 'chips',
-    GhostwriterModeAutocomplete: 'autocomplete',
     GhostwriterModeSlash: 'slash',
   },
   LanguageTutorService: { Analyze: vi.fn(() => Promise.resolve({})) },

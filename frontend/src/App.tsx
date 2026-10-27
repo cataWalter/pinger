@@ -54,6 +54,7 @@ import {
   ListOrdered,
   LogOut,
   Mic,
+  MessageSquareReply,
   PanelRight,
   Plus,
   Quote,
@@ -64,15 +65,14 @@ import {
   Video,
   ZoomIn,
   ZoomOut,
-  WandSparkles,
 } from 'lucide-react'
 import EmojiPicker from 'emoji-picker-react'
 import { AppService, GhostwriterMode as GhostwriterRequestMode, LanguageTutorService } from '../bindings/mychat/desktop'
-import type { AIMessage, AppBuildInfo, ChatExportResult, Device, MediaCacheUsage, MediaCleanupResult, Member, Message, MessageSearchRequest, MessageSearchResult, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, TutorAnalysis, UpdateStatus } from '../bindings/mychat/desktop/models.js'
-import { createBusyReplyForLanguage, detectBusyReplyLanguage, detectConversationLanguage } from './busyMode'
+import type { AIMessage, AppBuildInfo, ChatExportResult, Device, MediaCacheUsage, MediaCleanupResult, Member, MenuState, Message, MessageSearchRequest, MessageSearchResult, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, TutorAnalysis, UpdateStatus } from '../bindings/mychat/desktop/models.js'
+import { createBusyReplyForLanguage, detectBusyReplyLanguage } from './busyMode'
 import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, type ComposerFormat, type EmojiQuery, type EmoticonReplacement } from './composerText'
 import { fuzzyScore } from './fuzzy'
-import { ghostwriterDefaultEndpoints, isGhostCommandDraft, isLoopbackEndpoint, parseGhostCommand, type GhostwriterProvider } from './ghostwriter'
+import { ghostwriterDefaultEndpoints, isLoopbackEndpoint, parseGhostCommand, type GhostwriterProvider } from './ghostwriter'
 import { DEFAULT_ACCENT_NAME, accentCssVariables, accentPaletteFor, accentPresets, isAccentHex } from './accent'
 import { SYSTEM_THEME_NAME, findThemeByName, themeIdForPreference, themeModeForPreference, themes as appearanceThemes } from './themes'
 import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
@@ -81,7 +81,7 @@ import { loadSnippets, saveSnippets, type Snippet } from './snippets'
 import { useSnippetExpander } from './useSnippetExpander'
 import { ConnectionStatusBanner } from './ConnectionStatusBanner'
 import { useConnectionProblem } from './useConnectionProblem'
-import { ChatTranslationResponseError, EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, buildChatTranslationPrompt, buildExplainPrompt, buildReplyPrompt, buildSummaryChatDraft, parseChatAgents, parseChatTranslationResponse, serializeChatAgents, splitChatTranslationBatches, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage } from './aiPrompts'
+import { EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, buildExplainPrompt, buildReplyPrompt, buildSummaryChatDraft, parseChatAgents, serializeChatAgents, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage } from './aiPrompts'
 import { languageName, resolveAIFeatureTuning, resolveLanguageRoles, type AIFeatureID } from './aiSettings'
 import { LanguageSettings } from './LanguageSettings'
 import { AIPromptSettings } from './AIPromptSettings'
@@ -140,9 +140,7 @@ type AIPanel = {
 type AIStreamChunk = { requestId: string; text: string; reset?: boolean }
 type AIStreamHandler = (chunk: AIStreamChunk) => void
 type LanguageTutorState = { mode: 'draft' | 'message'; originalText: string; explanationLanguage: string; analysis: TutorAnalysis | null; busy: boolean; error: string; requestID: string; preview: string }
-type ChatTranslationState = { requestID: number; roomID: string; targetLanguage: string; targetMessageIDs: string[]; translations: Record<string, string>; busy: boolean; status: string; error: string; errorResponse: string | null }
-type GhostwriterCompletionState = { roomID: string; draft: string; text: string; requestID: string }
-type GhostwriterStreamChunk = { requestId: string; roomId: string; text: string }
+type ChatTranslationState = { requestID: number; roomID: string; targetLanguage: string; targetMessageIDs: string[]; analyses: Record<string, TutorAnalysis>; busy: boolean; status: string; error: string }
 type ChatExportState = { roomID: string; phase: 'running' | 'done' | 'failed'; stage: string; mediaDone: number; mediaTotal: number; result: ChatExportResult | null; error: string }
 type ChatExportProgressEvent = { roomId: string; stage: string; messages: number; mediaDone: number; mediaTotal: number }
 type ScheduledDraft =
@@ -534,10 +532,16 @@ function isOwnMessage(message: Message, currentUserID: string) {
   return message.own || Boolean(message.sender && message.sender === currentUserID)
 }
 
-function ghostwriterTargetLanguage(messages: Message[]) {
-  const recentMessages = messages.filter((message) => !message.redacted && !message.decryptionError && !message.mediaUri && message.body.trim()).slice(-10)
-  const incomingLanguage = detectConversationLanguage(recentMessages.filter((message) => !message.own).map((message) => message.body))
-  return incomingLanguage || detectConversationLanguage(recentMessages.map((message) => message.body))
+// incomingSinceOwnMessage returns the text messages from others that follow the user's latest loaded message.
+function incomingSinceOwnMessage(timeline: Message[], currentUserID: string) {
+  let lastOwnIndex = -1
+  timeline.forEach((message, index) => {
+    if (isOwnMessage(message, currentUserID)) lastOwnIndex = index
+  })
+  const incoming = timeline.slice(lastOwnIndex + 1).filter((message) =>
+    Boolean(timelineMessageID(message)) && !message.redacted && Boolean(message.body.trim()),
+  )
+  return { foundOwnMessage: lastOwnIndex >= 0, incoming }
 }
 
 function isDirectLikeRoom(room: Room) {
@@ -598,9 +602,9 @@ const TimelineMessageList = memo(function TimelineMessageList({
     {visibleMessages.map((message, index) => {
       const ownMessage = isOwnMessage(message, currentUserID)
       const messageID = timelineMessageID(message)
-      const translatedBody = !ownMessage ? chatTranslation?.translations[messageID] : undefined
+      const translatedAnalysis = !ownMessage ? chatTranslation?.analyses[messageID] : undefined
       const translationPending = Boolean(!ownMessage && chatTranslation?.busy && chatTranslation.targetMessageIDs.includes(messageID))
-      const showTranslation = Boolean(translatedBody || translationPending)
+      const showTranslation = Boolean(translatedAnalysis || translationPending)
       const isAudioAttachment = Boolean(message.mediaUri && (message.mediaMime.startsWith('audio/') || message.mediaType === 'm.audio'))
       const isFileAttachment = Boolean(message.mediaUri && message.mediaType === 'm.file' && !message.redacted && !message.decryptionError)
       const isImageOrVideoAttachment = !isAudioAttachment && (
@@ -673,7 +677,7 @@ const TimelineMessageList = memo(function TimelineMessageList({
             </div>
             {showTranslation && <aside className="message-translation" role="note" aria-label={`${chatTranslation?.targetLanguage || 'Translation'} translation`} aria-live="polite">
               <span className="message-translation-label">{chatTranslation?.targetLanguage || 'Translation'}</span>
-              <p>{translatedBody || 'Translating…'}</p>
+              {translatedAnalysis ? <LanguageTutorAnalysisDetails analysis={translatedAnalysis} originalText={message.body} /> : <p>Translating…</p>}
             </aside>}
           </article>
         </Fragment>
@@ -948,8 +952,6 @@ function App() {
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([])
   const [mediaApproval, setMediaApproval] = useState<MediaApprovalRequest | null>(null)
   const [snippets, setSnippets] = useState<Snippet[]>(() => loadSnippets())
-  const [ghostwriterCompletion, setGhostwriterCompletion] = useState<GhostwriterCompletionState | null>(null)
-  const [ghostwriterAutocompleteStatus, setGhostwriterAutocompleteStatus] = useState<'idle' | 'loading' | 'offline'>('idle')
   const [ghostwriterDraftStatus, setGhostwriterDraftStatus] = useState('')
   const [ghostwriterDraftBusy, setGhostwriterDraftBusy] = useState(false)
   const [contactHUDOpen, setContactHUDOpen] = useState(false)
@@ -1063,8 +1065,6 @@ function App() {
   const selectedRoomIDRef = useRef(selectedRoomID)
   selectedRoomIDRef.current = selectedRoomID
   const ghostwriterSelectedRoomRef = useRef('')
-  const ghostwriterAutocompleteRequestRef = useRef(0)
-  const ghostwriterStreamRequestRef = useRef('')
   const ghostwriterDraftRequestRef = useRef(0)
   const nativeNotificationsRef = useRef(false)
   const lastReadEventByRoom = useRef(new Map<string, string>())
@@ -1124,6 +1124,7 @@ function App() {
     if (videoPreviewRef.current) videoPreviewRef.current.srcObject = voiceStreamRef.current
   }, [videoRecordingActive])
   const roomSearchInputRef = useRef<HTMLInputElement>(null)
+  const menuActionRef = useRef<(action: string) => void>(() => undefined)
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
   const [aiPanel, setAIPanel] = useState<AIPanel | null>(null)
   const [languageTutorState, setLanguageTutorState] = useState<LanguageTutorState | null>(null)
@@ -1159,7 +1160,7 @@ function App() {
 
   const preferences = useMemo(() => snapshot?.preferences ?? {}, [snapshot?.preferences])
   const languageRoles = resolveLanguageRoles(preferences)
-  const translateRecentLabel = `Translate latest 10 received messages to ${languageName(languageRoles.defaultLanguage)}`
+  const translateRecentLabel = `Translate messages received since your last message to ${languageName(languageRoles.defaultLanguage)}`
   const rooms = snapshot?.rooms ?? EMPTY_ROOMS
   const selectedRoom = useMemo(() => rooms.find((room) => room.id === selectedRoomID), [rooms, selectedRoomID])
   const selectedRoomAvatar = useMemo(() => selectedRoom?.avatar || (
@@ -1174,9 +1175,6 @@ function App() {
   const imageRunHere = imageSendRun !== null && imageSendRun.roomID === selectedRoomID ? imageSendRun : null
   const imageRunStatus = imageRunHere?.stage === 'generating' ? `Generating image · step ${imageRunHere.step} of ${imageRunHere.totalSteps}` : 'Starting image engine…'
   const imageButtonTooltip = imageRunHere ? 'Stop image generation' : imageEngineReady ? 'Generate an image from the draft to review before sending' : 'Generate an image from the draft · set up the image engine in Settings > AI first'
-  const ghostwriterRewriteText = ghostwriterCompletion?.roomID === selectedRoomID && ghostwriterCompletion.draft === composeText
-    ? ghostwriterCompletion.text
-    : ''
   const roomAgentsPreferenceKey = selectedRoom ? `room.ai_agents.${selectedRoom.id}` : ''
   const roomAgents = useMemo<ChatAgentCollection>(() => parseChatAgents(preferenceString(preferences, roomAgentsPreferenceKey, JSON.stringify(EMPTY_CHAT_AGENTS))), [preferences, roomAgentsPreferenceKey])
   const localAIAgents = useMemo<ChatAgentCollection>(() => parseChatAgents(preferenceString(preferences, 'ai.local_agents', JSON.stringify(EMPTY_CHAT_AGENTS))), [preferences])
@@ -1293,23 +1291,6 @@ function App() {
   currentUserIDRef.current = snapshot?.profile.userId ?? ''
   currentDisplayNameRef.current = snapshot?.profile.displayName ?? ''
 
-  useEffect(() => {
-    const requestID = ++ghostwriterAutocompleteRequestRef.current
-    ghostwriterStreamRequestRef.current = ''
-    setGhostwriterCompletion(null)
-    setGhostwriterAutocompleteStatus('idle')
-    return () => {
-      if (ghostwriterAutocompleteRequestRef.current === requestID) ghostwriterAutocompleteRequestRef.current++
-    }
-  }, [composeText, editTarget, ghostwriterEnabled, selectedRoomID])
-
-  useEffect(() => Events.On('ghostwriter:stream', (event: { data: unknown }) => {
-    const chunk = event.data as GhostwriterStreamChunk | undefined
-    if (!chunk || chunk.requestId !== ghostwriterStreamRequestRef.current || !chunk.text) return
-    setGhostwriterCompletion((current) => current && current.requestID === chunk.requestId && current.roomID === chunk.roomId
-      ? { ...current, text: current.text + chunk.text }
-      : current)
-  }), [])
   useEffect(() => Events.On('ai:stream', (event: { data: unknown }) => {
     const chunk = event.data as AIStreamChunk | undefined
     if (!chunk?.requestId) return
@@ -1428,7 +1409,7 @@ function App() {
       const localAI = isLocalAIRoomID(room.id)
       const archived = !localAI && preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
       const matchesArchive = roomScope === 'local-ai' ? localAI : roomScope === 'archived' ? archived : !archived || Boolean(query)
-      const matchesRefinements = (!roomRefinements.unanswered || isUnansweredRoom(room))
+      const matchesRefinements = (!roomRefinements.unanswered || (!localAI && isUnansweredRoom(room)))
         && (!roomRefinements.needsReply || isNeedsReplyRoom(room, preferences))
         && (!roomRefinements.favorite || room.favorite)
       const matchesFolder = roomScope !== 'local-ai' || localAIFolderFilter === null || (localAIFolderIDByRoomID.get(room.id) ?? '') === localAIFolderFilter
@@ -1981,6 +1962,9 @@ function App() {
     const unsubscribeMenuSearch = Events.On('application-menu:search', () => {
       if (active) setSearchOpen(true)
     })
+    const unsubscribeMenuAction = Events.On('application-menu:action', (event: { data: unknown }) => {
+      if (active) menuActionRef.current(String(event.data))
+    })
     const unsubscribeNotificationOpenRoom = Events.On('notification:open-room', (event: { data: unknown }) => {
       const roomID = event.data as string | undefined
       if (active && roomID) {
@@ -2036,6 +2020,7 @@ function App() {
       unsubscribeMenuAbout()
       unsubscribeMenuSettings()
       unsubscribeMenuSearch()
+      unsubscribeMenuAction()
       unsubscribeNotificationOpenRoom()
       unsubscribeAttachmentSent()
       unsubscribeScheduledReminder()
@@ -3433,9 +3418,6 @@ function App() {
         return
       }
       const requestID = ++ghostwriterDraftRequestRef.current
-      ghostwriterAutocompleteRequestRef.current++
-      setGhostwriterCompletion(null)
-      setGhostwriterAutocompleteStatus('idle')
       setGhostwriterDraftBusy(true)
       setGhostwriterDraftStatus('Generating a local draft…')
       try {
@@ -3883,6 +3865,117 @@ function App() {
 
   const aiEndpoint = preferenceString(preferences, 'ai.endpoint', '')
   const aiEnabled = aiEndpoint !== ''
+  // Native menu state mirrors the selected room and filters; menu actions reuse the keyboard handlers.
+  const menuRoom = selectedRoom && isActiveAccountRoom(selectedRoom) && !isLocalAIRoomID(selectedRoom.id) ? selectedRoom : undefined
+  const menuRoomSelected = Boolean(menuRoom)
+  const menuRoomUnread = menuRoom ? isUnreadRoom(menuRoom) : false
+  const menuRoomArchived = menuRoom ? preferenceBoolean(preferences, archivedPreferenceKey(menuRoom.id, menuRoom.accountId)) : false
+  const menuRoomFavorite = Boolean(menuRoom?.favorite)
+  const menuRoomNeedsReply = menuRoom ? isNeedsReplyRoom(menuRoom, preferences) : false
+  const menuPrivateChatOpen = localAIChatOpen && Boolean(localAIChatId)
+  const menuPrivateChatInAll = localAIChatOpen && localAIChatId ? preferenceBoolean(preferences, localAIIncludeInAllPreference(localAIChatId)) : false
+  const menuDraftReady = Boolean(selectedRoom) && composeText.trim() !== '' && !busy && aiEnabled && !editTarget
+  const menuFilter = roomScope === 'archived' ? 'archived' : roomScope === 'local-ai' ? 'private' : roomRefinements.needsReply ? 'needs-reply' : roomRefinements.unanswered ? 'unanswered' : roomRefinements.favorite ? 'favorites' : 'all'
+  useEffect(() => {
+    const menuState: MenuState = {
+      roomSelected: menuRoomSelected,
+      roomUnread: menuRoomUnread,
+      roomArchived: menuRoomArchived,
+      roomFavorite: menuRoomFavorite,
+      roomNeedsReply: menuRoomNeedsReply,
+      privateChatOpen: menuPrivateChatOpen,
+      privateChatInAll: menuPrivateChatInAll,
+      draftReady: menuDraftReady,
+      filter: menuFilter,
+    }
+    void AppService.SetMenuState(menuState)
+  }, [menuRoomSelected, menuRoomUnread, menuRoomArchived, menuRoomFavorite, menuRoomNeedsReply, menuPrivateChatOpen, menuPrivateChatInAll, menuDraftReady, menuFilter])
+
+  function applyMenuFilter(filter: string) {
+    setRoomScope(filter === 'archived' ? 'archived' : filter === 'private' ? 'local-ai' : 'all')
+    setRoomRefinements({
+      unanswered: filter === 'unanswered',
+      needsReply: filter === 'needs-reply',
+      favorite: filter === 'favorites',
+    })
+  }
+
+  function runMenuAction(action: string) {
+    if (action.startsWith('account:')) {
+      void switchAccount(action.slice('account:'.length))
+      return
+    }
+    if (action.startsWith('settings:')) {
+      const tab = SETTINGS_TABS.find((candidate) => candidate === action.slice('settings:'.length))
+      if (tab) setSettingsTab(tab)
+      setSettingsOpen(true)
+      return
+    }
+    if (action.startsWith('filter:')) {
+      applyMenuFilter(action.slice('filter:'.length))
+      return
+    }
+    switch (action) {
+      case 'quick-switch':
+        if (roomsRef.current.length > 0) {
+          setQuickSwitcherQuery('')
+          setQuickSwitcherIndex(0)
+          setQuickSwitcherOpen(true)
+        }
+        return
+      case 'room-search':
+        roomSearchInputRef.current?.focus()
+        return
+      case 'jump-latest':
+        jumpToLatest()
+        return
+      case 'private-chat-new':
+        startLocalAIChat()
+        return
+      case 'private-chat-all': {
+        if (localAIChatOpen && localAIChatId) {
+          const preferenceKey = localAIIncludeInAllPreference(localAIChatId)
+          void setPreference(preferenceKey, !preferenceBoolean(preferences, preferenceKey))
+        }
+        return
+      }
+      case 'tutor-draft':
+        if (menuDraftReady) void analyzeWithLanguageTutor(composeText, 'draft')
+        return
+      case 'undo':
+        if (isTextEntryTarget(document.activeElement)) document.execCommand('undo')
+        else if (undoRoomID) void undoAnswered()
+        return
+      case 'room-next':
+        selectRoomByOffset(1)
+        return
+      case 'room-previous':
+        selectRoomByOffset(-1)
+        return
+      case 'needs-reply-next':
+        selectRoomByOffset(1, true)
+        return
+      case 'needs-reply-previous':
+        selectRoomByOffset(-1, true)
+        return
+      case 'room-read':
+        if (menuRoom) void applyBulkRoomAction(menuRoomUnread ? 'read' : 'unread', [menuRoom])
+        return
+      case 'room-answered':
+        if (menuRoom && menuRoomNeedsReply) void markRoomAnswered(menuRoom.id)
+        return
+      case 'room-needs-reply':
+        if (menuRoom && !menuRoomNeedsReply) void applyBulkRoomAction('needs-reply', [menuRoom])
+        return
+      case 'room-archive':
+        if (menuRoom) void applyBulkRoomAction(menuRoomArchived ? 'restore' : 'archive', [menuRoom])
+        return
+      case 'room-favorite':
+        if (menuRoom) void applyBulkRoomAction(menuRoomFavorite ? 'unfavorite' : 'favorite', [menuRoom])
+        return
+    }
+  }
+  menuActionRef.current = runMenuAction
   function promptMessages(source: Message[]): PromptMessage[] {
     return source.map((message) => ({
       senderName: message.senderName,
@@ -4085,6 +4178,48 @@ function App() {
     setAIPanel(null)
   }
 
+  const suggestReplyDisabled = !selectedRoom || !ghostwriterEnabled || busy || ghostwriterDraftBusy || Boolean(editTarget) || Boolean(composeText.trim())
+  const suggestReplyTooltip = !ghostwriterEnabled
+    ? 'Suggest next reply · enable Ghostwriter in Settings'
+    : composeText.trim()
+      ? 'Suggest next reply · clear the draft first'
+      : 'Suggest next reply from the last 500 messages · not sent automatically'
+
+  // Suggests one reply only when the button is pressed. The result fills the composer for review and is never sent.
+  async function suggestNextReply() {
+    const roomID = selectedRoomID
+    if (!roomID || suggestReplyDisabled || composeTextRef.current.trim()) return
+    const requestID = ++ghostwriterDraftRequestRef.current
+    setGhostwriterDraftBusy(true)
+    setGhostwriterDraftStatus('Suggesting a reply from the last 500 messages…')
+    try {
+      const suggestions = await AppService.Ghostwriter({ roomId: roomID, mode: GhostwriterRequestMode.GhostwriterModeNext, draft: '', intent: '' })
+      if (requestID !== ghostwriterDraftRequestRef.current) return
+      if (ghostwriterSelectedRoomRef.current !== roomID || composeTextRef.current !== '') {
+        setGhostwriterDraftBusy(false)
+        setGhostwriterDraftStatus('Suggestion not inserted because the chat or draft changed.')
+        return
+      }
+      const reply = suggestions?.find((suggestion) => suggestion.type === 'next_reply')?.text.trim()
+      if (!reply) throw new Error('The local model returned no reply.')
+      setGhostwriterDraftBusy(false)
+      setComposeDraft(reply)
+      setGhostwriterDraftStatus('Suggested reply ready to review. It has not been sent.')
+      requestAnimationFrame(() => {
+        const input = composerInputRef.current
+        if (!input) return
+        input.focus()
+        input.setSelectionRange(reply.length, reply.length)
+      })
+    } catch (error) {
+      if (requestID === ghostwriterDraftRequestRef.current) {
+        setGhostwriterDraftStatus(error instanceof Error && error.message ? error.message : 'Local model unavailable. Check that it is running.')
+      }
+    } finally {
+      if (requestID === ghostwriterDraftRequestRef.current) setGhostwriterDraftBusy(false)
+    }
+  }
+
   // Prepare a Local AI chat with the full room transcript and an editable summary request.
   async function summarizeRoom() {
     if (!selectedRoomID || !aiEnabled || summaryLoadingRef.current) return
@@ -4142,38 +4277,33 @@ function App() {
     const requestID = chatTranslationRequestRef.current + 1
     chatTranslationRequestRef.current = requestID
     const currentUserID = snapshot?.profile.userId ?? ''
-    const targetLanguage = languageName(resolveLanguageRoles(preferencesRef.current).defaultLanguage)
+    const explanation = resolveLanguageRoles(preferencesRef.current).defaultLanguage
+    const targetLanguage = languageName(explanation)
     let allMessages = [...messages]
     let cursor = olderCursor
     let moreHistory = hasOlder
-    const receivedTextMessages = () => allMessages.filter((message) =>
-      Boolean(timelineMessageID(message))
-      && !isOwnMessage(message, currentUserID)
-      && !message.redacted
-      && Boolean(message.body.trim()),
-    )
+    const sinceOwnMessage = () => incomingSinceOwnMessage(allMessages, currentUserID)
     setChatTranslation({
       requestID,
       roomID,
       targetLanguage,
       targetMessageIDs: [],
-      translations: {},
+      analyses: {},
       busy: true,
-      status: receivedTextMessages().length < 10 && moreHistory ? 'Loading recent received messages…' : 'Preparing translations…',
+      status: sinceOwnMessage().foundOwnMessage || !moreHistory ? 'Preparing translations…' : 'Loading older messages to find your last message…',
       error: '',
-      errorResponse: null,
     })
     let pagingHistory = false
     let fetchedHistory = false
 
     try {
-      if (receivedTextMessages().length < 10 && moreHistory) {
+      if (!sinceOwnMessage().foundOwnMessage && moreHistory) {
         if (loadingOlderRef.current) throw new Error('Wait for older messages to finish loading.')
         pagingHistory = true
         loadingOlderRef.current = true
         setLoadingOlder(true)
       }
-      while (receivedTextMessages().length < 10 && moreHistory) {
+      while (!sinceOwnMessage().foundOwnMessage && moreHistory) {
         if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
         const page = await AppService.History(roomID, cursor)
         if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
@@ -4194,50 +4324,38 @@ function App() {
         setHasOlder(moreHistory && cursor !== olderCursor)
       }
 
-      const targetMessages = receivedTextMessages().slice(-10)
-      if (targetMessages.length === 0) throw new Error('There are no incoming text messages to translate in this chat.')
+      const targetMessages = sinceOwnMessage().incoming
+      if (targetMessages.length === 0) throw new Error('There are no incoming text messages since your last message in this chat.')
       const targetMessageIDs = targetMessages.map(timelineMessageID)
       setChatTranslation((current) => current?.requestID === requestID
         ? { ...current, targetMessageIDs, status: 'Translating…' }
         : current)
-      const batches = splitChatTranslationBatches(promptMessages(targetMessages))
-      let completedMessages = 0
 
-      const chatTuning = resolveAIFeatureTuning(preferencesRef.current, 'chat_translation')
-      for (const batch of batches) {
+      for (const [index, message] of targetMessages.entries()) {
         if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
-        const batchStart = completedMessages + 1
-        const batchEnd = completedMessages + batch.length
-        const batchRequestID = newAIRequestID()
+        const analysisRequestID = newAIRequestID()
         let receivedCharacters = 0
-        const showBatchProgress = () => setChatTranslation((current) => current?.requestID === requestID
-          ? { ...current, status: `Translating ${batchStart}-${batchEnd} of ${targetMessages.length}… (${receivedCharacters.toLocaleString()} characters received)` }
+        const showMessageProgress = () => setChatTranslation((current) => current?.requestID === requestID
+          ? { ...current, status: `Translating ${index + 1} of ${targetMessages.length}… (${receivedCharacters.toLocaleString()} characters received)` }
           : current)
-        const unregisterStream = registerAIStream(batchRequestID, (chunk) => {
+        const unregisterStream = registerAIStream(analysisRequestID, (chunk) => {
           receivedCharacters = (chunk.reset ? 0 : receivedCharacters) + chunk.text.length
-          showBatchProgress()
+          showMessageProgress()
         })
-        chatTranslationAIRequestRef.current = batchRequestID
-        let response = ''
+        chatTranslationAIRequestRef.current = analysisRequestID
+        let analysis: TutorAnalysis
         try {
-          showBatchProgress()
-          response = await AppService.AIComplete(
-            buildChatTranslationPrompt(batch, targetLanguage, batchStart, chatTuning.prompt),
-            batchRequestID,
-            chatTuning.temperature,
-            chatTuning.maxTokens,
-          )
+          showMessageProgress()
+          analysis = await LanguageTutorService.Analyze(message.body, 'message', explanation, analysisRequestID)
         } finally {
           unregisterStream()
-          if (chatTranslationAIRequestRef.current === batchRequestID) chatTranslationAIRequestRef.current = ''
+          if (chatTranslationAIRequestRef.current === analysisRequestID) chatTranslationAIRequestRef.current = ''
         }
-        const translations = parseChatTranslationResponse(response, batch.length)
         if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
-        const batchMessageIDs = targetMessageIDs.slice(completedMessages, completedMessages + batch.length)
-        const translatedBatch = Object.fromEntries(batchMessageIDs.map((messageID, index) => [messageID, translations[index]]))
-        completedMessages += batch.length
+        if (!analysis.translation.trim()) throw new Error('Language Tutor returned an empty translation.')
+        const messageID = timelineMessageID(message)
         setChatTranslation((current) => current?.requestID === requestID
-          ? { ...current, translations: { ...current.translations, ...translatedBatch }, status: `Translated ${completedMessages} of ${targetMessages.length}…` }
+          ? { ...current, analyses: { ...current.analyses, [messageID]: analysis }, status: `Translated ${index + 1} of ${targetMessages.length}…` }
           : current)
       }
 
@@ -4246,13 +4364,7 @@ function App() {
       }
     } catch (translationError) {
       if (chatTranslationRequestRef.current === requestID) {
-        setChatTranslation((current) => current?.requestID === requestID ? {
-          ...current,
-          busy: false,
-          error: describeError(translationError),
-          errorResponse: translationError instanceof ChatTranslationResponseError ? translationError.response : null,
-          status: '',
-        } : current)
+        setChatTranslation((current) => current?.requestID === requestID ? { ...current, busy: false, error: describeError(translationError), status: '' } : current)
       }
     } finally {
       if (pagingHistory) {
@@ -4354,54 +4466,6 @@ function App() {
   function updateSnippets(next: Snippet[]) {
     setSnippets(next)
     saveSnippets(next)
-  }
-
-  async function requestGhostwriterCompletion() {
-    const roomID = selectedRoomID
-    const draft = composeText
-    if (!ghostwriterEnabled || !roomID || !draft.trim() || editTarget || busy || ghostwriterDraftBusy || isGhostCommandDraft(draft) || ghostwriterAutocompleteStatus === 'loading') return
-
-    const requestID = ++ghostwriterAutocompleteRequestRef.current
-    const streamRequestID = `${roomID}:${Date.now()}:${requestID}`
-    ghostwriterStreamRequestRef.current = streamRequestID
-    const targetLanguage = ghostwriterTargetLanguage(messages)
-    setGhostwriterCompletion({ roomID, draft, text: '', requestID: streamRequestID })
-    setGhostwriterAutocompleteStatus('loading')
-    try {
-      const suggestions = await AppService.Ghostwriter({ roomId: roomID, requestId: streamRequestID, mode: GhostwriterRequestMode.GhostwriterModeAutocomplete, draft, intent: '', targetLanguage })
-      if (requestID !== ghostwriterAutocompleteRequestRef.current || ghostwriterSelectedRoomRef.current !== roomID || composeTextRef.current !== draft) return
-      ghostwriterStreamRequestRef.current = ''
-      const completion = suggestions?.find((suggestion) => suggestion.type === 'autocomplete')
-      if (completion?.text.trim() && completion.text.trim() !== draft.trim()) setGhostwriterCompletion({ roomID, draft, text: completion.text, requestID: streamRequestID })
-      else setGhostwriterCompletion(null)
-      setGhostwriterAutocompleteStatus('idle')
-    } catch {
-      if (requestID !== ghostwriterAutocompleteRequestRef.current || ghostwriterSelectedRoomRef.current !== roomID || composeTextRef.current !== draft) return
-      ghostwriterStreamRequestRef.current = ''
-      setGhostwriterCompletion(null)
-      setGhostwriterAutocompleteStatus('offline')
-    }
-  }
-
-
-  function acceptGhostwriterCompletion() {
-    if (ghostwriterAutocompleteStatus === 'loading' || !ghostwriterCompletion || ghostwriterCompletion.roomID !== selectedRoomID || ghostwriterCompletion.draft !== composeText) return
-    const draft = ghostwriterCompletion.text.trim()
-    if (!draft || draft === composeText) {
-      setGhostwriterCompletion(null)
-      return
-    }
-    ghostwriterAutocompleteRequestRef.current++
-    ghostwriterStreamRequestRef.current = ''
-    setGhostwriterCompletion(null)
-    setGhostwriterAutocompleteStatus('idle')
-    setComposeDraft(draft)
-    requestAnimationFrame(() => {
-      const input = composerInputRef.current
-      if (!input) return
-      input.focus()
-      input.setSelectionRange(draft.length, draft.length)
-    })
   }
 
   function applyEmojiSuggestion(emoji: string) {
@@ -4512,6 +4576,10 @@ function App() {
     }
   }
 
+  function dismissChatExport() {
+    setChatExport((current) => current?.phase === 'running' ? { ...current, error: '' } : null)
+  }
+
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     const snippetHandled = snippetExpander.handleKeyDown(
       event,
@@ -4571,11 +4639,6 @@ function App() {
         setEmojiMatch(null)
         return
       }
-    }
-    if (event.key === 'Tab' && ghostwriterAutocompleteStatus !== 'loading' && ghostwriterCompletion?.roomID === selectedRoomID && ghostwriterCompletion.draft === composeText) {
-      event.preventDefault()
-      acceptGhostwriterCompletion()
-      return
     }
     const ctrlEnter = preferenceBoolean(preferences, 'composer.ctrl_enter')
     if (event.key === 'Enter' && !event.shiftKey && (!ctrlEnter || event.ctrlKey)) {
@@ -4960,6 +5023,11 @@ function App() {
                       <Images size={16} />
                     </button>
                   </IconTooltip>
+                  <IconTooltip label="Export chat">
+                    <button className="icon-button" type="button" aria-label="Export chat" disabled={chatExport?.phase === 'running'} onClick={() => void exportSelectedRoomChat()}>
+                      <Download size={16} />
+                    </button>
+                  </IconTooltip>
                   <IconTooltip label="Search messages">
                     <button className="icon-button" type="button" aria-label="Search messages" onClick={() => setSearchOpen(true)}>
                       <Search size={16} />
@@ -5053,7 +5121,23 @@ function App() {
           />
           {localAIChatOpen ? null : <>
             <div className="conversation-thread">
-              {(scheduledNotice || undoRoomID) && <div className="chat-notice-stack" aria-label="Notifications">
+              {(chatExportForSelectedRoom || scheduledNotice || undoRoomID) && <div className="chat-notice-stack" aria-label="Notifications">
+                {chatExportForSelectedRoom?.phase === 'running' && <div className="scheduled-notice chat-export-notice" role="status">
+                  <Download size={16} />
+                  <span>{chatExportStatusText(chatExportForSelectedRoom)}</span>
+                  <button type="button" onClick={() => void cancelChatExport()}>Cancel export</button>
+                </div>}
+                {chatExportForSelectedRoom?.phase === 'done' && chatExportForSelectedRoom.result && <div className="scheduled-notice chat-export-notice" role="status">
+                  <Download size={16} />
+                  <span>Exported {chatExportForSelectedRoom.result.messages} messages and {chatExportForSelectedRoom.result.media} media files{chatExportForSelectedRoom.result.mediaFailed > 0 ? `, ${chatExportForSelectedRoom.result.mediaFailed} could not be saved` : ''}.</span>
+                  <button type="button" title={chatExportForSelectedRoom.result.path} onClick={() => void revealChatExport(chatExportForSelectedRoom.result?.path ?? '')}>Show in file manager</button>
+                  <button className="icon-button" type="button" aria-label="Dismiss export notice" title="Dismiss export notice" onClick={dismissChatExport}><X size={15} /></button>
+                </div>}
+                {chatExportForSelectedRoom?.error && <div className="scheduled-notice chat-export-notice" role="alert">
+                  <CircleAlert size={16} />
+                  <span>{chatExportForSelectedRoom.error}</span>
+                  <button className="icon-button" type="button" aria-label="Dismiss export error" title="Dismiss export error" onClick={dismissChatExport}><X size={15} /></button>
+                </div>}
                 {scheduledNotice && <div className="scheduled-notice" role="status">
                   <BellRing size={16} />
                   <span>{scheduledNotice}</span>
@@ -5174,13 +5258,7 @@ function App() {
                 />
                 {chatTranslation?.roomID === selectedRoomID && <div className="chat-translation-status">
                   {chatTranslation.busy && <p role="status">{chatTranslation.status}</p>}
-                  {chatTranslation.error && <>
-                    <p role="alert">{chatTranslation.error}</p>
-                    {chatTranslation.errorResponse !== null && <details className="chat-translation-response">
-                      <summary>Show raw AI response</summary>
-                      <pre>{chatTranslation.errorResponse || '(empty response)'}</pre>
-                    </details>}
-                  </>}
+                  {chatTranslation.error && <p role="alert">{chatTranslation.error}</p>}
                 </div>}
               </div>
               {typingStatus && <div className="typing-indicator" aria-live="polite"><UsersRound size={13} />{typingStatus}</div>}
@@ -5306,23 +5384,7 @@ function App() {
                     onSelect={snippetExpander.select}
                   />}
                 </div>
-                {ghostwriterEnabled && ghostwriterRewriteText && <div className="ghostwriter-rewrite-preview" role="group" aria-label="Suggested draft edit">
-                  <div className="ghostwriter-rewrite-copy">
-                    <span className="ghostwriter-rewrite-label">Suggested edit</span>
-                    <span className="ghostwriter-rewrite-text">{ghostwriterRewriteText}</span>
-                  </div>
-                  <button className="ghostwriter-rewrite-apply" type="button" disabled={ghostwriterAutocompleteStatus === 'loading'} onMouseDown={(event) => event.preventDefault()} onClick={acceptGhostwriterCompletion}>Replace draft</button>
-                  <IconTooltip label="Dismiss suggestion"><button className="icon-button" type="button" aria-label="Dismiss draft suggestion" title="Dismiss suggestion" onMouseDown={(event) => event.preventDefault()} onClick={() => {
-                    ghostwriterAutocompleteRequestRef.current++
-                    ghostwriterStreamRequestRef.current = ''
-                    setGhostwriterCompletion(null)
-                    setGhostwriterAutocompleteStatus('idle')
-                  }}><X size={14} /></button></IconTooltip>
-                </div>}
                 {ghostwriterDraftStatus && <p className="ghostwriter-composer-status" role="status">{ghostwriterDraftStatus}</p>}
-                {ghostwriterEnabled && ghostwriterAutocompleteStatus === 'loading' && <p className="ghostwriter-composer-status" role="status">Local model is correcting your draft…</p>}
-                {ghostwriterEnabled && ghostwriterRewriteText && ghostwriterAutocompleteStatus !== 'loading' && <span className="visually-hidden" role="status">Draft correction ready. Press Tab to replace the draft.</span>}
-                {ghostwriterAutocompleteStatus === 'offline' && <p className="ghostwriter-composer-status" role="status">Local draft correction unavailable. Check that the model is running.</p>}
                 {videoRecordingActive && <div className="video-capture-preview"><video ref={videoPreviewRef} muted playsInline autoPlay aria-label="Camera preview" /></div>}
                 <div className="composer-footer">
                   <div className="composer-toolbar-row composer-toolbar-row-compose">
@@ -5373,8 +5435,8 @@ function App() {
                     <div className="composer-tool-group composer-tool-group-ai" role="group" aria-label="AI tools">
                       <span className="composer-tool-group-label" aria-hidden="true"><Sparkles size={13} />AI</span>
                       <div className="composer-tool-cluster" role="group" aria-label="Draft assistance">
+                        <IconTooltip label={suggestReplyTooltip}><button className="composer-assist-button" type="button" aria-label="Suggest next reply" aria-busy={ghostwriterDraftBusy} disabled={suggestReplyDisabled} onClick={() => void suggestNextReply()}>{ghostwriterDraftBusy ? <span className="loading-mark" aria-hidden="true" /> : <MessageSquareReply size={14} />}<span>Suggest reply</span></button></IconTooltip>
                         <IconTooltip label={aiEnabled ? 'Analyze draft with Language Tutor · Ctrl+Shift+T' : 'Analyze draft with Language Tutor · set up a local AI endpoint'}><button className="composer-assist-button" type="button" aria-label="Analyze draft with Language Tutor" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => void analyzeWithLanguageTutor(composeText, 'draft')}><GraduationCap size={14} /><span>Tutor</span></button></IconTooltip>
-                        <IconTooltip label={ghostwriterEnabled ? 'Suggest one draft edit' : 'Enable Ghostwriter in Settings > AI first'}><button className="composer-assist-button" type="button" aria-label="Suggest draft edit" disabled={!selectedRoom || !ghostwriterEnabled || !composeText.trim() || busy || ghostwriterDraftBusy || Boolean(editTarget) || isGhostCommandDraft(composeText) || ghostwriterAutocompleteStatus === 'loading'} onClick={() => void requestGhostwriterCompletion()}><WandSparkles size={14} /><span>Suggest edit</span></button></IconTooltip>
                         <IconTooltip label={imageButtonTooltip}><button className="composer-assist-button" type="button" aria-label={imageRunHere ? 'Stop image generation' : 'Generate image from draft'} disabled={!imageRunHere && (!selectedRoom || !imageEngineReady || !composeText.trim() || busy || Boolean(editTarget) || imageSendRun !== null || generatedImageReview !== null)} onClick={imageRunHere ? stopImageGeneration : () => void generateImageToRoom()}>{imageRunHere ? <Square size={14} /> : <ImagePlus size={14} />}<span>{imageRunHere ? 'Stop' : 'Image'}</span></button></IconTooltip>
                       </div>
                       <div className="composer-tool-cluster" role="group" aria-label="Conversation analysis and translation">
@@ -5657,21 +5719,6 @@ function App() {
                     <span className="room-member-avatar">{initials(member.displayName || member.id)}</span>
                     <span><strong>{member.displayName || member.id}</strong>{member.displayName && <small>{member.id}</small>}</span>
                   </div>)}</div>}
-            <section className="room-export" aria-label="Export chat">
-              <div className="room-members-heading"><h3>Export chat</h3></div>
-              <p className="room-agent-note">Saves every message and media file in this room to a new folder you choose, with an HTML transcript.</p>
-              {chatExport?.phase === 'running' && chatExport.roomID !== selectedRoom.id && <p className="room-info-state">An export is running for another room.</p>}
-              {chatExportForSelectedRoom?.phase === 'running' && <p className="room-export-status" role="status">{chatExportStatusText(chatExportForSelectedRoom)}</p>}
-              {chatExportForSelectedRoom?.phase === 'done' && chatExportForSelectedRoom.result && <p className="room-export-status" role="status">
-                Exported {chatExportForSelectedRoom.result.messages} messages and {chatExportForSelectedRoom.result.media} media files{chatExportForSelectedRoom.result.mediaFailed > 0 ? `, ${chatExportForSelectedRoom.result.mediaFailed} could not be saved` : ''}.{' '}
-                <button className="media-reveal" type="button" title="Show in file manager" onClick={() => void revealChatExport(chatExportForSelectedRoom.result?.path ?? '')}>{chatExportForSelectedRoom.result.path}</button>
-              </p>}
-              {chatExportForSelectedRoom?.error && <p className="settings-error" role="alert">{chatExportForSelectedRoom.error}</p>}
-              <div className="room-export-actions">
-                <button className="settings-command" type="button" disabled={chatExport?.phase === 'running'} onClick={() => void exportSelectedRoomChat()}><Download size={14} />Export chat</button>
-                {chatExportForSelectedRoom?.phase === 'running' && <button className="settings-command" type="button" onClick={() => void cancelChatExport()}>Cancel export</button>}
-              </div>
-            </section>
           </div>
           <footer className="room-info-footer">
             <button className="settings-command is-danger" type="button" onClick={() => { setLeaveRoomError(''); setLeaveConfirmOpen(true) }}><LogOut size={15} />Leave room</button>
@@ -6395,7 +6442,7 @@ function LanguageTutorAnalysisDetails({ analysis, originalText }: { analysis: Tu
   const detectedCode = analysis.detected_language
   const learningCode = analysis.target_language
   const explanationCode = analysis.explanation_language
-  const morphemes = analysis.morpheme_breakdown ?? []
+  const phrases = analysis.phrases ?? []
   return <>
     <section className="language-tutor-section">
       <span className="eyebrow">ORIGINAL · {languageName(detectedCode).toUpperCase()}</span>
@@ -6410,15 +6457,21 @@ function LanguageTutorAnalysisDetails({ analysis, originalText }: { analysis: Tu
       <span className="eyebrow">TRANSLATION · {languageName(explanationCode).toUpperCase()}</span>
       <p lang={explanationCode}>{analysis.translation}</p>
     </section>
-    {morphemes.length > 0 && <section className="language-tutor-section">
+    {phrases.length > 0 && <section className="language-tutor-section">
       <span className="eyebrow">WORD-BY-WORD</span>
-      <ol className="language-tutor-morphemes">
-        {morphemes.map((item, index) => <li key={`${item.word}-${index}`}>
-          <strong lang={learningCode}>{item.word}</strong>
-          <span>{item.breakdown}</span>
-          <small>{item.meaning}</small>
-        </li>)}
-      </ol>
+      {phrases.map((phrase, phraseIndex) => <div className="language-tutor-phrase" key={`${phrase.text}-${phraseIndex}`}>
+        <div className="language-tutor-phrase-head">
+          <strong lang={learningCode}>{phrase.text}</strong>
+          <span>{phrase.meaning}</span>
+        </div>
+        <ol className="language-tutor-morphemes">
+          {(phrase.words ?? []).map((item, index) => <li key={`${item.word}-${index}`}>
+            <strong lang={learningCode}>{item.word}</strong>
+            <span>{item.breakdown}</span>
+            <small>{item.meaning}</small>
+          </li>)}
+        </ol>
+      </div>)}
     </section>}
     {analysis.grammar_rule && <section className="language-tutor-section language-tutor-rule">
       <span className="eyebrow">GRAMMAR RULE</span>
@@ -6743,7 +6796,7 @@ function SettingsDialog({
   const searchActive = searchQuery.trim().length > 0
   const keyboardShortcuts: [string, string][] = [
     ['Ctrl / ⌘ + K', 'Quick switch rooms'],
-    ['Ctrl / ⌘ + F', 'Search this room'],
+    ['Ctrl / ⌘ + F', 'Search messages'],
     ['Ctrl / ⌘ + ,', 'Open settings'],
     ['/ or Ctrl / ⌘ + Shift + S', 'Focus room search'],
     ['Alt + ↑ / ↓', 'Switch rooms'],

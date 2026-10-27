@@ -122,6 +122,25 @@ describe('LocalAIChat', () => {
     expect(screen.getByRole('log').getAttribute('aria-busy')).toBe('false')
   })
 
+  it('keeps the draft editable while a reply runs but blocks sending', async () => {
+    let resolveReply!: (reply: string) => void
+    service.LocalAIChat.mockImplementationOnce(() => new Promise((resolve) => { resolveReply = resolve }))
+    renderChat({ chatId: 'chat-1' })
+
+    await sendDraft('Summarize the room')
+    await waitFor(() => expect(service.LocalAIChat).toHaveBeenCalledTimes(1))
+    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    expect(screen.getByRole('button', { name: 'Stop generating' })).toBeTruthy()
+
+    fireEvent.change(composer, { target: { value: 'Summarize only the decisions' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    expect(composer.disabled).toBe(false)
+    expect(composer.value).toBe('Summarize only the decisions')
+    expect(service.LocalAIChat).toHaveBeenCalledTimes(1)
+
+    await act(async () => resolveReply('Done.'))
+  })
+
   it('asks for an AI title after a complete reply', async () => {
     service.LocalAIChat.mockResolvedValueOnce('Here is a plan.')
     const { props } = renderChat({ chatId: 'chat-1' })

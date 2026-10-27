@@ -32,7 +32,7 @@ const (
 	localAIChatAgentLimit       = 8000
 	localAIChatResponseBytes    = 256 << 10
 	localAIChatDefaultMaxTokens = 8192
-	localAIChatTimeout          = 10 * time.Minute
+	localAIChatTimeout          = time.Hour
 	localAIChatStreamEventName  = "local-ai:stream"
 )
 
@@ -54,13 +54,14 @@ var localAIChatIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // LocalAIChatSummary describes one saved local AI chat in the chat list.
 type LocalAIChatSummary struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	AgentID   string `json:"agentId"`
-	Kind      string `json:"kind"`
-	FolderID  string `json:"folderId"`
-	UpdatedAt int64  `json:"updatedAt"`
-	Preview   string `json:"preview"`
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	AgentID    string `json:"agentId"`
+	Kind       string `json:"kind"`
+	FolderID   string `json:"folderId"`
+	UpdatedAt  int64  `json:"updatedAt"`
+	Preview    string `json:"preview"`
+	Unanswered bool   `json:"unanswered"`
 }
 
 const (

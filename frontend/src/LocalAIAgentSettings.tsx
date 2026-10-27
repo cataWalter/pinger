@@ -4,8 +4,6 @@ import {
     MAX_AGENT_INSTRUCTIONS_LENGTH,
     MAX_AGENT_NAME_LENGTH,
     MAX_CHAT_AGENTS,
-    chatAgentDraftError,
-    newChatAgentID,
     type ChatAgentCollection,
     type ChatAgentProfile,
 } from './aiPrompts'
@@ -20,6 +18,10 @@ type AgentDraft = {
 export type LocalAIAgentSettingsProps = {
     agents: ChatAgentCollection
     onSave: (collection: ChatAgentCollection) => Promise<boolean>
+}
+
+function createAgentID() {
+    return globalThis.crypto?.randomUUID?.() ?? `agent-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 export default function LocalAIAgentSettings({ agents, onSave }: LocalAIAgentSettingsProps) {
@@ -48,9 +50,12 @@ export default function LocalAIAgentSettings({ agents, onSave }: LocalAIAgentSet
         if (!agentDraft) return
         const name = agentDraft.name.trim()
         const instructions = agentDraft.instructions.trim()
-        const problem = chatAgentDraftError(name, instructions)
-        if (problem) {
-            setStatus(problem)
+        if (!name || Array.from(name).length > MAX_AGENT_NAME_LENGTH) {
+            setStatus(`Agent names must be 1-${MAX_AGENT_NAME_LENGTH} characters.`)
+            return
+        }
+        if (!instructions || Array.from(instructions).length > MAX_AGENT_INSTRUCTIONS_LENGTH) {
+            setStatus(`Agent instructions must be 1-${MAX_AGENT_INSTRUCTIONS_LENGTH} characters.`)
             return
         }
         const isNew = agentDraft.id === ''
@@ -58,7 +63,7 @@ export default function LocalAIAgentSettings({ agents, onSave }: LocalAIAgentSet
             setStatus(`Keep up to ${MAX_CHAT_AGENTS} agents.`)
             return
         }
-        const id = isNew ? newChatAgentID() : agentDraft.id
+        const id = isNew ? createAgentID() : agentDraft.id
         const nextAgents = isNew
             ? [...agents.agents, { id, name, instructions }]
             : agents.agents.map((agent) => (agent.id === id ? { id, name, instructions } : agent))
@@ -115,9 +120,6 @@ export default function LocalAIAgentSettings({ agents, onSave }: LocalAIAgentSet
                         <span>Name</span>
                         <input
                             aria-label="Agent name"
-                            spellCheck={false}
-                            autoCorrect="off"
-                            autoCapitalize="off"
                             value={agentDraft.name}
                             maxLength={MAX_AGENT_NAME_LENGTH}
                             autoFocus
@@ -128,9 +130,6 @@ export default function LocalAIAgentSettings({ agents, onSave }: LocalAIAgentSet
                         <span>Instructions</span>
                         <textarea
                             aria-label="Agent instructions"
-                            spellCheck={false}
-                            autoCorrect="off"
-                            autoCapitalize="off"
                             value={agentDraft.instructions}
                             maxLength={MAX_AGENT_INSTRUCTIONS_LENGTH}
                             rows={4}

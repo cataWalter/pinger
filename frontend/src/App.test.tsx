@@ -90,6 +90,7 @@ const harness = vi.hoisted(() => ({
     CheckForUpdates: vi.fn(),
     Devices: vi.fn(),
     RevokeDevice: vi.fn(),
+    SetMenuState: vi.fn(),
   },
   tutorService: {
     Analyze: vi.fn(),
@@ -119,8 +120,8 @@ vi.mock('../bindings/mychat/desktop', () => ({
   LanguageTutorService: harness.tutorService,
   GhostwriterMode: {
     GhostwriterModeChips: 'chips',
-    GhostwriterModeAutocomplete: 'autocomplete',
     GhostwriterModeSlash: 'slash',
+    GhostwriterModeNext: 'next',
   },
 }))
 
@@ -285,7 +286,10 @@ describe('settings storage, integrations, help, and about', () => {
       corrected_text: 'Merhaba, nasılsın?',
       translation: 'Ciao, come stai?',
       has_grammar_errors: false,
-      morpheme_breakdown: [{ word: 'nasılsın', breakdown: 'nasıl-sın -> come-sei', meaning: 'how are you' }],
+      phrases: [
+        { text: 'Merhaba,', meaning: 'hello,', words: [{ word: 'Merhaba', breakdown: 'merhaba -> ciao', meaning: 'hello' }] },
+        { text: 'nasılsın?', meaning: 'how are you?', words: [{ word: 'nasılsın', breakdown: 'nasıl-sın -> come-sei', meaning: 'how are you' }] },
+      ],
       grammar_rule: 'The second-person ending follows vowel harmony.',
       text_to_insert: 'Merhaba, nasılsın?',
     })
@@ -670,8 +674,8 @@ describe('settings storage, integrations, help, and about', () => {
     const contentTools = within(messageTools).getByRole('group', { name: 'Add content' })
     const deliveryTools = within(messageTools).getByRole('group', { name: 'Delivery options' })
     expect(within(draftAssistance).getByRole('button', { name: 'Analyze draft with Language Tutor' })).toBeTruthy()
-    expect(within(draftAssistance).getByRole('button', { name: 'Suggest draft edit' })).toBeTruthy()
     expect(within(draftAssistance).getByRole('button', { name: 'Generate image from draft' })).toBeTruthy()
+    expect(within(draftAssistance).getByRole('button', { name: 'Suggest next reply' })).toBeTruthy()
     expect(within(draftAssistance).getAllByRole('button')).toHaveLength(3)
     expect(within(conversationAnalysis).getByRole('button', { name: 'Summarize with Local AI' })).toBeTruthy()
     expect(within(conversationAnalysis).queryByRole('button', { name: 'Analyze chat topics' })).toBeNull()
@@ -844,7 +848,7 @@ describe('settings storage, integrations, help, and about', () => {
       mimeType = 'audio/webm'
       ondataavailable: ((event: { data: Blob }) => void) | null = null
       onstop: (() => void) | null = null
-      constructor() {}
+      constructor() { }
       start() {
         this.state = 'recording'
       }
@@ -978,7 +982,7 @@ describe('settings storage, integrations, help, and about', () => {
       mimeType = 'audio/webm'
       ondataavailable: ((event: { data: Blob }) => void) | null = null
       onstop: (() => void) | null = null
-      constructor() {}
+      constructor() { }
       start() {
         this.state = 'recording'
       }
@@ -1273,7 +1277,10 @@ describe('room history updates', () => {
       corrected_text: 'Merhaba, nasılsın?',
       translation: 'Ciao, come stai?',
       has_grammar_errors: false,
-      morpheme_breakdown: [{ word: 'nasılsın', breakdown: 'nasıl-sın -> come-sei', meaning: 'how are you' }],
+      phrases: [
+        { text: 'Merhaba,', meaning: 'hello,', words: [{ word: 'Merhaba', breakdown: 'merhaba -> ciao', meaning: 'hello' }] },
+        { text: 'nasılsın?', meaning: 'how are you?', words: [{ word: 'nasılsın', breakdown: 'nasıl-sın -> come-sei', meaning: 'how are you' }] },
+      ],
       grammar_rule: 'The second-person ending follows vowel harmony.',
       text_to_insert: 'Merhaba, nasılsın?',
     })
@@ -1379,107 +1386,18 @@ describe('room history updates', () => {
     expect(screen.queryByRole('button', { name: 'Analyze conversation' })).toBeNull()
   })
 
-  it('shows a complete draft correction and replaces the draft when accepted', async () => {
+  it('does not call the local model or show draft edits while typing', async () => {
     const user = userEvent.setup()
-    const { container } = renderGhostwriterComposer()
-    await screen.findByText('Can you review this?')
-    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
-    harness.service.Ghostwriter.mockResolvedValueOnce([{ id: 'completion', type: 'autocomplete', text: 'Hello, how are you?' }])
-    await user.type(composer, 'Helo how are u')
-    expect(harness.service.Ghostwriter).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Suggest draft edit' }))
-
-    await waitFor(() => expect(harness.service.Ghostwriter).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(container.querySelector('.ghostwriter-rewrite-text')?.textContent).toBe('Hello, how are you?'))
-    expect(composer.value).toBe('Helo how are u')
-    await user.click(screen.getByRole('button', { name: 'Replace draft' }))
-
-    expect(composer.value).toBe('Hello, how are you?')
-    expect(harness.service.SendMessage).not.toHaveBeenCalled()
-  })
-
-  it('renders Ghostwriter response chunks before generation completes', async () => {
-    let resolveAutocomplete!: (suggestions: { id: string; type: string; text: string }[]) => void
-    const { container } = renderGhostwriterComposer()
-    await screen.findByText('Can you review this?')
-    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
-    harness.service.Ghostwriter.mockImplementationOnce(() => new Promise((resolve) => { resolveAutocomplete = resolve }))
-    fireEvent.change(composer, { target: { value: 'I can help with that' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Suggest draft edit' }))
-    await waitFor(() => expect(harness.service.Ghostwriter).toHaveBeenCalledTimes(1))
-    const request = harness.service.Ghostwriter.mock.calls[0][0] as { requestId: string }
-    const emitChunk = (text: string) => act(() => harness.eventHandlers.get('ghostwriter:stream')?.({
-      data: { requestId: request.requestId, roomId: room.id, text },
-    }))
-
-    emitChunk('I can ')
-    expect(container.querySelector('.ghostwriter-rewrite-text')?.textContent).toBe('I can ')
-    expect(screen.getByRole('button', { name: 'Replace draft' }).hasAttribute('disabled')).toBe(true)
-    emitChunk('help with that.')
-    expect(container.querySelector('.ghostwriter-rewrite-text')?.textContent).toBe('I can help with that.')
-
-    await act(async () => resolveAutocomplete([{ id: 'completion', type: 'autocomplete', text: 'I can help with that.' }]))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Replace draft' }).hasAttribute('disabled')).toBe(false))
-  })
-
-  it('passes the detected incoming language to draft correction', async () => {
-    const user = userEvent.setup()
-    const turkishHistory = [
-      message('$morning', 'Günaydın, bugün nasılsın? Dün çok yorulmuştun, değil mi?', 100),
-      message('$feeling', 'Daha iyiyim, teşekkür ederim. Sen bugün nasılsın?', 200),
-      message('$tired', 'Çok mu yoruldun dün? Bence biraz dinlenmelisin.', 300),
-    ]
-    harness.service.Snapshot.mockResolvedValue({
-      ...snapshot,
-      preferences: { 'ghostwriter.enabled': true, [`room.ghostwriter.${room.id}`]: true },
-    })
-    harness.service.History.mockResolvedValue({ messages: turkishHistory, before: 0, hasMore: false })
-    render(<App />)
-
-    await screen.findByText('Çok mu yoruldun dün? Bence biraz dinlenmelisin.')
-    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'come stai oggi?')
-    await user.click(screen.getByRole('button', { name: 'Suggest draft edit' }))
-
-    await waitFor(() => expect(harness.service.Ghostwriter).toHaveBeenCalledWith(expect.objectContaining({
-      mode: 'autocomplete',
-      targetLanguage: 'tur',
-      draft: 'come stai oggi?',
-    })))
-  })
-
-  it('enables Suggest edit from the global Ghostwriter setting', async () => {
-    const user = userEvent.setup()
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ghostwriter.enabled': true } })
-    harness.service.History.mockResolvedValue({ messages: [message('$incoming', 'Can you review this?', 300)], before: 0, hasMore: false })
-    harness.service.Ghostwriter.mockResolvedValueOnce([{ id: 'completion', type: 'autocomplete', text: 'Hello, how are you?' }])
-    render(<App />)
-    await screen.findByText('Can you review this?')
-    expect(screen.queryByRole('button', { name: 'Enable suggestions in this chat' })).toBeNull()
-
-    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Helo how are u')
-    await user.click(screen.getByRole('button', { name: 'Suggest draft edit' }))
-
-    await waitFor(() => expect(harness.service.Ghostwriter).toHaveBeenCalledTimes(1))
-    expect(harness.service.SendMessage).not.toHaveBeenCalled()
-  })
-
-  it('does not apply an autocomplete response after the draft changes', async () => {
-    let resolveAutocomplete!: (suggestions: { id: string; type: string; text: string }[]) => void
     renderGhostwriterComposer()
     await screen.findByText('Can you review this?')
     const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
-    harness.service.Ghostwriter.mockImplementationOnce(() => new Promise((resolve) => { resolveAutocomplete = resolve }))
-    fireEvent.change(composer, { target: { value: 'first draft' } })
+    await user.type(composer, 'Helo how are u')
+
+    expect(composer.value).toBe('Helo how are u')
     expect(harness.service.Ghostwriter).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Suggest draft edit' }))
-    await waitFor(() => expect(harness.service.Ghostwriter).toHaveBeenCalledTimes(1))
-
-    fireEvent.change(composer, { target: { value: 'newer draft' } })
-    await act(async () => resolveAutocomplete([{ id: 'completion', type: 'autocomplete', text: 'stale text' }]))
-
-    expect(composer.value).toBe('newer draft')
-    expect(harness.service.Ghostwriter).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Suggest draft edit' })).toBeNull()
     expect(document.querySelector('.ghostwriter-rewrite-preview')).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
   it('turns /ghost into an unsent draft and never sends the command', async () => {
@@ -1506,6 +1424,48 @@ describe('room history updates', () => {
 
     expect(await screen.findByText('Enable Ghostwriter in Settings > AI first.')).toBeTruthy()
     expect(harness.service.Ghostwriter).not.toHaveBeenCalled()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('does not suggest a reply on load or while typing', async () => {
+    const user = userEvent.setup()
+    renderGhostwriterComposer()
+    await screen.findByText('Can you review this?')
+    expect((screen.getByRole('button', { name: 'Suggest next reply' }) as HTMLButtonElement).disabled).toBe(false)
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.type(composer, 'Helo')
+
+    expect(harness.service.Ghostwriter).not.toHaveBeenCalled()
+    expect(composer.value).toBe('Helo')
+    expect((screen.getByRole('button', { name: 'Suggest next reply' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('inserts a suggested reply only after the button is pressed and never sends it', async () => {
+    const user = userEvent.setup()
+    renderGhostwriterComposer()
+    await screen.findByText('Can you review this?')
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    harness.service.Ghostwriter.mockResolvedValueOnce([{ id: 'next-reply', type: 'next_reply', label: 'next reply', text: 'Yes, I will review it tonight.' }])
+    await user.click(screen.getByRole('button', { name: 'Suggest next reply' }))
+
+    expect(await screen.findByText('Suggested reply ready to review. It has not been sent.')).toBeTruthy()
+    expect(composer.value).toBe('Yes, I will review it tonight.')
+    expect(harness.service.Ghostwriter).toHaveBeenCalledTimes(1)
+    expect(harness.service.Ghostwriter).toHaveBeenLastCalledWith({ roomId: room.id, mode: 'next', draft: '', intent: '' })
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    expect(harness.service.SendReply).not.toHaveBeenCalled()
+  })
+
+  it('leaves the composer empty when the local model returns no reply', async () => {
+    const user = userEvent.setup()
+    renderGhostwriterComposer()
+    await screen.findByText('Can you review this?')
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    harness.service.Ghostwriter.mockResolvedValueOnce([])
+    await user.click(screen.getByRole('button', { name: 'Suggest next reply' }))
+
+    expect(await screen.findByText('The local model returned no reply.')).toBeTruthy()
+    expect(composer.value).toBe('')
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
@@ -1828,7 +1788,7 @@ describe('room history updates', () => {
       corrected_text: 'Hola, ¿cómo estás?',
       translation: 'Hello, how are you?',
       has_grammar_errors: false,
-      morpheme_breakdown: [{ word: 'estás', breakdown: 'estar + ás', meaning: 'you are' }],
+      phrases: [{ text: 'Hola, ¿cómo estás?', meaning: 'how are you?', words: [{ word: 'estás', breakdown: 'estar + ás', meaning: 'you are' }] }],
       grammar_rule: 'Estar conjugates for the second person.',
       text_to_insert: 'Hola, ¿cómo estás?',
     })
@@ -1845,103 +1805,131 @@ describe('room history updates', () => {
     expect(within(dialog).getByRole('button', { name: 'Replace draft with Spanish' })).toBeTruthy()
   })
 
-  it('translates incoming chat messages beside their originals and excludes own messages', async () => {
+  it('translates messages received after your last message and skips own and redacted messages', async () => {
     const user = userEvent.setup()
-    const recentMessages = [
-      { ...message('$latest-own', 'My latest message', 300), own: true, sender: snapshot.profile.userId },
-      message('$latest-turkish', 'Günaydın', 400),
-    ]
-    const olderMessages = [
-      message('$older-turkish', 'Merhaba', 100),
-      { ...message('$redacted-turkish', 'Silinmiş mesaj', 200), redacted: true },
+    const timeline = [
+      message('$before-own', 'Eski mesaj', 100),
+      { ...message('$own-latest', 'My latest message', 200), own: true, sender: snapshot.profile.userId },
+      message('$received-first', 'Günaydın', 300),
+      { ...message('$received-redacted', 'Silinmiş mesaj', 350), redacted: true },
+      message('$received-second', 'Nasılsın?', 400),
     ]
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
-    harness.service.History.mockImplementation(async (_roomID: string, before: number) => before === 0
-      ? { messages: recentMessages, before: 80, hasMore: true }
-      : { messages: olderMessages, before: 40, hasMore: false })
-    harness.service.AIComplete.mockResolvedValue(JSON.stringify(['Hello', 'Good morning']))
+    harness.service.History.mockResolvedValue({ messages: timeline, before: 80, hasMore: true })
+    harness.tutorService.Analyze.mockImplementation(async (body: string) => ({ translation: body === 'Günaydın' ? 'Good morning' : 'How are you?' }))
 
     const { container } = render(<App />)
     expect(await screen.findByText('Günaydın')).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Translate latest 10 received messages to English' }))
+    await user.click(screen.getByRole('button', { name: 'Translate messages received since your last message to English' }))
 
     await screen.findByText('Good morning')
-    await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalledTimes(1))
-    expect(harness.service.History).toHaveBeenCalledWith(room.id, 80)
-    expect(container.querySelector('[data-event-id="$older-turkish"] .message-translation')?.textContent).toContain('Hello')
-    expect(container.querySelector('[data-event-id="$latest-turkish"] .message-translation')?.textContent).toContain('Good morning')
-    expect(container.querySelector('[data-event-id="$latest-own"] .message-translation')).toBeNull()
-    expect(screen.queryByRole('region', { name: 'Chat translation' })).toBeNull()
-    const request = harness.service.AIComplete.mock.calls[0][0]
-    expect(request[0].content).toContain('Translate every message body into English')
-    expect(request[0].content).toContain('valid JSON array')
-    expect(request[1].content).toContain('Merhaba')
-    expect(request[1].content).toContain('Günaydın')
-    expect(request[1].content).not.toContain('My latest message')
-    expect(request[1].content).not.toContain('Silinmiş mesaj')
-    expect(container.querySelector('[data-event-id="$latest-turkish"] .message-body')?.textContent).toBe('Günaydın')
+    await screen.findByText('How are you?')
+    expect(harness.tutorService.Analyze.mock.calls.map((call) => call.slice(0, 3))).toEqual([
+      ['Günaydın', 'message', 'en'],
+      ['Nasılsın?', 'message', 'en'],
+    ])
+    expect(container.querySelector('[data-event-id="$received-first"] .message-translation')?.textContent).toContain('Good morning')
+    expect(container.querySelector('[data-event-id="$received-second"] .message-translation')?.textContent).toContain('How are you?')
+    expect(container.querySelector('[data-event-id="$before-own"] .message-translation')).toBeNull()
+    expect(container.querySelector('[data-event-id="$own-latest"] .message-translation')).toBeNull()
+    expect(container.querySelector('[data-event-id="$received-redacted"] .message-translation')).toBeNull()
+    expect(harness.service.History.mock.calls.filter(([, before]) => before !== 0)).toEqual([])
+    expect(harness.service.AIComplete).not.toHaveBeenCalled()
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
-  it('explains malformed translation responses and reveals the raw AI output', async () => {
+  it('translates every incoming message after your last message without a fixed cap', async () => {
     const user = userEvent.setup()
-    const rawResponse = 'The translation is Hola, not JSON.'
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
-    harness.service.History.mockResolvedValue({ messages: [message('$latest-turkish', 'Günaydın', 400)], before: 0, hasMore: false })
-    harness.service.AIComplete.mockResolvedValue(rawResponse)
-
-    render(<App />)
-    expect(await screen.findByText('Günaydın')).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Translate latest 10 received messages to English' }))
-
-    expect(await screen.findByText(/not valid JSON/)).toBeTruthy()
-    const responseDetails = screen.getByText('Show raw AI response').closest('details') as HTMLDetailsElement
-    expect(responseDetails.open).toBe(false)
-    await user.click(screen.getByText('Show raw AI response'))
-    expect(responseDetails.open).toBe(true)
-    expect(responseDetails.textContent).toContain(rawResponse)
-  })
-
-  it('translates only the latest 10 incoming messages and loads just enough history', async () => {
-    const user = userEvent.setup()
-    const latestMessages = Array.from({ length: 16 }, (_, index) => {
-      const sequence = index + 1
-      const isOwn = sequence % 2 === 0
-      const current = message(isOwn ? `$own-${sequence}` : `$received-${sequence}`, isOwn ? `my message ${sequence}` : `received message ${sequence}`, 100 + sequence)
-      return isOwn ? { ...current, own: true, sender: snapshot.profile.userId } : current
-    })
-    const olderMessages = [
-      message('$outside-last-ten', 'outside last ten received', 1),
-      message('$older-received-1', 'older received one', 2),
-      message('$older-received-2', 'older received two', 3),
+    const timeline = [
+      { ...message('$own-latest', 'my message', 100), own: true, sender: snapshot.profile.userId },
+      ...Array.from({ length: 12 }, (_, index) => message(`$received-${index + 1}`, `received message ${index + 1}`, 200 + index)),
     ]
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    harness.service.History.mockResolvedValue({ messages: timeline, before: 80, hasMore: true })
+    harness.tutorService.Analyze.mockImplementation(async (body: string) => ({ translation: `Translated ${body}` }))
+
+    const { container } = render(<App />)
+    expect(await screen.findByText('received message 12')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Translate messages received since your last message to English' }))
+
+    await waitFor(() => expect(container.querySelector('[data-event-id="$received-12"] .message-translation')?.textContent).toContain('Translated received message 12'))
+    expect(harness.tutorService.Analyze).toHaveBeenCalledTimes(12)
+    expect(container.querySelector('[data-event-id="$own-latest"] .message-translation')).toBeNull()
+  })
+
+  it('loads older history only until your last message and translates what follows it', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
     harness.service.History.mockImplementation(async (_roomID: string, before: number) => before === 0
-      ? { messages: latestMessages, before: 80, hasMore: true }
-      : before === 80
-        ? { messages: olderMessages, before: 40, hasMore: true }
-        : { messages: [message('$older-unrequested', 'older unrequested message', 0)], before: 0, hasMore: false })
-    harness.service.AIComplete.mockResolvedValue(JSON.stringify(Array.from({ length: 10 }, (_, index) => `Translated ${index + 1}`)))
+      ? { messages: [message('$received-late', 'late received', 300)], before: 80, hasMore: true }
+      : {
+        messages: [
+          message('$outside', 'outside received', 50),
+          { ...message('$own-older', 'my older message', 200), own: true, sender: snapshot.profile.userId },
+          message('$received-older', 'older received', 250),
+        ],
+        before: 40,
+        hasMore: true,
+      })
+    harness.tutorService.Analyze.mockImplementation(async (body: string) => ({ translation: `EN ${body}` }))
+
+    const { container } = render(<App />)
+    expect(await screen.findByText('late received')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Translate messages received since your last message to English' }))
+
+    await screen.findByText('EN late received')
+    expect(harness.service.History.mock.calls.filter(([, before]) => before !== 0)).toEqual([[room.id, 80]])
+    expect(harness.tutorService.Analyze.mock.calls.map((call) => call[0])).toEqual(['older received', 'late received'])
+    expect(container.querySelector('[data-event-id="$received-older"] .message-translation')?.textContent).toContain('EN older received')
+    expect(container.querySelector('[data-event-id="$outside"] .message-translation')).toBeNull()
+    expect(container.querySelector('[data-event-id="$own-older"] .message-translation')).toBeNull()
+  })
+
+  it('explains when no incoming messages follow your last message', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    harness.service.History.mockResolvedValue({ messages: [{ ...message('$own-latest', 'My latest message', 300), own: true, sender: snapshot.profile.userId }], before: 0, hasMore: false })
 
     render(<App />)
-    expect(await screen.findByText('received message 15')).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Translate latest 10 received messages to English' }))
-    await screen.findByText('Translated 10')
-    await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText('My latest message')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Translate messages received since your last message to English' }))
 
-    expect(harness.service.History.mock.calls.filter(([, before]) => before !== 0)).toEqual([[room.id, 80]])
-    const submittedContent = harness.service.AIComplete.mock.calls
-      .flatMap(([request]) => request.map((item: { content: string }) => item.content))
-      .join('\n')
-    expect(submittedContent).toContain('older received one')
-    expect(submittedContent).toContain('older received two')
-    expect(submittedContent).toContain('received message 15')
-    expect(submittedContent).not.toContain('outside last ten received')
-    expect(submittedContent).not.toContain('my message')
-    expect(submittedContent).not.toContain('older unrequested message')
-    expect(document.querySelector('[data-event-id="$outside-last-ten"] .message-translation')).toBeNull()
-    expect(document.querySelector('[data-event-id="$own-16"] .message-translation')).toBeNull()
-    expect(document.querySelector('[data-event-id="$received-15"] .message-translation')?.textContent).toContain('Translated 10')
+    expect(await screen.findByText(/There are no incoming text messages since your last message/)).toBeTruthy()
+    expect(harness.tutorService.Analyze).not.toHaveBeenCalled()
+  })
+
+  it('shows the Language Tutor analysis for each translated message', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    harness.service.History.mockResolvedValue({ messages: [message('$received-turkish', 'Nasılsın?', 300)], before: 0, hasMore: false })
+    harness.tutorService.Analyze.mockResolvedValueOnce({
+      detected_language: 'tr',
+      target_language: 'tr',
+      explanation_language: 'en',
+      original_text: 'Nasılsın?',
+      corrected_text: 'Nasılsın?',
+      translation: 'How are you?',
+      has_grammar_errors: false,
+      error_explanation: '',
+      phrases: [{ text: 'Nasılsın?', meaning: 'how are you (informal)', words: [{ word: 'Nasılsın?', breakdown: 'nasıl-sın -> come-sei', meaning: 'how are you' }] }],
+      grammar_rule: 'The second-person ending follows vowel harmony.',
+      text_to_insert: '',
+    })
+
+    const { container } = render(<App />)
+    expect(await screen.findByText('Nasılsın?')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Translate messages received since your last message to English' }))
+
+    await waitFor(() => expect(container.querySelector('[data-event-id="$received-turkish"] .message-translation')?.textContent).toContain('How are you?'))
+    expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Nasılsın?', 'message', 'en', expect.any(String))
+    const translation = container.querySelector<HTMLElement>('[data-event-id="$received-turkish"] .message-translation')
+    expect(translation).toBeTruthy()
+    expect(within(translation as HTMLElement).getByText('WORD-BY-WORD')).toBeTruthy()
+    expect((translation as HTMLElement).querySelectorAll('.language-tutor-phrase')).toHaveLength(1)
+    expect(within(translation as HTMLElement).getByText('how are you (informal)')).toBeTruthy()
+    expect(within(translation as HTMLElement).getByText('nasıl-sın -> come-sei')).toBeTruthy()
+    expect(within(translation as HTMLElement).getByText('GRAMMAR RULE')).toBeTruthy()
+    expect(within(translation as HTMLElement).getByText('The second-person ending follows vowel harmony.')).toBeTruthy()
   })
 
   it('drafts a reply from nearby context and keeps the selected message as the reply target', async () => {
@@ -2098,32 +2086,30 @@ describe('room history updates', () => {
   it('exports the room chat to a chosen folder with progress and reveals the result', async () => {
     const user = userEvent.setup()
     const exportPath = '/tmp/exports/Test room chat 2026-01-01 1200/chat.html'
-    let finishExport: (result: { path: string; messages: number; media: number; mediaFailed: number }) => void = () => {}
+    let finishExport: (result: { path: string; messages: number; media: number; mediaFailed: number }) => void = () => { }
     harness.service.ChooseDownloadFolder.mockResolvedValue('/tmp/exports')
     harness.service.ExportRoomChat.mockReturnValue(new Promise((resolve) => { finishExport = resolve }))
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: 'Room details' }))
-    const roomDialog = await screen.findByRole('dialog', { name: 'Test room' })
-    await user.click(within(roomDialog).getByRole('button', { name: 'Export chat' }))
+    await user.click(screen.getByRole('button', { name: 'Export chat' }))
     await waitFor(() => expect(harness.service.ExportRoomChat).toHaveBeenCalledWith(room.id, '/tmp/exports'))
     await waitFor(() => expect(harness.eventHandlers.has('chat-export:progress')).toBe(true))
 
     act(() => {
       harness.eventHandlers.get('chat-export:progress')?.({ data: { roomId: room.id, stage: 'media', messages: 3, mediaDone: 1, mediaTotal: 2 } })
     })
-    expect(await within(roomDialog).findByText('Saving media 1 of 2')).toBeTruthy()
+    expect(await screen.findByText('Saving media 1 of 2')).toBeTruthy()
 
     await act(async () => finishExport({ path: exportPath, messages: 3, media: 2, mediaFailed: 0 }))
-    expect(await within(roomDialog).findByText(/Exported 3 messages and 2 media files/)).toBeTruthy()
-    await user.click(within(roomDialog).getByRole('button', { name: exportPath }))
+    expect(await screen.findByText(/Exported 3 messages and 2 media files/)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Show in file manager' }))
     expect(harness.service.RevealFile).toHaveBeenCalledWith(exportPath)
   })
 
   it('cancels a running room chat export and reports the failure', async () => {
     const user = userEvent.setup()
-    let abortExport: (reason: Error) => void = () => {}
+    let abortExport: (reason: Error) => void = () => { }
     harness.service.ChooseDownloadFolder.mockResolvedValue('/tmp/exports')
     harness.service.ExportRoomChat.mockReturnValue(new Promise((_resolve, reject) => { abortExport = reject }))
     harness.service.CancelChatExport.mockImplementation(async () => {
@@ -2133,15 +2119,13 @@ describe('room history updates', () => {
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: 'Room details' }))
-    const roomDialog = await screen.findByRole('dialog', { name: 'Test room' })
-    await user.click(within(roomDialog).getByRole('button', { name: 'Export chat' }))
-    await user.click(await within(roomDialog).findByRole('button', { name: 'Cancel export' }))
+    await user.click(screen.getByRole('button', { name: 'Export chat' }))
+    await user.click(await screen.findByRole('button', { name: 'Cancel export' }))
 
     expect(harness.service.CancelChatExport).toHaveBeenCalledTimes(1)
-    expect((await within(roomDialog).findByRole('alert')).textContent).toContain('chat export was cancelled')
-    expect(within(roomDialog).getByRole('button', { name: 'Export chat' }).hasAttribute('disabled')).toBe(false)
-    expect(within(roomDialog).queryByRole('button', { name: 'Cancel export' })).toBeNull()
+    expect((await screen.findByRole('alert')).textContent).toContain('chat export was cancelled')
+    expect(screen.getByRole('button', { name: 'Export chat' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Cancel export' })).toBeNull()
   })
 
   it('does not start an export when the folder picker is dismissed', async () => {
@@ -2150,14 +2134,12 @@ describe('room history updates', () => {
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: 'Room details' }))
-    const roomDialog = await screen.findByRole('dialog', { name: 'Test room' })
-    await user.click(within(roomDialog).getByRole('button', { name: 'Export chat' }))
+    await user.click(screen.getByRole('button', { name: 'Export chat' }))
 
     await waitFor(() => expect(harness.service.ChooseDownloadFolder).toHaveBeenCalledTimes(1))
     expect(harness.service.ExportRoomChat).not.toHaveBeenCalled()
-    expect(within(roomDialog).queryByRole('button', { name: 'Cancel export' })).toBeNull()
-    expect(within(roomDialog).queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Cancel export' })).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('loads chat agent preferences from the active account when room IDs overlap', async () => {
@@ -2848,6 +2830,21 @@ describe('room history updates', () => {
     expect(await screen.findByRole('heading', { name: 'Trip plan' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Message timeline' })).toBeNull()
     await waitFor(() => expect(harness.service.LoadLocalAIChatMessages).toHaveBeenCalledWith('chat-1'))
+  })
+
+  it('keeps private chats out of the Unanswered filter', async () => {
+    const user = userEvent.setup()
+    harness.service.ListLocalAIChats.mockResolvedValue([
+      { id: 'chat-1', title: 'Trip plan', agentId: '', kind: 'chat', folderId: '', updatedAt: 1_700_000_000_000, preview: 'Here is a draft', unanswered: true },
+    ])
+    render(<App />)
+    await screen.findByText('latest message')
+    expect(screen.queryByRole('button', { name: /Trip plan/ })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Unanswered rooms' }).getAttribute('aria-pressed')).toBe('true'))
+    expect(screen.queryByRole('button', { name: /Trip plan/ })).toBeNull()
   })
 
   it('adds a private chat to All rooms from its context menu', async () => {
@@ -5509,5 +5506,161 @@ describe('room history updates', () => {
 
     const timestamp = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(300))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(`[${timestamp}] Alice: latest message`))
+  })
+})
+
+describe('native application menu actions', () => {
+  function dispatchMenuAction(action: string) {
+    harness.eventHandlers.get('application-menu:action')?.({ data: action })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    harness.eventHandlers.clear()
+    harness.service.Snapshot.mockResolvedValue(snapshot)
+    harness.service.AccountRooms.mockResolvedValue([])
+    harness.service.History.mockResolvedValue({ messages: [message('$latest', 'latest message', 300)], before: 0, hasMore: false })
+    harness.service.ScheduledJobs.mockResolvedValue([])
+    harness.service.SetActiveRoom.mockResolvedValue(undefined)
+    harness.service.MarkRead.mockResolvedValue(undefined)
+    harness.service.SetRoomUnanswered.mockResolvedValue(undefined)
+    harness.service.RoomMembers.mockResolvedValue([])
+    harness.service.NativeNotificationsSupported.mockResolvedValue(false)
+    harness.service.NotificationPermission.mockResolvedValue('default')
+    harness.service.SetBooleanPreference.mockResolvedValue(undefined)
+    harness.service.SetStringPreference.mockResolvedValue(undefined)
+    harness.service.ListLocalAIChats.mockResolvedValue([])
+    harness.service.ListLocalAIChatFolders.mockResolvedValue([])
+    harness.service.LoadLocalAIChatMessages.mockResolvedValue([])
+    harness.service.SwitchAccount.mockResolvedValue({ ...snapshot, activeAccountId: 'secondary' })
+    harness.tutorService.Analyze.mockReturnValue(new Promise(() => undefined))
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('publishes the selected room and filter to the native menu', async () => {
+    render(<App />)
+    await screen.findByText('latest message')
+
+    await waitFor(() => expect(harness.service.SetMenuState).toHaveBeenLastCalledWith(expect.objectContaining({
+      roomSelected: true,
+      privateChatOpen: false,
+      draftReady: false,
+      filter: 'all',
+    })))
+  })
+
+  it('runs room actions from the native menu on the selected room', async () => {
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [secondRoom] })
+    render(<App />)
+    await waitFor(() => expect(harness.service.SetMenuState).toHaveBeenLastCalledWith(expect.objectContaining({ roomSelected: true, roomNeedsReply: true })))
+
+    act(() => dispatchMenuAction('room-answered'))
+
+    await waitFor(() => expect(harness.service.SetRoomUnanswered).toHaveBeenCalledWith(secondRoom.id, false))
+  })
+
+  it('applies room filters from the native menu', async () => {
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, secondRoom] })
+    render(<App />)
+    await screen.findByText('latest message')
+    const roomList = screen.getByRole('navigation', { name: 'Rooms' })
+    expect(within(roomList).getByRole('button', { name: /Test room/ })).toBeTruthy()
+
+    act(() => dispatchMenuAction('filter:needs-reply'))
+
+    await waitFor(() => expect(within(roomList).queryByRole('button', { name: /Test room/ })).toBeNull())
+    expect(within(roomList).getByRole('button', { name: /Second room/ })).toBeTruthy()
+    expect(harness.service.SetMenuState).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'needs-reply' }))
+  })
+
+  it('opens the requested settings tab from the native menu', async () => {
+    render(<App />)
+    await screen.findByText('latest message')
+
+    act(() => dispatchMenuAction('settings:Keyboard'))
+
+    const settingsDialog = await screen.findByRole('dialog', { name: 'Settings' })
+    expect(within(settingsDialog).getByRole('tab', { name: 'Keyboard' }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('switches accounts from the native menu', async () => {
+    render(<App />)
+    await screen.findByText('latest message')
+
+    act(() => dispatchMenuAction('account:secondary'))
+
+    await waitFor(() => expect(harness.service.SwitchAccount).toHaveBeenCalledWith('secondary'))
+  })
+
+  it('opens the quick switcher from the native menu', async () => {
+    render(<App />)
+    await screen.findByText('latest message')
+
+    act(() => dispatchMenuAction('quick-switch'))
+
+    expect(await screen.findByRole('dialog', { name: 'Quick switcher' })).toBeTruthy()
+  })
+
+  it('focuses room search from the native menu', async () => {
+    render(<App />)
+    await screen.findByText('latest message')
+
+    act(() => dispatchMenuAction('room-search'))
+
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Find a room' }))
+  })
+
+  it('opens a new private chat from the native menu', async () => {
+    render(<App />)
+    await screen.findByText('latest message')
+
+    act(() => dispatchMenuAction('private-chat-new'))
+
+    expect(await screen.findByRole('heading', { name: 'Local AI' })).toBeTruthy()
+  })
+
+  it('adds the open private chat to All rooms from the native menu', async () => {
+    const user = userEvent.setup()
+    harness.service.ListLocalAIChats.mockResolvedValue([{ id: 'chat-1', title: 'Trip plan', agentId: '', updatedAt: 1_700_000_000_000, preview: '' }])
+    render(<App />)
+    await screen.findByText('latest message')
+    await user.click(screen.getByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: /Trip plan/ }))
+    await waitFor(() => expect(harness.service.SetMenuState).toHaveBeenLastCalledWith(expect.objectContaining({ privateChatOpen: true, privateChatInAll: false })))
+
+    act(() => dispatchMenuAction('private-chat-all'))
+
+    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith('ai.local_chat.in_all.chat-1', true))
+  })
+
+  it('analyzes the composer draft from the native menu', async () => {
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:11434' } })
+    render(<App />)
+    await screen.findByText('latest message')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Ben iyiyim.' } })
+    await waitFor(() => expect(harness.service.SetMenuState).toHaveBeenLastCalledWith(expect.objectContaining({ draftReady: true })))
+
+    act(() => dispatchMenuAction('tutor-draft'))
+
+    await waitFor(() => expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Ben iyiyim.', 'draft', 'en', expect.any(String)))
+  })
+
+  it('sends undo to the focused text field from the native menu', async () => {
+    const execCommand = vi.fn(() => true)
+    Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true })
+    try {
+      render(<App />)
+      const composer = await screen.findByRole('textbox', { name: 'Message' })
+      composer.focus()
+
+      act(() => dispatchMenuAction('undo'))
+
+      expect(execCommand).toHaveBeenCalledWith('undo')
+    } finally {
+      Reflect.deleteProperty(document, 'execCommand')
+    }
   })
 })

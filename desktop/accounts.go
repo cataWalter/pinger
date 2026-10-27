@@ -339,6 +339,7 @@ func (s *AppService) SwitchAccount(accountID string) (Snapshot, error) {
 	s.clientMu.Unlock()
 	s.startAccountEventPump(accountID, client)
 	s.startAccountSync(accountID, client)
+	s.notifyAccountsChanged()
 	return s.Snapshot()
 }
 
@@ -386,6 +387,7 @@ func (s *AppService) AddAccount(homeserver, username, password string) (Snapshot
 	s.clientMu.Unlock()
 	s.startAccountEventPump(accountID, client)
 	s.startAccountSync(accountID, client)
+	s.notifyAccountsChanged()
 	return s.Snapshot()
 }
 
