@@ -436,6 +436,10 @@ jobs:
             <id>fi.mau.pinger</id>
             <name>Pinger</name>
             <summary>Desktop client for gomuks, a Matrix client</summary>
+            <description>
+              <p>Pinger is a desktop Matrix chat client built on gomuks.</p>
+            </description>
+            <url type="homepage">https://github.com/cataWalter/pinger</url>
             <metadata_license>CC0-1.0</metadata_license>
             <project_license>AGPL-3.0-or-later</project_license>
             <launchable type="desktop-id">fi.mau.pinger.desktop</launchable>
