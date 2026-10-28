@@ -150,7 +150,9 @@ func (s *AppService) initializeAccounts(dataDir, mediaCacheDir string) error {
 	if err != nil {
 		return err
 	}
+	s.accountMu.RLock()
 	primary := s.client
+	s.accountMu.RUnlock()
 	clients := make(map[string]*matrix.Client, 1)
 	activeID := registry.ActiveID()
 	if activeID == "" {
@@ -205,10 +207,8 @@ func (s *AppService) initializeAccounts(dataDir, mediaCacheDir string) error {
 	s.activeAccountID = activeID
 	s.dataDir = dataDir
 	s.accountMediaCacheDir = mediaCacheDir
-	s.accountMu.Unlock()
-	s.clientMu.Lock()
 	s.client = activeClient
-	s.clientMu.Unlock()
+	s.accountMu.Unlock()
 	return nil
 }
 
@@ -244,12 +244,17 @@ func (s *AppService) Accounts() []AccountSummary {
 }
 
 func (s *AppService) accountClient(accountID string) (*matrix.Client, error) {
-	s.accountMu.Lock()
-	defer s.accountMu.Unlock()
+	s.accountOpenMu.Lock()
+	defer s.accountOpenMu.Unlock()
+	s.accountMu.RLock()
 	if client := s.accountClients[accountID]; client != nil {
+		s.accountMu.RUnlock()
 		return client, nil
 	}
 	registry := s.accountRegistry
+	dataDir := s.dataDir
+	mediaCacheDir := s.accountMediaCacheDir
+	s.accountMu.RUnlock()
 	if registry == nil {
 		return nil, errors.New("account registry is unavailable")
 	}
@@ -263,7 +268,7 @@ func (s *AppService) accountClient(accountID string) (*matrix.Client, error) {
 	if stored == nil {
 		return nil, fmt.Errorf("account %q is not registered", accountID)
 	}
-	databasePath, err := accountDatabasePath(s.dataDir, accountID)
+	databasePath, err := accountDatabasePath(dataDir, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -271,8 +276,8 @@ func (s *AppService) accountClient(accountID string) (*matrix.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open account %s: %w", accountID, err)
 	}
-	if s.accountMediaCacheDir != "" {
-		client.SetMediaCacheDir(filepath.Join(s.accountMediaCacheDir, accountID))
+	if mediaCacheDir != "" {
+		client.SetMediaCacheDir(filepath.Join(mediaCacheDir, accountID))
 	}
 	if client.IsLoggedIn() && stored.Profile.UserID != "" {
 		actualUserID := client.Profile().UserID
@@ -281,10 +286,12 @@ func (s *AppService) accountClient(accountID string) (*matrix.Client, error) {
 			return nil, fmt.Errorf("account %s database belongs to %s, not %s", accountID, actualUserID, stored.Profile.UserID)
 		}
 	}
+	s.accountMu.Lock()
 	if s.accountClients == nil {
 		s.accountClients = make(map[string]*matrix.Client)
 	}
 	s.accountClients[accountID] = client
+	s.accountMu.Unlock()
 	return client, nil
 }
 
@@ -331,12 +338,7 @@ func (s *AppService) SwitchAccount(accountID string) (Snapshot, error) {
 	if err = registry.SetActive(accountID); err != nil {
 		return Snapshot{}, err
 	}
-	s.accountMu.Lock()
-	s.activeAccountID = accountID
-	s.accountMu.Unlock()
-	s.clientMu.Lock()
-	s.client = client
-	s.clientMu.Unlock()
+	s.setActiveAccount(accountID, client)
 	s.startAccountEventPump(accountID, client)
 	s.startAccountSync(accountID, client)
 	s.notifyAccountsChanged()
@@ -369,10 +371,12 @@ func (s *AppService) AddAccount(homeserver, username, password string) (Snapshot
 	}
 	if err = client.Login(s.ctx, homeserver, username, password); err != nil {
 		client.Close()
+		removeAccountData(dataDir, accountID, mediaCacheDir)
 		return Snapshot{}, err
 	}
 	if err = registry.UpsertAndActivate(accountSummary(accountID, client)); err != nil {
 		client.Close()
+		removeAccountData(dataDir, accountID, mediaCacheDir)
 		return Snapshot{}, err
 	}
 	s.accountMu.Lock()
@@ -380,22 +384,34 @@ func (s *AppService) AddAccount(homeserver, username, password string) (Snapshot
 		s.accountClients = make(map[string]*matrix.Client)
 	}
 	s.accountClients[accountID] = client
-	s.activeAccountID = accountID
 	s.accountMu.Unlock()
-	s.clientMu.Lock()
-	s.client = client
-	s.clientMu.Unlock()
+	s.setActiveAccount(accountID, client)
 	s.startAccountEventPump(accountID, client)
 	s.startAccountSync(accountID, client)
 	s.notifyAccountsChanged()
 	return s.Snapshot()
 }
 
+// removeAccountData deletes the database and media cache created for an account that was not added.
+func removeAccountData(dataDir, accountID, mediaCacheDir string) {
+	_ = os.RemoveAll(filepath.Join(dataDir, "accounts", accountID))
+	if mediaCacheDir != "" {
+		_ = os.RemoveAll(filepath.Join(mediaCacheDir, accountID))
+	}
+}
+
+// setActiveAccount updates the active account ID and client together.
+func (s *AppService) setActiveAccount(accountID string, client *matrix.Client) {
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
+	s.activeAccountID = accountID
+	s.client = client
+}
+
 func (s *AppService) currentClient() *matrix.Client {
-	s.clientMu.RLock()
-	client := s.client
-	s.clientMu.RUnlock()
-	return client
+	s.accountMu.RLock()
+	defer s.accountMu.RUnlock()
+	return s.client
 }
 
 func (s *AppService) currentAccountID() string {

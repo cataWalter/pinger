@@ -133,6 +133,7 @@ type imageEngine struct {
 	epoch     uint64
 	idleSeq   uint64
 	idleTimer *time.Timer
+	stateFile string
 }
 
 // generate runs one image job for prompt and returns the PNG as base64. Progress is reported through progress when it is set.
@@ -203,9 +204,11 @@ func (e *imageEngine) start(settings imageSettings) (imageEngineRun, error) {
 	command := exec.Command(settings.BinaryPath, "--listen-ip", "127.0.0.1", "--listen-port", strconv.Itoa(port), "--batched-cfg", "off", imageEngineModelFlag, settings.ModelPath)
 	command.Stdout = logs
 	command.Stderr = logs
+	configureImageEngineProcess(command)
 	if err := command.Start(); err != nil {
 		return imageEngineRun{}, fmt.Errorf("start image engine: %w", err)
 	}
+	e.recordLocked(command.Process.Pid, settings.BinaryPath)
 	exited := make(chan struct{})
 	go func() {
 		_ = command.Wait()
@@ -280,8 +283,9 @@ func (e *imageEngine) isRunningLocked() bool {
 func (e *imageEngine) stopLocked() {
 	e.stopIdleLocked()
 	if e.cmd != nil {
-		_ = e.cmd.Process.Kill()
+		_ = killImageEngineTree(e.cmd.Process.Pid)
 	}
+	removeImageEngineRecord(e.stateFile)
 	e.cmd = nil
 	e.baseURL = ""
 	e.exited = nil
@@ -490,7 +494,7 @@ func imageEngineDo(ctx context.Context, method, target string, body io.Reader, o
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	response, err := ghostwriterHTTPClient.Do(request)
+	response, err := aiLocalHTTPClient.Do(request)
 	if err != nil {
 		return 0, err
 	}

@@ -60,7 +60,7 @@ func TestApplicationMenuRoomItemsFollowSelection(t *testing.T) {
 		}
 	}
 
-	menus.applyState(MenuState{RoomSelected: true, RoomUnread: true, RoomNeedsReply: true})
+	menus.applyState(MenuState{RoomSelected: true, RoomUnread: true, RoomUnanswered: true, RoomNeedsReply: true})
 	if !menus.items[menuActionRoomRead].Enabled() {
 		t.Error("room read is disabled with a selected room")
 	}
@@ -75,14 +75,19 @@ func TestApplicationMenuRoomItemsFollowSelection(t *testing.T) {
 	}
 
 	menus.applyState(MenuState{RoomSelected: true})
-	if !menus.items[menuActionRoomNeedsReply].Enabled() {
-		t.Error("add to needs reply is disabled for a selected room")
+	if menus.items[menuActionRoomNeedsReply].Enabled() {
+		t.Error("add to needs reply is enabled for a room that is not unanswered")
 	}
 	if menus.items[menuActionRoomAnswered].Enabled() {
 		t.Error("mark as answered is enabled for a room that does not need reply")
 	}
 	if got := menus.items[menuActionRoomRead].Label(); got != "Mark Room as Unread" {
 		t.Errorf("room read label = %q, want %q", got, "Mark Room as Unread")
+	}
+
+	menus.applyState(MenuState{RoomSelected: true, RoomUnanswered: true})
+	if !menus.items[menuActionRoomNeedsReply].Enabled() {
+		t.Error("add to needs reply is disabled for an unanswered room")
 	}
 }
 

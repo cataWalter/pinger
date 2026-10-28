@@ -11,11 +11,10 @@ describe('settings search', () => {
     expect(searchSettings('launch').map((entry) => entry.id)).toContain('general.launch-at-login')
     expect(searchSettings('dark mode').map((entry) => entry.id)).toContain('appearance.theme')
     expect(searchSettings('llama').map((entry) => entry.id)).toContain('help.ai')
-    expect(searchSettings('busy mode').map((entry) => entry.id)).toContain('notifications.busy-mode')
-    expect(searchSettings('ghostwriter').map((entry) => entry.id)).toContain('ai.ghostwriter')
-    expect(searchSettings('localhost').map((entry) => entry.id)).toContain('ai.ghostwriter-endpoint')
-    expect(searchSettings('keep in touch').map((entry) => entry.id)).not.toContain('integrations.relationship-health')
-    expect(searchSettings('contact dossier').map((entry) => entry.id)).toContain('integrations.contact-dossier')
+    expect(searchSettings('busy mode').map((entry) => entry.id)).not.toContain('notifications.busy-mode')
+    expect(searchSettings('ghostwriter').map((entry) => entry.id).filter((id) => id.startsWith('ai.ghostwriter'))).toEqual([])
+    expect(searchSettings('keep in touch').map((entry) => entry.id).filter((id) => /relationship|dossier/.test(id))).toEqual([])
+    expect(searchSettings('contact dossier').map((entry) => entry.id).filter((id) => /relationship|dossier/.test(id))).toEqual([])
   })
 
   it('ignores the case of the query', () => {

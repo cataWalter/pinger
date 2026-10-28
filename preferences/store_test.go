@@ -33,18 +33,6 @@ func TestValidateIncognitoPreference(t *testing.T) {
 	}
 }
 
-func TestValidateBusyModePreference(t *testing.T) {
-	const key = "busy_mode.enabled"
-	for _, value := range []bool{true, false} {
-		if err := Validate(key, value); err != nil {
-			t.Errorf("Validate(%q, %t) error = %v", key, value, err)
-		}
-	}
-	if err := Validate(key, "true"); err == nil {
-		t.Fatal("Validate() accepted a non-boolean busy-mode preference")
-	}
-}
-
 func TestValidateImageEnginePreferences(t *testing.T) {
 	for _, key := range []string{"ai.image.binary_path", "ai.image.model_path"} {
 		if err := Validate(key, ""); err != nil {
@@ -229,42 +217,6 @@ func TestValidateAIFeaturePreferences(t *testing.T) {
 	}
 }
 
-func TestValidateGhostwriterPreferences(t *testing.T) {
-	for _, endpoint := range []string{"", "http://localhost:11434", "http://127.0.0.1:8080", "http://[::1]:8080"} {
-		if err := Validate("ghostwriter.endpoint", endpoint); err != nil {
-			t.Errorf("Validate(ghostwriter.endpoint, %q) error = %v", endpoint, err)
-		}
-	}
-	for _, endpoint := range []string{"https://localhost:11434", "http://example.com:11434", "http://localhost:11434/v1"} {
-		if err := Validate("ghostwriter.endpoint", endpoint); err == nil {
-			t.Errorf("Validate(ghostwriter.endpoint, %q) accepted a non-local URL", endpoint)
-		}
-	}
-	if err := Validate("ghostwriter.enabled", true); err != nil {
-		t.Fatalf("Validate(ghostwriter.enabled) error = %v", err)
-	}
-	for _, provider := range []string{"ollama", "openai-compatible"} {
-		if err := Validate("ghostwriter.provider", provider); err != nil {
-			t.Errorf("Validate(ghostwriter.provider, %q) error = %v", provider, err)
-		}
-	}
-	if err := Validate("ghostwriter.provider", "remote"); err == nil {
-		t.Fatal("Validate(ghostwriter.provider) accepted an unsupported provider")
-	}
-	if err := Validate("ghostwriter.model", strings.Repeat("x", 161)); err == nil {
-		t.Fatal("Validate(ghostwriter.model) accepted an overlong model name")
-	}
-}
-
-func TestValidateRelationshipHealthPreference(t *testing.T) {
-	if err := Validate("relationship_health.enabled", true); err != nil {
-		t.Fatalf("Validate(relationship_health.enabled) error = %v", err)
-	}
-	if err := Validate("relationship_health.enabled", "true"); err == nil {
-		t.Fatal("Validate() accepted a non-boolean relationship-health preference")
-	}
-}
-
 func TestValidateEmoticonReplacements(t *testing.T) {
 	const key = "emoji.emoticon_replacements"
 	if err := Validate(key, `[[":)","😎"],[":shrug:","🤷"]]`); err != nil {
@@ -405,6 +357,69 @@ func TestStorePersistsAndScopesValues(t *testing.T) {
 	}
 }
 
+func TestDeleteRetiredRemovesRemovedFeatureKeys(t *testing.T) {
+	store, err := open(filepath.Join(t.TempDir(), "preferences.db"), 5*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	const accountID = "0123456789abcdef0123456789abcdef"
+	rows := []struct {
+		scope     Scope
+		accountID string
+		key       string
+		value     string
+	}{
+		{GlobalScope, "", "busy_mode.enabled", "true"},
+		{GlobalScope, "", "ghostwriter.endpoint", `"http://localhost:11434"`},
+		{GlobalScope, "", "relationship_health.enabled", "true"},
+		{GlobalScope, "", "ai.feature.contact_dossier.temperature", "0.7"},
+		{AccountScope, accountID, "room.ghostwriter.!room:example.org", "true"},
+		{GlobalScope, "", "ai.endpoint", `"http://localhost:11434"`},
+		{GlobalScope, "", "notifications.enabled", "false"},
+		{AccountScope, accountID, "room.favorite.!room:example.org", "true"},
+	}
+	for _, row := range rows {
+		if _, err := store.db.Exec("INSERT INTO preferences (scope, account_id, key, value_json, updated_at, revision) VALUES (?, ?, ?, ?, 0, 0)", row.scope, row.accountID, row.key, []byte(row.value)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deleted, err := store.DeleteRetired()
+	if err != nil {
+		t.Fatalf("DeleteRetired() error = %v", err)
+	}
+	if deleted != 5 {
+		t.Fatalf("DeleteRetired() deleted %d rows, want 5", deleted)
+	}
+	global, err := store.All(GlobalScope, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := global["ai.endpoint"]; !ok {
+		t.Fatal("DeleteRetired() removed ai.endpoint")
+	}
+	if _, ok := global["notifications.enabled"]; !ok {
+		t.Fatal("DeleteRetired() removed notifications.enabled")
+	}
+	if len(global) != 2 {
+		t.Fatalf("global preferences = %v, want only the two kept keys", global)
+	}
+	account, err := store.All(AccountScope, accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := account["room.favorite.!room:example.org"]; !ok || len(account) != 1 {
+		t.Fatalf("account preferences = %v, want only the favorite room key", account)
+	}
+	again, err := store.DeleteRetired()
+	if err != nil {
+		t.Fatalf("second DeleteRetired() error = %v", err)
+	}
+	if again != 0 {
+		t.Fatalf("second DeleteRetired() deleted %d rows, want 0", again)
+	}
+}
+
 func TestStorePublishesChanges(t *testing.T) {
 	store, err := open(filepath.Join(t.TempDir(), "preferences.db"), 5*time.Millisecond)
 	if err != nil {
@@ -535,21 +550,6 @@ func TestValidateRoomNeedsReplyPreference(t *testing.T) {
 	}
 	if err := Validate("room.needs_reply.", true); err == nil {
 		t.Fatal("Validate(room needs reply) accepted a missing room ID")
-	}
-}
-
-func TestValidateRoomGhostwriterPreference(t *testing.T) {
-	if err := Validate("room.ghostwriter.!room:example.org", true); err != nil {
-		t.Fatalf("Validate(room Ghostwriter) error = %v", err)
-	}
-	if err := Validate("room.ghostwriter.!room:example.org", false); err != nil {
-		t.Fatalf("Validate(disabled room Ghostwriter) error = %v", err)
-	}
-	if err := Validate("room.ghostwriter.!room:example.org", "true"); err == nil {
-		t.Fatal("Validate(room Ghostwriter) accepted a non-boolean value")
-	}
-	if err := Validate("room.ghostwriter.", true); err == nil {
-		t.Fatal("Validate(room Ghostwriter) accepted a missing room ID")
 	}
 }
 

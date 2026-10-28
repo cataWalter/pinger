@@ -58,7 +58,6 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - Actions: **Ask AI** (answer a question using room context), draft a reply, explain or translate a selected message, rewrite or shorten composer text, summarize a room, identify chat topics and themes, analyze a two-person conversation, and run a per-room chat agent. **Translate chat to English** batches the room history so a whole conversation can be translated at once, and audio messages can be transcribed (optional transcription model in Settings → Integrations). Results can be inserted into the composer as a draft or reply.
 - Create up to eight named instruction profiles per room, with an optional default. Profiles are managed in the room **Details** panel, stored in the active account's local preferences, and are not synced through Matrix.
 - AI actions return suggestions only. Nothing is sent as a Matrix message unless you review and send it yourself. The selected text, included chat context, and custom profile instructions are sent to the configured endpoint, which may be remote.
-- **AI Ghostwriter** is a separate, opt-in local feature. It offers three context-aware reply chips, a Tab-accepted inline continuation after 300 ms, and `/ghost <intent>` for a complete draft. Configure Ollama or a llama.cpp-compatible server in Settings → Integrations; Ghostwriter accepts only HTTP loopback endpoints, bypasses proxies, rejects redirects, and never sends a message automatically. Inline completions use a compact context and a 20-second response limit.
 - **Tone Guard** checks drafts over 10 words, drafts sent from 10 PM to 6 AM, drafts after tense incoming messages, or every draft in rooms where it is enabled. It uses only a local loopback model; a remote endpoint, timeout, or model error fails open. Medium- or high-severity drafts can be replaced with a calmer alternative or sent unchanged.
 
 **Room details & media**
@@ -92,7 +91,7 @@ A searchable dialog with twelve tabs:
 - **Security** — device verification status; export/import room keys protected with a passphrase.
 - **Help** — shortcuts, storage, local AI, bridged networks, encryption FAQ, and a report-an-issue link.
 - **About** — version and build info, check for updates with release notes, repository, feedback, and license links.
-- **Integrations** — OpenAI-compatible AI (endpoint, model, transcription model, translation language, test), local AI Ghostwriter (Ollama or OpenAI-compatible loopback endpoint), and detected chat networks (WhatsApp, Telegram, Instagram, Signal, iMessage, Discord, Slack, SMS).
+- **Integrations** — OpenAI-compatible AI (endpoint, model, transcription model, translation language, test) and detected chat networks (WhatsApp, Telegram, Instagram, Signal, iMessage, Discord, Slack, SMS).
 
 ## Keyboard shortcuts
 
@@ -121,7 +120,7 @@ Press `?` in the app (or open Settings → Keyboard) for the authoritative list.
 | `Shift+F10` | Open the room actions menu |
 | `Home` / `End` | Focus the first / latest message in the timeline |
 | `Escape` | Close search or dialog |
-| `Tab` / `Shift+Tab` | Accept a visible Ghostwriter continuation, otherwise move between controls |
+| `Tab` / `Shift+Tab` | Move between controls |
 | `Enter` or `Ctrl+Enter` / `⌘↩` | Send message *(toggleable in Settings → Keyboard)* |
 | `Shift+Enter` | New line in the composer |
 
@@ -138,12 +137,7 @@ Single-key shortcuts (`R`, `J`, `K`, and the answered key) can be turned off in 
 - The local SQLite cache stores message data, including decrypted event contents. Downloaded media is cached under the user's cache directory; encrypted payloads are decrypted before caching, and cache files are owner-only. Clearing the media cache (Settings → Storage) removes only downloaded media — use OS disk encryption for protection at rest.
 - Tone Guard sends only the draft and up to two recent incoming messages to a configured loopback HTTP model. It never sends this context to a remote endpoint; when the configured endpoint is not local or the check fails, the message can still be sent.
 - On first launch, data from the legacy Fyne build (`fyne-matrix` data directory and `fi.mau.fyne-matrix` preferences) is migrated into the current data directory; the legacy database is copied with SQLite's online backup API.
-
-### Ghostwriter storage boundary
-
-Ghostwriter reads up to 200 messages from the active room through `matrix.Client.HistoryPageWithLimit`; this reuses gomuks' existing SQLite-backed timeline and does not open a second database connection. Only bounded room context and outgoing style examples are sent to the configured loopback model. The frontend never receives database paths, handles, or keys.
-
-The Matrix cache currently uses SQLite, not SQLCipher. If SQLCipher is introduced, configure it where the gomuks database is opened and keep Ghostwriter on `HistoryPageWithLimit` so the engine owns the encrypted connection and key lifecycle. If a future requirement needs direct SQL reads, add a bounded, read-only typed method to `matrix.Client` beside `HistoryPageWithLimit`; do not open the database from the desktop service or expose SQLCipher keys to TypeScript. Use OS disk encryption for the current SQLite cache at rest.
+- On each launch, removed features' stored data is deleted: the `relationship-health.db*` files for each account and their retired preference keys. The step is idempotent and ignores missing files.
 
 ## Run locally
 

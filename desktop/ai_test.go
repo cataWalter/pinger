@@ -91,14 +91,14 @@ func TestAIThinkingOptionsMapLevelsForProviders(t *testing.T) {
 
 func TestAIThinkingOptionsEncodeForProviders(t *testing.T) {
 	for _, test := range []struct {
-		provider GhostwriterProvider
+		provider AIProvider
 		level    string
 		want     any
 	}{
-		{provider: GhostwriterProviderOpenAICompatible, level: "none", want: false},
-		{provider: GhostwriterProviderOpenAICompatible, level: "high", want: "high"},
-		{provider: GhostwriterProviderOllama, level: "none", want: false},
-		{provider: GhostwriterProviderOllama, level: "high", want: "high"},
+		{provider: AIProviderOpenAICompatible, level: "none", want: false},
+		{provider: AIProviderOpenAICompatible, level: "high", want: "high"},
+		{provider: AIProviderOllama, level: "none", want: false},
+		{provider: AIProviderOllama, level: "high", want: "high"},
 	} {
 		body, _, err := encodeAICompletionRequest(test.provider, "gemma4:12b", []AIMessage{{Role: "user", Content: "test"}}, aiCompletionOptions{
 			Chat:               true,
@@ -112,7 +112,7 @@ func TestAIThinkingOptionsEncodeForProviders(t *testing.T) {
 			t.Fatalf("decode %q request: %v", test.provider, err)
 		}
 		var got any
-		if test.provider == GhostwriterProviderOllama {
+		if test.provider == AIProviderOllama {
 			if err := json.Unmarshal(request["think"], &got); err != nil {
 				t.Fatalf("decode Ollama think value: %v", err)
 			}

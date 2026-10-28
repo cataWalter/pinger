@@ -189,26 +189,6 @@ func TestPreferenceStoreAcceptsAfterReadNavigationPreference(t *testing.T) {
 	}
 }
 
-func TestPreferenceStoreAcceptsUndoSendWindow(t *testing.T) {
-	store, err := NewPreferenceStore(filepath.Join(t.TempDir(), "preferences.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, value := range []string{"0", "5", "10", "20", "30"} {
-		if err = store.Set("composer.undo_send_seconds", value); err != nil {
-			t.Errorf("Set(composer.undo_send_seconds, %q) error = %v", value, err)
-		}
-	}
-	for _, enabled := range []bool{true, false} {
-		if err = store.Set("composer.undo_send_enabled", enabled); err != nil {
-			t.Errorf("Set(composer.undo_send_enabled, %t) error = %v", enabled, err)
-		}
-	}
-	if err = store.Set("composer.undo_send_seconds", "15"); err == nil {
-		t.Fatal("Set(composer.undo_send_seconds, 15) unexpectedly succeeded")
-	}
-}
-
 func TestPreferenceStoreValidatesScheduleDefaultDelays(t *testing.T) {
 	store, err := NewPreferenceStore(filepath.Join(t.TempDir(), "preferences.json"))
 	if err != nil {

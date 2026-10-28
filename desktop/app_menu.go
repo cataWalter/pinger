@@ -73,6 +73,7 @@ type MenuState struct {
 	RoomUnread       bool   `json:"roomUnread"`
 	RoomArchived     bool   `json:"roomArchived"`
 	RoomFavorite     bool   `json:"roomFavorite"`
+	RoomUnanswered   bool   `json:"roomUnanswered"`
 	RoomNeedsReply   bool   `json:"roomNeedsReply"`
 	PrivateChatOpen  bool   `json:"privateChatOpen"`
 	PrivateChatInAll bool   `json:"privateChatInAll"`
@@ -269,7 +270,7 @@ func (m *applicationMenus) applyState(state MenuState) {
 	for _, key := range []string{menuActionRoomRead, menuActionRoomArchive, menuActionRoomFavorite, menuActionRoomNeedsReply, menuActionRoomAnswered} {
 		m.setEnabled(key, state.RoomSelected)
 	}
-	m.setEnabled(menuActionRoomNeedsReply, state.RoomSelected && !state.RoomNeedsReply)
+	m.setEnabled(menuActionRoomNeedsReply, state.RoomSelected && state.RoomUnanswered && !state.RoomNeedsReply)
 	m.setEnabled(menuActionRoomAnswered, state.RoomSelected && state.RoomNeedsReply)
 	m.setEnabled(menuActionPrivateChatAll, state.PrivateChatOpen)
 	m.setEnabled(menuActionTutorDraft, state.DraftReady)

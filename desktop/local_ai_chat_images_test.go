@@ -11,7 +11,7 @@ const testLocalAIChatPNG = "iVBORw0KGgo="
 
 func TestLocalAIChatEncodesOllamaImagesAsBase64(t *testing.T) {
 	messages := []AIMessage{{Role: "user", Content: "What is this?", Images: []AIImage{{MediaType: "image/png", Data: testLocalAIChatPNG}}}}
-	body, requestPath, err := encodeAICompletionRequest(GhostwriterProviderOllama, "llava", messages, aiCompletionOptions{Chat: true}, false)
+	body, requestPath, err := encodeAICompletionRequest(AIProviderOllama, "llava", messages, aiCompletionOptions{Chat: true}, false)
 	if err != nil {
 		t.Fatalf("encodeAICompletionRequest() error = %v", err)
 	}
@@ -38,7 +38,7 @@ func TestLocalAIChatEncodesOpenAIImagesAsDataURLs(t *testing.T) {
 		{Role: "assistant", Content: "A square."},
 		{Role: "user", Content: "Thanks"},
 	}
-	body, requestPath, err := encodeAICompletionRequest(GhostwriterProviderOpenAICompatible, "local-model", messages, aiCompletionOptions{Chat: true}, false)
+	body, requestPath, err := encodeAICompletionRequest(AIProviderOpenAICompatible, "local-model", messages, aiCompletionOptions{Chat: true}, false)
 	if err != nil {
 		t.Fatalf("encodeAICompletionRequest() error = %v", err)
 	}
@@ -73,7 +73,7 @@ func TestLocalAIChatEncodesOpenAIImagesAsDataURLs(t *testing.T) {
 
 func TestLocalAIChatRejectsImagesOutsideChatRequests(t *testing.T) {
 	messages := []AIMessage{{Role: "user", Content: "Describe", Images: []AIImage{{MediaType: "image/png", Data: testLocalAIChatPNG}}}}
-	for _, provider := range []GhostwriterProvider{GhostwriterProviderOllama, GhostwriterProviderOpenAICompatible} {
+	for _, provider := range []AIProvider{AIProviderOllama, AIProviderOpenAICompatible} {
 		if _, _, err := encodeAICompletionRequest(provider, "model", messages, aiCompletionOptions{Chat: false}, false); err == nil {
 			t.Errorf("provider %v accepted images for a non-chat request", provider)
 		}

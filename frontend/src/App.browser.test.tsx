@@ -18,6 +18,7 @@ const service = vi.hoisted(() => {
     markedUnread: false,
     mentions: 0,
     unanswered: false,
+    needsReply: false,
     lastEventId: '',
     lastEventSender: '',
     lastEventAt: 0,
@@ -66,10 +67,6 @@ vi.mock('@wailsio/runtime', () => ({
 
 vi.mock('../bindings/mychat/desktop', () => ({
   AppService: service,
-  GhostwriterMode: {
-    GhostwriterModeChips: 'chips',
-    GhostwriterModeSlash: 'slash',
-  },
   LanguageTutorService: { Analyze: vi.fn(() => Promise.resolve({})) },
 }))
 

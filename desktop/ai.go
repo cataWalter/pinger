@@ -394,7 +394,7 @@ func (s *AppService) CheckMessageTone(messages []AIMessage) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return aiToneGuardCompletion(s.aiContext(), ghostwriterHTTPClient, endpoint, model, messages)
+	return aiToneGuardCompletion(s.aiContext(), aiLocalHTTPClient, endpoint, model, messages)
 }
 
 // AITranscribeMedia transcribes cached Matrix audio with the configured OpenAI-compatible endpoint.

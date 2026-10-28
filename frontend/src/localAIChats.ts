@@ -74,6 +74,7 @@ export function localAIChatToRoom(chat: LocalAIChatSummary, favorite: boolean): 
         markedUnread: false,
         mentions: 0,
         unanswered: chat.unanswered,
+        needsReply: false,
         lastEventId: '',
         lastEventSender: '',
         lastEventAt: chat.updatedAt,
@@ -86,10 +87,15 @@ export function newLocalAIMessage(role: string, content: string, status: string,
     return { seq: 0, role, content, status, attachments, createdAt: 0 }
 }
 
+// Escaping keeps file text from closing the <attached_file> tag that marks it as data.
+function escapeAttachmentText(text: string) {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
 export function localAIMessageText(content: string, attachments: LocalAIChatAttachment[]) {
     const blocks = attachments
         .filter((attachment) => attachment.kind === 'text' && attachment.text)
-        .map((attachment) => `Attached file ${attachment.name}:\n\`\`\`\n${attachment.text}\n\`\`\``)
+        .map((attachment) => `<attached_file name="${escapeAttachmentText(attachment.name).replace(/"/g, '&quot;')}">\n${escapeAttachmentText(attachment.text ?? '')}\n</attached_file>`)
     return [content, ...blocks].filter((part) => part.trim() !== '').join('\n\n')
 }
 

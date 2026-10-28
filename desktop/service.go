@@ -20,54 +20,49 @@ import (
 )
 
 type AppService struct {
-	client                   *matrix.Client
-	clientMu                 sync.RWMutex
-	accountMu                sync.RWMutex
-	accountRegistry          *accountRegistry
-	accountClients           map[string]*matrix.Client
-	accountEventPumps        map[string]bool
-	accountSyncStarted       map[string]bool
-	dataDir                  string
-	defaultDataDir           string
-	accountMediaCacheDir     string
-	activeAccountID          string
-	preferences              *PreferenceStore
-	sharedPreferences        *sharedpreferences.Store
-	preferencesUnsubscribe   func()
-	notifier                 notifications.Notifier
-	ctx                      context.Context
-	cancel                   context.CancelFunc
-	quit                     func()
-	openURL                  func(string) error
-	chooseDataFolder         func() (string, error)
-	restartRequested         atomic.Bool
-	setAutostart             func(bool) error
-	setMenuBarIcon           func(bool)
-	menuStateChanged         func(MenuState)
-	menuAccountsChanged      func()
-	chooseSavePath           func(directory, filename string) (string, error)
-	chooseDownloadFolder     func() (string, error)
-	revealFile               func(string) error
-	activeRoomMu             sync.RWMutex
-	activeRoomID             string
-	activeRoomClient         *matrix.Client
-	localAIChatMu            sync.Mutex
-	localAIChats             *localAIChatStore
-	aiRuns                   aiRunRegistry
-	imageEngine              imageEngine
-	workers                  sync.WaitGroup
-	scheduled                *scheduledJobStore
-	relationshipHealthMu     sync.Mutex
-	relationshipHealthStores map[string]*relationshipHealthStore
-	relationshipHealthJobs   map[string]bool
-	contactDossierJobs       map[string]bool
-	chatExportMu             sync.Mutex
-	chatExportCancel         context.CancelFunc
+	// Lock order: accountOpenMu, then accountMu, then activeRoomMu. localAIChatMu and chatExportMu are leaves; never nest them.
+	client                 *matrix.Client
+	accountMu              sync.RWMutex
+	accountOpenMu          sync.Mutex
+	accountRegistry        *accountRegistry
+	accountClients         map[string]*matrix.Client
+	accountEventPumps      map[string]bool
+	accountSyncStarted     map[string]bool
+	dataDir                string
+	defaultDataDir         string
+	accountMediaCacheDir   string
+	activeAccountID        string
+	preferences            *PreferenceStore
+	sharedPreferences      *sharedpreferences.Store
+	preferencesUnsubscribe func()
+	notifier               notifications.Notifier
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	quit                   func()
+	openURL                func(string) error
+	chooseDataFolder       func() (string, error)
+	restartRequested       atomic.Bool
+	setAutostart           func(bool) error
+	setMenuBarIcon         func(bool)
+	menuStateChanged       func(MenuState)
+	menuAccountsChanged    func()
+	chooseSavePath         func(directory, filename string) (string, error)
+	chooseDownloadFolder   func() (string, error)
+	revealFile             func(string) error
+	activeRoomMu           sync.RWMutex
+	activeRoomID           string
+	activeRoomClient       *matrix.Client
+	localAIChatMu          sync.Mutex
+	localAIChats           *localAIChatStore
+	aiRuns                 aiRunRegistry
+	imageEngine            imageEngine
+	workers                sync.WaitGroup
+	scheduled              *scheduledJobStore
+	chatExportMu           sync.Mutex
+	chatExportCancel       context.CancelFunc
 
 	emitUpdate               func(Update)
 	emitReminder             func(ScheduledJob)
-	emitRelationshipHealth   func(RelationshipHealthSnapshot)
-	emitContactDossier       func(ContactDossierSnapshot)
 	emitLocalAIChatStream    func(LocalAIChatStreamEvent)
 	emitLocalAIImageProgress func(LocalAIImageProgressEvent)
 	emitChatExportProgress   func(ChatExportProgress)
@@ -112,6 +107,7 @@ type Room struct {
 	MarkedUnread    bool   `json:"markedUnread"`
 	Mentions        int    `json:"mentions"`
 	Unanswered      bool   `json:"unanswered"`
+	NeedsReply      bool   `json:"needsReply"`
 	LastEventID     string `json:"lastEventId"`
 	LastEventSender string `json:"lastEventSender"`
 	LastEventAt     int64  `json:"lastEventAt"`
@@ -392,6 +388,10 @@ func (s *AppService) EditMessage(roomID, text, eventID string) error {
 
 func (s *AppService) React(roomID, eventID, emoji string) error {
 	return s.currentClient().React(s.ctx, roomID, eventID, emoji)
+}
+
+func (s *AppService) RemoveReaction(roomID, eventID, emoji string) error {
+	return s.currentClient().RemoveReaction(s.ctx, roomID, eventID, emoji)
 }
 
 func (s *AppService) RedactMessage(roomID, eventID string) error {
@@ -940,12 +940,7 @@ func (s *AppService) Logout() error {
 			if err := registry.SetActive(account.ID); err != nil {
 				return err
 			}
-			s.accountMu.Lock()
-			s.activeAccountID = account.ID
-			s.accountMu.Unlock()
-			s.clientMu.Lock()
-			s.client = nextClient
-			s.clientMu.Unlock()
+			s.setActiveAccount(account.ID, nextClient)
 			return nil
 		}
 	}
@@ -984,8 +979,13 @@ func (s *AppService) startAccountSync(accountID string, client *matrix.Client) {
 	s.accountMu.Unlock()
 	go func() {
 		defer s.workers.Done()
-		if err := client.StartWithRetry(s.ctx); err != nil && s.ctx.Err() == nil && s.currentAccountID() == accountID && s.emitUpdate != nil {
-			s.emitUpdate(Update{Error: err.Error(), ConnectionState: string(matrix.StateOffline)})
+		if err := client.StartWithRetry(s.ctx); err != nil && s.ctx.Err() == nil && s.currentAccountID() == accountID {
+			s.accountMu.RLock()
+			emit := s.emitUpdate
+			s.accountMu.RUnlock()
+			if emit != nil {
+				emit(Update{Error: err.Error(), ConnectionState: string(matrix.StateOffline)})
+			}
 		}
 	}()
 }
@@ -1067,7 +1067,6 @@ func (s *AppService) close() {
 	s.cancel()
 	s.imageEngine.stop()
 	s.workers.Wait()
-	s.closeRelationshipHealthStores()
 	if s.preferencesUnsubscribe != nil {
 		s.preferencesUnsubscribe()
 		s.preferencesUnsubscribe = nil
@@ -1096,6 +1095,7 @@ func mapRooms(rooms []matrix.Room) []Room {
 			MarkedUnread:    room.MarkedUnread,
 			Mentions:        room.Mentions,
 			Unanswered:      room.Unanswered,
+			NeedsReply:      room.NeedsReply,
 			LastEventID:     room.LastEventID,
 			LastEventSender: room.LastEventSender,
 			LastEventAt:     room.LastEventAt.UnixMilli(),

@@ -183,7 +183,7 @@ func (r *aiRunRegistry) cancel(requestID string) bool {
 // aiProviderCompletion sends one request to a local Ollama server or an OpenAI-compatible endpoint.
 // When onChunk is set, the reply is requested as a stream and each delta is passed to onChunk.
 // The full trimmed reply is returned in both modes.
-func aiProviderCompletion(ctx context.Context, client *http.Client, provider GhostwriterProvider, endpoint, model string, messages []AIMessage, options aiCompletionOptions, onChunk func(string)) (string, error) {
+func aiProviderCompletion(ctx context.Context, client *http.Client, provider AIProvider, endpoint, model string, messages []AIMessage, options aiCompletionOptions, onChunk func(string)) (string, error) {
 	if err := validateAIEndpoint(endpoint); err != nil {
 		return "", err
 	}
@@ -204,7 +204,7 @@ func aiProviderCompletion(ctx context.Context, client *http.Client, provider Gho
 	}
 	request.Header.Set("Content-Type", "application/json")
 	if streaming {
-		if provider == GhostwriterProviderOllama {
+		if provider == AIProviderOllama {
 			request.Header.Set("Accept", "application/x-ndjson")
 		} else {
 			request.Header.Set("Accept", "text/event-stream, application/json")
@@ -225,7 +225,7 @@ func aiProviderCompletion(ctx context.Context, client *http.Client, provider Gho
 	}
 	limited := &io.LimitedReader{R: response.Body, N: maxBytes + 1}
 	var completion string
-	if streaming && (provider == GhostwriterProviderOllama || isEventStreamResponse(response)) {
+	if streaming && (provider == AIProviderOllama || isEventStreamResponse(response)) {
 		completion, err = streamAICompletion(limited, provider, options.Chat, maxBytes, onChunk)
 	} else {
 		data, readErr := io.ReadAll(limited)
@@ -249,12 +249,12 @@ func aiProviderCompletion(ctx context.Context, client *http.Client, provider Gho
 	return completion, nil
 }
 
-func encodeAICompletionRequest(provider GhostwriterProvider, model string, messages []AIMessage, options aiCompletionOptions, stream bool) ([]byte, string, error) {
+func encodeAICompletionRequest(provider AIProvider, model string, messages []AIMessage, options aiCompletionOptions, stream bool) ([]byte, string, error) {
 	if !options.Chat && aiMessagesHaveImages(messages) {
 		return nil, "", errors.New("images require a chat request")
 	}
 	switch provider {
-	case GhostwriterProviderOllama:
+	case AIProviderOllama:
 		request := aiOllamaRequest{
 			Model:   model,
 			Think:   aiOllamaThinkingOption(options.ChatTemplateKwargs),
@@ -278,7 +278,7 @@ func encodeAICompletionRequest(provider GhostwriterProvider, model string, messa
 			return nil, "", fmt.Errorf("encode Ollama request: %w", err)
 		}
 		return body, requestPath, nil
-	case GhostwriterProviderOpenAICompatible:
+	case AIProviderOpenAICompatible:
 		responseFormat, err := aiOpenAIResponseFormat(options)
 		if err != nil {
 			return nil, "", fmt.Errorf("encode response format: %w", err)
@@ -378,8 +378,8 @@ func aiOpenAIResponseFormat(options aiCompletionOptions) (json.RawMessage, error
 	return nil, nil
 }
 
-// runLocalAICompletion runs a request against a local model endpoint configured for Ghostwriter or a background feature.
-func runLocalAICompletion(ctx context.Context, client *http.Client, provider GhostwriterProvider, endpoint *url.URL, model string, messages []AIMessage, options aiCompletionOptions, onChunk func(string)) (string, error) {
+// runLocalAICompletion runs a request against the local model endpoint configured in AI settings.
+func runLocalAICompletion(ctx context.Context, client *http.Client, provider AIProvider, endpoint *url.URL, model string, messages []AIMessage, options aiCompletionOptions, onChunk func(string)) (string, error) {
 	if endpoint == nil {
 		return "", errors.New("local AI endpoint is unavailable")
 	}
@@ -413,8 +413,8 @@ func aiStatusError(response *http.Response) error {
 	return fmt.Errorf("AI endpoint returned %d", response.StatusCode)
 }
 
-func decodeAICompletion(provider GhostwriterProvider, chat bool, data []byte) (string, error) {
-	if provider == GhostwriterProviderOllama {
+func decodeAICompletion(provider AIProvider, chat bool, data []byte) (string, error) {
+	if provider == AIProviderOllama {
 		var parsed struct {
 			Response string    `json:"response"`
 			Message  AIMessage `json:"message"`
@@ -453,8 +453,8 @@ func decodeAICompletion(provider GhostwriterProvider, chat bool, data []byte) (s
 	return text, nil
 }
 
-func streamAICompletion(reader io.Reader, provider GhostwriterProvider, chat bool, maxBytes int64, onChunk func(string)) (string, error) {
-	if provider == GhostwriterProviderOllama {
+func streamAICompletion(reader io.Reader, provider AIProvider, chat bool, maxBytes int64, onChunk func(string)) (string, error) {
+	if provider == AIProviderOllama {
 		return streamOllamaCompletion(reader, chat, maxBytes, onChunk)
 	}
 	return streamOpenAICompatibleCompletion(reader, maxBytes, onChunk)

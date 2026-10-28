@@ -788,12 +788,15 @@ func TestPopulateEditHistoriesReturnsPersistedPreviousVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read original message: %v", err)
 	}
-	messages := []Message{{ID: originalID.String(), Body: "second edit"}}
+	messages := []Message{{ID: originalID.String(), Body: "original"}}
 	if err = client.populateEditHistories(ctx, roomID.String(), []*database.Event{original}, messages); err != nil {
 		t.Fatalf("populate edit history: %v", err)
 	}
 	if !messages[0].Edited {
 		t.Fatal("edited message was not recognized from persisted replacement events")
+	}
+	if messages[0].Body != "second edit" {
+		t.Fatalf("body = %q, want latest non-redacted edit %q", messages[0].Body, "second edit")
 	}
 	want := []string{"original source", "first edit source"}
 	if len(messages[0].EditHistory) != len(want) {
@@ -876,6 +879,24 @@ func TestRoomNeedsReplyHonorsUnreadIncomingAndDismissedEvents(t *testing.T) {
 	room = Room{ID: "!cached:example.org", Unread: 2}
 	if roomNeedsReply(room, "@me:example.org", room.ID) {
 		t.Fatal("a dismissed room with no locally known latest event should stay dismissed")
+	}
+}
+
+func TestSetRoomNeedsReplySplitsUnansweredFromAnsweredMark(t *testing.T) {
+	room := Room{ID: "!dm:example.org", LastEventID: "$incoming", LastEventSender: "@alice:example.org"}
+	setRoomNeedsReply(&room, "@me:example.org", "$incoming")
+	if !room.Unanswered || room.NeedsReply {
+		t.Fatalf("answered room = %+v, want unanswered without needs reply", room)
+	}
+	room.LastEventID = "$next"
+	setRoomNeedsReply(&room, "@me:example.org", "$incoming")
+	if !room.Unanswered || !room.NeedsReply {
+		t.Fatalf("room with a new incoming event = %+v, want needs reply again", room)
+	}
+	room.LastEventSender = "@me:example.org"
+	setRoomNeedsReply(&room, "@me:example.org", "")
+	if room.Unanswered || room.NeedsReply {
+		t.Fatalf("room with my last message = %+v, want neither list", room)
 	}
 }
 
@@ -1092,6 +1113,122 @@ func TestApplySyncSeedsEmptyPreviewFromOwnPendingSend(t *testing.T) {
 	}
 	if !rooms[0].LastSeen.Equal(sent) {
 		t.Fatalf("last seen = %v, want %v", rooms[0].LastSeen, sent)
+	}
+}
+
+// An incoming message outside the timeline must move the sender with the last
+// event ID, otherwise the room keeps the user's own sender and drops out of Unanswered.
+func TestApplySyncSetsLastEventSenderWithLastEventID(t *testing.T) {
+	client := &Client{
+		events: make(chan Update, 1),
+		done:   make(chan struct{}),
+		rooms:  map[string]Room{},
+	}
+	roomID := id.RoomID("!chat:example.org")
+	base := time.Date(2026, time.October, 17, 14, 0, 0, 0, time.UTC)
+	client.rooms[roomID.String()] = Room{
+		ID:              roomID.String(),
+		Name:            "Vincenzo",
+		Preview:         "my reply",
+		LastSeen:        base,
+		LastEventAt:     base,
+		LastEventID:     "$own-reply",
+		LastEventSender: "@me:example.org",
+	}
+	client.applySync(&jsoncmd.SyncComplete{
+		Rooms: map[id.RoomID]*jsoncmd.SyncRoom{
+			roomID: {
+				Events: []*database.Event{
+					{
+						RowID:     7,
+						ID:        "$incoming",
+						Type:      event.EventMessage.Type,
+						Sender:    id.UserID("@friend:example.org"),
+						Content:   json.RawMessage(`{"body":"ciao"}`),
+						Timestamp: jsontime.UM(base.Add(time.Minute)),
+					},
+				},
+			},
+		},
+	}, false)
+
+	rooms := client.Rooms()
+	if len(rooms) != 1 {
+		t.Fatalf("rooms = %+v, want one room", rooms)
+	}
+	room := rooms[0]
+	if room.LastEventID != "$incoming" || room.LastEventSender != "@friend:example.org" {
+		t.Fatalf("last event = (%q, %q), want the incoming message", room.LastEventID, room.LastEventSender)
+	}
+	if room.Preview != "my reply" || !room.Unanswered {
+		t.Fatalf("preview = %q, unanswered = %t, want preview kept and room unanswered", room.Preview, room.Unanswered)
+	}
+}
+
+// Timeline.Get is newest first. The decryption refresh must pick the newest
+// message in the window, not the oldest one.
+func TestRefreshRoomFromTimelineUsesNewestMessageSender(t *testing.T) {
+	client, err := New(filepath.Join(t.TempDir(), "profile", "matrix.db"))
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	roomID := id.RoomID("!decrypted-preview:example.org")
+	if err = client.engine.DB.Room.CreateRow(ctx, roomID); err != nil {
+		t.Fatalf("create room row: %v", err)
+	}
+	base := time.Date(2026, time.October, 17, 7, 34, 0, 0, time.UTC)
+	insert := func(eventID id.EventID, sender id.UserID, body string, at time.Time) database.EventRowID {
+		t.Helper()
+		content, marshalErr := json.Marshal(map[string]string{"msgtype": "m.text", "body": body})
+		if marshalErr != nil {
+			t.Fatalf("marshal %s: %v", eventID, marshalErr)
+		}
+		rowID, insertErr := client.engine.DB.Event.Insert(ctx, &database.Event{
+			RoomID:    roomID,
+			ID:        eventID,
+			Sender:    sender,
+			Type:      event.EventMessage.Type,
+			Timestamp: jsontime.UM(at),
+			Content:   content,
+			Unsigned:  json.RawMessage(`{}`),
+		})
+		if insertErr != nil {
+			t.Fatalf("insert %s: %v", eventID, insertErr)
+		}
+		return rowID
+	}
+	own := insert("$own-reply", "@me:example.org", "my reply", base)
+	incoming := insert("$incoming", "@friend:example.org", "decrypted incoming", base.Add(time.Hour))
+	if _, err = client.engine.DB.Timeline.Append(ctx, roomID, []database.EventRowID{own, incoming}); err != nil {
+		t.Fatalf("append timeline: %v", err)
+	}
+
+	client.mu.Lock()
+	client.rooms[roomID.String()] = Room{
+		ID:              roomID.String(),
+		Preview:         "my reply",
+		LastSeen:        base,
+		LastEventAt:     base,
+		LastEventID:     "$own-reply",
+		LastEventSender: "@me:example.org",
+	}
+	client.mu.Unlock()
+
+	client.refreshRoomFromTimeline(roomID.String())
+
+	rooms := client.Rooms()
+	if len(rooms) != 1 {
+		t.Fatalf("rooms = %+v, want one room", rooms)
+	}
+	room := rooms[0]
+	if room.LastEventID != "$incoming" || room.LastEventSender != "@friend:example.org" {
+		t.Fatalf("last event = (%q, %q), want the newest incoming message", room.LastEventID, room.LastEventSender)
+	}
+	if room.Preview != "decrypted incoming" || !room.Unanswered {
+		t.Fatalf("preview = %q, unanswered = %t, want incoming preview and unanswered room", room.Preview, room.Unanswered)
 	}
 }
 
@@ -1667,6 +1804,13 @@ func TestBridgeLabelDetectsNetworks(t *testing.T) {
 	instagram := &database.Room{ID: "!room:example.org", Topic: &topic}
 	if got := bridgeLabel(instagram); got != "IG" {
 		t.Fatalf("Instagram topic bridge = %q, want IG", got)
+	}
+	ghost := &database.Room{
+		ID:              "!room:example.org",
+		LazyLoadSummary: &mautrix.LazyLoadSummary{Heroes: []id.UserID{"@instagramgo_114644436598164:beeper.local"}},
+	}
+	if got := bridgeLabel(ghost); got != "IG" {
+		t.Fatalf("Instagram ghost hero bridge = %q, want IG", got)
 	}
 }
 

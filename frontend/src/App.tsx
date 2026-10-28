@@ -1,916 +1,43 @@
-import { Fragment, lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactElement, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { lazy, Fragment, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Events } from '@wailsio/runtime'
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowUpRight,
-  Archive,
-  ArchiveRestore,
-  Bold,
-  Bot,
-  ChevronDown,
-  Bell,
-  BellOff,
-  BellRing,
-  Check,
-  Clock3,
-  Code,
-  CircleAlert,
-  CircleDot,
-  Copy,
-  FileText,
-  LockKeyhole,
-  MessageCircleMore,
-  MessageSquare,
-  Paperclip,
-  Pencil,
-  Reply,
-  RotateCcw,
-  ScrollText,
-  Search,
-  Settings,
-  Send,
-  ShieldCheck,
-  Languages,
-  Smile,
-  Sparkles,
-  Star,
-  Trash2,
-  UsersRound,
-  X,
-  Download,
-  EyeOff,
-  Folder,
-  FolderPlus,
-  GraduationCap,
-  HardDrive,
-  Heading1,
-  Images,
-  ImagePlus,
-  Italic,
-  Link,
-  List,
-  ListOrdered,
-  LogOut,
-  Mic,
-  MessageSquareReply,
-  PanelRight,
-  Plus,
-  Quote,
-  Upload,
-  Square,
-  SquareCode,
-  Strikethrough,
-  Video,
-  ZoomIn,
-  ZoomOut,
-} from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUpRight, Archive, ArchiveRestore, Bold, ChevronDown, Bell, BellOff, BellRing, Check, Clock3, Code, CircleAlert, CircleDot, Copy, LockKeyhole, MessageCircleMore, Paperclip, Pencil, Reply, RotateCcw, ScrollText, Search, Settings, Send, ShieldCheck, Languages, Smile, Sparkles, Star, Trash2, UsersRound, X, Download, EyeOff, Folder, FolderPlus, GraduationCap, Heading1, Images, ImagePlus, Italic, Link, List, ListOrdered, Mic, Plus, Quote, Upload, Square, SquareCode, Strikethrough, Video } from 'lucide-react'
+import { QuickSwitcher } from './QuickSwitcher'
+import { ProfilePhotoViewer } from './ProfilePhotoViewer'
+import { RoomInfoDialog } from './RoomInfoDialog'
+import { SettingsProvider, useSettings } from './SettingsContext'
 import EmojiPicker from 'emoji-picker-react'
-import { AppService, GhostwriterMode as GhostwriterRequestMode, LanguageTutorService } from '../bindings/mychat/desktop'
-import type { AIMessage, AppBuildInfo, ChatExportResult, Device, MediaCacheUsage, MediaCleanupResult, Member, MenuState, Message, MessageSearchRequest, MessageSearchResult, Room, RoomStorage, ScheduledJob, Snapshot, StorageUsage, TutorAnalysis, UpdateStatus } from '../bindings/mychat/desktop/models.js'
-import { createBusyReplyForLanguage, detectBusyReplyLanguage } from './busyMode'
-import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, type ComposerFormat, type EmojiQuery, type EmoticonReplacement } from './composerText'
-import { fuzzyScore } from './fuzzy'
-import { ghostwriterDefaultEndpoints, isLoopbackEndpoint, parseGhostCommand, type GhostwriterProvider } from './ghostwriter'
-import { DEFAULT_ACCENT_NAME, accentCssVariables, accentPaletteFor, accentPresets, isAccentHex } from './accent'
-import { SYSTEM_THEME_NAME, findThemeByName, themeIdForPreference, themeModeForPreference, themes as appearanceThemes } from './themes'
-import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
+import { AppService, LanguageTutorService } from '../bindings/mychat/desktop'
+import { type AIMessage, type Member, type MenuState, type Message, type MessageSearchRequest, type MessageSearchResult, type Room, type ScheduledJob, type Snapshot, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
+import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, type ComposerFormat, type EmojiQuery } from './composerText'
+import { DEFAULT_ACCENT_NAME, accentCssVariables, accentPaletteFor } from './accent'
+import { SYSTEM_THEME_NAME, themeIdForPreference, themeModeForPreference } from './themes'
+import { SETTINGS_TABS } from './settings'
 import { SnippetPopover } from './SnippetPopover'
 import { loadSnippets, saveSnippets, type Snippet } from './snippets'
 import { useSnippetExpander } from './useSnippetExpander'
 import { ConnectionStatusBanner } from './ConnectionStatusBanner'
 import { useConnectionProblem } from './useConnectionProblem'
-import { EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, buildExplainPrompt, buildReplyPrompt, buildSummaryChatDraft, parseChatAgents, serializeChatAgents, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage } from './aiPrompts'
+import { EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, buildExplainPrompt, buildReplyPrompt, buildSummaryChatDraft, parseChatAgents, serializeChatAgents, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage, endsWithAssistantTurn } from './aiPrompts'
 import { languageName, resolveAIFeatureTuning, resolveLanguageRoles, type AIFeatureID } from './aiSettings'
-import { LanguageSettings } from './LanguageSettings'
-import { AIPromptSettings } from './AIPromptSettings'
-import { matrixMediaURL, matrixMXCMediaURL } from './ChatMediaRenderer'
-import { VoiceMessagePlayer } from './VoiceMessagePlayer'
+import { matrixMXCMediaURL } from './ChatMediaRenderer'
 import { useMatrixBatch } from './useMatrixBatch'
 import { DialogSurface } from './DialogSurface'
-import { SnippetSettingsModal } from './SnippetSettingsModal'
-import ContactHUD from './ContactHUD'
 import LocalAIChat from './LocalAIChat'
-import LocalAIAgentSettings from './LocalAIAgentSettings'
-import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID, LOCAL_AI_FOLDER_NAME_CHARACTERS, LOCAL_AI_TITLE_CHARACTERS, type LocalAIChatIcon, type LocalAIChatKind, useLocalAIChatList } from './localAIChats'
-const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
-
-type MatrixUpdate = {
-  rooms: Room[]
-  slidingSyncListCounts?: Record<string, number> | null
-  timelineChangedRoomId: string[] | null
-  typingUsers?: Record<string, string[]> | null
-  notifications?: MatrixNotification[] | null
-  initialSyncComplete: boolean
-  needsVerification: boolean
-  connectionState: string
-  error: string
-}
-
-type MatrixNotification = {
-  roomId: string
-  room: string
-  sender: string
-  body: string
-  mention: boolean
-  category: string
-}
-
-type PreferenceValues = NonNullable<Snapshot['preferences']>
-type RoomScope = 'all' | 'archived' | 'local-ai'
-type RoomRefinements = { unanswered: boolean; needsReply: boolean; favorite: boolean }
-type OutgoingMessage = { roomID: string; text: string; replyTo: Message | null; mentionUserIDs: string[] }
-type MessageMenuItem = { key: string; label: string; ariaLabel: string; icon: ReactElement; danger?: boolean; disabled?: boolean; separatorBefore?: boolean; run: () => void }
-type AIAcceptAction = { kind: 'none' } | { kind: 'draft' | 'rewrite' } | { kind: 'reply'; target: Message }
-type AIPanel = {
-  title: string
-  busy: boolean
-  result: string
-  error: string
-  acceptAction: AIAcceptAction
-  status?: string
-  featureID: AIFeatureID
-  requestID: string
-  // conversation holds the messages sent so far. It ends with the assistant reply once a run finishes.
-  conversation: AIMessage[]
-  followUp: string
-  stopped: boolean
-}
-type AIStreamChunk = { requestId: string; text: string; reset?: boolean }
-type AIStreamHandler = (chunk: AIStreamChunk) => void
-type LanguageTutorState = { mode: 'draft' | 'message'; originalText: string; explanationLanguage: string; analysis: TutorAnalysis | null; busy: boolean; error: string; requestID: string; preview: string }
-type ChatTranslationState = { requestID: number; roomID: string; targetLanguage: string; targetMessageIDs: string[]; analyses: Record<string, TutorAnalysis>; busy: boolean; status: string; error: string }
-type ChatExportState = { roomID: string; phase: 'running' | 'done' | 'failed'; stage: string; mediaDone: number; mediaTotal: number; result: ChatExportResult | null; error: string }
-type ChatExportProgressEvent = { roomId: string; stage: string; messages: number; mediaDone: number; mediaTotal: number }
-type ScheduledDraft =
-  | { kind: 'message'; roomID: string; text: string; replyToEventID?: string; replyToSender?: string; replyToPreview?: string }
-  | { kind: 'reminder'; roomID: string; eventID: string; text: string; archiveAfter?: boolean }
-type MediaGalleryFilter = 'all' | 'images' | 'videos' | 'audio' | 'files'
-const MEDIA_GALLERY_FILTERS: { value: MediaGalleryFilter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'images', label: 'Images' },
-  { value: 'videos', label: 'Videos' },
-  { value: 'audio', label: 'Audio' },
-  { value: 'files', label: 'Files' },
-]
-
-function mediaGalleryCategory(message: Message): Exclude<MediaGalleryFilter, 'all'> {
-  if (message.mediaMime.startsWith('audio/') || message.mediaType === 'm.audio') return 'audio'
-  if (message.mediaMime.startsWith('image/') || message.mediaType === 'm.image') return 'images'
-  if (message.mediaMime.startsWith('video/') || message.mediaType === 'm.video') return 'videos'
-  return 'files'
-}
-
-function filterMediaGalleryItems(items: Message[], filter: MediaGalleryFilter) {
-  return filter === 'all' ? items : items.filter((message) => mediaGalleryCategory(message) === filter)
-}
-
-function hasGalleryMedia(message: Message) {
-  return Boolean(message.mediaUri && !message.redacted && !message.decryptionError)
-}
-
-function mediaGalleryMessageKey(message: Message) {
-  return message.id || message.transactionId || `${message.timestamp}:${message.sender}:${message.mediaUri}:${message.body}`
-}
-
-type TimelineMessageActions = {
-  onDoubleClick: (message: Message) => void
-  onOpenContextMenu: (message: Message, x: number, y: number) => void
-  onFocusMessage: (eventID: string) => void
-  onAudioEnded: (messageID: string) => void
-  onUseTranscript: (text: string) => void
-  onSendReaction: (message: Message, emoji: string) => void
-  onRemoveReaction: (message: Message, emoji: string) => void
-  onStartDirectChat: (message: Message) => void
-}
-type RoomButtonActions = {
-  onSelect: (room: Room, index: number, event: React.MouseEvent<HTMLButtonElement>) => void
-  onKeyDown: (room: Room, index: number, event: KeyboardEvent<HTMLButtonElement>) => void
-  onContextMenu: (room: Room, event: React.MouseEvent<HTMLButtonElement>) => void
-}
-
-const IN_APP_NOTICE_TIMEOUT_MS = 10_000
-const EMPTY_ROOMS: Room[] = []
-const MAX_CACHED_AVATARS = 128
-const MAX_MISSING_AVATARS = 512
-const ROOM_LIST_VIRTUALIZATION_THRESHOLD = 100
-const ROOM_LIST_RANGE_PREFETCH = 20
-const ROOM_LIST_MAX_SYNC_RANGE = 200
-
-function cachedAvatarSource(uri: string) {
-  const cached = avatarSources.get(uri)
-  if (cached) {
-    avatarSources.delete(uri)
-    avatarSources.set(uri, cached)
-  }
-  return cached
-}
-
-function cacheMissingAvatar(uri: string) {
-  avatarSources.delete(uri)
-  missingAvatarSources.delete(uri)
-  missingAvatarSources.add(uri)
-  if (missingAvatarSources.size > MAX_MISSING_AVATARS) {
-    const oldest = missingAvatarSources.values().next().value
-    if (oldest) missingAvatarSources.delete(oldest)
-  }
-}
-
-function newestPersistentMessage(messages: Message[]) {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index]
-    if (message.id && !message.id.startsWith('~')) return message
-  }
-  return null
-}
-
-function isMatrixUserID(value: string) {
-  return /^@[^:\s]+:[^\s]+$/.test(value.trim())
-}
-
-function formatTypingStatus(userIDs: string[], members: Member[], messages: Message[], directRoomName: string) {
-  if (userIDs.length === 0) return ''
-  const names = userIDs.map((userID) => {
-    const memberName = members.find((member) => member.id === userID)?.displayName.trim()
-    if (memberName && !isMatrixUserID(memberName)) return memberName
-    const senderName = messages.find((message) => message.sender === userID && message.senderName.trim())?.senderName.trim()
-    if (senderName && !isMatrixUserID(senderName)) return senderName
-    const roomName = directRoomName.trim()
-    return roomName && !isMatrixUserID(roomName) ? roomName : 'Someone'
-  })
-  if (names.length === 1) return `${names[0]} is typing`
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} are typing`
-}
-
-function newestOtherAvatar(messages: Message[]) {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index]
-    if (!message.own && message.avatar) return message.avatar
-  }
-  return ''
-}
-
-function describeError(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
-}
-
-function chatExportStatusText(state: ChatExportState) {
-  if (state.stage === 'media') return `Saving media ${state.mediaDone} of ${state.mediaTotal}`
-  if (state.stage === 'finishing') return 'Writing transcript'
-  if (state.stage === 'history') return 'Reading room history'
-  return 'Starting export'
-}
-
-function isTextEntryTarget(target: EventTarget | null) {
-  return target instanceof HTMLElement && (target.isContentEditable || Boolean(target.closest('input, textarea, select, [contenteditable="true"]')))
-}
-
-function displayMessageBody(message: Message) {
-  if (message.redacted) return 'Message removed'
-  if (message.decryptionError || /^\s*Decrypting message from .+ failed, waiting for sender to re-send\b/i.test(message.body)) {
-    return "This message couldn't be opened. Ask the sender to resend it."
-  }
-  return message.body
-}
-
-// Matrix uses the filename as the body of an uncaptioned image. The inline preview already shows it.
-const imageFileNameBodyPattern = /^\S+\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/i
-
-function initials(label: string) {
-  const words = label.trim().split(/\s+/).filter(Boolean)
-  const parts = words.length > 1 ? words.slice(0, 2) : [words[0]?.slice(0, 2) ?? '?']
-  return parts
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase()
-}
-
-function avatarHue(label: string) {
-  let hash = 0
-  for (let i = 0; i < label.length; i++) hash = (hash * 31 + label.charCodeAt(i)) | 0
-  return Math.abs(hash) % 360
-}
-
-function avatarStyle(label: string) {
-  const hue = avatarHue(label || '?')
-  return {
-    '--avatar-hue': String(hue),
-    background: `linear-gradient(135deg, hsl(${hue} 32% 88%) 0%, hsl(${(hue + 24) % 360} 30% 80%) 100%)`,
-    color: `hsl(${hue} 32% 26%)`,
-  } as React.CSSProperties
-}
-
-const avatarSources = new Map<string, string>()
-const missingAvatarSources = new Set<string>()
-const mediaVisibilityCallbacks = new Map<Element, (isNearViewport: boolean) => void>()
-let mediaVisibilityObserver: IntersectionObserver | null = null
-
-function observeMediaVisibility(element: Element, callback: (isNearViewport: boolean) => void) {
-  if (typeof IntersectionObserver === 'undefined') {
-    callback(true)
-    return () => { }
-  }
-  if (!mediaVisibilityObserver) {
-    mediaVisibilityObserver = new IntersectionObserver((entries) => {
-      for (const entry of entries) mediaVisibilityCallbacks.get(entry.target)?.(entry.isIntersecting)
-    }, { rootMargin: '240px' })
-  }
-  mediaVisibilityCallbacks.set(element, callback)
-  mediaVisibilityObserver.observe(element)
-  return () => {
-    mediaVisibilityCallbacks.delete(element)
-    const observer = mediaVisibilityObserver
-    observer?.unobserve(element)
-    if (mediaVisibilityCallbacks.size === 0) {
-      observer?.disconnect()
-      if (mediaVisibilityObserver === observer) mediaVisibilityObserver = null
-    }
-  }
-}
-
-function loadAvatarSource(uri: string) {
-  const cached = cachedAvatarSource(uri)
-  if (cached) return Promise.resolve(cached)
-  if (missingAvatarSources.has(uri)) return Promise.resolve(null)
-
-  const source = matrixMXCMediaURL(uri)
-  if (!source) {
-    cacheMissingAvatar(uri)
-    return Promise.resolve(null)
-  }
-  avatarSources.set(uri, source)
-  if (avatarSources.size > MAX_CACHED_AVATARS) {
-    const oldest = avatarSources.keys().next().value
-    if (oldest) avatarSources.delete(oldest)
-  }
-  return Promise.resolve(source)
-}
-
-function Avatar({ uri, label, className, style, deferLoad = false }: {
-  uri?: string
-  label: string
-  className: string
-  style?: React.CSSProperties
-  deferLoad?: boolean
-}) {
-  const avatarRef = useRef<HTMLDivElement>(null)
-  const [source, setSource] = useState(() => uri ? cachedAvatarSource(uri) ?? null : null)
-  const [nearViewport, setNearViewport] = useState(!deferLoad)
-
-  useEffect(() => {
-    if (!deferLoad || nearViewport || !uri) return
-    const element = avatarRef.current
-    if (!element || typeof IntersectionObserver === 'undefined') {
-      setNearViewport(true)
-      return
-    }
-
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        setNearViewport(true)
-        observer.disconnect()
-      }
-    }, { rootMargin: '96px' })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [deferLoad, nearViewport, uri])
-
-  useEffect(() => {
-    let active = true
-    const cached = uri ? cachedAvatarSource(uri) : undefined
-    if (!uri || cached) {
-      setSource(cached ?? null)
-      return () => { active = false }
-    }
-    if (!nearViewport) {
-      setSource(null)
-      return () => { active = false }
-    }
-
-    setSource(null)
-    void loadAvatarSource(uri).then((loadedSource) => {
-      if (active) setSource(loadedSource)
-    })
-    return () => { active = false }
-  }, [uri, nearViewport])
-
-  return (
-    <div ref={avatarRef} className={className} style={style}>
-      {source ? <img className="avatar-image" src={source} alt="" onError={() => {
-        if (uri) cacheMissingAvatar(uri)
-        setSource(null)
-      }} /> : initials(label)}
-    </div>
-  )
-}
-
-function isSameDay(left: number, right: number) {
-  if (!left || !right) return true
-  const a = new Date(left)
-  const b = new Date(right)
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-}
-
-function formatDayLabel(timestamp: number) {
-  if (!timestamp) return ''
-  const date = new Date(timestamp)
-  const today = new Date()
-  const yesterday = new Date()
-  yesterday.setDate(today.getDate() - 1)
-  const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-  if (sameDay(date, today)) return 'Today'
-  if (sameDay(date, yesterday)) return 'Yesterday'
-  return new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(date)
-}
-
-function localDateTimeInputValue(timestamp: number) {
-  const localTime = new Date(timestamp - new Date(timestamp).getTimezoneOffset() * 60_000)
-  return localTime.toISOString().slice(0, 16)
-}
-
-function formatScheduledTime(timestamp: number) {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(timestamp))
-}
-
-function preferenceBoolean(preferences: PreferenceValues, key: string, fallback = false) {
-  const value = preferences[key]
-  return typeof value === 'boolean' ? value : fallback
-}
-
-function preferenceString(preferences: PreferenceValues, key: string, fallback: string) {
-  const value = preferences[key]
-  return typeof value === 'string' ? value : fallback
-}
-
-function preferenceNumber(preferences: PreferenceValues, key: string, fallback: number, minimum = 0, maximum = 100) {
-  const value = preferences[key]
-  const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
-  return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback
-}
-
-function parseTimeSuggestionMinutes(value: string) {
-  const parts = value.split(',').map((part) => part.trim())
-  if (parts.length < 1 || parts.length > 6 || parts.some((part) => !/^\d+$/.test(part))) return []
-  const minutes = parts.map(Number)
-  if (minutes.some((value) => value < 1 || value > 10080) || new Set(minutes).size !== minutes.length) return []
-  return minutes
-}
-
-function formatTimeSuggestion(minutes: number) {
-  if (minutes < 60) return `${minutes} min`
-  if (minutes % 60 === 0) return `${minutes / 60} hr`
-  return `${Math.floor(minutes / 60)} hr ${minutes % 60} min`
-}
-
-function sameRoomSnapshot(leftRoom: Room, rightRoom: Room) {
-  return leftRoom.id === rightRoom.id
-    && leftRoom.name === rightRoom.name
-    && leftRoom.topic === rightRoom.topic
-    && leftRoom.avatar === rightRoom.avatar
-    && leftRoom.preview === rightRoom.preview
-    && leftRoom.lastSeen === rightRoom.lastSeen
-    && leftRoom.direct === rightRoom.direct
-    && leftRoom.favorite === rightRoom.favorite
-    && leftRoom.muted === rightRoom.muted
-    && leftRoom.unread === rightRoom.unread
-    && leftRoom.markedUnread === rightRoom.markedUnread
-    && leftRoom.mentions === rightRoom.mentions
-    && leftRoom.unanswered === rightRoom.unanswered
-    && leftRoom.lastEventId === rightRoom.lastEventId
-    && leftRoom.lastEventSender === rightRoom.lastEventSender
-    && leftRoom.lastEventAt === rightRoom.lastEventAt
-    && leftRoom.bridge === rightRoom.bridge
-    && leftRoom.accountId === rightRoom.accountId
-}
-
-function reconcileRoomSnapshots(currentRooms: Room[] | null, incomingRooms: Room[]) {
-  if (!currentRooms) return incomingRooms
-  const previousByKey = new Map(currentRooms.map((room) => [`${room.accountId}\u0000${room.id}`, room]))
-  let unchanged = currentRooms.length === incomingRooms.length
-  const rooms = incomingRooms.map((room, index) => {
-    const previous = previousByKey.get(`${room.accountId}\u0000${room.id}`)
-    if (!previous || !sameRoomSnapshot(previous, room)) {
-      unchanged = false
-      return room
-    }
-    if (currentRooms[index] !== previous) unchanged = false
-    return previous
-  })
-  return unchanged ? currentRooms : rooms
-}
-
-function mergeTimelineMessages(current: Message[], incoming: Message[]) {
-  const merged = [...current]
-  const indexes = new Map<string, number>()
-  const keysFor = (message: Message) => [message.id, message.transactionId].filter(Boolean)
-
-  merged.forEach((message, index) => {
-    for (const key of keysFor(message)) indexes.set(key, index)
-  })
-
-  for (const message of incoming) {
-    const existingIndex = keysFor(message).map((key) => indexes.get(key)).find((index) => index !== undefined)
-    if (existingIndex !== undefined) {
-      merged[existingIndex] = { ...merged[existingIndex], ...message }
-      for (const key of keysFor(merged[existingIndex])) indexes.set(key, existingIndex)
-      continue
-    }
-
-    const index = merged.push(message) - 1
-    for (const key of keysFor(message)) indexes.set(key, index)
-  }
-
-  return merged.sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id))
-}
-
-function timelineMessageID(message: Message) {
-  return message.id || message.transactionId
-}
-
-function isOwnMessage(message: Message, currentUserID: string) {
-  return message.own || Boolean(message.sender && message.sender === currentUserID)
-}
-
-// incomingSinceOwnMessage returns the text messages from others that follow the user's latest loaded message.
-function incomingSinceOwnMessage(timeline: Message[], currentUserID: string) {
-  let lastOwnIndex = -1
-  timeline.forEach((message, index) => {
-    if (isOwnMessage(message, currentUserID)) lastOwnIndex = index
-  })
-  const incoming = timeline.slice(lastOwnIndex + 1).filter((message) =>
-    Boolean(timelineMessageID(message)) && !message.redacted && Boolean(message.body.trim()),
-  )
-  return { foundOwnMessage: lastOwnIndex >= 0, incoming }
-}
-
-function isDirectLikeRoom(room: Room) {
-  return room.direct || room.bridge === 'IG'
-}
-
-// The Matrix-derived "unanswered" flag only applies to direct-like chats. Any room can be added to Needs reply manually.
-function isUnansweredRoom(room: Room) {
-  return room.unanswered && isDirectLikeRoom(room)
-}
-
-function needsReplyPreferenceKey(roomID: string) {
-  return `room.needs_reply.${roomID}`
-}
-
-function isNeedsReplyRoom(room: Room, preferences: PreferenceValues) {
-  return preferenceBoolean(preferences, needsReplyPreferenceKey(room.id)) || isUnansweredRoom(room)
-}
-
-function isUnreadRoom(room: Room) {
-  return room.unread > 0 || room.markedUnread
-}
-
-function primaryModifierLabel() {
-  return /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
-}
-
-const TimelineMessageList = memo(function TimelineMessageList({
-  messages,
-  hideDeleted,
-  preferences,
-  currentUserID,
-  selectedRoomID,
-  groupChat,
-  chatTranslation,
-  contextMessageID,
-  reactingMessageID,
-  autoPlayNextMessageId,
-  canUseTranscriptAsDraft,
-  actionsRef,
-}: {
-  messages: Message[]
-  hideDeleted: boolean
-  preferences: PreferenceValues
-  currentUserID: string
-  selectedRoomID: string
-  groupChat: boolean
-  chatTranslation: ChatTranslationState | null
-  contextMessageID: string
-  reactingMessageID: string
-  autoPlayNextMessageId: string | null
-  canUseTranscriptAsDraft: boolean
-  actionsRef: { current: TimelineMessageActions }
-}) {
-  const visibleMessages = hideDeleted ? messages.filter((message) => !message.redacted) : messages
-
-  return <>
-    {visibleMessages.map((message, index) => {
-      const ownMessage = isOwnMessage(message, currentUserID)
-      const messageID = timelineMessageID(message)
-      const translatedAnalysis = !ownMessage ? chatTranslation?.analyses[messageID] : undefined
-      const translationPending = Boolean(!ownMessage && chatTranslation?.busy && chatTranslation.targetMessageIDs.includes(messageID))
-      const showTranslation = Boolean(translatedAnalysis || translationPending)
-      const isAudioAttachment = Boolean(message.mediaUri && (message.mediaMime.startsWith('audio/') || message.mediaType === 'm.audio'))
-      const isFileAttachment = Boolean(message.mediaUri && message.mediaType === 'm.file' && !message.redacted && !message.decryptionError)
-      const isImageOrVideoAttachment = !isAudioAttachment && (
-        message.mediaMime.startsWith('image/') || message.mediaMime.startsWith('video/') || message.mediaType === 'm.image' || message.mediaType === 'm.video'
-      )
-      const hideImagesAndVideos = preferenceBoolean(preferences, 'appearance.hide_images_and_videos')
-      const previous = index > 0 ? visibleMessages[index - 1] : null
-      const grouped = Boolean(previous && !previous.redacted && previous.sender === message.sender && message.timestamp - previous.timestamp < 5 * 60_000 && isSameDay(previous.timestamp, message.timestamp))
-      const next = index + 1 < visibleMessages.length ? visibleMessages[index + 1] : null
-      const nextIsGrouped = Boolean(next && !message.redacted && !next.redacted && next.sender === message.sender && next.timestamp - message.timestamp < 5 * 60_000 && isSameDay(message.timestamp, next.timestamp))
-      const lastInGroup = !nextIsGrouped
-      const showDayDivider = !previous || !isSameDay(previous.timestamp, message.timestamp)
-      const displayBody = displayMessageBody(message)
-      const showsImagePreview = Boolean(message.mediaUri && !message.redacted && !message.decryptionError && !hideImagesAndVideos && (message.mediaMime.startsWith('image/') || message.mediaType === 'm.image'))
-      const hideFileNameBody = showsImagePreview && imageFileNameBodyPattern.test(displayBody.trim())
-      const isContextTarget = (message.id || message.transactionId) === contextMessageID
-      const showSender = groupChat && !ownMessage && !grouped
-      const senderName = message.senderName || message.sender
-      return (
-        <Fragment key={message.id || message.transactionId}>
-          {showDayDivider && message.timestamp > 0 && <div className="day-divider" aria-label={formatDayLabel(message.timestamp)}><span>{formatDayLabel(message.timestamp)}</span></div>}
-          <article className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''} ${showTranslation ? 'has-translation' : ''} ${isContextTarget ? 'is-context-target' : ''} ${groupChat && !ownMessage ? 'is-group-incoming' : ''}`} data-event-id={messageID} tabIndex={messageID ? -1 : undefined} style={{ '--message-index': Math.min(index, 12) } as React.CSSProperties} onDoubleClick={() => actionsRef.current.onDoubleClick(message)} onContextMenu={(event) => {
-            if (!selectedRoomID) return
-            event.preventDefault()
-            actionsRef.current.onOpenContextMenu(message, event.clientX, event.clientY)
-          }} onKeyDown={(event) => {
-            if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
-            event.preventDefault()
-            const bounds = event.currentTarget.getBoundingClientRect()
-            actionsRef.current.onOpenContextMenu(message, bounds.left + 8, bounds.bottom)
-          }}>
-            {showSender && <Avatar uri={message.avatar} label={senderName} className="message-sender-avatar" deferLoad />}
-            <div className="message-body-wrap">
-              {!grouped && <div className="message-meta">
-                {showSender && <button className="message-sender-name" type="button" title={`Start a direct chat with ${senderName}`} aria-label={`Start a direct chat with ${senderName}`} onClick={() => actionsRef.current.onStartDirectChat(message)}>{senderName}</button>}
-                {message.timestamp > 0 && preferenceBoolean(preferences, 'appearance.show_timestamps', true) && <time>{formatTimelineTime(message.timestamp, preferences)}</time>}
-                {message.edited && <span className="edited-mark" title={message.editHistory?.length ? message.editHistory.join('\n') : 'Edited message'}>edited{(message.editHistory?.length ?? 0) > 0 && ` (${message.editHistory?.length} prior)`}</span>}
-              </div>}
-              {message.replyToEventId && <button className="reply-preview" type="button" title="Jump to quoted message" onClick={() => actionsRef.current.onFocusMessage(message.replyToEventId)}>
-                <span className="reply-preview-sender">{message.replyToSender || 'Reply'}</span>
-                <span className="reply-preview-text">{message.replyToPreview || 'Original message unavailable'}</span>
-              </button>}
-              {!isAudioAttachment && !isFileAttachment && !hideFileNameBody && <Suspense fallback={<div className="message-body">{displayBody}</div>}>
-                <MarkdownMessage body={displayBody} />
-              </Suspense>}
-              {message.mediaUri && !message.redacted && !message.decryptionError && !(hideImagesAndVideos && isImageOrVideoAttachment) && (
-                <MessageMedia
-                  roomID={selectedRoomID}
-                  message={message}
-                  autoPlayNext={autoPlayNextMessageId === message.id}
-                  aiEnabled={Boolean(preferenceString(preferences, 'ai.endpoint', '').trim())}
-                  canUseDraft={canUseTranscriptAsDraft}
-                  onUseDraft={(text) => actionsRef.current.onUseTranscript(text)}
-                  onAudioEnded={() => actionsRef.current.onAudioEnded(message.id)}
-                />
-              )}
-              {ownMessage && message.seenAt > 0 && <time className="message-seen-status" dateTime={new Date(message.seenAt).toISOString()}>
-                Seen at {formatTime(message.seenAt, preferenceBoolean(preferences, 'appearance.time_24_hour'))}
-              </time>}
-              {Object.keys(message.reactions ?? {}).length > 0 && <div className="message-reactions">
-                {Object.entries(message.reactions ?? {}).map(([emoji, count]) => (
-                  <button key={emoji} type="button" className={`reaction-chip ${message.reacted?.[emoji] ? 'is-reacted' : ''}`} aria-label={`${message.reacted?.[emoji] ? 'Remove' : 'Add'} ${emoji} reaction`} title={`${message.reacted?.[emoji] ? 'Remove' : 'Add'} ${emoji} reaction`} aria-pressed={message.reacted?.[emoji] ?? false} onClick={() => message.reacted?.[emoji] ? actionsRef.current.onRemoveReaction(message, emoji) : actionsRef.current.onSendReaction(message, emoji)}>{emoji} {typeof count === 'number' ? count : 0}</button>
-                ))}
-              </div>}
-              {message.sendError && message.sendError !== 'not sent' && <span className="message-error">{message.sendError}</span>}
-              {message.sending && !message.sendError && <span className="message-pending">Sending…</span>}
-              {reactingMessageID === message.id && <div className="reaction-picker" aria-label="Quick reactions">
-                {quickReactionOptions(preferences).map((emoji) => <button key={emoji} type="button" aria-label={`React with ${emoji}`} title={`React with ${emoji}`} onClick={() => actionsRef.current.onSendReaction(message, emoji)}>{emoji}</button>)}
-              </div>}
-            </div>
-            {showTranslation && <aside className="message-translation" role="note" aria-label={`${chatTranslation?.targetLanguage || 'Translation'} translation`} aria-live="polite">
-              <span className="message-translation-label">{chatTranslation?.targetLanguage || 'Translation'}</span>
-              {translatedAnalysis ? <LanguageTutorAnalysisDetails analysis={translatedAnalysis} originalText={message.body} /> : <p>Translating…</p>}
-            </aside>}
-          </article>
-        </Fragment>
-      )
-    })}
-  </>
-})
-
-const chatWallpapers = [
-  { name: 'None', swatch: 'var(--paper)' },
-  { name: 'Meadow', swatch: 'linear-gradient(135deg, #e8f2e8, #f7f5e9)' },
-  { name: 'Tide', swatch: 'linear-gradient(135deg, #e3eff1, #f1f3eb)' },
-  { name: 'Rose', swatch: 'linear-gradient(135deg, #f1e5e8, #f5efe4)' },
-] as const
-
-function formatTime(timestamp: number, use24Hour = false) {
-  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: !use24Hour }).format(new Date(timestamp))
-}
-
-function isWithinDay(timestamp: number) {
-  return Math.abs(Date.now() - timestamp) < 24 * 60 * 60_000
-}
-
-function formatTimeOrDate(timestamp: number, use24Hour = false) {
-  if (isSameDay(timestamp, Date.now())) return formatTime(timestamp, use24Hour)
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(timestamp))
-}
-
-function roomActivityAt(room: Room) {
-  return room.lastEventAt > 0 ? room.lastEventAt : room.lastSeen
-}
-
-function compareRoomActivity(left: Room, right: Room, today: number) {
-  const leftActivity = roomActivityAt(left)
-  const rightActivity = roomActivityAt(right)
-  const leftDate = new Date(leftActivity)
-  const rightDate = new Date(rightActivity)
-  leftDate.setHours(0, 0, 0, 0)
-  rightDate.setHours(0, 0, 0, 0)
-  const dateOrder = rightDate.getTime() - leftDate.getTime()
-  if (dateOrder !== 0) return dateOrder
-  if (leftActivity > 0 && isSameDay(leftActivity, today)) return rightActivity - leftActivity
-  return 0
-}
-
-function formatTimelineTime(timestamp: number, preferences: PreferenceValues) {
-  if (preferenceBoolean(preferences, 'appearance.relative_timestamps') && isWithinDay(timestamp)) {
-    const minutes = Math.round((timestamp - Date.now()) / 60_000)
-    const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
-    if (Math.abs(minutes) < 60) return relative.format(minutes, 'minute')
-    return relative.format(Math.round(minutes / 60), 'hour')
-  }
-  return formatTime(timestamp, preferenceBoolean(preferences, 'appearance.time_24_hour'))
-}
-
-function formatMediaGalleryDateTime(timestamp: number, preferences: PreferenceValues) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'short',
-    timeStyle: 'short',
-    hour12: !preferenceBoolean(preferences, 'appearance.time_24_hour'),
-  }).format(new Date(timestamp))
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)) - 1, units.length - 1)
-  return `${(bytes / 1024 ** (unitIndex + 1)).toFixed(1)} ${units[unitIndex]}`
-}
-
-function rankQuickSwitcherRooms(rooms: Room[], query: string) {
-  const normalizedQuery = query.trim()
-  if (!normalizedQuery) return rooms
-  const ranked: { room: Room; score: number; index: number }[] = []
-  rooms.forEach((room, index) => {
-    const nameScore = fuzzyScore(normalizedQuery, room.name)
-    const idScore = fuzzyScore(normalizedQuery, room.id)
-    if (nameScore === null && idScore === null) return
-    ranked.push({ room, score: Math.max(nameScore ?? Number.NEGATIVE_INFINITY, idScore ?? Number.NEGATIVE_INFINITY), index })
-  })
-  return ranked.sort((left, right) => right.score - left.score || left.index - right.index).map(({ room }) => room)
-}
-
-const notificationTones: Record<string, { type: OscillatorType; frequency: number; duration: number; gain: number }> = {
-  Chime: { type: 'sine', frequency: 720, duration: 0.12, gain: 0.035 },
-  Pulse: { type: 'square', frequency: 480, duration: 0.09, gain: 0.012 },
-  Soft: { type: 'triangle', frequency: 360, duration: 0.2, gain: 0.02 },
-}
-
-const builtInQuickReactions = ['👍', '❤️', '😂', '🎉', '👀', '🙏']
-
-function playNotificationSound(volume: number, tone = 'Chime') {
-  const profile = notificationTones[tone]
-  if (volume <= 0 || !profile) return
-  try {
-    const audio = new AudioContext()
-    const oscillator = audio.createOscillator()
-    const gain = audio.createGain()
-    oscillator.type = profile.type
-    oscillator.connect(gain)
-    gain.connect(audio.destination)
-    oscillator.onended = () => { void audio.close() }
-    void audio.resume().then(() => {
-      const startTime = audio.currentTime
-      oscillator.frequency.setValueAtTime(profile.frequency, startTime)
-      gain.gain.setValueAtTime(profile.gain * volume / 100, startTime)
-      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + profile.duration)
-      oscillator.start(startTime)
-      oscillator.stop(startTime + profile.duration)
-    }).catch(() => { void audio.close() })
-  } catch {
-    return
-  }
-}
-
-function notificationAllowed(preferences: PreferenceValues, roomID: string, category: string) {
-  if (!preferenceBoolean(preferences, 'notifications.enabled', true)) return false
-  if (preferenceBoolean(preferences, `room.muted.${roomID}`)) return false
-  switch (category) {
-    case 'group': return preferenceBoolean(preferences, 'notifications.group')
-    case 'mention': return preferenceBoolean(preferences, 'notifications.mentions', true)
-    case 'direct': return preferenceBoolean(preferences, 'notifications.direct', true)
-    default: return true
-  }
-}
-
-function notificationTone(preferences: PreferenceValues, category: string) {
-  const keys: Record<string, string> = { direct: 'notifications.sound_direct', mention: 'notifications.sound_mention', group: 'notifications.sound_group' }
-  return preferenceString(preferences, keys[category] ?? 'notifications.sound_mention', 'Chime')
-}
-
-function notificationText(preferences: PreferenceValues, notification: MatrixNotification, roomName: string) {
-  let title = notification.sender ? `${notification.sender} · ${roomName}` : roomName
-  let body = notification.body
-  switch (preferenceString(preferences, 'notifications.privacy', 'Sender and message preview')) {
-    case 'Sender only':
-      body = 'New message'
-      break
-    case 'Hidden content':
-      title = 'Matrix'
-      body = 'New activity'
-      break
-  }
-  return { title, body }
-}
-
-function detectOneTimeCode(body: string) {
-  if (!/\b(code|otp|one[- ]time|verification|passcode|2fa)\b/i.test(body)) return null
-  return /\b(\d{4,8})\b/.exec(body)?.[1] ?? null
-}
-
-function networkHue(label: string) {
-  let hash = 0
-  for (const char of label) hash = (hash * 31 + char.charCodeAt(0)) % 360
-  return hash
-}
-
-function quickReactionOptions(preferences: PreferenceValues) {
-  const custom = preferenceString(preferences, 'reactions.quick_source', 'Frequent') === 'Custom'
-    ? preferenceString(preferences, 'reactions.custom_emojis', '').split(/\s+/).filter(Boolean)
-    : []
-  const base = custom.length > 0 ? custom : builtInQuickReactions
-  const defaultEmoji = preferenceString(preferences, 'reactions.default_emoji', '')
-  return [...new Set(defaultEmoji ? [defaultEmoji, ...base] : base)].slice(0, 6)
-}
-
-type CaptureKind = 'voice' | 'video'
-type RecordedUpload = { kind: CaptureKind; durationMilliseconds: number }
-type StagedAttachment = { id: string; roomID: string; file: File; previewURL: string }
-type MediaApprovalItem = { key: string; name: string; kind: 'image' | 'video' | 'audio' | 'file'; sizeBytes: number; previewURL: string }
-type MediaApprovalRequest = { items: MediaApprovalItem[]; onApprove: () => void; onCancel?: () => void }
-const mediaApprovalKindLabels: Record<MediaApprovalItem['kind'], string> = { image: 'Image', video: 'Video', audio: 'Audio', file: 'File' }
-
-// mediaKindForFile returns the approval category for a file. Anything that is not an image, video, or audio file is a plain file.
-function mediaKindForFile(file: File): MediaApprovalItem['kind'] {
-  if (file.type.startsWith('image/')) return 'image'
-  if (file.type.startsWith('video/')) return 'video'
-  if (file.type.startsWith('audio/')) return 'audio'
-  return 'file'
-}
-
-function mediaApprovalItemFromFile(key: string, file: File, previewURL: string): MediaApprovalItem {
-  return { key, name: file.name || 'Attachment', kind: mediaKindForFile(file), sizeBytes: file.size, previewURL }
-}
-
-const maxVideoMessageMilliseconds = 3 * 60 * 1000
-const maxAttachmentBytes = 50 * 1024 * 1024
-
-function preferredVideoMimeType() {
-  return ['video/mp4', 'video/webm'].find((type) => MediaRecorder.isTypeSupported?.(type)) ?? ''
-}
-
-async function requestLocalAsset(path: string, init: RequestInit) {
-  const response = await fetch(path, init)
-  if (!response.ok) {
-    const detail = (await response.text()).trim()
-    throw new Error(detail || `Local request failed with status ${response.status}.`)
-  }
-  return response
-}
-
-function encodeVoiceNoteWav(audio: AudioBuffer) {
-  const dataLength = audio.length * 2
-  if (dataLength + 44 > 50 * 1024 * 1024) throw new Error('Voice note cannot exceed 50 MiB.')
-  const buffer = new ArrayBuffer(dataLength + 44)
-  const view = new DataView(buffer)
-  const channels = Array.from({ length: audio.numberOfChannels }, (_, index) => audio.getChannelData(index))
-  const writeText = (offset: number, value: string) => {
-    for (let index = 0; index < value.length; index++) view.setUint8(offset + index, value.charCodeAt(index))
-  }
-  writeText(0, 'RIFF')
-  view.setUint32(4, dataLength + 36, true)
-  writeText(8, 'WAVE')
-  writeText(12, 'fmt ')
-  view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true)
-  view.setUint16(22, 1, true)
-  view.setUint32(24, audio.sampleRate, true)
-  view.setUint32(28, audio.sampleRate * 2, true)
-  view.setUint16(32, 2, true)
-  view.setUint16(34, 16, true)
-  writeText(36, 'data')
-  view.setUint32(40, dataLength, true)
-  for (let frame = 0; frame < audio.length; frame++) {
-    let sample = 0
-    for (const channel of channels) sample += channel[frame] / channels.length
-    const clamped = Math.max(-1, Math.min(1, sample))
-    view.setInt16(44 + frame * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
-  }
-  return new Blob([buffer], { type: 'audio/wav' })
-}
-
-function App() {
+import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID, LOCAL_AI_FOLDER_NAME_CHARACTERS, LOCAL_AI_TITLE_CHARACTERS, type LocalAIChatKind, useLocalAIChatList } from './localAIChats'
+import { type MatrixUpdate, type MatrixNotification, type PreferenceValues, type RoomScope, type RoomRefinements, type OutgoingMessage, type MessageMenuItem, type AIAcceptAction, type AIPanel, type AIStreamChunk, type AIStreamHandler, type LanguageTutorState, type ChatTranslationState, type ChatExportState, type ChatExportProgressEvent, type ScheduledDraft, type MediaGalleryFilter, hasGalleryMedia, mediaGalleryMessageKey, type TimelineMessageActions, type RoomButtonActions, IN_APP_NOTICE_TIMEOUT_MS, EMPTY_ROOMS, newestPersistentMessage, formatTypingStatus, newestOtherAvatar, describeError, chatExportStatusText, isTextEntryTarget, displayMessageBody, initials, Avatar, localDateTimeInputValue, preferenceBoolean, preferenceString, preferenceNumber, parseTimeSuggestionMinutes, reconcileRoomSnapshots, mergeTimelineMessages, timelineMessageID, incomingSinceOwnMessage, isDirectLikeRoom, isUnansweredRoom, isNeedsReplyRoom, isUnreadRoom, primaryModifierLabel, TimelineMessageList, roomActivityAt, compareRoomActivity, rankQuickSwitcherRooms, playNotificationSound, notificationAllowed, notificationTone, notificationText, detectOneTimeCode, type CaptureKind, type RecordedUpload, type StagedAttachment, type MediaApprovalRequest, mediaKindForFile, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, requestLocalAsset, encodeVoiceNoteWav, RoomButton, reportRoomListVisibleRange, VirtualRoomList, IconTooltip } from './appShared'
+
+const SettingsDialog = lazy(() => import('./SettingsDialog').then((module) => ({ default: module.SettingsDialog })))
+const AIResultDialogs = lazy(() => import('./AIResultDialogs').then((module) => ({ default: module.AIResultDialogs })))
+const ScheduledJobsDialog = lazy(() => import('./ScheduledDialogs').then((module) => ({ default: module.ScheduledJobsDialog })))
+const ScheduledDraftDialog = lazy(() => import('./ScheduledDialogs').then((module) => ({ default: module.ScheduledDraftDialog })))
+const MediaApprovalDialog = lazy(() => import('./ConfirmDialogs').then((module) => ({ default: module.MediaApprovalDialog })))
+const GeneratedImageDialog = lazy(() => import('./ConfirmDialogs').then((module) => ({ default: module.GeneratedImageDialog })))
+const LeaveRoomDialog = lazy(() => import('./ConfirmDialogs').then((module) => ({ default: module.LeaveRoomDialog })))
+const RedactDialog = lazy(() => import('./ConfirmDialogs').then((module) => ({ default: module.RedactDialog })))
+const ForwardMessageDialog = lazy(() => import('./RoomDialogs').then((module) => ({ default: module.ForwardMessageDialog })))
+const MediaGalleryDialog = lazy(() => import('./RoomDialogs').then((module) => ({ default: module.MediaGalleryDialog })))
+
+function AppBody() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const connectionProblem = useConnectionProblem(snapshot?.connectionState === 'offline')
   const [systemPrefersDark, setSystemPrefersDark] = useState(() =>
@@ -952,9 +79,6 @@ function App() {
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([])
   const [mediaApproval, setMediaApproval] = useState<MediaApprovalRequest | null>(null)
   const [snippets, setSnippets] = useState<Snippet[]>(() => loadSnippets())
-  const [ghostwriterDraftStatus, setGhostwriterDraftStatus] = useState('')
-  const [ghostwriterDraftBusy, setGhostwriterDraftBusy] = useState(false)
-  const [contactHUDOpen, setContactHUDOpen] = useState(false)
   const [mentionBindings, setMentionBindings] = useState<{ token: string; userID: string }[]>([])
   const [mentionStart, setMentionStart] = useState(-1)
   const [mentionEnd, setMentionEnd] = useState(0)
@@ -1007,8 +131,7 @@ function App() {
   const [scheduledJobsError, setScheduledJobsError] = useState('')
   const [scheduledDialogError, setScheduledDialogError] = useState('')
   const [scheduledNotice, setScheduledNotice] = useState('')
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('General')
+  const { settingsOpen, setSettingsOpen, settingsTab, setSettingsTab } = useSettings()
   const [accountManagerOpen, setAccountManagerOpen] = useState(false)
   const [addingAccount, setAddingAccount] = useState(false)
   const [accountHomeserver, setAccountHomeserver] = useState('https://matrix.org')
@@ -1052,7 +175,6 @@ function App() {
   const pendingHistoryRefreshRoomIDRef = useRef('')
   const editTargetRef = useRef<Message | null>(null)
   const markRoomAnsweredRef = useRef<(roomID: string) => Promise<void>>(async () => { })
-  const needsReplyUndoRef = useRef({ manual: false, auto: false })
   const preferencesRef = useRef<PreferenceValues>({})
   const setPreferenceRef = useRef<(key: string, value: boolean | string) => Promise<boolean>>(async () => false)
   const automaticArchiveInFlightRef = useRef(false)
@@ -1064,14 +186,8 @@ function App() {
   const composerEmojiSelectionRef = useRef({ start: 0, end: 0 })
   const selectedRoomIDRef = useRef(selectedRoomID)
   selectedRoomIDRef.current = selectedRoomID
-  const ghostwriterSelectedRoomRef = useRef('')
-  const ghostwriterDraftRequestRef = useRef(0)
   const nativeNotificationsRef = useRef(false)
   const lastReadEventByRoom = useRef(new Map<string, string>())
-  const busyRoomLastEventIDRef = useRef(new Map<string, string>())
-  const busyAutoRepliedRoomsRef = useRef(new Set<string>())
-  const busyReplyInFlightRoomsRef = useRef(new Map<string, number>())
-  const busyModeSessionRef = useRef(0)
   const currentUserIDRef = useRef('')
   const currentDisplayNameRef = useRef('')
   const draftsRef = useRef(new Map<string, string>())
@@ -1170,7 +286,6 @@ function App() {
   ), [messages, selectedRoom?.avatar, selectedRoomID, historyRoomIDRef.current])
   const selectedRoomAvatarSource = useMemo(() => matrixMXCMediaURL(selectedRoomAvatar), [selectedRoomAvatar])
   const typingStatus = formatTypingStatus(typingUsers, roomMembers, messages, selectedRoom?.direct ? selectedRoom.name : '')
-  const ghostwriterEnabled = preferenceBoolean(preferences, 'ghostwriter.enabled')
   const imageEngineReady = preferenceString(preferences, 'ai.image.binary_path', '') !== '' && preferenceString(preferences, 'ai.image.model_path', '') !== ''
   const imageRunHere = imageSendRun !== null && imageSendRun.roomID === selectedRoomID ? imageSendRun : null
   const imageRunStatus = imageRunHere?.stage === 'generating' ? `Generating image · step ${imageRunHere.step} of ${imageRunHere.totalSteps}` : 'Starting image engine…'
@@ -1280,14 +395,12 @@ function App() {
   const answeredShortcut = preferenceString(preferences, 'shortcuts.mark_answered', 'E').trim().toUpperCase() || 'E'
   const singleKeyShortcuts = preferenceBoolean(preferences, 'shortcuts.single_keys', true)
   const hideDeletedMessages = preferenceBoolean(preferences, 'appearance.hide_deleted_messages')
-  const busyModeEnabled = preferenceBoolean(preferences, 'busy_mode.enabled')
   const automaticArchiveEnabled = preferenceBoolean(preferences, 'archive.automatic')
   const visibleMessages = useMemo(() => hideDeletedMessages ? messages.filter((message) => !message.redacted) : messages, [messages, hideDeletedMessages])
   preferencesRef.current = preferences
   roomsRef.current = rooms
   messagesRef.current = messages
   composeTextRef.current = composeText
-  ghostwriterSelectedRoomRef.current = selectedRoomID
   currentUserIDRef.current = snapshot?.profile.userId ?? ''
   currentDisplayNameRef.current = snapshot?.profile.displayName ?? ''
 
@@ -1338,15 +451,6 @@ function App() {
   useEffect(() => {
     setSelectedAudioInputDeviceId(preferenceString(preferences, 'audio.input_device', ''))
   }, [preferences['audio.input_device']])
-
-  useEffect(() => {
-    busyModeSessionRef.current++
-    busyRoomLastEventIDRef.current = busyModeEnabled
-      ? new Map(rooms.map((room): [string, string] => [room.id, room.lastEventId]))
-      : new Map()
-    busyAutoRepliedRoomsRef.current.clear()
-    busyReplyInFlightRoomsRef.current.clear()
-  }, [busyModeEnabled, snapshot?.activeAccountId])
 
   useEffect(() => {
     let active = true
@@ -1410,7 +514,7 @@ function App() {
       const archived = !localAI && preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
       const matchesArchive = roomScope === 'local-ai' ? localAI : roomScope === 'archived' ? archived : !archived || Boolean(query)
       const matchesRefinements = (!roomRefinements.unanswered || (!localAI && isUnansweredRoom(room)))
-        && (!roomRefinements.needsReply || isNeedsReplyRoom(room, preferences))
+        && (!roomRefinements.needsReply || isNeedsReplyRoom(room))
         && (!roomRefinements.favorite || room.favorite)
       const matchesFolder = roomScope !== 'local-ai' || localAIFolderFilter === null || (localAIFolderIDByRoomID.get(room.id) ?? '') === localAIFolderFilter
       return matchesQuery && matchesArchive && matchesRefinements && matchesFolder
@@ -1425,14 +529,14 @@ function App() {
   const activeListRoomID = localAIChatOpen ? (localAIChatId ? localAIRoomID(localAIChatId) : '') : selectedRoomID
   const selectedRoomListIndex = filteredRooms.findIndex((room) => room.id === activeListRoomID && isActiveAccountRoom(room))
   const quickSwitcherRooms = useMemo(() => rankQuickSwitcherRooms(rooms, quickSwitcherQuery), [rooms, quickSwitcherQuery])
-  const needsReplyCount = useMemo(() => scopedRooms.filter((room) => isNeedsReplyRoom(room, preferences) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences])
+  const needsReplyCount = useMemo(() => scopedRooms.filter((room) => isNeedsReplyRoom(room) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences])
   const readRoomCount = useMemo(() => rooms.filter((room) => room.unread === 0 && !room.markedUnread && !preferenceBoolean(preferences, archivedPreferenceKey(room.id))).length, [rooms, preferences])
   const contextMenuRooms = roomContextMenu
     ? (selectedRoomIDs.includes(roomContextMenu.roomID) ? selectedRoomIDs : [roomContextMenu.roomID])
       .map((roomID) => rooms.find((room) => room.id === roomID))
       .filter((room): room is Room => Boolean(room))
     : []
-  const contextMenuNeedsReplyAddRooms = contextMenuRooms.filter((room) => !isNeedsReplyRoom(room, preferences))
+  const contextMenuNeedsReplyAddRooms = contextMenuRooms.filter((room) => isUnansweredRoom(room) && !isNeedsReplyRoom(room))
   const contextMenuNeedsReplyAddCount = contextMenuNeedsReplyAddRooms.length
   const contextMenuIsBulk = contextMenuRooms.length > 1
   const contextMenuHasUnread = contextMenuRooms.some((room) => room.unread > 0 || room.markedUnread)
@@ -1578,7 +682,7 @@ function App() {
       if (settingsOpen || roomInfoOpen || leaveConfirmOpen || redactTarget || quickSwitcherOpen) return
       const roomID = roomContextMenu?.roomID ?? selectedRoomID
       const room = roomsRef.current.find((candidate) => candidate.id === roomID)
-      if (!room || !isNeedsReplyRoom(room, preferencesRef.current)) return
+      if (!room || !isNeedsReplyRoom(room)) return
       event.preventDefault()
       void markRoomAnsweredRef.current(roomID)
     }
@@ -1882,17 +986,6 @@ function App() {
         if (!updatedRoom?.lastEventId || !previousRoom || updatedRoom.lastEventId === previousRoom.lastEventId) continue
         const key = archivedPreferenceKey(roomID, updatedRoom.accountId)
         if (preferenceBoolean(preferencesRef.current, key)) void setPreference(key, false)
-      }
-      if (preferenceBoolean(preferencesRef.current, 'busy_mode.enabled')) {
-        for (const roomID of update.timelineChangedRoomId ?? []) {
-          const room = (update.rooms ?? []).find((candidate) => candidate.id === roomID) ?? roomsRef.current.find((candidate) => candidate.id === roomID)
-          if (!room) continue
-          const previousEventID = busyRoomLastEventIDRef.current.get(roomID)
-          busyRoomLastEventIDRef.current.set(roomID, room.lastEventId)
-          const isNewEvent = previousEventID === undefined ? Boolean(room.lastEventId) : previousEventID !== room.lastEventId
-          if (!isNewEvent || !room.direct || !room.lastEventId || room.lastEventSender === currentUserIDRef.current) continue
-          void sendBusyModeReply(room)
-        }
       }
       for (const notification of update.notifications ?? []) {
         const currentPreferences = preferencesRef.current
@@ -2199,32 +1292,6 @@ function App() {
     } finally {
       loadingOlderRef.current = false
       setLoadingOlder(false)
-    }
-  }
-
-  async function sendBusyModeReply(room: Room) {
-    const sessionID = busyModeSessionRef.current
-    if (!preferenceBoolean(preferencesRef.current, 'busy_mode.enabled') || !room.direct || !room.lastEventId || room.lastEventSender === currentUserIDRef.current) return
-    if (busyAutoRepliedRoomsRef.current.has(room.id) || busyReplyInFlightRoomsRef.current.has(room.id)) return
-    busyReplyInFlightRoomsRef.current.set(room.id, sessionID)
-    try {
-      const page = await AppService.History(room.id, 0)
-      if (busyModeSessionRef.current !== sessionID || !preferenceBoolean(preferencesRef.current, 'busy_mode.enabled')) return
-      const recentTexts = [...(page.messages ?? [])]
-        .sort((left, right) => left.timestamp - right.timestamp)
-        .filter((message) => !message.redacted && !message.decryptionError && !message.mediaUri && message.body.trim())
-        .slice(-10)
-        .map((message) => message.body.trim())
-      const displayName = currentDisplayNameRef.current || currentUserIDRef.current
-      const language = detectBusyReplyLanguage(recentTexts)
-      const reply = createBusyReplyForLanguage(language, displayName)
-      if (busyModeSessionRef.current !== sessionID || !preferenceBoolean(preferencesRef.current, 'busy_mode.enabled')) return
-      await AppService.SendMessage(room.id, reply)
-      if (busyModeSessionRef.current === sessionID) busyAutoRepliedRoomsRef.current.add(room.id)
-    } catch (replyError) {
-      if (busyModeSessionRef.current === sessionID) setError(`Busy mode auto-reply failed: ${describeError(replyError)}`)
-    } finally {
-      if (busyReplyInFlightRoomsRef.current.get(room.id) === sessionID) busyReplyInFlightRoomsRef.current.delete(room.id)
     }
   }
 
@@ -2584,10 +1651,10 @@ function App() {
     })
   }
 
-  function updateRoomUnanswered(roomID: string, unanswered: boolean) {
+  function updateRoomNeedsReply(roomID: string, needsReply: boolean) {
     setSnapshot((current) => current ? {
       ...current,
-      rooms: (current.rooms ?? []).map((room) => room.id === roomID ? { ...room, unanswered } : room),
+      rooms: (current.rooms ?? []).map((room) => room.id === roomID ? { ...room, needsReply } : room),
     } : current)
   }
 
@@ -2692,22 +1759,17 @@ function App() {
     }
   }
 
-  // Clears the manual flag and, for direct chats, the Matrix-derived flag. Returns false when the manual flag could not be saved.
+  // Records the answered mark. Unanswered stays set; only Needs reply clears.
   async function clearNeedsReply(room: Room) {
-    const manualKey = needsReplyPreferenceKey(room.id)
-    if (preferenceBoolean(preferencesRef.current, manualKey) && !(await setPreference(manualKey, false))) return false
-    if (isUnansweredRoom(room)) {
-      await AppService.SetRoomUnanswered(room.id, false)
-      updateRoomUnanswered(room.id, false)
-    }
-    return true
+    await AppService.SetRoomUnanswered(room.id, false)
+    updateRoomNeedsReply(room.id, false)
   }
 
   async function markRoomAnswered(roomID: string) {
     setRoomContextMenu(null)
     clearRoomSelection()
     const targetRoom = roomsRef.current.find((room) => room.id === roomID)
-    if (triageBusyRef.current || !targetRoom || !isNeedsReplyRoom(targetRoom, preferencesRef.current)) return
+    if (triageBusyRef.current || !targetRoom || !isNeedsReplyRoom(targetRoom)) return
     triageBusyRef.current = true
     setError('')
     const wasSelected = selectedRoomRef.current === roomID
@@ -2715,11 +1777,8 @@ function App() {
     const nextRoom = visibleIndex >= 0 && filteredRooms.length > 1
       ? filteredRooms[(visibleIndex + 1) % filteredRooms.length]
       : roomsRef.current.find((room) => room.id !== roomID)
-    const wasManual = preferenceBoolean(preferencesRef.current, needsReplyPreferenceKey(roomID))
-    const wasAuto = isUnansweredRoom(targetRoom)
     try {
-      if (!(await clearNeedsReply(targetRoom))) return
-      needsReplyUndoRef.current = { manual: wasManual, auto: wasAuto }
+      await clearNeedsReply(targetRoom)
       showUndoToast(roomID)
       if (wasSelected && nextRoom && isActiveAccountRoom(nextRoom)) showRoom(nextRoom.id)
     } catch (triageError) {
@@ -2743,9 +1802,9 @@ function App() {
     if (action === 'answered') {
       let changed = false
       for (const room of targetRooms) {
-        if (!isNeedsReplyRoom(room, preferencesRef.current)) continue
+        if (!isNeedsReplyRoom(room)) continue
         try {
-          if (!(await clearNeedsReply(room))) continue
+          await clearNeedsReply(room)
           changed = true
         } catch (actionError) {
           setError(describeError(actionError))
@@ -2764,8 +1823,13 @@ function App() {
 
     if (action === 'needs-reply') {
       for (const room of targetRooms) {
-        if (isNeedsReplyRoom(room, preferencesRef.current)) continue
-        await setPreference(needsReplyPreferenceKey(room.id), true)
+        if (!isUnansweredRoom(room) || isNeedsReplyRoom(room)) continue
+        try {
+          await AppService.SetRoomUnanswered(room.id, true)
+          updateRoomNeedsReply(room.id, true)
+        } catch (actionError) {
+          setError(describeError(actionError))
+        }
       }
       return
     }
@@ -2825,7 +1889,7 @@ function App() {
   function handleMarkAnsweredKeyDown(event: KeyboardEvent<HTMLElement>, roomID: string) {
     if (!singleKeyShortcuts || event.altKey || event.metaKey || event.ctrlKey || event.key.toUpperCase() !== answeredShortcut) return
     const room = roomsRef.current.find((candidate) => candidate.id === roomID)
-    if (!room || !isNeedsReplyRoom(room, preferencesRef.current)) return
+    if (!room || !isNeedsReplyRoom(room)) return
     event.preventDefault()
     event.stopPropagation()
     void markRoomAnswered(roomID)
@@ -2840,7 +1904,7 @@ function App() {
     let actionRooms = targetRooms
     if (key === 'n') {
       action = 'needs-reply'
-      actionRooms = targetRooms.filter((room) => !isNeedsReplyRoom(room, preferences))
+      actionRooms = targetRooms.filter((room) => isUnansweredRoom(room) && !isNeedsReplyRoom(room))
       if (actionRooms.length === 0) return false
     } else if (key === 'u') {
       action = targetRooms.some(isUnreadRoom) ? 'read' : 'unread'
@@ -2860,13 +1924,9 @@ function App() {
     if (!roomID || triageBusyRef.current) return
     triageBusyRef.current = true
     setError('')
-    const restore = needsReplyUndoRef.current
     try {
-      if (restore.manual && !(await setPreference(needsReplyPreferenceKey(roomID), true))) return
-      if (restore.auto) {
-        await AppService.SetRoomUnanswered(roomID, true)
-        updateRoomUnanswered(roomID, true)
-      }
+      await AppService.SetRoomUnanswered(roomID, true)
+      updateRoomNeedsReply(roomID, true)
       clearUndoToast()
       showRoom(roomID)
     } catch (triageError) {
@@ -2923,7 +1983,7 @@ function App() {
   }
 
   function selectRoomByOffset(direction: number, unansweredOnly = false) {
-    const availableRooms = filteredRooms.filter((room) => !unansweredOnly || isNeedsReplyRoom(room, preferences))
+    const availableRooms = filteredRooms.filter((room) => !unansweredOnly || isNeedsReplyRoom(room))
     if (availableRooms.length === 0) return
     const currentIndex = availableRooms.findIndex((room) => room.id === selectedRoomRef.current && isActiveAccountRoom(room))
     const nextIndex = currentIndex < 0
@@ -3265,9 +2325,6 @@ function App() {
     if (message.replyTo) await AppService.SendReply(message.roomID, message.text, message.replyTo.id)
     else if (message.mentionUserIDs.length > 0) await AppService.SendMessageWithMentions(message.roomID, message.text, message.mentionUserIDs)
     else await AppService.SendMessage(message.roomID, message.text)
-    // Sending into a room answers it, so drop any manual Needs reply flag.
-    const needsReplyKey = needsReplyPreferenceKey(message.roomID)
-    if (preferenceBoolean(preferencesRef.current, needsReplyKey)) void setPreferenceRef.current(needsReplyKey, false)
     if (preferenceString(preferencesRef.current, 'sounds.effects', 'Off') === 'Sent messages') {
       playNotificationSound(preferenceNumber(preferencesRef.current, 'notifications.volume', 50), 'Soft')
     }
@@ -3405,50 +2462,9 @@ function App() {
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const roomID = selectedRoomID
-    const sourceDraft = composeText
-    const ghostIntent = parseGhostCommand(sourceDraft)
-    if (ghostIntent !== null) {
-      if (!roomID || busy || ghostwriterDraftBusy) return
-      if (!ghostwriterEnabled) {
-        setGhostwriterDraftStatus('Enable Ghostwriter in Settings > AI first.')
-        return
-      }
-      if (!ghostIntent) {
-        setGhostwriterDraftStatus('Add an intent after /ghost.')
-        return
-      }
-      const requestID = ++ghostwriterDraftRequestRef.current
-      setGhostwriterDraftBusy(true)
-      setGhostwriterDraftStatus('Generating a local draft…')
-      try {
-        const suggestions = await AppService.Ghostwriter({ roomId: roomID, mode: GhostwriterRequestMode.GhostwriterModeSlash, draft: '', intent: ghostIntent })
-        if (requestID !== ghostwriterDraftRequestRef.current) return
-        if (ghostwriterSelectedRoomRef.current !== roomID || composeTextRef.current !== sourceDraft) {
-          setGhostwriterDraftBusy(false)
-          setGhostwriterDraftStatus('Draft not inserted because the chat or draft changed.')
-          return
-        }
-        const draft = suggestions?.find((suggestion) => suggestion.type === 'slash_result')?.text.trim()
-        if (!draft) throw new Error('The local model returned no draft.')
-        setGhostwriterDraftBusy(false)
-        setComposeDraft(draft)
-        setGhostwriterDraftStatus('Draft ready to review. It has not been sent.')
-        requestAnimationFrame(() => {
-          const input = composerInputRef.current
-          if (!input) return
-          input.focus()
-          input.setSelectionRange(draft.length, draft.length)
-        })
-      } catch {
-        if (requestID === ghostwriterDraftRequestRef.current) setGhostwriterDraftStatus('Local model unavailable. Check that it is running.')
-      } finally {
-        if (requestID === ghostwriterDraftRequestRef.current) setGhostwriterDraftBusy(false)
-      }
-      return
-    }
     const customReplacements = parseCustomEmoticonReplacements(preferenceString(preferences, 'emoji.emoticon_replacements', ''))
     const text = (preferenceBoolean(preferences, 'emoji.replace_emoticons', true) ? replaceEmoticons(composeText, customReplacements) : composeText).trim()
-    if (!roomID || (!text && sendableStagedAttachments.length === 0) || busy || ghostwriterDraftBusy) return
+    if (!roomID || (!text && sendableStagedAttachments.length === 0) || busy) return
     const mentionUserIDs = [...new Set(mentionBindings.filter(({ token }) => text.includes(token)).map(({ userID }) => userID))]
     const attachments = sendableStagedAttachments
     if (attachments.some((item) => mediaKindForFile(item.file) !== 'file')) {
@@ -3871,7 +2887,8 @@ function App() {
   const menuRoomUnread = menuRoom ? isUnreadRoom(menuRoom) : false
   const menuRoomArchived = menuRoom ? preferenceBoolean(preferences, archivedPreferenceKey(menuRoom.id, menuRoom.accountId)) : false
   const menuRoomFavorite = Boolean(menuRoom?.favorite)
-  const menuRoomNeedsReply = menuRoom ? isNeedsReplyRoom(menuRoom, preferences) : false
+  const menuRoomUnanswered = menuRoom ? isUnansweredRoom(menuRoom) : false
+  const menuRoomNeedsReply = menuRoom ? isNeedsReplyRoom(menuRoom) : false
   const menuPrivateChatOpen = localAIChatOpen && Boolean(localAIChatId)
   const menuPrivateChatInAll = localAIChatOpen && localAIChatId ? preferenceBoolean(preferences, localAIIncludeInAllPreference(localAIChatId)) : false
   const menuDraftReady = Boolean(selectedRoom) && composeText.trim() !== '' && !busy && aiEnabled && !editTarget
@@ -3882,6 +2899,7 @@ function App() {
       roomUnread: menuRoomUnread,
       roomArchived: menuRoomArchived,
       roomFavorite: menuRoomFavorite,
+      roomUnanswered: menuRoomUnanswered,
       roomNeedsReply: menuRoomNeedsReply,
       privateChatOpen: menuPrivateChatOpen,
       privateChatInAll: menuPrivateChatInAll,
@@ -3889,7 +2907,7 @@ function App() {
       filter: menuFilter,
     }
     void AppService.SetMenuState(menuState)
-  }, [menuRoomSelected, menuRoomUnread, menuRoomArchived, menuRoomFavorite, menuRoomNeedsReply, menuPrivateChatOpen, menuPrivateChatInAll, menuDraftReady, menuFilter])
+  }, [menuRoomSelected, menuRoomUnread, menuRoomArchived, menuRoomFavorite, menuRoomUnanswered, menuRoomNeedsReply, menuPrivateChatOpen, menuPrivateChatInAll, menuDraftReady, menuFilter])
 
   function applyMenuFilter(filter: string) {
     setRoomScope(filter === 'archived' ? 'archived' : filter === 'private' ? 'local-ai' : 'all')
@@ -4010,10 +3028,6 @@ function App() {
   // aiInstructions returns the tunable prompt for a feature. Built-in defaults are returned when no override is saved.
   function aiInstructions(featureID: AIFeatureID) {
     return resolveAIFeatureTuning(preferencesRef.current, featureID).prompt
-  }
-
-  function endsWithAssistantTurn(conversation: AIMessage[]) {
-    return conversation[conversation.length - 1]?.role === 'assistant'
   }
 
   async function runAIRequest(title: string, request: AIMessage[], featureID: AIFeatureID, acceptAction: AIAcceptAction = { kind: 'none' }) {
@@ -4176,48 +3190,6 @@ function App() {
     cancelAIRequest(activeAIRequestRef.current)
     activeAIRequestRef.current = ''
     setAIPanel(null)
-  }
-
-  const suggestReplyDisabled = !selectedRoom || !ghostwriterEnabled || busy || ghostwriterDraftBusy || Boolean(editTarget) || Boolean(composeText.trim())
-  const suggestReplyTooltip = !ghostwriterEnabled
-    ? 'Suggest next reply · enable Ghostwriter in Settings'
-    : composeText.trim()
-      ? 'Suggest next reply · clear the draft first'
-      : 'Suggest next reply from the last 500 messages · not sent automatically'
-
-  // Suggests one reply only when the button is pressed. The result fills the composer for review and is never sent.
-  async function suggestNextReply() {
-    const roomID = selectedRoomID
-    if (!roomID || suggestReplyDisabled || composeTextRef.current.trim()) return
-    const requestID = ++ghostwriterDraftRequestRef.current
-    setGhostwriterDraftBusy(true)
-    setGhostwriterDraftStatus('Suggesting a reply from the last 500 messages…')
-    try {
-      const suggestions = await AppService.Ghostwriter({ roomId: roomID, mode: GhostwriterRequestMode.GhostwriterModeNext, draft: '', intent: '' })
-      if (requestID !== ghostwriterDraftRequestRef.current) return
-      if (ghostwriterSelectedRoomRef.current !== roomID || composeTextRef.current !== '') {
-        setGhostwriterDraftBusy(false)
-        setGhostwriterDraftStatus('Suggestion not inserted because the chat or draft changed.')
-        return
-      }
-      const reply = suggestions?.find((suggestion) => suggestion.type === 'next_reply')?.text.trim()
-      if (!reply) throw new Error('The local model returned no reply.')
-      setGhostwriterDraftBusy(false)
-      setComposeDraft(reply)
-      setGhostwriterDraftStatus('Suggested reply ready to review. It has not been sent.')
-      requestAnimationFrame(() => {
-        const input = composerInputRef.current
-        if (!input) return
-        input.focus()
-        input.setSelectionRange(reply.length, reply.length)
-      })
-    } catch (error) {
-      if (requestID === ghostwriterDraftRequestRef.current) {
-        setGhostwriterDraftStatus(error instanceof Error && error.message ? error.message : 'Local model unavailable. Check that it is running.')
-      }
-    } finally {
-      if (requestID === ghostwriterDraftRequestRef.current) setGhostwriterDraftBusy(false)
-    }
   }
 
   // Prepare a Local AI chat with the full room transcript and an editable summary request.
@@ -4454,7 +3426,6 @@ function App() {
   }
 
   function setComposeDraft(text: string) {
-    ghostwriterDraftRequestRef.current++
     composeTextRef.current = text
     setComposeText(text)
     if (!editTarget && selectedRoomID) {
@@ -4845,7 +3816,7 @@ function App() {
                 room={room}
                 index={index}
                 active={room.id === activeListRoomID && isActiveAccountRoom(room)}
-                needsReply={isNeedsReplyRoom(room, preferences)}
+                needsReply={isNeedsReplyRoom(room)}
                 multiSelected={selectedRoomIDs.length > 1 && selectedRoomIDs.includes(room.id)}
                 lastMessageByMe={isLastMessageByCurrentUser(room)}
                 use24Hour={preferenceBoolean(preferences, 'appearance.time_24_hour')}
@@ -4919,7 +3890,7 @@ function App() {
             {contextMenuNeedsReplyAddCount > 0 && <button type="button" role="menuitem" aria-keyshortcuts="N" title="Add to Needs reply (N)" onClick={() => void applyBulkRoomAction('needs-reply', contextMenuNeedsReplyAddRooms)}>
               <Reply size={15} /><span>{contextMenuIsBulk ? `Add ${contextMenuNeedsReplyAddCount} to Needs reply` : 'Add to Needs reply'}</span><kbd aria-hidden="true">N</kbd>
             </button>}
-            {contextMenuRooms.some((room) => isNeedsReplyRoom(room, preferences)) && <button type="button" role="menuitem" aria-keyshortcuts={answeredShortcut} onClick={() => contextMenuIsBulk ? void applyBulkRoomAction('answered', contextMenuRooms) : void markRoomAnswered(roomContextMenu.roomID)} onKeyDown={(event) => {
+            {contextMenuRooms.some((room) => isNeedsReplyRoom(room)) && <button type="button" role="menuitem" aria-keyshortcuts={answeredShortcut} onClick={() => contextMenuIsBulk ? void applyBulkRoomAction('answered', contextMenuRooms) : void markRoomAnswered(roomContextMenu.roomID)} onKeyDown={(event) => {
               if (!contextMenuIsBulk) {
                 handleMarkAnsweredKeyDown(event, roomContextMenu.roomID)
                 return
@@ -5035,12 +4006,7 @@ function App() {
                   </IconTooltip>
                 </div>
                 <div className="conversation-action-group" role="group" aria-label="Room controls">
-                  <IconTooltip label={busyModeEnabled ? 'Turn busy mode off' : 'Turn busy mode on'}>
-                    <button className={`icon-button ${busyModeEnabled ? 'is-selected' : ''}`} type="button" aria-label={busyModeEnabled ? 'Turn busy mode off' : 'Turn busy mode on'} aria-pressed={busyModeEnabled} onClick={() => void setPreference('busy_mode.enabled', !busyModeEnabled)}>
-                      <MessageCircleMore size={16} />
-                    </button>
-                  </IconTooltip>
-                  {isNeedsReplyRoom(selectedRoom, preferences) && <IconTooltip label="Mark room answered"><button className="icon-button" type="button" aria-label="Mark room answered" onClick={() => void markRoomAnswered(selectedRoom.id)}><Check size={16} /></button></IconTooltip>}
+                  {isNeedsReplyRoom(selectedRoom) && <IconTooltip label="Mark room answered"><button className="icon-button" type="button" aria-label="Mark room answered" onClick={() => void markRoomAnswered(selectedRoom.id)}><Check size={16} /></button></IconTooltip>}
                   <IconTooltip label={selectedRoom.favorite ? 'Remove from Favorites' : 'Add to Favorites'}>
                     <button
                       className={`icon-button ${selectedRoom.favorite ? 'is-selected' : ''}`}
@@ -5065,9 +4031,6 @@ function App() {
                   </IconTooltip>
                 </div>
                 <div className="conversation-action-group" role="group" aria-label="Room details">
-                  {selectedRoom.direct && <IconTooltip label={contactHUDOpen ? 'Hide contact dossier' : 'Show contact dossier'}>
-                    <button className={`icon-button ${contactHUDOpen ? 'is-selected' : ''}`} type="button" aria-label={contactHUDOpen ? 'Hide contact dossier' : 'Show contact dossier'} aria-pressed={contactHUDOpen} onClick={() => setContactHUDOpen((open) => !open)}><PanelRight size={16} /></button>
-                  </IconTooltip>}
                   <IconTooltip label="Room details">
                     <button className="icon-button" type="button" aria-label="Room details" onClick={() => void openRoomInfo()}>
                       <UsersRound size={16} />
@@ -5343,10 +4306,7 @@ function App() {
                           if (composeTextRef.current === value && document.activeElement === composerInputRef.current) composerInputRef.current?.setSelectionRange(converted.cursor, converted.cursor)
                         })
                       }
-                      ghostwriterDraftRequestRef.current++
                       composeTextRef.current = value
-                      setGhostwriterDraftBusy(false)
-                      setGhostwriterDraftStatus('')
                       setComposeText(value)
                       if (!editTarget && selectedRoomID) {
                         if (value) draftsRef.current.set(selectedRoomID, value)
@@ -5384,7 +4344,6 @@ function App() {
                     onSelect={snippetExpander.select}
                   />}
                 </div>
-                {ghostwriterDraftStatus && <p className="ghostwriter-composer-status" role="status">{ghostwriterDraftStatus}</p>}
                 {videoRecordingActive && <div className="video-capture-preview"><video ref={videoPreviewRef} muted playsInline autoPlay aria-label="Camera preview" /></div>}
                 <div className="composer-footer">
                   <div className="composer-toolbar-row composer-toolbar-row-compose">
@@ -5435,7 +4394,6 @@ function App() {
                     <div className="composer-tool-group composer-tool-group-ai" role="group" aria-label="AI tools">
                       <span className="composer-tool-group-label" aria-hidden="true"><Sparkles size={13} />AI</span>
                       <div className="composer-tool-cluster" role="group" aria-label="Draft assistance">
-                        <IconTooltip label={suggestReplyTooltip}><button className="composer-assist-button" type="button" aria-label="Suggest next reply" aria-busy={ghostwriterDraftBusy} disabled={suggestReplyDisabled} onClick={() => void suggestNextReply()}>{ghostwriterDraftBusy ? <span className="loading-mark" aria-hidden="true" /> : <MessageSquareReply size={14} />}<span>Suggest reply</span></button></IconTooltip>
                         <IconTooltip label={aiEnabled ? 'Analyze draft with Language Tutor · Ctrl+Shift+T' : 'Analyze draft with Language Tutor · set up a local AI endpoint'}><button className="composer-assist-button" type="button" aria-label="Analyze draft with Language Tutor" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => void analyzeWithLanguageTutor(composeText, 'draft')}><GraduationCap size={14} /><span>Tutor</span></button></IconTooltip>
                         <IconTooltip label={imageButtonTooltip}><button className="composer-assist-button" type="button" aria-label={imageRunHere ? 'Stop image generation' : 'Generate image from draft'} disabled={!imageRunHere && (!selectedRoom || !imageEngineReady || !composeText.trim() || busy || Boolean(editTarget) || imageSendRun !== null || generatedImageReview !== null)} onClick={imageRunHere ? stopImageGeneration : () => void generateImageToRoom()}>{imageRunHere ? <Square size={14} /> : <ImagePlus size={14} />}<span>{imageRunHere ? 'Stop' : 'Image'}</span></button></IconTooltip>
                       </div>
@@ -5447,93 +4405,46 @@ function App() {
                     </div>
                     <span className={`composer-hint${voiceCaptureStatus !== null || busy || imageRunHere ? ' is-status' : ''}`}>{voiceCaptureStatus === 'recording' ? `Recording ${captureNoun} · click stop to send` : voiceCaptureStatus === 'processing' ? `Preparing ${captureNoun}…` : imageRunHere ? imageRunStatus : selectedRoom ? busy ? 'Sending…' : preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter to send' : 'Enter to send · Shift + Enter for a new line' : ' '}</span>
                   </div>
-                  <IconTooltip label="Send message" className="send-tooltip">
-                    <button className="send-button" type="submit" aria-label="Send message" disabled={!selectedRoom || (!composeText.trim() && sendableStagedAttachments.length === 0) || busy || voiceCaptureStatus !== null}>
-                      <Send size={17} />
+                  <IconTooltip label={editTarget ? 'Save edit' : 'Send message'} className="send-tooltip">
+                    <button className="send-button" type="submit" aria-label={editTarget ? 'Save edit' : 'Send message'} disabled={!selectedRoom || (!composeText.trim() && sendableStagedAttachments.length === 0) || busy || voiceCaptureStatus !== null}>
+                      {editTarget ? <Check size={17} /> : <Send size={17} />}
                     </button>
                   </IconTooltip>
                 </div>
               </form>
             </div>
-            {contactHUDOpen && selectedRoom?.direct && <ContactHUD accountID={snapshot?.activeAccountId ?? ''} roomID={selectedRoom.id} rooms={rooms.filter((room) => isActiveAccountRoom(room) && room.direct)} onClose={() => setContactHUDOpen(false)} />}
           </>}
         </div>
       </section>
-      {forwardingMessage && <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setForwardingMessage(null) }}>
-        <DialogSurface className="room-info-dialog forward-message-dialog" labelledBy="forward-message-title" onClose={() => setForwardingMessage(null)} onClick={(event) => event.stopPropagation()}>
-          <header className="room-info-header">
-            <div><span className="eyebrow">FORWARD MESSAGE</span><h2 id="forward-message-title">Forward message</h2></div>
-            <button className="icon-button" type="button" aria-label="Close forward message" title="Close forward message" onClick={() => setForwardingMessage(null)}><X size={16} /></button>
-          </header>
-          <div className="room-info-content forward-message-content">
-            <div className="forward-message-preview">{displayMessageBody(forwardingMessage)}</div>
-            <label className="forward-message-destination"><span>Send to</span><select aria-label="Forward destination" value={forwardTargetRoomID} onChange={(event) => setForwardTargetRoomID(event.target.value)}>
-              {rooms.filter((room) => room.id !== selectedRoomID && isActiveAccountRoom(room)).map((room) => <option key={room.id} value={room.id}>{room.name || room.id}</option>)}
-            </select></label>
-            {forwardError && <p className="settings-error" role="alert">{forwardError}</p>}
-          </div>
-          <div className="forward-message-actions">
-            <button type="button" onClick={() => setForwardingMessage(null)} disabled={forwardBusy}>Cancel</button>
-            <button className="is-primary" type="button" onClick={() => void confirmMessageForward()} disabled={forwardBusy || !forwardTargetRoomID}><ArrowUpRight size={15} />{forwardBusy ? 'Forwarding...' : 'Forward'}</button>
-          </div>
-        </DialogSurface>
-      </div>}
-      {aiPanel && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeAIResult() }}>
-        <DialogSurface className="room-info-dialog ai-result-dialog" labelledBy="ai-result-title" onClose={closeAIResult} onClick={(event) => event.stopPropagation()}>
-          <header className="room-info-header ai-result-header">
-            <div><span className="eyebrow">AI RESULT</span><h2 id="ai-result-title">{aiPanel.title}</h2></div>
-            <button className="icon-button" type="button" aria-label="Close AI result" title="Close AI result" onClick={closeAIResult}><X size={16} /></button>
-          </header>
-          <div className="ai-result-content" aria-live="polite" aria-busy={aiPanel.busy}>
-            {aiPanel.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />{aiPanel.status || 'Waiting for the local model…'}</p>}
-            {aiPanel.error && <p className="settings-error" role="alert">{aiPanel.error}</p>}
-            {aiPanel.result && <div className="ai-result-text">{aiPanel.result}</div>}
-            {aiPanel.stopped && !aiPanel.busy && <p className="settings-note ai-result-stopped" role="status">Generation stopped. The text above may be incomplete.</p>}
-          </div>
-          {!aiPanel.busy && endsWithAssistantTurn(aiPanel.conversation) && <form className="ai-result-followup" onSubmit={sendAIFollowUp}>
-            <textarea aria-label="Follow-up question" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={aiPanel.followUp} maxLength={2000} rows={2} placeholder="Ask a follow-up about this result" onChange={(event) => setAIFollowUp(event.target.value)} />
-            <button className="settings-command" type="submit" disabled={!aiPanel.followUp.trim()}>Send follow-up</button>
-          </form>}
-          <aside className="ai-result-disclaimer">
-            <ShieldCheck size={16} aria-hidden="true" />
-            <p>No Matrix message is sent automatically. The selected text, included chat context, and, for custom agents, profile instructions are sent to the configured endpoint, which may be remote.</p>
-          </aside>
-          <footer className="room-info-footer ai-result-footer">
-            {aiPanel.acceptAction.kind !== 'none' && <button className="settings-command ai-result-primary" type="button" title={aiPanel.acceptAction.kind === 'reply' ? 'Use the result as a reply draft' : aiPanel.acceptAction.kind === 'rewrite' ? 'Replace the composer draft with this result' : 'Use the result as a draft'} disabled={!aiPanel.result || aiPanel.busy || Boolean(editTarget)} onClick={acceptAIResult}>
-              {aiPanel.acceptAction.kind === 'reply' ? 'Use as reply draft' : aiPanel.acceptAction.kind === 'rewrite' ? 'Replace draft' : 'Use as draft'}
-            </button>}
-            {aiPanel.busy
-              ? <button className="settings-command ai-result-stop" type="button" onClick={stopAIRequest}>Stop</button>
-              : <button className="settings-command" type="button" onClick={regenerateAIResult}>Regenerate</button>}
-            <button className="settings-command" type="button" onClick={closeAIResult}>Close</button>
-          </footer>
-        </DialogSurface>
-      </div>}
-      {languageTutorState && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeLanguageTutor() }}>
-        <DialogSurface className="room-info-dialog ai-result-dialog language-tutor-dialog" labelledBy="language-tutor-title" onClose={closeLanguageTutor} onClick={(event) => event.stopPropagation()}>
-          <header className="room-info-header ai-result-header">
-            <div><span className="eyebrow">LANGUAGE TUTOR</span><h2 id="language-tutor-title">{languageTutorState.mode === 'draft' ? 'Tutor this draft' : 'Analyze message'}</h2></div>
-            <button className="icon-button" type="button" aria-label="Close Language Tutor" title="Close Language Tutor" onClick={closeLanguageTutor}><X size={16} /></button>
-          </header>
-          <div className="ai-result-content language-tutor-content" aria-live="polite" aria-busy={languageTutorState.busy}>
-            <label className="language-tutor-explain-in"><span>Explain in</span><select aria-label="Explain in" value={languageTutorState.explanationLanguage} disabled={languageTutorState.busy} onChange={(event) => void analyzeWithLanguageTutor(languageTutorState.originalText, languageTutorState.mode, event.target.value)}>
-              {languageRoles.known.map((code) => <option key={code} value={code}>{languageName(code)}</option>)}
-            </select></label>
-            {languageTutorState.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with the local model…</p>}
-            {languageTutorState.busy && languageTutorState.preview !== '' && <pre className="language-tutor-preview">{languageTutorState.preview}</pre>}
-            {languageTutorState.error && <p className="settings-error" role="alert">{languageTutorState.error}</p>}
-            {languageTutorState.analysis && <LanguageTutorAnalysisDetails analysis={languageTutorState.analysis} originalText={languageTutorState.originalText} />}
-          </div>
-          <aside className="ai-result-disclaimer">
-            <ShieldCheck size={16} aria-hidden="true" />
-            <p>Analysis uses the local AI endpoint configured in Settings. No Matrix message is sent.</p>
-          </aside>
-          <footer className="room-info-footer ai-result-footer">
-            {languageTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" disabled={!languageTutorState.analysis || languageTutorState.busy || Boolean(editTarget)} onClick={useLanguageTutorDraft}>Replace draft with {languageName(languageTutorState.analysis?.target_language || languageRoles.learning)}</button>}
-            <button className="settings-command" type="button" onClick={closeLanguageTutor}>Close</button>
-          </footer>
-        </DialogSurface>
-      </div>}
+      {forwardingMessage && <Suspense fallback={null}>
+        <ForwardMessageDialog
+          message={forwardingMessage}
+          destinations={rooms.filter((room) => room.id !== selectedRoomID && isActiveAccountRoom(room))}
+          targetRoomID={forwardTargetRoomID}
+          busy={forwardBusy}
+          error={forwardError}
+          onTargetChange={setForwardTargetRoomID}
+          onClose={() => setForwardingMessage(null)}
+          onConfirm={() => void confirmMessageForward()}
+        />
+      </Suspense>}
+      {(aiPanel || languageTutorState) && <Suspense fallback={null}>
+        <AIResultDialogs
+          aiPanel={aiPanel}
+          languageTutorState={languageTutorState}
+          hasEditTarget={Boolean(editTarget)}
+          languageRoles={languageRoles}
+          onCloseAIResult={closeAIResult}
+          onAcceptAIResult={acceptAIResult}
+          onStopAIRequest={stopAIRequest}
+          onRegenerateAIResult={regenerateAIResult}
+          onFollowUpChange={setAIFollowUp}
+          onSendFollowUp={sendAIFollowUp}
+          onCloseLanguageTutor={closeLanguageTutor}
+          onAnalyzeWithLanguageTutor={analyzeWithLanguageTutor}
+          onUseLanguageTutorDraft={useLanguageTutorDraft}
+        />
+      </Suspense>}
       {accountManagerOpen && <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setAccountManagerOpen(false) }}>
         <DialogSurface className="room-info-dialog account-dialog" labelledBy="account-manager-title" onClose={() => { if (!busy) setAccountManagerOpen(false) }} onClick={(event) => event.stopPropagation()}>
           <header className="room-info-header">
@@ -5578,2149 +4489,124 @@ function App() {
         </DialogSurface>
       </div>}
       {settingsOpen && (
-        <SettingsDialog
-          tab={settingsTab}
-          profile={snapshot.profile}
-          preferences={preferences}
-          snippets={snippets}
-          rooms={rooms}
-          audioInputDevices={audioInputDevices}
-          selectedAudioInputDeviceId={selectedAudioInputDeviceId}
-          onArchiveInactiveRooms={archiveInactiveRooms}
-          onTabChange={setSettingsTab}
-          onClose={() => setSettingsOpen(false)}
-          onLogout={async () => {
-            await AppService.Logout()
-            setSettingsOpen(false)
-            try {
-              resetAccountWorkspace(await AppService.Snapshot())
-            } catch {
-              // The app is closing after logout from the final account.
-            }
-          }}
-          onPreferenceChange={(key, value) => setPreference(key, value)}
-          onSnippetsChange={updateSnippets}
-        />
-      )}
-      {scheduledJobsOpen && <div className="room-info-scrim" role="presentation" onClick={() => setScheduledJobsOpen(false)}>
-        <DialogSurface className="room-info-dialog scheduled-dialog" labelledBy="scheduled-jobs-title" onClose={() => setScheduledJobsOpen(false)} onClick={(event) => event.stopPropagation()}>
-          <header className="room-info-header">
-            <div><span className="eyebrow">YOUR QUEUE</span><h2 id="scheduled-jobs-title">Scheduled messages and reminders</h2></div>
-            <button className="icon-button" type="button" aria-label="Close scheduled jobs" onClick={() => setScheduledJobsOpen(false)}><X size={16} /></button>
-          </header>
-          <div className="room-info-content scheduled-job-list" aria-live="polite">
-            {scheduledJobsError && <p className="room-info-state is-error" role="alert">{scheduledJobsError}</p>}
-            {scheduledLoading && <div className="room-info-state"><span className="loading-mark" />Loading scheduled jobs</div>}
-            {!scheduledLoading && scheduledJobs.length === 0 && <p className="room-info-state">No scheduled messages or reminders.</p>}
-            {scheduledJobs.map((job) => {
-              const roomName = rooms.find((room) => room.id === job.roomId)?.name || job.roomId
-              const editable = job.status === 'pending' || job.status === 'failed'
-              const dismissible = job.status === 'fired' || job.status === 'sent-late'
-              const statusLabel = job.status === 'pending' ? 'Scheduled'
-                : job.status === 'sending' ? 'Sending'
-                  : job.status === 'failed' ? 'Failed'
-                    : job.status === 'fired' ? 'Due now'
-                      : job.status === 'sent-late' ? 'Sent late' : job.status
-              return <article className="scheduled-job" key={job.id}>
-                <div className="scheduled-job-heading">
-                  <div><strong>{job.kind === 'message' ? 'Scheduled message' : 'Reminder'}</strong><span className={`scheduled-job-status is-${job.status}`}>{statusLabel}</span></div>
-                  <time>{formatScheduledTime(job.dueAt)}</time>
-                </div>
-                <span className="scheduled-job-room">{roomName}</span>
-                {job.replyToEventId && <span className="scheduled-job-room">Reply to {job.replyToEventId}</span>}
-                <p>{job.text || (job.kind === 'reminder' ? 'Reminder for a message' : '')}</p>
-                {editable && <label className="scheduled-job-time">New time
-                  <input type="datetime-local" value={scheduledTimes[job.id] ?? localDateTimeInputValue(job.dueAt)} onChange={(event) => setScheduledTimes((current) => ({ ...current, [job.id]: event.target.value }))} />
-                </label>}
-                {job.error && <p className="scheduled-job-error" role="alert">{job.error}</p>}
-                <div className="scheduled-job-actions">
-                  {editable && <button className="settings-command" type="button" disabled={scheduledBusyID === job.id} onClick={() => void manageScheduledJob(job.id, 'reschedule')}><Check size={14} />Save time</button>}
-                  {job.status === 'failed' && job.kind === 'message' && <button className="settings-command" type="button" disabled={scheduledBusyID === job.id} onClick={() => void manageScheduledJob(job.id, 'retry')}><RotateCcw size={14} />Retry</button>}
-                  {editable && <button className="settings-command is-danger" type="button" disabled={scheduledBusyID === job.id} onClick={() => void manageScheduledJob(job.id, 'cancel')}><X size={14} />Cancel</button>}
-                  {dismissible && <button className="settings-command" type="button" disabled={scheduledBusyID === job.id} onClick={() => void manageScheduledJob(job.id, 'dismiss')}><Check size={14} />Dismiss</button>}
-                </div>
-              </article>
-            })}
-          </div>
-          <footer className="room-info-footer"><button className="settings-command" type="button" onClick={() => setScheduledJobsOpen(false)}>Close</button></footer>
-        </DialogSurface>
-      </div>}
-      {scheduledDraft && <div className="room-info-scrim" role="presentation" onClick={() => setScheduledDraft(null)}>
-        <DialogSurface className="room-info-dialog scheduled-editor" labelledBy="scheduled-editor-title" onClose={() => setScheduledDraft(null)} onClick={(event) => event.stopPropagation()}>
-          <header className="room-info-header">
-            <div><span className="eyebrow">{scheduledDraft.kind === 'message' ? scheduledDraft.replyToEventID ? 'SCHEDULE REPLY' : 'SCHEDULE SEND' : 'MESSAGE REMINDER'}</span><h2 id="scheduled-editor-title">{scheduledDraft.kind === 'message' ? scheduledDraft.replyToEventID ? 'Schedule reply' : 'Schedule message' : 'Set reminder'}</h2></div>
-            <button className="icon-button" type="button" aria-label="Close schedule dialog" onClick={() => setScheduledDraft(null)}><X size={16} /></button>
-          </header>
-          <form className="scheduled-editor-form" onSubmit={submitScheduledDraft}>
-            <div className="room-info-content scheduled-editor-content">
-              <p className="scheduled-editor-room">To {rooms.find((room) => room.id === scheduledDraft.roomID)?.name || scheduledDraft.roomID}</p>
-              {scheduledDraft.kind === 'message'
-                ? <>
-                  {scheduledDraft.replyToEventID && <div className="scheduled-reply-context"><strong>Replying to {scheduledDraft.replyToSender}</strong><span>{scheduledDraft.replyToPreview}</span></div>}
-                  <p className="scheduled-draft-preview">{scheduledDraft.text}</p>
-                </>
-                : <>
-                  <label>Reminder note <input type="text" value={scheduledDraft.text} onChange={(event) => setScheduledDraft((current) => current?.kind === 'reminder' ? { ...current, text: event.target.value } : current)} placeholder="Optional note" spellCheck={false} autoCorrect="off" autoCapitalize="off" /></label>
-                  <label className="scheduled-archive-toggle">
-                    <input type="checkbox" aria-label="Archive room after setting reminder" checked={Boolean(scheduledDraft.archiveAfter)} disabled={scheduledSaving} onChange={(event) => setScheduledDraft((current) => current?.kind === 'reminder' ? { ...current, archiveAfter: event.target.checked } : current)} />
-                    <span>Archive this room after setting the reminder</span>
-                  </label>
-                </>}
-              <label>{scheduledDraft.kind === 'message' ? 'Send at' : 'Remind me at'}
-                <input type="datetime-local" required value={scheduledDueAt} onChange={(event) => setScheduledDueAt(event.target.value)} />
-              </label>
-              <div className="scheduled-time-suggestions" role="group" aria-label="Time suggestions">
-                {scheduleTimeSuggestions.map((minutes) => <button key={minutes} className="settings-command" type="button" onClick={() => setScheduledDueAt(localDateTimeInputValue(Date.now() + minutes * 60_000))}>{formatTimeSuggestion(minutes)}</button>)}
-              </div>
-              {scheduledDialogError && <p className="room-info-state is-error" role="alert">{scheduledDialogError}</p>}
-            </div>
-            <footer className="room-info-footer">
-              <button className="settings-command" type="button" disabled={scheduledSaving} onClick={() => setScheduledDraft(null)}>Cancel</button>
-              <button className="settings-command is-primary" type="submit" disabled={scheduledSaving}>{scheduledSaving ? 'Saving…' : scheduledDraft.kind === 'message' ? scheduledDraft.replyToEventID ? 'Schedule reply' : 'Schedule message' : 'Set reminder'}</button>
-            </footer>
-          </form>
-        </DialogSurface>
-      </div>}
-      {roomInfoOpen && selectedRoom && <div className="room-info-scrim" role="presentation" onClick={() => setRoomInfoOpen(false)}>
-        <DialogSurface className="room-info-dialog" labelledBy="room-info-title" onClose={() => setRoomInfoOpen(false)} onClick={(event) => event.stopPropagation()}>
-          <header className="room-info-header">
-            <div><span className="eyebrow">ROOM DETAILS</span><h2 id="room-info-title">{selectedRoom.name || selectedRoom.id}</h2></div>
-            <button className="icon-button" type="button" aria-label="Close room details" onClick={() => setRoomInfoOpen(false)}><X size={16} /></button>
-          </header>
-          <div className="room-info-content">
-            <div className="room-info-fact"><span>Room ID</span><strong>{selectedRoom.id}</strong></div>
-            {selectedRoom.topic && <div className="room-info-fact"><span>Topic</span><strong>{selectedRoom.topic}</strong></div>}
-            <section className="room-agent-settings" aria-label="Chat agents">
-              <div className="room-members-heading"><h3>Chat agents</h3><span>{roomAgents.agents.length}/{MAX_CHAT_AGENTS}</span></div>
-              <p className="room-agent-note">Profiles are saved to this account for this room. Profile instructions and included chat text are sent to the configured endpoint, which may be remote.</p>
-              <label className="room-agent-field"><span>Default agent</span><select aria-label="Default chat agent" value={roomAgents.defaultAgentId} onChange={(event) => void persistRoomAgents({ ...roomAgents, defaultAgentId: event.target.value })}>
-                <option value="">No default</option>
-                {roomAgents.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-              </select></label>
-              {roomAgents.agents.map((agent) => <div className="room-agent-row" key={agent.id}>
-                <span>{agent.name}{agent.id === roomAgents.defaultAgentId && <small>Default</small>}</span>
-                <button className="icon-button" type="button" aria-label={`Edit ${agent.name}`} title={`Edit ${agent.name}`} onClick={() => { setAgentSettingsError(''); setAgentEditor(agent) }}><Pencil size={14} /></button>
-                <button className="icon-button" type="button" aria-label={`Delete ${agent.name}`} title={`Delete ${agent.name}`} onClick={() => void deleteAgentProfile(agent)}><Trash2 size={14} /></button>
-              </div>)}
-              {roomAgents.agents.length === 0 && <p className="room-info-state">No chat agents are set up for this room.</p>}
-              {agentSettingsError && <p className="settings-error" role="alert">{agentSettingsError}</p>}
-              {agentEditor && <form className="room-agent-editor" onSubmit={(event) => void saveAgentProfile(event)}>
-                <label className="room-agent-field"><span>Name</span><input autoFocus maxLength={MAX_AGENT_NAME_LENGTH} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={agentEditor.name} onChange={(event) => setAgentEditor({ ...agentEditor, name: event.target.value })} required /></label>
-                <label className="room-agent-field"><span>Instructions</span><textarea maxLength={MAX_AGENT_INSTRUCTIONS_LENGTH} rows={4} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={agentEditor.instructions} onChange={(event) => setAgentEditor({ ...agentEditor, instructions: event.target.value })} required /></label>
-                <div className="room-agent-editor-actions"><button className="settings-command" type="submit">Save agent</button><button className="settings-command" type="button" onClick={() => setAgentEditor(null)}>Cancel</button></div>
-              </form>}
-              {!agentEditor && <button className="settings-command room-agent-add" type="button" disabled={roomAgents.agents.length >= MAX_CHAT_AGENTS} onClick={createAgentProfile}><Plus size={14} />Add agent</button>}
-            </section>
-            <div className="room-members-heading"><h3>Members</h3><span>{roomMembersLoading ? 'Loading' : roomMembers.length}</span></div>
-            {roomMembersLoading ? <div className="room-info-state"><span className="loading-mark" />Loading members</div>
-              : roomMembersError ? <p className="room-info-state is-error" role="alert">{roomMembersError}</p>
-                : roomMembers.length === 0 ? <p className="room-info-state">No room members found.</p>
-                  : <div className="room-member-list">{roomMembers.map((member) => <div className="room-member-row" key={member.id}>
-                    <span className="room-member-avatar">{initials(member.displayName || member.id)}</span>
-                    <span><strong>{member.displayName || member.id}</strong>{member.displayName && <small>{member.id}</small>}</span>
-                  </div>)}</div>}
-          </div>
-          <footer className="room-info-footer">
-            <button className="settings-command is-danger" type="button" onClick={() => { setLeaveRoomError(''); setLeaveConfirmOpen(true) }}><LogOut size={15} />Leave room</button>
-          </footer>
-        </DialogSurface>
-      </div>}
-      {mediaGalleryOpen && selectedRoom && <div className="media-gallery-scrim" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) closeMediaGallery() }}>
-        <DialogSurface className="media-gallery-dialog" labelledBy="media-gallery-title" onClose={closeMediaGallery} onClick={(event) => event.stopPropagation()}>
-          <header className="room-info-header media-gallery-header">
-            <div><span className="eyebrow">ROOM MEDIA</span><h2 id="media-gallery-title">Media in {selectedRoom.name || selectedRoom.id}</h2></div>
-            <button className="icon-button" type="button" aria-label="Close media gallery" title="Close media gallery" onClick={closeMediaGallery}><X size={16} /></button>
-          </header>
-          <div className="media-gallery-toolbar">
-            <div className="media-gallery-filters" role="group" aria-label="Filter media">
-              {MEDIA_GALLERY_FILTERS.map((filter) => (
-                <button key={filter.value} className="media-gallery-filter" type="button" aria-label={`${filter.label}, ${filterMediaGalleryItems(mediaGalleryItems, filter.value).length}`} aria-pressed={mediaGalleryFilter === filter.value} onClick={() => setMediaGalleryFilter(filter.value)}>
-                  {filter.label}<span>{filterMediaGalleryItems(mediaGalleryItems, filter.value).length}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="media-gallery-content">
-            {mediaGalleryLoading && <p className="media-gallery-status" role="status">Scanning room history, {mediaGalleryScanned} messages checked.</p>}
-            {mediaGalleryError && <div className="media-gallery-error" role="alert"><span>{mediaGalleryError}</span><button className="media-gallery-retry" type="button" onClick={() => void openMediaGallery()}><RotateCcw size={14} />Retry</button></div>}
-            {filterMediaGalleryItems(mediaGalleryItems, mediaGalleryFilter).length === 0
-              ? <p className="media-gallery-empty">{mediaGalleryLoading ? 'No media found yet.' : `No ${mediaGalleryFilter === 'all' ? 'media' : mediaGalleryFilter} in this room.`}</p>
-              : <div className="media-gallery-grid">
-                {filterMediaGalleryItems(mediaGalleryItems, mediaGalleryFilter).map((message) => (
-                  <article key={mediaGalleryMessageKey(message)} className="media-gallery-item" aria-label={`${mediaGalleryCategory(message)} attachment ${message.body || 'attachment'} from ${message.senderName || message.sender}`}>
-                    <div className="media-gallery-item-meta">
-                      <span title={message.senderName || message.sender}>{message.senderName || message.sender || 'Unknown sender'}</span>
-                      {message.timestamp > 0 && <time dateTime={new Date(message.timestamp).toISOString()}>{formatMediaGalleryDateTime(message.timestamp, preferences)}</time>}
-                    </div>
-                    <MessageMedia roomID={selectedRoom.id} message={message} aiEnabled={Boolean(preferenceString(preferences, 'ai.endpoint', '').trim())} canUseDraft={false} onUseDraft={() => { }} />
-                  </article>
-                ))}
-              </div>}
-          </div>
-        </DialogSurface>
-      </div>}
-      {mediaApproval && <div className="confirm-scrim" role="presentation">
-        <DialogSurface className="confirm-dialog media-approval-dialog" role="alertdialog" labelledBy="media-approval-title" onClose={() => resolveMediaApproval(false)}>
-          <h2 id="media-approval-title">Send media to this room?</h2>
-          <p>Review each item. Nothing is uploaded until you approve.</p>
-          <ul className="media-approval-list" aria-label="Media to send">
-            {mediaApproval.items.map((item) => (
-              <li key={item.key}>
-                {item.previewURL ? <img src={item.previewURL} alt="" /> : <Paperclip size={14} />}
-                <span className="media-approval-name" title={item.name}>{item.name}</span>
-                <small>{mediaApprovalKindLabels[item.kind]} · {formatBytes(item.sizeBytes)}</small>
-              </li>
-            ))}
-          </ul>
-          <div><button type="button" onClick={() => resolveMediaApproval(false)}>Cancel</button><button type="button" onClick={() => resolveMediaApproval(true)}>Approve and send</button></div>
-        </DialogSurface>
-      </div>}
-      {generatedImageReview && <div className="confirm-scrim" role="presentation">
-        <DialogSurface className="confirm-dialog generated-image-dialog" role="alertdialog" labelledBy="generated-image-title" onClose={() => setGeneratedImageReview(null)}>
-          <h2 id="generated-image-title">Send generated image to this room?</h2>
-          <p>Discarding keeps your draft. Nothing is sent until you approve.</p>
-          <figure className="generated-image-preview">
-            <img src={`data:image/png;base64,${generatedImageReview.encoded}`} alt="Generated image preview" />
-            <figcaption>{generatedImageReview.prompt}</figcaption>
-          </figure>
-          <div><button type="button" onClick={() => setGeneratedImageReview(null)}>Discard</button><button type="button" onClick={() => void approveGeneratedImage()}>Approve and send</button></div>
-        </DialogSurface>
-      </div>}
-      {leaveConfirmOpen && selectedRoom && <div className="confirm-scrim" role="presentation">
-        <DialogSurface className="confirm-dialog" role="alertdialog" labelledBy="leave-room-title" onClose={() => setLeaveConfirmOpen(false)}>
-          <h2 id="leave-room-title">Leave this room?</h2>
-          <p>You will leave {selectedRoom.name || selectedRoom.id} and stop receiving its messages.</p>
-          {leaveRoomError && <p className="room-info-state is-error" role="alert">{leaveRoomError}</p>}
-          <div><button type="button" disabled={leavingRoom} onClick={() => setLeaveConfirmOpen(false)}>Cancel</button><button className="is-danger" type="button" disabled={leavingRoom} onClick={() => void leaveSelectedRoom()}>{leavingRoom ? 'Leaving…' : 'Leave room'}</button></div>
-        </DialogSurface>
-      </div>}
-      {redactTarget && <div className="confirm-scrim" role="presentation">
-        <DialogSurface className="confirm-dialog" role="alertdialog" labelledBy="redact-title" onClose={() => setRedactTarget(null)}>
-          <h2 id="redact-title">Delete message?</h2>
-          <p>This removes the message for everyone in the room.</p>
-          <div><button type="button" onClick={() => setRedactTarget(null)}>Cancel</button><button className="is-danger" type="button" disabled={busy} onClick={() => void redactMessage()}>{busy ? 'Deleting…' : 'Delete'}</button></div>
-        </DialogSurface>
-      </div>}
-      {quickSwitcherOpen && <div className="quick-switcher-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickSwitcherOpen(false) }}>
-        <DialogSurface className="quick-switcher" label="Quick switcher" onClose={() => setQuickSwitcherOpen(false)}>
-          <div className="quick-switcher-input"><Search size={17} /><input ref={quickSwitcherInputRef} value={quickSwitcherQuery} onChange={(event) => setQuickSwitcherQuery(event.target.value)} onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.preventDefault()
-              event.stopPropagation()
-              setQuickSwitcherOpen(false)
-            } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-              event.preventDefault()
-              event.stopPropagation()
-              if (quickSwitcherRooms.length > 0) setQuickSwitcherIndex((current) => (current + (event.key === 'ArrowDown' ? 1 : -1) + quickSwitcherRooms.length) % quickSwitcherRooms.length)
-            } else if (event.key === 'Enter') {
-              event.preventDefault()
-              event.stopPropagation()
-              const room = quickSwitcherRooms[quickSwitcherIndex]
-              if (room) {
-                showRoom(room.id)
-                setQuickSwitcherOpen(false)
+        <Suspense fallback={null}>
+          <SettingsDialog
+            tab={settingsTab}
+            profile={snapshot.profile}
+            preferences={preferences}
+            snippets={snippets}
+            rooms={rooms}
+            audioInputDevices={audioInputDevices}
+            selectedAudioInputDeviceId={selectedAudioInputDeviceId}
+            onArchiveInactiveRooms={archiveInactiveRooms}
+            onTabChange={setSettingsTab}
+            onClose={() => setSettingsOpen(false)}
+            onLogout={async () => {
+              await AppService.Logout()
+              setSettingsOpen(false)
+              try {
+                resetAccountWorkspace(await AppService.Snapshot())
+              } catch {
+                // The app is closing after logout from the final account.
               }
-            }
-          }} placeholder="Search rooms" aria-label="Search rooms" autoComplete="off" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
-            <button className="icon-button" type="button" aria-label="Close quick switcher" onClick={() => setQuickSwitcherOpen(false)}><X size={16} /></button>
-          </div>
-          <div className="quick-switcher-results" role="listbox" aria-label="Matching rooms">
-            {quickSwitcherRooms.map((room, index) => <button key={room.id} type="button" role="option" aria-selected={quickSwitcherIndex === index} className={`quick-switcher-option ${quickSwitcherIndex === index ? 'is-active' : ''}`} onMouseEnter={() => setQuickSwitcherIndex(index)} onClick={() => { showRoom(room.id); setQuickSwitcherOpen(false) }}>
-              <Avatar uri={room.avatar} label={room.name || room.id} className="quick-switcher-avatar" />
-              <span className="quick-switcher-copy"><strong>{room.name || room.id}</strong><small>{room.id}</small></span>
-              {room.unread > 0 && <span className="quick-switcher-unread">{room.unread}</span>}
-            </button>)}
-            {quickSwitcherRooms.length === 0 && <div className="quick-switcher-empty">No matching rooms</div>}
-          </div>
-        </DialogSurface>
-      </div>}
-      {profilePhotoPreview && createPortal(
-        <div className="profile-photo-viewer-scrim" role="presentation" onClick={() => setProfilePhotoPreview(null)}>
-          <DialogSurface
-            className="profile-photo-viewer"
-            label={`Profile photo for ${profilePhotoPreview.label}`}
-            onClose={() => setProfilePhotoPreview(null)}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button className="icon-button profile-photo-viewer-close" type="button" aria-label="Close profile photo" title="Close profile photo" onClick={() => setProfilePhotoPreview(null)}>
-              <X size={16} />
-            </button>
-            <img className="profile-photo-viewer-image" src={profilePhotoPreview.source} alt={profilePhotoPreview.label} />
-          </DialogSurface>
-        </div>,
-        document.body,
+            }}
+            onPreferenceChange={(key, value) => setPreference(key, value)}
+            onSnippetsChange={updateSnippets}
+          />
+        </Suspense>
       )}
+      {scheduledJobsOpen && <Suspense fallback={null}>
+        <ScheduledJobsDialog
+          rooms={rooms}
+          jobs={scheduledJobs}
+          loading={scheduledLoading}
+          error={scheduledJobsError}
+          times={scheduledTimes}
+          setTimes={setScheduledTimes}
+          busyID={scheduledBusyID}
+          onManage={(id, action) => void manageScheduledJob(id, action)}
+          onClose={() => setScheduledJobsOpen(false)}
+        />
+      </Suspense>}
+      {scheduledDraft && <Suspense fallback={null}>
+        <ScheduledDraftDialog
+          draft={scheduledDraft}
+          rooms={rooms}
+          dueAt={scheduledDueAt}
+          setDueAt={setScheduledDueAt}
+          setDraft={setScheduledDraft}
+          saving={scheduledSaving}
+          error={scheduledDialogError}
+          suggestions={scheduleTimeSuggestions}
+          onSubmit={submitScheduledDraft}
+          onClose={() => setScheduledDraft(null)}
+        />
+      </Suspense>}
+      {roomInfoOpen && selectedRoom && <RoomInfoDialog
+        room={selectedRoom}
+        agents={roomAgents}
+        agentEditor={agentEditor}
+        agentSettingsError={agentSettingsError}
+        members={roomMembers}
+        membersLoading={roomMembersLoading}
+        membersError={roomMembersError}
+        onClose={() => setRoomInfoOpen(false)}
+        onAgentEditorChange={setAgentEditor}
+        onDefaultAgentChange={(agentID) => void persistRoomAgents({ ...roomAgents, defaultAgentId: agentID })}
+        onEditAgent={(agent) => { setAgentSettingsError(''); setAgentEditor(agent) }}
+        onDeleteAgent={(agent) => void deleteAgentProfile(agent)}
+        onSaveAgent={(event) => void saveAgentProfile(event)}
+        onCreateAgent={createAgentProfile}
+        onLeave={() => { setLeaveRoomError(''); setLeaveConfirmOpen(true) }}
+      />}
+      {mediaGalleryOpen && selectedRoom && <Suspense fallback={null}>
+        <MediaGalleryDialog
+          roomID={selectedRoom.id}
+          roomName={selectedRoom.name || selectedRoom.id}
+          items={mediaGalleryItems}
+          filter={mediaGalleryFilter}
+          loading={mediaGalleryLoading}
+          scanned={mediaGalleryScanned}
+          error={mediaGalleryError}
+          preferences={preferences}
+          onFilterChange={setMediaGalleryFilter}
+          onClose={closeMediaGallery}
+          onRetry={() => void openMediaGallery()}
+        />
+      </Suspense>}
+      {mediaApproval && <Suspense fallback={null}>
+        <MediaApprovalDialog request={mediaApproval} onResolve={resolveMediaApproval} />
+      </Suspense>}
+      {generatedImageReview && <Suspense fallback={null}>
+        <GeneratedImageDialog review={generatedImageReview} onDiscard={() => setGeneratedImageReview(null)} onApprove={() => void approveGeneratedImage()} />
+      </Suspense>}
+      {leaveConfirmOpen && selectedRoom && <Suspense fallback={null}>
+        <LeaveRoomDialog roomName={selectedRoom.name || selectedRoom.id} error={leaveRoomError} leaving={leavingRoom} onCancel={() => setLeaveConfirmOpen(false)} onConfirm={() => void leaveSelectedRoom()} />
+      </Suspense>}
+      {redactTarget && <Suspense fallback={null}>
+        <RedactDialog busy={busy} onCancel={() => setRedactTarget(null)} onConfirm={() => void redactMessage()} />
+      </Suspense>}
+      {quickSwitcherOpen && <QuickSwitcher
+        results={quickSwitcherRooms}
+        query={quickSwitcherQuery}
+        activeIndex={quickSwitcherIndex}
+        inputRef={quickSwitcherInputRef}
+        onQueryChange={setQuickSwitcherQuery}
+        onActiveIndexChange={setQuickSwitcherIndex}
+        onSelect={(roomID) => { showRoom(roomID); setQuickSwitcherOpen(false) }}
+        onClose={() => setQuickSwitcherOpen(false)}
+      />}
+      {profilePhotoPreview && <ProfilePhotoViewer source={profilePhotoPreview.source} label={profilePhotoPreview.label} onClose={() => setProfilePhotoPreview(null)} />}
       {isDraggingFiles && <div className="drop-overlay" role="status"><div><Upload size={21} /><span>{selectedRoom ? `Add files to ${selectedRoom.name || selectedRoom.id}` : 'Select a room to upload files'}</span></div></div>}
     </main>
   )
 }
 
-function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, canUseDraft, onUseDraft }: {
-  roomID: string
-  message: Message
-  onAudioEnded?: () => void
-  autoPlayNext?: boolean
-  aiEnabled: boolean
-  canUseDraft: boolean
-  onUseDraft: (text: string) => void
-}) {
-  const [source, setSource] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [savedPath, setSavedPath] = useState('')
-  const [transcription, setTranscription] = useState('')
-  const [transcriptionLoading, setTranscriptionLoading] = useState(false)
-  const [transcriptionError, setTranscriptionError] = useState('')
-  const [transcriptCopyFeedback, setTranscriptCopyFeedback] = useState('')
-  const [viewerOpen, setViewerOpen] = useState(false)
-  const [zoom, setZoom] = useState(1)
-  const [copyFeedback, setCopyFeedback] = useState('')
-  const [nearViewport, setNearViewport] = useState(false)
-  const attachmentRef = useRef<HTMLDivElement>(null)
-  const sourceRef = useRef('')
-  const mountedRef = useRef(false)
-  const nearViewportRef = useRef(false)
-  const loadingRef = useRef(false)
-  const mimeType = message.mediaMime || 'application/octet-stream'
-  const isImage = mimeType.startsWith('image/')
-  const isAudio = mimeType.startsWith('audio/') || message.mediaType === 'm.audio'
-  const isVideo = !isAudio && mimeType.startsWith('video/')
-  const filename = message.body.trim() || 'matrix-attachment'
-  const fileType = mimeType === 'application/pdf' ? 'PDF document' : mimeType.startsWith('text/') ? 'Text document' : 'File attachment'
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-      sourceRef.current = ''
-    }
-  }, [])
-
-  useEffect(() => {
-    sourceRef.current = ''
-    setSource('')
-    setError('')
-  }, [roomID, message.id])
-
-  useEffect(() => {
-    if (!viewerOpen) return
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') setViewerOpen(false)
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [viewerOpen])
-
-  useEffect(() => {
-    if (!isImage) return
-    const attachment = attachmentRef.current
-    if (!attachment) return
-    return observeMediaVisibility(attachment, (isNearViewport) => {
-      nearViewportRef.current = isNearViewport
-      setNearViewport(isNearViewport)
-    })
-  }, [isImage, roomID, message.id])
-
-  useEffect(() => {
-    if (isImage && nearViewport) void prepareMedia()
-  }, [isImage, nearViewport, roomID, message.id])
-
-  useEffect(() => {
-    if (!isImage || nearViewport || !sourceRef.current) return
-    sourceRef.current = ''
-    setSource('')
-  }, [isImage, nearViewport, source])
-
-  async function prepareMedia() {
-    if (source) return source
-    if (loadingRef.current) return ''
-    loadingRef.current = true
-    setLoading(true)
-    setError('')
-    try {
-      const mediaURL = matrixMediaURL(roomID, message.id)
-      if (!mediaURL) throw new Error('This media event has no server ID.')
-      if (!mountedRef.current || (isImage && !nearViewportRef.current)) return ''
-      sourceRef.current = mediaURL
-      setSource(mediaURL)
-      return mediaURL
-    } catch (mediaError) {
-      setError(describeError(mediaError))
-      return ''
-    } finally {
-      loadingRef.current = false
-      setLoading(false)
-    }
-  }
-
-  async function openImage() {
-    if (await prepareMedia()) {
-      setZoom(1)
-      setCopyFeedback('')
-      setViewerOpen(true)
-    }
-  }
-
-  async function downloadFile() {
-    if (loadingRef.current) return
-    loadingRef.current = true
-    setLoading(true)
-    setError('')
-    setSavedPath('')
-    try {
-      const path = await AppService.SaveMedia(message.mediaUri, filename)
-      if (path) setSavedPath(path)
-    } catch (downloadError) {
-      setError(describeError(downloadError))
-    } finally {
-      loadingRef.current = false
-      setLoading(false)
-    }
-  }
-
-  async function revealSavedFile() {
-    if (!savedPath) return
-    try {
-      await AppService.RevealFile(savedPath)
-    } catch (revealError) {
-      setError(describeError(revealError))
-    }
-  }
-
-  function renderSavedFile() {
-    return (
-      <>
-        Saved to{' '}
-        <button className="media-reveal" type="button" title="Show in file manager" onClick={() => void revealSavedFile()}>{savedPath}</button>
-      </>
-    )
-  }
-
-  async function transcribeAudio() {
-    if (!aiEnabled || transcriptionLoading) return
-    setTranscriptionLoading(true)
-    setTranscriptionError('')
-    setTranscription('')
-    setTranscriptCopyFeedback('')
-    try {
-      const result = (await AppService.AITranscribeMedia(message.mediaUri, filename, mimeType)).trim()
-      if (!result) throw new Error('The AI endpoint returned an empty transcription.')
-      if (mountedRef.current) setTranscription(result)
-    } catch (transcriptionError) {
-      if (mountedRef.current) setTranscriptionError(describeError(transcriptionError))
-    } finally {
-      if (mountedRef.current) setTranscriptionLoading(false)
-    }
-  }
-
-  async function copyTranscript() {
-    setTranscriptCopyFeedback('')
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is not available.')
-      await navigator.clipboard.writeText(transcription)
-      if (mountedRef.current) setTranscriptCopyFeedback('Transcript copied')
-    } catch (copyError) {
-      if (mountedRef.current) setTranscriptCopyFeedback(describeError(copyError))
-    }
-  }
-
-  async function copyImage() {
-    setCopyFeedback('')
-    try {
-      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
-        throw new Error('Image copying is not supported by this webview.')
-      }
-      const image = new Image()
-      image.src = source
-      await image.decode()
-      const canvas = document.createElement('canvas')
-      canvas.width = image.naturalWidth
-      canvas.height = image.naturalHeight
-      const context = canvas.getContext('2d')
-      if (!context) throw new Error('Could not prepare the image for copying.')
-      context.drawImage(image, 0, 0)
-      const png = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Could not encode the image.')), 'image/png')
-      })
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
-      setCopyFeedback('Image copied')
-    } catch (copyError) {
-      setCopyFeedback(describeError(copyError))
-    }
-  }
-
+function App() {
   return (
-    <div ref={attachmentRef} className={`message-attachment ${isAudio ? 'audio-attachment' : ''} ${isImage ? 'is-image' : ''}`}>
-      {isAudio && <VoiceMessagePlayer key={message.id} label={filename} waveformKey={message.mediaUri} durationMs={message.mediaDurationMs} sizeBytes={message.mediaSize} source={source} autoPlay={autoPlayNext} onRequestSource={prepareMedia} onEnded={onAudioEnded} />}
-      {isAudio && <div className="audio-attachment-footer">
-        <span className="audio-filename" title={filename}>{filename}</span>
-        <button className="icon-button audio-download" type="button" title={`Download ${filename}`} aria-label={`Download ${filename}`} disabled={loading} onClick={() => void downloadFile()}><Download size={15} /></button>
-      </div>}
-      {isAudio && <div className="audio-transcription-controls">
-        <button className="audio-transcribe-button" type="button" title={aiEnabled ? 'Upload this audio to the configured endpoint for transcription.' : 'Set an AI endpoint in Settings > AI.'} disabled={!aiEnabled || transcriptionLoading} onClick={() => void transcribeAudio()}>
-          {transcriptionLoading ? <span className="loading-mark" /> : <Sparkles size={14} />}
-          {transcriptionLoading ? 'Transcribing…' : 'Transcribe with AI'}
-        </button>
-        <small>{aiEnabled ? 'Audio is sent to the configured endpoint, which may be remote.' : 'Set an AI endpoint in Settings > AI to transcribe audio.'}</small>
-      </div>}
-      {transcriptionLoading && <p className="audio-transcription-status" role="status">Transcribing audio…</p>}
-      {transcriptionError && <span className="media-error" role="alert">{transcriptionError}</span>}
-      {transcription && <section className="audio-transcript" aria-label="Audio transcript">
-        <header className="audio-transcript-header">
-          <strong>Transcript</strong>
-          <div className="audio-transcript-actions">
-            <button className="icon-button audio-transcript-copy" type="button" title="Copy transcript" aria-label="Copy transcript" onClick={() => void copyTranscript()}><Copy size={14} /></button>
-            <button className="audio-transcript-draft" type="button" title={canUseDraft ? 'Put this transcript in the message composer' : 'Finish editing the current message first'} disabled={!canUseDraft} onClick={() => onUseDraft(transcription)}><ArrowUpRight size={13} />Use as draft</button>
-          </div>
-        </header>
-        <p>{transcription}</p>
-        {transcriptCopyFeedback && <span className="audio-transcript-feedback" role="status">{transcriptCopyFeedback}</span>}
-      </section>}
-      {!source && (isImage || isVideo) && <button className="media-load" type="button" title={loading ? 'Loading media' : `Load ${filename}`} disabled={loading} onClick={() => void prepareMedia()}>
-        <Download size={14} />{loading ? 'Loading media…' : isImage ? `Preview ${filename}` : 'Load video'}
-        {message.mediaSize > 0 && <span>{formatBytes(message.mediaSize)}</span>}
-      </button>}
-      {error && <span className="media-error" role="status">{error}</span>}
-      {source && isImage && <>
-        <button className="media-preview-button" type="button" aria-label={`Open image ${filename}`} title={`Open image ${filename}`} onClick={() => void openImage()}>
-          <img className="media-preview" src={source} alt={filename} loading="lazy" onError={() => setError('This image could not be loaded.')} />
-        </button>
-        <div className="media-toolbar"><button className="media-download" type="button" aria-label={`Download ${filename}`} onClick={() => void downloadFile()}><Download size={13} />Download</button>{savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}</div>
-      </>}
-      {source && isVideo && <>
-        <video className="media-player" controls preload="metadata" src={source} aria-label={filename} onError={() => setError('This video could not be played.')} />
-        <button className="media-download" type="button" onClick={() => void downloadFile()}><Download size={13} />Download {filename}</button>
-        {savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}
-      </>}
-      {!isImage && !isAudio && !isVideo && <div className="file-card">
-        <span className="file-card-icon"><FileText size={17} /></span>
-        <span className="file-card-copy"><strong title={filename}>{filename}</strong><small>{fileType}{message.mediaSize > 0 && ` · ${formatBytes(message.mediaSize)}`}</small>{savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}</span>
-        <button className="icon-button" type="button" title={loading ? `Saving ${filename}` : `Download ${filename}`} aria-label={loading ? `Saving ${filename}` : `Download ${filename}`} disabled={loading} onClick={() => void downloadFile()}>{loading ? <span className="loading-mark" /> : <Download size={15} />}</button>
-      </div>}
-      {viewerOpen && source && createPortal(
-        <div className="media-viewer-scrim" role="presentation" onClick={() => setViewerOpen(false)}>
-          <DialogSurface className="media-viewer" label={`Preview ${filename}`} onClose={() => setViewerOpen(false)} onClick={(event) => event.stopPropagation()}>
-            <header className="media-viewer-toolbar">
-              <strong>{filename}</strong>
-              <div>
-                <button className="icon-button" type="button" title="Zoom out" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => setZoom((current) => Math.max(1, current / 1.25))}><ZoomOut size={15} /></button>
-                <button className="icon-button" type="button" title="Zoom in" aria-label="Zoom in" disabled={zoom >= 4} onClick={() => setZoom((current) => Math.min(4, current * 1.25))}><ZoomIn size={15} /></button>
-                <button className="icon-button" type="button" title="Copy image" aria-label="Copy image" onClick={() => void copyImage()}><Copy size={14} /></button>
-                <button className="media-download" type="button" onClick={() => void downloadFile()}><Download size={14} />Download</button>
-                <button className="icon-button" type="button" aria-label="Close image preview" title="Close image preview" onClick={() => setViewerOpen(false)}><X size={15} /></button>
-              </div>
-            </header>
-            {copyFeedback && <span className="media-viewer-feedback" role="status">{copyFeedback}</span>}
-            {savedPath && <span className="media-viewer-feedback" role="status">{renderSavedFile()}</span>}
-            <div className="media-viewer-image-wrap">
-              <img className="media-viewer-image" src={source} alt={filename} style={{ maxWidth: zoom === 1 ? '100%' : 'none', maxHeight: zoom === 1 ? 'calc(100vh - 100px)' : 'none', transform: `scale(${zoom})` }} />
-            </div>
-          </DialogSurface>
-        </div>,
-        document.body,
-      )}
-    </div>
-  )
-}
-
-const LOCAL_AI_ROW_ICONS: Record<LocalAIChatIcon, typeof MessageSquare> = { agent: Bot, chat: MessageSquare, summary: FileText }
-
-const RoomButton = memo(function RoomButton({ room, index, active, needsReply, multiSelected, lastMessageByMe, use24Hour, showNetwork, showUnreadCounts, aiIcon, actionsRef }: { room: Room; index: number; active: boolean; needsReply: boolean; multiSelected: boolean; lastMessageByMe: boolean; use24Hour: boolean; showNetwork: boolean; showUnreadCounts: boolean; aiIcon?: LocalAIChatIcon; actionsRef: { current: RoomButtonActions } }) {
-  const RowIcon = LOCAL_AI_ROW_ICONS[aiIcon ?? 'chat']
-  const hasUnread = room.unread > 0 || room.markedUnread
-  // Rooms without a message time show their sorting time, which the sidebar is already ordered by.
-  const activityAt = roomActivityAt(room)
-  return (
-    <button data-room-index={index} className={`room-button ${active ? 'is-active' : ''} ${multiSelected ? 'is-multiselected' : ''} ${room.muted ? 'is-muted' : ''} ${hasUnread ? 'has-unread' : ''}`} onClick={(event) => actionsRef.current.onSelect(room, index, event)} onKeyDown={(event) => actionsRef.current.onKeyDown(room, index, event)} onContextMenu={(event) => actionsRef.current.onContextMenu(room, event)} aria-current={active ? 'page' : undefined} title={room.name || room.id}>
-      {isLocalAIRoomID(room.id)
-        ? <span className="room-avatar room-avatar-ai" aria-hidden="true"><RowIcon size={16} /></span>
-        : <Avatar uri={room.avatar} label={room.name || room.id} className="room-avatar" style={avatarStyle(room.name || room.id)} deferLoad />}
-      <span className="room-copy">
-        <span className="room-name">{room.favorite && <Star size={10} fill="currentColor" aria-label="Favorite" />}<span className="room-name-text">{room.name || room.id}</span>{room.muted && <span className="room-muted-mark" title="Muted">· muted</span>}{showNetwork && room.bridge && <span className="room-network" style={{ '--network-hue': networkHue(room.bridge) } as React.CSSProperties}>{room.bridge}</span>}</span>
-        <span className="room-preview">
-          {lastMessageByMe && room.preview && <span className="room-preview-sent" role="img" aria-label="Sent by you" title="Sent by you"><ArrowUpRight size={11} /></span>}
-          <span className={`room-preview-text ${room.preview && room.lastEventSender && !lastMessageByMe ? 'is-received' : ''}`}>{room.preview || room.topic}</span>
-        </span>
-      </span>
-      <span className="room-meta">
-        {room.unread > 0 ? <span className="unread-count">{room.unread > 99 ? '99+' : room.unread}</span> : room.markedUnread && <span className="unread-dot" aria-label="Unread" />}
-        {needsReply && !(showUnreadCounts && room.unread > 0) && <span className="needs-reply-dot" aria-label="Needs reply" title="Needs reply" />}
-        {activityAt > 0 && <time>{formatTimeOrDate(activityAt, use24Hour)}</time>}
-      </span>
-    </button>
-  )
-})
-
-function reportRoomListVisibleRange(startIndex: number, endIndex: number) {
-  void Promise.resolve(AppService.UpdateVisibleRange('main', startIndex, endIndex)).catch(() => undefined)
-}
-
-function VirtualRoomList({ listRef, rooms, selectedRoomIndex, rowHeight, listCount, rangeKey, onVisibleRange, renderRoom, emptyContent }: {
-  listRef: { current: HTMLElement | null }
-  rooms: Room[]
-  selectedRoomIndex: number
-  rowHeight: number
-  listCount: number
-  rangeKey: string
-  onVisibleRange: (startIndex: number, endIndex: number) => void
-  renderRoom: (room: Room, index: number) => ReactNode
-  emptyContent: ReactNode
-}) {
-  const [scrollTop, setScrollTop] = useState(0)
-  const [viewportHeight, setViewportHeight] = useState(600)
-  const pendingScrollTop = useRef(0)
-  const scrollFrame = useRef(0)
-  const virtualized = rooms.length > ROOM_LIST_VIRTUALIZATION_THRESHOLD
-  const overscan = 8
-  const first = Math.min(rooms.length, Math.max(0, Math.floor(scrollTop / rowHeight) - overscan))
-  const visibleEnd = Math.min(rooms.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan)
-  const knownListCount = Math.max(rooms.length, listCount)
-  const requestedEnd = visibleEnd >= rooms.length && rooms.length < knownListCount
-    ? Math.min(knownListCount, rooms.length + ROOM_LIST_RANGE_PREFETCH)
-    : visibleEnd
-  const rangeEnd = Math.min(requestedEnd, first + ROOM_LIST_MAX_SYNC_RANGE)
-
-  useEffect(() => {
-    const list = listRef.current
-    if (!list) return
-    const updateSize = () => {
-      setViewportHeight(list.clientHeight || 600)
-      pendingScrollTop.current = list.scrollTop
-      setScrollTop(list.scrollTop)
-    }
-    updateSize()
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateSize)
-      return () => window.removeEventListener('resize', updateSize)
-    }
-    const observer = new ResizeObserver(updateSize)
-    observer.observe(list)
-    return () => observer.disconnect()
-  }, [listRef])
-
-  useEffect(() => () => {
-    if (scrollFrame.current) window.cancelAnimationFrame(scrollFrame.current)
-  }, [])
-
-  useEffect(() => {
-    if (rangeEnd <= first) return
-    onVisibleRange(first, rangeEnd)
-  }, [first, onVisibleRange, rangeEnd, rangeKey])
-
-  useEffect(() => {
-    const list = listRef.current
-    if (!virtualized || !list || selectedRoomIndex < 0) return
-    const top = selectedRoomIndex * rowHeight
-    if (top < list.scrollTop || top + rowHeight > list.scrollTop + viewportHeight) {
-      list.scrollTop = top
-      pendingScrollTop.current = top
-      setScrollTop(top)
-    }
-  }, [listRef, rowHeight, selectedRoomIndex, virtualized, viewportHeight])
-
-  function handleScroll(event: React.UIEvent<HTMLElement>) {
-    pendingScrollTop.current = event.currentTarget.scrollTop
-    if (scrollFrame.current) return
-    scrollFrame.current = window.requestAnimationFrame(() => {
-      scrollFrame.current = 0
-      setScrollTop(pendingScrollTop.current)
-    })
-  }
-
-  let content: ReactNode
-  if (rooms.length === 0) {
-    content = emptyContent
-  } else if (!virtualized) {
-    content = rooms.map((room, index) => renderRoom(room, index))
-  } else {
-    content = (
-      <div className="room-list-virtual-content" style={{ height: rooms.length * rowHeight }}>
-        {rooms.slice(first, visibleEnd).map((room, offset) => {
-          const index = first + offset
-          return <div className="room-list-virtual-row" key={`${room.accountId}:${room.id}`} style={{ top: index * rowHeight }}>{renderRoom(room, index)}</div>
-        })}
-      </div>
-    )
-  }
-
-  return (
-    <nav
-      ref={(element) => { listRef.current = element }}
-      className={`room-list ${virtualized ? 'is-virtualized' : ''}`}
-      aria-label="Rooms"
-      onScroll={handleScroll}
-      style={virtualized ? { '--room-row-height': `${rowHeight}px` } as React.CSSProperties : undefined}
-    >
-      {content}
-    </nav>
-  )
-}
-
-const storageMediaOptions: Array<{ value: string; label: string }> = [
-  { value: '', label: 'All media' },
-  { value: 'image', label: 'Images' },
-  { value: 'video', label: 'Videos' },
-  { value: 'audio', label: 'Audio' },
-  { value: 'file', label: 'Files' },
-  { value: 'other', label: 'Other' },
-]
-
-const storageAgeOptions: Array<{ value: string; label: string }> = [
-  { value: '', label: 'Any age' },
-  { value: '30', label: 'Older than 30 days' },
-  { value: '90', label: 'Older than 90 days' },
-  { value: '365', label: 'Older than 1 year' },
-]
-
-const chatNetworks: Array<{ code: string; name: string }> = [
-  { code: 'WA', name: 'WhatsApp' },
-  { code: 'TG', name: 'Telegram' },
-  { code: 'IG', name: 'Instagram' },
-  { code: 'SG', name: 'Signal' },
-  { code: 'iM', name: 'iMessage' },
-  { code: 'DC', name: 'Discord' },
-  { code: 'SL', name: 'Slack' },
-  { code: 'SMS', name: 'SMS' },
-  { code: 'BR', name: 'Other bridged chats' },
-]
-
-function ChatStorageSettings() {
-  const [rows, setRows] = useState<RoomStorage[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [chatID, setChatID] = useState('')
-  const [age, setAge] = useState('')
-  const [mediaType, setMediaType] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [cleanupResult, setCleanupResult] = useState<MediaCleanupResult | null>(null)
-
-  useEffect(() => {
-    let active = true
-    AppService.RoomStorageUsage()
-      .then((usage) => { if (active) setRows(usage ?? []) })
-      .catch((loadError: unknown) => { if (active) setError(describeError(loadError)) })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [])
-
-  async function reloadRows() {
-    setLoading(true)
-    try {
-      setRows((await AppService.RoomStorageUsage()) ?? [])
-    } catch (loadError) {
-      setError(describeError(loadError))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function clearMedia(target: { roomID: string; name: string }) {
-    const typeLabel = storageMediaOptions.find((option) => option.value === mediaType)?.label.toLowerCase() ?? 'all media'
-    const ageLabel = storageAgeOptions.find((option) => option.value === age)?.label.toLowerCase() ?? 'any age'
-    const scope = target.roomID ? target.name : 'all chats'
-    if (!window.confirm(`Remove cached media (${typeLabel}, ${scope}, ${ageLabel})? Messages stay. Media downloads again when opened.`)) return
-    setBusy(true)
-    setError('')
-    setCleanupResult(null)
-    try {
-      setCleanupResult(await AppService.ClearCachedMedia({ roomId: target.roomID, olderThanDays: Number(age) || 0, mediaType }))
-      await reloadRows()
-    } catch (cleanupError) {
-      setError(describeError(cleanupError))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="chat-storage">
-      <h4>Storage by chat</h4>
-      <p className="settings-note">Text sizes are approximate. Cleanup removes cached media files only; messages are not removed.</p>
-      {loading && <p className="settings-note">Reading chat storage…</p>}
-      {error && <p className="settings-error" role="alert">{error}</p>}
-      {!loading && !error && rows.length === 0 && <p className="settings-note">No chats have stored messages on this device yet.</p>}
-      {rows.length > 0 && (
-        <table className="storage-table" aria-label="Storage used by each chat">
-          <thead>
-            <tr><th scope="col">Chat</th><th scope="col">Messages</th><th scope="col">Text</th><th scope="col">Media</th><th scope="col">Files</th><th scope="col">Cleanup</th></tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const name = row.name || row.roomId
-              return (
-                <tr key={row.roomId}>
-                  <th scope="row">{name}</th>
-                  <td>{row.messages.toLocaleString()}</td>
-                  <td>{formatBytes(row.textBytes)}</td>
-                  <td>{formatBytes(row.mediaBytes)}</td>
-                  <td>{row.mediaFiles.toLocaleString()}</td>
-                  <td><button className="settings-command" type="button" disabled={busy || row.mediaFiles === 0} aria-label={`Clear media in ${name}`} onClick={() => void clearMedia({ roomID: row.roomId, name })}>Clear media</button></td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      )}
-      <form className="storage-cleanup" aria-label="Clear cached media" onSubmit={(event) => {
-        event.preventDefault()
-        void clearMedia({ roomID: chatID, name: rows.find((row) => row.roomId === chatID)?.name || chatID })
-      }}>
-        <label><span>Chat</span><select aria-label="Cleanup chat" value={chatID} onChange={(event) => setChatID(event.target.value)}>
-          <option value="">All chats</option>
-          {rows.map((row) => <option key={row.roomId} value={row.roomId}>{row.name || row.roomId}</option>)}
-        </select></label>
-        <label><span>Age</span><select aria-label="Cleanup age" value={age} onChange={(event) => setAge(event.target.value)}>
-          {storageAgeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select></label>
-        <label><span>Media type</span><select aria-label="Cleanup media type" value={mediaType} onChange={(event) => setMediaType(event.target.value)}>
-          {storageMediaOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select></label>
-        <button className="settings-command is-danger" type="submit" disabled={busy || loading}>{busy ? 'Clearing…' : 'Clear matching media'}</button>
-      </form>
-      {cleanupResult && <p className="settings-note" role="status">{`Removed ${cleanupResult.files.toLocaleString()} cached files (${formatBytes(cleanupResult.bytes)}).`}</p>}
-    </div>
-  )
-}
-
-function AboutPinger() {
-  const [version, setVersion] = useState('')
-  const [buildInfo, setBuildInfo] = useState<AppBuildInfo | null>(null)
-  const [update, setUpdate] = useState<UpdateStatus | null>(null)
-  const [checking, setChecking] = useState(false)
-  const [updateError, setUpdateError] = useState('')
-
-  useEffect(() => {
-    let active = true
-    AppService.AppVersion()
-      .then((value) => { if (active) setVersion(value) })
-      .catch(() => { if (active) setVersion('unknown') })
-    AppService.AppBuildInfo()
-      .then((value) => { if (active) setBuildInfo(value) })
-      .catch(() => { if (active) setBuildInfo({ commit: 'unknown', buildDate: 'unknown' }) })
-    return () => { active = false }
-  }, [])
-
-  async function checkForUpdates() {
-    setChecking(true)
-    setUpdateError('')
-    try {
-      setUpdate(await AppService.CheckForUpdates())
-    } catch (checkError) {
-      setUpdate(null)
-      setUpdateError(describeError(checkError))
-    } finally {
-      setChecking(false)
-    }
-  }
-
-  const published = update?.publishedAt ? Date.parse(update.publishedAt) : NaN
-  const commit = buildInfo?.commit
-    ? buildInfo.commit === 'unknown' ? 'unknown' : buildInfo.commit.slice(0, 7)
-    : 'Loading…'
-  return (
-    <>
-      <div className="account-details"><span>Application</span><strong>Pinger</strong><span>Version</span><strong>{version || 'Loading…'}</strong><span>Commit</span><strong>{commit}</strong><span>Build date</span><strong>{buildInfo?.buildDate || 'Loading…'}</strong><span>Matrix engine</span><strong>gomuks</strong><span>License</span><strong>AGPL-3.0-or-later</strong></div>
-      <button className="settings-command" type="button" disabled={checking} onClick={() => void checkForUpdates()}>{checking ? 'Checking…' : 'Check for updates'}</button>
-      {updateError && <p className="settings-error" role="alert">{updateError}</p>}
-      {update && (
-        <div className="update-status" role="status">
-          <p>{update.message}</p>
-          {update.latestVersion && <p className="settings-note">{`Latest release ${update.latestVersion}${Number.isNaN(published) ? '' : ` · published ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(published))}`}`}</p>}
-          {update.updateAvailable && <p className="settings-note">Pinger does not install updates itself. Download the new version from the release page.</p>}
-          {update.releaseNotes && <details><summary>Release notes</summary><pre className="release-notes">{update.releaseNotes}</pre></details>}
-          <a className="settings-link" href={update.releaseUrl} target="_blank" rel="noreferrer">View release</a>
-        </div>
-      )}
-      <a className="settings-link" href="https://github.com/cataWalter/pinger" target="_blank" rel="noreferrer">Project repository</a>
-      <a className="settings-link" href="https://github.com/cataWalter/pinger/issues" target="_blank" rel="noreferrer">Send feedback or report an issue</a>
-      <a className="settings-link" href="https://github.com/cataWalter/pinger/blob/main/LICENSE" target="_blank" rel="noreferrer">License (AGPL-3.0-or-later)</a>
-    </>
-  )
-}
-
-function LanguageTutorAnalysisDetails({ analysis, originalText }: { analysis: TutorAnalysis; originalText: string }) {
-  const detectedCode = analysis.detected_language
-  const learningCode = analysis.target_language
-  const explanationCode = analysis.explanation_language
-  const phrases = analysis.phrases ?? []
-  return <>
-    <section className="language-tutor-section">
-      <span className="eyebrow">ORIGINAL · {languageName(detectedCode).toUpperCase()}</span>
-      <p lang={detectedCode}>{originalText}</p>
-    </section>
-    {analysis.corrected_text && <section className="language-tutor-section">
-      <span className="eyebrow">CORRECTED · {languageName(learningCode).toUpperCase()}</span>
-      <p lang={learningCode}>{analysis.corrected_text}</p>
-      {analysis.has_grammar_errors && analysis.error_explanation && <small className="language-tutor-error-note">{analysis.error_explanation}</small>}
-    </section>}
-    <section className="language-tutor-section">
-      <span className="eyebrow">TRANSLATION · {languageName(explanationCode).toUpperCase()}</span>
-      <p lang={explanationCode}>{analysis.translation}</p>
-    </section>
-    {phrases.length > 0 && <section className="language-tutor-section">
-      <span className="eyebrow">WORD-BY-WORD</span>
-      {phrases.map((phrase, phraseIndex) => <div className="language-tutor-phrase" key={`${phrase.text}-${phraseIndex}`}>
-        <div className="language-tutor-phrase-head">
-          <strong lang={learningCode}>{phrase.text}</strong>
-          <span>{phrase.meaning}</span>
-        </div>
-        <ol className="language-tutor-morphemes">
-          {(phrase.words ?? []).map((item, index) => <li key={`${item.word}-${index}`}>
-            <strong lang={learningCode}>{item.word}</strong>
-            <span>{item.breakdown}</span>
-            <small>{item.meaning}</small>
-          </li>)}
-        </ol>
-      </div>)}
-    </section>}
-    {analysis.grammar_rule && <section className="language-tutor-section language-tutor-rule">
-      <span className="eyebrow">GRAMMAR RULE</span>
-      <p>{analysis.grammar_rule}</p>
-    </section>}
-  </>
-}
-
-function LocalAISettings({ endpoint, model, transcriptionModel, thinkingLevel, onSave }: {
-  endpoint: string
-  model: string
-  transcriptionModel: string
-  thinkingLevel: string
-  onSave: (key: string, value: string) => Promise<boolean>
-}) {
-  const [endpointDraft, setEndpointDraft] = useState(endpoint)
-  const [modelDraft, setModelDraft] = useState(model)
-  const [transcriptionModelDraft, setTranscriptionModelDraft] = useState(transcriptionModel)
-  const [thinkingLevelDraft, setThinkingLevelDraft] = useState(thinkingLevel)
-  const [status, setStatus] = useState('')
-  const [busy, setBusy] = useState(false)
-  const endpointUnsaved = endpointDraft.trim() !== endpoint
-
-  async function saveSettings(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setBusy(true)
-    setStatus('')
-    let saved = await onSave('ai.endpoint', endpointDraft.trim())
-    if (saved) saved = await onSave('ai.model', modelDraft.trim())
-    if (saved) saved = await onSave('ai.thinking_level', thinkingLevelDraft)
-    if (saved) saved = await onSave('ai.transcription_model', transcriptionModelDraft.trim())
-    setStatus(saved ? 'AI settings saved.' : 'Not saved. The endpoint must be an http or https URL.')
-    setBusy(false)
-  }
-
-  async function testEndpoint() {
-    setBusy(true)
-    setStatus('Checking the endpoint…')
-    try {
-      await AppService.TestAIEndpoint()
-      setStatus('Model is loaded and ready.')
-    } catch (testError) {
-      setStatus(describeError(testError))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <form className="ai-settings-form" onSubmit={(event) => void saveSettings(event)}>
-      <h4>OpenAI-compatible AI</h4>
-      <p className="settings-note">Configure an HTTP or HTTPS endpoint, including a llama-server you run yourself. Audio transcription requires support for <code>/v1/audio/transcriptions</code>; audio is uploaded only when you request a transcript. Requests and uploads go to this endpoint, which may be remote. Results are suggestions and no Matrix message is sent automatically.</p>
-      <label><span>Endpoint</span><input type="url" value={endpointDraft} placeholder="http://localhost:8080" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setEndpointDraft(event.target.value)} /></label>
-      <label><span>Model name (optional)</span><input type="text" value={modelDraft} placeholder="Uses the loaded model" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setModelDraft(event.target.value)} /></label>
-      <label><span>Thinking level</span><select aria-label="Model thinking level" value={thinkingLevelDraft} onChange={(event) => setThinkingLevelDraft(event.target.value)}>
-        <option value="none">None</option>
-        <option value="low">Low</option>
-        <option value="medium">Medium</option>
-        <option value="high">High</option>
-      </select></label>
-      <p className="settings-note">Gemma 4 12B supports thinking on or off; Low, Medium, and High all enable its model-default thinking. Other chat templates may honor the selected level. Thinking uses the response token budget.</p>
-      <label><span>Transcription model (optional)</span><input type="text" value={transcriptionModelDraft} placeholder="Uses the model above" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setTranscriptionModelDraft(event.target.value)} /></label>
-      <div className="ai-settings-actions">
-        <button className="settings-command" type="submit" disabled={busy}>Save</button>
-        <button
-          className="settings-command"
-          type="button"
-          disabled={busy || !endpoint || endpointUnsaved}
-          title={endpointUnsaved ? 'Save the endpoint before testing' : undefined}
-          onClick={() => void testEndpoint()}
-        >Test endpoint</button>
-      </div>
-      {status && <p className="settings-note" role="status">{status}</p>}
-    </form>
-  )
-}
-
-const imageIdleMinuteOptions = ['1', '3', '5', '10', '30']
-const imageSizeOptions = ['512x512', '512x768', '768x512', '768x768', '768x1024', '1024x768', '1024x1024']
-// An empty value means the engine's own default, which is what Pinger sends when the preference is unset.
-const imageStepOptions = ['', '4', '8', '12', '20', '30', '40']
-const imageGuidanceOptions = ['', '1', '3', '5', '7', '9']
-const imageSamplerOptions = ['', 'euler', 'euler_a', 'heun', 'dpm2', 'dpm++2m', 'lcm']
-
-function ImageGenerationSettings({ binaryPath, modelPath, idleMinutes, size, steps, guidanceScale, sampler, negativePrompt, onSave }: {
-  binaryPath: string
-  modelPath: string
-  idleMinutes: string
-  size: string
-  steps: string
-  guidanceScale: string
-  sampler: string
-  negativePrompt: string
-  onSave: (key: string, value: string) => Promise<boolean>
-}) {
-  const [binaryDraft, setBinaryDraft] = useState(binaryPath)
-  const [modelDraft, setModelDraft] = useState(modelPath)
-  const [idleDraft, setIdleDraft] = useState(idleMinutes || '3')
-  const [sizeDraft, setSizeDraft] = useState(size || '512x512')
-  const [stepsDraft, setStepsDraft] = useState(steps)
-  const [guidanceDraft, setGuidanceDraft] = useState(guidanceScale)
-  const [samplerDraft, setSamplerDraft] = useState(sampler)
-  const [negativeDraft, setNegativeDraft] = useState(negativePrompt)
-  const [status, setStatus] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  async function saveSettings(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setBusy(true)
-    setStatus('')
-    let saved = await onSave('ai.image.binary_path', binaryDraft.trim())
-    if (saved) saved = await onSave('ai.image.model_path', modelDraft.trim())
-    if (saved) saved = await onSave('ai.image.idle_minutes', idleDraft)
-    if (saved) saved = await onSave('ai.image.size', sizeDraft)
-    if (saved) saved = await onSave('ai.image.steps', stepsDraft)
-    if (saved) saved = await onSave('ai.image.cfg_scale', guidanceDraft)
-    if (saved) saved = await onSave('ai.image.sampler', samplerDraft)
-    if (saved) saved = await onSave('ai.image.negative_prompt', negativeDraft.trim())
-    setStatus(saved ? 'Image settings saved.' : 'Not saved. Check the values; paths must be absolute.')
-    setBusy(false)
-  }
-
-  return (
-    <form className="ai-settings-form" aria-label="Image generation settings" onSubmit={(event) => void saveSettings(event)}>
-      <h4>Image generation</h4>
-      <p className="settings-note">Generate images in the local AI chat with a stable-diffusion.cpp <code>sd-server</code> that you install yourself, along with its model checkpoint. Pinger starts the engine on 127.0.0.1 when you press Generate image, stops it after the idle timeout, and sends prompts only to that local process.</p>
-      <label><span>Image engine binary</span><input type="text" value={binaryDraft} placeholder="/path/to/sd-server" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setBinaryDraft(event.target.value)} /></label>
-      <label><span>Image model checkpoint</span><input type="text" value={modelDraft} placeholder="/path/to/model.safetensors" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setModelDraft(event.target.value)} /></label>
-      <label><span>Stop after idle</span><select aria-label="Image engine idle timeout" value={idleDraft} onChange={(event) => setIdleDraft(event.target.value)}>
-        {imageIdleMinuteOptions.map((minutes) => <option key={minutes} value={minutes}>{minutes === '1' ? '1 minute' : `${minutes} minutes`}</option>)}
-      </select></label>
-      <label><span>Image size</span><select aria-label="Image size" value={sizeDraft} onChange={(event) => setSizeDraft(event.target.value)}>
-        {imageSizeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-      </select></label>
-      <label><span>Sampling steps</span><select aria-label="Image steps" value={stepsDraft} onChange={(event) => setStepsDraft(event.target.value)}>
-        {imageStepOptions.map((option) => <option key={option || 'default'} value={option}>{option === '' ? 'Default (20)' : `${option} steps`}</option>)}
-      </select></label>
-      <label><span>Guidance scale</span><select aria-label="Image guidance scale" value={guidanceDraft} onChange={(event) => setGuidanceDraft(event.target.value)}>
-        {imageGuidanceOptions.map((option) => <option key={option || 'default'} value={option}>{option === '' ? 'Default' : option}</option>)}
-      </select></label>
-      <label><span>Sampler</span><select aria-label="Image sampler" value={samplerDraft} onChange={(event) => setSamplerDraft(event.target.value)}>
-        {imageSamplerOptions.map((option) => <option key={option || 'default'} value={option}>{option === '' ? 'Model default' : option}</option>)}
-      </select></label>
-      <label><span>Default negative prompt</span><textarea rows={2} maxLength={1000} value={negativeDraft} placeholder="Things to avoid in every image" spellCheck={false} onChange={(event) => setNegativeDraft(event.target.value)} /></label>
-      <div className="ai-settings-actions">
-        <button className="settings-command" type="submit" disabled={busy}>Save image settings</button>
-      </div>
-      {status && <p className="settings-note" role="status">{status}</p>}
-    </form>
-  )
-}
-
-function GhostwriterSettings({ enabled, provider, endpoint, model, onSave }: {
-  enabled: boolean
-  provider: GhostwriterProvider
-  endpoint: string
-  model: string
-  onSave: (key: string, value: boolean | string) => Promise<boolean>
-}) {
-  const [enabledDraft, setEnabledDraft] = useState(enabled)
-  const [providerDraft, setProviderDraft] = useState(provider)
-  const [endpointDraft, setEndpointDraft] = useState(endpoint)
-  const [modelDraft, setModelDraft] = useState(model)
-  const [status, setStatus] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  async function saveSettings(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setSaving(true)
-    setStatus('')
-    let saved = await onSave('ghostwriter.provider', providerDraft)
-    if (saved) saved = await onSave('ghostwriter.endpoint', endpointDraft.trim())
-    if (saved) saved = await onSave('ghostwriter.model', modelDraft.trim())
-    if (saved) saved = await onSave('ghostwriter.enabled', enabledDraft)
-    setStatus(saved ? 'Ghostwriter settings saved. Requests go only to this local endpoint.' : 'Not saved. Use an HTTP localhost or loopback endpoint.')
-    setSaving(false)
-  }
-
-  return (
-    <form className="ai-settings-form ghostwriter-settings" onSubmit={(event) => void saveSettings(event)}>
-      <h4>AI Ghostwriter</h4>
-      <p className="settings-note">Suggestions are off by default and must be enabled separately in each chat with the Suggest button. This is the local-model master switch; requests use recent chat history and are restricted to localhost. No message is sent automatically.</p>
-      <PreferenceToggle label="Enable local AI Ghostwriter" checked={enabledDraft} onChange={setEnabledDraft} />
-      <label><span>Provider</span><select value={providerDraft} onChange={(event) => {
-        const nextProvider = event.target.value as GhostwriterProvider
-        if (endpointDraft === ghostwriterDefaultEndpoints[providerDraft]) setEndpointDraft(ghostwriterDefaultEndpoints[nextProvider])
-        setProviderDraft(nextProvider)
-      }}>
-        <option value="ollama">Ollama</option>
-        <option value="openai-compatible">llama.cpp / OpenAI-compatible</option>
-      </select></label>
-      <label><span>Local endpoint</span><input type="url" value={endpointDraft} placeholder={ghostwriterDefaultEndpoints[providerDraft]} spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setEndpointDraft(event.target.value)} /></label>
-      <label><span>Model name</span><input type="text" value={modelDraft} placeholder={providerDraft === 'ollama' ? 'qwen2.5:3b' : 'Uses the loaded model'} spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setModelDraft(event.target.value)} /></label>
-      <div className="ai-settings-actions"><button className="settings-command" type="submit" disabled={saving || !isLoopbackEndpoint(endpointDraft)}>{saving ? 'Saving…' : 'Save Ghostwriter settings'}</button></div>
-      {status && <p className="settings-note" role="status">{status}</p>}
-    </form>
-  )
-}
-
-const SETTING_TARGET_SELECTORS = [
-  '.setting-row strong',
-  '.setting-toggle > span',
-  '.help-item h4',
-  '.security-field > span',
-  '.ai-settings-form label > span',
-  '.ghostwriter-settings label > span',
-  'button.settings-command',
-  'a.settings-link',
-]
-
-function findSettingTarget(panel: HTMLElement, entry: SettingsEntry) {
-  if (entry.anchor) {
-    const anchored = panel.querySelector<HTMLElement>(entry.anchor)
-    if (anchored) return anchored
-  }
-  const title = entry.title.trim().toLowerCase()
-  for (const selector of SETTING_TARGET_SELECTORS) {
-    for (const candidate of Array.from(panel.querySelectorAll<HTMLElement>(selector))) {
-      if ((candidate.textContent ?? '').trim().toLowerCase() !== title) continue
-      return candidate.closest<HTMLElement>('.setting-row, .setting-toggle, .help-item, .security-field, label, button, a') ?? candidate
-    }
-  }
-  return null
-}
-
-function SettingsDialog({
-  tab,
-  profile,
-  preferences,
-  snippets,
-  rooms,
-  audioInputDevices,
-  selectedAudioInputDeviceId,
-  onArchiveInactiveRooms,
-  onTabChange,
-  onClose,
-  onLogout,
-  onPreferenceChange,
-  onSnippetsChange,
-}: {
-  tab: SettingsTab
-  profile: Snapshot['profile']
-  preferences: PreferenceValues
-  snippets: Snippet[]
-  rooms: Room[]
-  audioInputDevices: MediaDeviceInfo[]
-  selectedAudioInputDeviceId: string
-  onArchiveInactiveRooms: () => Promise<void>
-  onTabChange: (tab: SettingsTab) => void
-  onClose: () => void
-  onLogout: () => Promise<void>
-  onPreferenceChange: (key: string, value: boolean | string) => Promise<boolean>
-  onSnippetsChange: (snippets: Snippet[]) => void
-}) {
-  const tabs = SETTINGS_TABS
-  const theme = preferenceString(preferences, 'appearance.theme', SYSTEM_THEME_NAME)
-  const activeTheme = findThemeByName(theme)
-  const themeDescription = activeTheme
-    ? `${activeTheme.name} is a ${activeTheme.mode} theme.`
-    : theme === SYSTEM_THEME_NAME
-      ? 'System default follows your OS preference.'
-      : ''
-  const fontSize = preferenceString(preferences, 'appearance.font_size', 'Medium')
-  const accentPreference = preferenceString(preferences, 'appearance.accent_color', DEFAULT_ACCENT_NAME)
-  const activeAccentPalette = accentPaletteFor(accentPreference)
-  const bubbleColor = preferenceString(preferences, 'appearance.bubble_color', activeAccentPalette.base)
-  const activeWallpaper = chatWallpapers.find((wallpaper) => wallpaper.name === preferenceString(preferences, 'appearance.chat_wallpaper', 'None')) ?? chatWallpapers[0]
-  const answeredShortcut = preferenceString(preferences, 'shortcuts.mark_answered', 'E').trim().toUpperCase() || 'E'
-  const safeBubbleColor = /^#[0-9a-fA-F]{6}$/.test(bubbleColor) ? bubbleColor : activeAccentPalette.base
-  const ghostwriterProviderValue = preferenceString(preferences, 'ghostwriter.provider', 'ollama')
-  const ghostwriterProvider: GhostwriterProvider = ghostwriterProviderValue === 'openai-compatible' ? 'openai-compatible' : 'ollama'
-  const downloadFolder = preferenceString(preferences, 'downloads.folder', '')
-  const localAIAgents = useMemo<ChatAgentCollection>(() => parseChatAgents(preferenceString(preferences, 'ai.local_agents', JSON.stringify(EMPTY_CHAT_AGENTS))), [preferences])
-  const [downloadError, setDownloadError] = useState('')
-  async function chooseDownloadFolder() {
-    setDownloadError('')
-    try {
-      const folder = await AppService.ChooseDownloadFolder()
-      if (folder) onPreferenceChange('downloads.folder', folder)
-    } catch (folderError) {
-      setDownloadError(describeError(folderError))
-    }
-  }
-  const [devices, setDevices] = useState<Device[]>([])
-  const [devicesLoading, setDevicesLoading] = useState(false)
-  const [devicesError, setDevicesError] = useState('')
-  const [deviceRevokeID, setDeviceRevokeID] = useState('')
-  const [deviceRevokePassword, setDeviceRevokePassword] = useState('')
-  const [deviceRevokeBusy, setDeviceRevokeBusy] = useState(false)
-  const [scheduleSuggestionsDraft, setScheduleSuggestionsDraft] = useState(preferenceString(preferences, 'schedule.suggestions_minutes', '5,15,60'))
-  const [scheduleSuggestionsError, setScheduleSuggestionsError] = useState('')
-  const [archiveAgeDraft, setArchiveAgeDraft] = useState(preferenceString(preferences, 'archive.older_than_days', '90'))
-  const [archiveAgeError, setArchiveAgeError] = useState('')
-  const [scheduleSendDelayDraft, setScheduleSendDelayDraft] = useState(preferenceString(preferences, 'schedule.default_send_minutes', '5'))
-  const [scheduleReminderDelayDraft, setScheduleReminderDelayDraft] = useState(preferenceString(preferences, 'schedule.default_reminder_minutes', '60'))
-  const [scheduleSendDelayError, setScheduleSendDelayError] = useState('')
-  const [scheduleReminderDelayError, setScheduleReminderDelayError] = useState('')
-  const [storage, setStorage] = useState<{ database: StorageUsage; media: MediaCacheUsage } | null>(null)
-  const [storageLoading, setStorageLoading] = useState(false)
-  const [storageError, setStorageError] = useState('')
-  const [storageAction, setStorageAction] = useState('')
-  const [backupPassphrase, setBackupPassphrase] = useState('')
-  const [backupConfirmation, setBackupConfirmation] = useState('')
-  const [importPassphrase, setImportPassphrase] = useState('')
-  const [keyStatus, setKeyStatus] = useState('')
-  const [keyBusy, setKeyBusy] = useState(false)
-  const [logoutConfirm, setLogoutConfirm] = useState(false)
-  const [logoutBusy, setLogoutBusy] = useState(false)
-  const [notificationPermission, setNotificationPermission] = useState('unsupported')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [shortcutSearchQuery, setShortcutSearchQuery] = useState('')
-  const [customEmoticonDraft, setCustomEmoticonDraft] = useState<EmoticonReplacement[]>(() => parseCustomEmoticonReplacements(preferenceString(preferences, 'emoji.emoticon_replacements', '')))
-  const [customEmoticonStatus, setCustomEmoticonStatus] = useState('')
-  const [searchTarget, setSearchTarget] = useState<{ entry: SettingsEntry; nonce: number } | null>(null)
-  const [snippetManagerOpen, setSnippetManagerOpen] = useState(false)
-  const searchInputRef = useRef<HTMLInputElement>(null)
-  const settingsPanelRef = useRef<HTMLDivElement>(null)
-  const searchNonceRef = useRef(0)
-
-  const searchResults = useMemo(() => searchSettings(searchQuery), [searchQuery])
-  const searchResultsByTab = useMemo(() => groupSettingsByTab(searchResults), [searchResults])
-  const searchActive = searchQuery.trim().length > 0
-  const keyboardShortcuts: [string, string][] = [
-    ['Ctrl / ⌘ + K', 'Quick switch rooms'],
-    ['Ctrl / ⌘ + F', 'Search messages'],
-    ['Ctrl / ⌘ + ,', 'Open settings'],
-    ['/ or Ctrl / ⌘ + Shift + S', 'Focus room search'],
-    ['Alt + ↑ / ↓', 'Switch rooms'],
-    ['Ctrl / ⌘ + Shift + ↑ / ↓', 'Switch needs-reply rooms'],
-    ['Ctrl / ⌘ + Shift + H', 'Show archived rooms'],
-    ['Ctrl / ⌘ + Shift + R', 'Show unanswered rooms'],
-    ['Ctrl / ⌘ + Shift + F', 'Show favorite rooms'],
-    ['Ctrl / ⌘ + 1–9', 'Switch to a visible room'],
-    ['Ctrl / ⌘ + Alt + 1–9', 'Switch Matrix accounts'],
-    ['Ctrl / ⌘ + + / -', 'Adjust app zoom'],
-    ['Ctrl / ⌘ + 0', 'Reset app zoom'],
-    ['Ctrl / ⌘ + Shift + P', 'Toggle content blur'],
-    ['Ctrl / ⌘ + Shift + I', 'Toggle hiding images and videos'],
-    ['Ctrl + Shift + T', 'Analyze draft with Language Tutor'],
-    ['Ctrl / ⌘ + Shift + A', 'Show all rooms'],
-    ['Ctrl / ⌘ + Shift + U', 'Show needs-reply rooms'],
-    ['Ctrl / ⌘ + Shift + M', 'Start a private model chat'],
-    ['Ctrl / ⌘ + Shift + G', 'Add or remove private chat from All rooms'],
-    ['Ctrl / ⌘ + Shift + L', 'Jump to latest messages'],
-    ['↑ / ↓ / Home / End', 'Navigate the room list'],
-    ['Shift + F10', 'Open room actions'],
-    ['↑ / ↓ or J / K', 'Navigate the focused timeline'],
-    ['Home / End', 'Focus first / latest message'],
-    ['N', 'Add room to Needs reply'],
-    ['U', 'Toggle room unread'],
-    ['A', 'Archive or restore room'],
-    ['F', 'Toggle room favorite'],
-    ['R', 'Reply to the focused message'],
-    [answeredShortcut, 'Mark room answered'],
-    ['Ctrl / ⌘ + Z', 'Undo mark answered'],
-    ['Escape', 'Close search or dialog'],
-    ['?', 'Open keyboard shortcuts'],
-    ['Tab / Shift + Tab', 'Move between controls'],
-    [preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter' : 'Enter', 'Send message'],
-    ['Shift + Enter', 'Add a line in the composer'],
-  ]
-  const normalizedShortcutSearch = shortcutSearchQuery.trim().toLocaleLowerCase()
-  const filteredKeyboardShortcuts = keyboardShortcuts.filter(([keys, description]) =>
-    `${keys} ${description}`.toLocaleLowerCase().includes(normalizedShortcutSearch))
-
-  function updateCustomEmoticon(index: number, part: 0 | 1, value: string) {
-    setCustomEmoticonDraft((current) => current.map((pair, pairIndex) => {
-      if (pairIndex !== index) return pair
-      const updated: [string, string] = [pair[0], pair[1]]
-      updated[part] = value
-      return updated
-    }))
-    setCustomEmoticonStatus('')
-  }
-
-  async function saveCustomEmoticons() {
-    const replacements = customEmoticonDraft.map(([symbol, emoji]) => [symbol.trim(), emoji.trim()] as EmoticonReplacement)
-    const symbols = replacements.map(([symbol]) => symbol)
-    const invalid = replacements.some(([symbol, emoji]) =>
-      !symbol || !emoji || /\s/.test(symbol) || /\s/.test(emoji) || [...symbol].length > 16 || [...emoji].length > 16)
-    if (invalid || replacements.length > 64 || new Set(symbols).size !== symbols.length) {
-      setCustomEmoticonStatus('Use unique symbols and one non-empty emoji per row, with no spaces.')
-      return
-    }
-    const saved = await onPreferenceChange('emoji.emoticon_replacements', JSON.stringify(replacements))
-    setCustomEmoticonStatus(saved ? 'Custom emoji replacements saved.' : 'Could not save custom emoji replacements.')
-  }
-
-  async function resetCustomEmoticons() {
-    const saved = await onPreferenceChange('emoji.emoticon_replacements', '[]')
-    if (!saved) {
-      setCustomEmoticonStatus('Could not restore built-in emoji replacements.')
-      return
-    }
-    setCustomEmoticonDraft([])
-    setCustomEmoticonStatus('Built-in emoji replacements restored.')
-  }
-
-  function revealSetting(entry: SettingsEntry) {
-    searchNonceRef.current += 1
-    setSearchQuery('')
-    setSearchTarget({ entry, nonce: searchNonceRef.current })
-    onTabChange(entry.tab)
-  }
-
-  function closeSnippetManager() {
-    setSnippetManagerOpen(false)
-  }
-
-  useEffect(() => {
-    if (!searchTarget) return
-    const panel = settingsPanelRef.current
-    if (!panel) return
-    const target = findSettingTarget(panel, searchTarget.entry)
-    if (!target) return
-    if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'center' })
-    target.classList.add('is-search-hit')
-    const timer = window.setTimeout(() => target.classList.remove('is-search-hit'), 1800)
-    return () => {
-      window.clearTimeout(timer)
-      target.classList.remove('is-search-hit')
-    }
-  }, [searchTarget])
-
-  function saveScheduleDefaultDelay(key: string, draft: string, setDraft: (value: string) => void, setError: (value: string) => void) {
-    const minutes = Number(draft)
-    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 10080) {
-      setError('Use a whole number from 1 to 10080 minutes.')
-      return
-    }
-    const value = String(minutes)
-    setDraft(value)
-    setError('')
-    void onPreferenceChange(key, value)
-  }
-
-  function saveArchiveAge(draft: string) {
-    const days = Number(draft)
-    if (!Number.isInteger(days) || days < 1 || days > 3650) {
-      setArchiveAgeError('Use a whole number from 1 to 3650 days.')
-      return
-    }
-    const value = String(days)
-    setArchiveAgeDraft(value)
-    setArchiveAgeError('')
-    void onPreferenceChange('archive.older_than_days', value)
-  }
-
-  useEffect(() => {
-    let active = true
-    async function refreshNotificationPermission() {
-      try {
-        const supported = await AppService.NativeNotificationsSupported()
-        const permission = supported ? await AppService.NotificationPermission() : 'unsupported'
-        if (active) {
-          setNotificationPermission((current) => current === 'denied' && permission === 'default' ? current : permission)
-        }
-      } catch {
-        if (active) setNotificationPermission('unsupported')
-      }
-    }
-
-    void refreshNotificationPermission()
-    window.addEventListener('focus', refreshNotificationPermission)
-    return () => {
-      active = false
-      window.removeEventListener('focus', refreshNotificationPermission)
-    }
-  }, [])
-
-  async function openNotificationSettings() {
-    try {
-      await AppService.OpenNotificationSettings()
-    } catch {
-      setNotificationPermission('denied')
-    }
-  }
-
-  async function enableSystemNotifications() {
-    try {
-      if (!await AppService.NativeNotificationsSupported()) {
-        setNotificationPermission('unsupported')
-        return
-      }
-      if (notificationPermission === 'denied') {
-        await openNotificationSettings()
-        return
-      }
-      const permission = await AppService.RequestNotificationPermission()
-      setNotificationPermission(permission)
-      if (permission === 'denied') await openNotificationSettings()
-    } catch {
-      setNotificationPermission('unsupported')
-    }
-  }
-
-  useEffect(() => {
-    if (tab !== 'Devices') return
-    let active = true
-    setDevicesLoading(true)
-    setDevicesError('')
-    AppService.Devices()
-      .then((result) => { if (active) setDevices(result ?? []) })
-      .catch((loadError: unknown) => { if (active) setDevicesError(describeError(loadError)) })
-      .finally(() => { if (active) setDevicesLoading(false) })
-    return () => { active = false }
-  }, [tab])
-
-  useEffect(() => {
-    if (tab !== 'Storage') return
-    let active = true
-    setStorageLoading(true)
-    setStorageError('')
-    Promise.all([AppService.StorageUsage(), AppService.MediaCacheUsage()])
-      .then(([database, media]) => { if (active) setStorage({ database, media }) })
-      .catch((loadError: unknown) => { if (active) setStorageError(describeError(loadError)) })
-      .finally(() => { if (active) setStorageLoading(false) })
-    return () => { active = false }
-  }, [tab])
-
-  async function revokeDevice(device: Device) {
-    setDeviceRevokeBusy(true)
-    setDevicesError('')
-    try {
-      await AppService.RevokeDevice(device.id, deviceRevokePassword)
-      setDevices((current) => current.filter((item) => item.id !== device.id))
-      setDeviceRevokeID('')
-    } catch (revokeError) {
-      setDevicesError(describeError(revokeError))
-    } finally {
-      setDeviceRevokePassword('')
-      setDeviceRevokeBusy(false)
-    }
-  }
-
-  function cancelDeviceRevoke() {
-    setDeviceRevokeID('')
-    setDeviceRevokePassword('')
-    setDevicesError('')
-  }
-
-  async function refreshStorage() {
-    setStorageLoading(true)
-    setStorageError('')
-    try {
-      const [database, media] = await Promise.all([AppService.StorageUsage(), AppService.MediaCacheUsage()])
-      setStorage({ database, media })
-    } catch (loadError) {
-      setStorageError(describeError(loadError))
-    } finally {
-      setStorageLoading(false)
-    }
-  }
-
-  async function runStorageAction(action: 'clear' | 'optimize') {
-    setStorageAction(action)
-    setStorageError('')
-    try {
-      if (action === 'clear') await AppService.ClearMediaCache()
-      else await AppService.OptimizeDatabase()
-      await refreshStorage()
-    } catch (actionError) {
-      setStorageError(describeError(actionError))
-    } finally {
-      setStorageAction('')
-    }
-  }
-
-  async function exportRoomKeys() {
-    if (!backupPassphrase || backupPassphrase !== backupConfirmation) {
-      setKeyStatus('Enter and confirm the same non-empty passphrase.')
-      return
-    }
-    setKeyBusy(true)
-    setKeyStatus('')
-    try {
-      const response = await requestLocalAsset('/media/ipc/room-keys/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ passphrase: backupPassphrase }),
-      })
-      const backup = await response.blob()
-      if (backup.size === 0) throw new Error('The homeserver returned an empty room key backup.')
-      const objectURL = URL.createObjectURL(backup)
-      const link = document.createElement('a')
-      link.href = objectURL
-      link.download = 'matrix-room-keys.txt'
-      link.click()
-      window.setTimeout(() => URL.revokeObjectURL(objectURL), 1000)
-      setKeyStatus('Encrypted room key backup exported.')
-      setBackupPassphrase('')
-      setBackupConfirmation('')
-    } catch (exportError) {
-      setKeyStatus(describeError(exportError))
-    } finally {
-      setKeyBusy(false)
-    }
-  }
-
-  async function importRoomKeys(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
-    if (!importPassphrase) {
-      setKeyStatus('Enter the backup passphrase before choosing a file.')
-      return
-    }
-    if (file.size > 100 * 1024 * 1024) {
-      setKeyStatus('Room key backup exceeds 100 MiB.')
-      return
-    }
-    setKeyBusy(true)
-    setKeyStatus('')
-    try {
-      const response = await requestLocalAsset('/media/ipc/room-keys/import', {
-        method: 'POST',
-        headers: {
-          'Content-Type': file.type || 'application/octet-stream',
-          'X-Matrix-Backup-Passphrase': importPassphrase,
-        },
-        body: file,
-      })
-      const result = await response.json() as { imported: number; total: number }
-      setKeyStatus(`Imported ${result.imported} of ${result.total} room keys.`)
-      setImportPassphrase('')
-    } catch (importError) {
-      setKeyStatus(describeError(importError))
-    } finally {
-      setKeyBusy(false)
-    }
-  }
-
-  async function confirmLogout() {
-    setLogoutBusy(true)
-    try {
-      await onLogout()
-    } catch {
-      setLogoutBusy(false)
-      setLogoutConfirm(false)
-    }
-  }
-
-  return (
-    <>
-      <div className="settings-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-        <DialogSurface className="settings-dialog" labelledBy="settings-title" onClose={onClose}>
-          <header className="settings-header">
-            <div><span className="eyebrow">PINGER</span><h2 id="settings-title">Settings</h2></div>
-            <button className="icon-button" type="button" aria-label="Close settings" title="Close settings" onClick={onClose}><X size={17} /></button>
-          </header>
-          <div className="settings-search">
-            <Search size={15} />
-            <input
-              ref={searchInputRef}
-              type="search"
-              value={searchQuery}
-              placeholder="Search settings"
-              aria-label="Search settings"
-              spellCheck={false}
-              autoCorrect="off"
-              autoCapitalize="off"
-              onChange={(event) => setSearchQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Escape') return
-                event.preventDefault()
-                event.stopPropagation()
-                setSearchQuery('')
-              }}
-            />
-            {searchQuery && (
-              <button type="button" className="icon-button" aria-label="Clear settings search" title="Clear search" onClick={() => { setSearchQuery(''); searchInputRef.current?.focus() }}><X size={14} /></button>
-            )}
-          </div>
-          <nav className="settings-tabs" role="tablist" aria-label="Settings sections">
-            {tabs.map((item) => {
-              const matches = searchResultsByTab.get(item)?.length ?? 0
-              return (
-                <button
-                  key={item}
-                  id={`settings-tab-${item.toLowerCase().replace(/\s+/g, '-')}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === item}
-                  aria-controls="settings-panel"
-                  tabIndex={tab === item ? 0 : -1}
-                  className={`${tab === item ? 'is-active' : ''} ${searchActive && matches > 0 ? 'has-matches' : ''}`}
-                  onClick={() => {
-                    const firstMatch = searchResultsByTab.get(item)?.[0]
-                    if (searchActive && firstMatch) {
-                      revealSetting(firstMatch)
-                      return
-                    }
-                    if (searchActive) setSearchQuery('')
-                    onTabChange(item)
-                  }}
-                  onKeyDown={(event) => {
-                    const currentIndex = tabs.indexOf(item)
-                    let nextIndex: number
-                    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % tabs.length
-                    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
-                    else if (event.key === 'Home') nextIndex = 0
-                    else if (event.key === 'End') nextIndex = tabs.length - 1
-                    else return
-                    event.preventDefault()
-                    onTabChange(tabs[nextIndex])
-                    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus()
-                  }}
-                >{item}{searchActive && matches > 0 && <span className="settings-tab-count" aria-hidden="true">{matches}</span>}</button>
-              )
-            })}
-          </nav>
-          <div id="settings-panel" className={`settings-content ${searchActive ? 'is-searching' : ''}`} role="tabpanel" aria-labelledby={`settings-tab-${tab.toLowerCase().replace(/\s+/g, '-')}`} tabIndex={0} ref={settingsPanelRef}>
-            {searchActive && (
-              <div className="settings-search-results" role="region" aria-label="Settings search results">
-                <p className="settings-note" role="status">
-                  {searchResults.length === 0
-                    ? `No settings match “${searchQuery.trim()}”.`
-                    : `${searchResults.length} ${searchResults.length === 1 ? 'setting matches' : 'settings match'} “${searchQuery.trim()}”.`}
-                </p>
-                {Array.from(searchResultsByTab.entries()).map(([group, entries]) => (
-                  <section className="settings-search-group" key={group}>
-                    <h3>{group}</h3>
-                    <div className="settings-search-list">
-                      {entries.map((entry) => (
-                        <button key={entry.id} type="button" className="settings-search-result" onClick={() => revealSetting(entry)}>
-                          <strong>{entry.title}</strong>
-                          <small>{entry.description}</small>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                ))}
-              </div>
-            )}
-            {tab === 'General' && (
-              <div className="settings-section">
-                <h3>General</h3>
-                <PreferenceToggle label="Launch Pinger at login" checked={preferenceBoolean(preferences, 'system.launch_at_startup')} onChange={(value) => onPreferenceChange('system.launch_at_startup', value)} />
-                <PreferenceToggle label="Minimize to tray when closing the window" checked={preferenceBoolean(preferences, 'window.minimize_to_tray')} onChange={(value) => onPreferenceChange('window.minimize_to_tray', value)} />
-                <PreferenceToggle label="Start minimized" checked={preferenceBoolean(preferences, 'window.start_minimized')} onChange={(value) => onPreferenceChange('window.start_minimized', value)} />
-                <PreferenceToggle label="Quit Pinger when the window closes" checked={preferenceBoolean(preferences, 'window.quit_on_close')} onChange={(value) => onPreferenceChange('window.quit_on_close', value)} />
-                <PreferenceToggle label="Show menu bar icon" checked={preferenceBoolean(preferences, 'window.menu_bar_icon', true)} onChange={(value) => onPreferenceChange('window.menu_bar_icon', value)} />
-                <div className="setting-row"><span><strong>Download folder</strong><small>{downloadFolder || 'Downloads folder in your home directory'}</small></span>
-                  <span>
-                    <button type="button" className="settings-command" onClick={() => void chooseDownloadFolder()}>Choose…</button>
-                    {downloadFolder && <button type="button" className="settings-command" onClick={() => onPreferenceChange('downloads.folder', '')}>Use default</button>}
-                  </span>
-                </div>
-                {downloadError && <p className="settings-error" role="alert">{downloadError}</p>}
-                <PreferenceToggle label="Ask where to save each download" checked={preferenceBoolean(preferences, 'downloads.ask_each_time')} onChange={(value) => onPreferenceChange('downloads.ask_each_time', value)} />
-                <label className="setting-row"><span><strong>Double-click a message</strong><small>Choose what a double-click on a message does.</small></span>
-                  <select aria-label="Double-click a message" value={preferenceString(preferences, 'messages.double_click', 'None')} onChange={(event) => onPreferenceChange('messages.double_click', event.target.value)}>
-                    <option value="None">Nothing</option>
-                    <option value="Reply">Reply</option>
-                    <option value="React">Add reaction</option>
-                  </select>
-                </label>
-                <PreferenceToggle label="Show quick reaction picker" checked={preferenceBoolean(preferences, 'reactions.quick_enabled', true)} onChange={(value) => onPreferenceChange('reactions.quick_enabled', value)} />
-                <label className="setting-row"><span><strong>Default reaction</strong><small>Sent directly when the quick picker is turned off.</small></span>
-                  <select aria-label="Default reaction" value={preferenceString(preferences, 'reactions.default_emoji', '👍')} onChange={(event) => onPreferenceChange('reactions.default_emoji', event.target.value)}>
-                    {['👍', '❤️', '😂', '🎉', '👀', '🙏'].map((emoji) => <option key={emoji} value={emoji}>{emoji}</option>)}
-                  </select>
-                </label>
-                <label className="setting-row"><span><strong>Quick reaction set</strong><small>Use the built-in frequent set or your own emoji.</small></span>
-                  <select aria-label="Quick reaction set" value={preferenceString(preferences, 'reactions.quick_source', 'Frequent')} onChange={(event) => onPreferenceChange('reactions.quick_source', event.target.value)}>
-                    <option value="Frequent">Frequent</option>
-                    <option value="Custom">Custom</option>
-                  </select>
-                </label>
-                <label className="setting-row"><span><strong>Custom quick reactions</strong><small>Up to 6 emoji, separated by spaces.</small></span>
-                  <input type="text" aria-label="Custom quick reactions" spellCheck={false} autoCorrect="off" autoCapitalize="off" defaultValue={preferenceString(preferences, 'reactions.custom_emojis', '')} onBlur={(event) => onPreferenceChange('reactions.custom_emojis', event.target.value.trim())} />
-                </label>
-                <label className="setting-row"><span><strong>After changing a room's read state</strong><small>Choose where to go after marking a room read or unread.</small></span>
-                  <select aria-label="After changing a room's read state" value={preferenceString(preferences, 'inbox.after_read', 'stay')} onChange={(event) => onPreferenceChange('inbox.after_read', event.target.value)}>
-                    <option value="stay">Stay in the current room</option>
-                    <option value="next_visible">Next visible room</option>
-                    <option value="next_unread">Next unread room</option>
-                    <option value="none">Clear selection</option>
-                  </select>
-                </label>
-                <label className="setting-row"><span><strong>After archiving a room</strong><small>Choose what opens after the selected room is archived.</small></span>
-                  <select aria-label="After archiving a room" value={preferenceString(preferences, 'archive.next_room', 'next_visible')} onChange={(event) => onPreferenceChange('archive.next_room', event.target.value)}>
-                    <option value="next_visible">Next visible room</option>
-                    <option value="next_unread">Next unread room</option>
-                    <option value="none">Clear selection</option>
-                  </select>
-                </label>
-                <PreferenceToggle label="Automatically archive inactive rooms" checked={preferenceBoolean(preferences, 'archive.automatic')} onChange={(value) => onPreferenceChange('archive.automatic', value)} />
-                <label className="setting-row"><span><strong>Inactive room age</strong><small>Archive rooms without activity for this long.</small></span>
-                  <input type="number" min="1" max="3650" step="1" value={archiveAgeDraft} aria-label="Inactive room age" aria-invalid={Boolean(archiveAgeError)} onChange={(event) => { setArchiveAgeDraft(event.target.value); setArchiveAgeError('') }} onBlur={() => saveArchiveAge(archiveAgeDraft)} />
-                </label>
-                {archiveAgeError && <p className="form-error" role="alert">{archiveAgeError}</p>}
-                <button className="settings-command" type="button" onClick={() => void onArchiveInactiveRooms()}><Archive size={15} />Archive inactive rooms</button>
-                <label className="setting-row"><span><strong>Voice-note microphone</strong><small>Choose the input used for recording.</small></span>
-                  <select value={selectedAudioInputDeviceId} aria-label="Voice-note microphone" onChange={(event) => onPreferenceChange('audio.input_device', event.target.value)}>
-                    <option value="">System default</option>
-                    {audioInputDevices.map((device, index) => <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}
-                  </select>
-                </label>
-                <PreferenceToggle label="Auto-play next voice note" checked={preferenceBoolean(preferences, 'voice.autoplay_next')} onChange={(value) => onPreferenceChange('voice.autoplay_next', value)} />
-                <label className="setting-row"><span><strong>Default Send Later delay</strong><small>Initial scheduled-send time, in minutes (1–10080).</small></span>
-                  <input type="number" min="1" max="10080" step="1" value={scheduleSendDelayDraft} aria-label="Default Send Later delay in minutes" aria-invalid={Boolean(scheduleSendDelayError)} onChange={(event) => { setScheduleSendDelayDraft(event.target.value); setScheduleSendDelayError('') }} onBlur={() => saveScheduleDefaultDelay('schedule.default_send_minutes', scheduleSendDelayDraft, setScheduleSendDelayDraft, setScheduleSendDelayError)} />
-                </label>
-                {scheduleSendDelayError && <p className="form-error" role="alert">{scheduleSendDelayError}</p>}
-                <label className="setting-row"><span><strong>Default Remind Later delay</strong><small>Initial reminder time, in minutes (1–10080).</small></span>
-                  <input type="number" min="1" max="10080" step="1" value={scheduleReminderDelayDraft} aria-label="Default Remind Later delay in minutes" aria-invalid={Boolean(scheduleReminderDelayError)} onChange={(event) => { setScheduleReminderDelayDraft(event.target.value); setScheduleReminderDelayError('') }} onBlur={() => saveScheduleDefaultDelay('schedule.default_reminder_minutes', scheduleReminderDelayDraft, setScheduleReminderDelayDraft, setScheduleReminderDelayError)} />
-                </label>
-                {scheduleReminderDelayError && <p className="form-error" role="alert">{scheduleReminderDelayError}</p>}
-                <label className="setting-row"><span><strong>Schedule time suggestions</strong><small>Enter 1–6 comma-separated delays in minutes.</small></span>
-                  <input className="schedule-suggestions-input" type="text" inputMode="numeric" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={scheduleSuggestionsDraft} aria-label="Schedule time suggestions" aria-invalid={Boolean(scheduleSuggestionsError)} onChange={(event) => { setScheduleSuggestionsDraft(event.target.value); setScheduleSuggestionsError('') }} onBlur={() => {
-                    const minutes = parseTimeSuggestionMinutes(scheduleSuggestionsDraft)
-                    if (minutes.length === 0) {
-                      setScheduleSuggestionsError('Use 1–6 unique values from 1 to 10080.')
-                      return
-                    }
-                    const value = minutes.join(',')
-                    setScheduleSuggestionsDraft(value)
-                    setScheduleSuggestionsError('')
-                    onPreferenceChange('schedule.suggestions_minutes', value)
-                  }} />
-                </label>
-                {scheduleSuggestionsError && <p className="form-error" role="alert">{scheduleSuggestionsError}</p>}
-              </div>
-            )}
-            {tab === 'Appearance' && (
-              <div className="settings-section">
-                <h3>Appearance</h3>
-                <label className="setting-row"><span><strong>Theme</strong><small>Choose the conversation surface. {themeDescription}</small></span>
-                  <select value={theme} onChange={(event) => onPreferenceChange('appearance.theme', event.target.value)}>
-                    <option value={SYSTEM_THEME_NAME}>{SYSTEM_THEME_NAME}</option>
-                    {appearanceThemes.map((entry) => <option key={entry.id} value={entry.name}>{entry.name} ({entry.mode})</option>)}
-                  </select>
-                </label>
-                <label className="setting-row"><span><strong>Font size</strong><small>Adjust room and message text.</small></span>
-                  <select value={fontSize} onChange={(event) => onPreferenceChange('appearance.font_size', event.target.value)}>
-                    {['Small', 'Medium', 'Large'].map((value) => <option key={value}>{value}</option>)}
-                  </select>
-                </label>
-                <label className="setting-row"><span><strong>App zoom</strong><small>Scale the full interface.</small></span>
-                  <PreferenceRange label="App zoom" min={75} max={125} step={5} value={preferenceNumber(preferences, 'appearance.zoom', 100, 75, 125)} onChange={(value) => onPreferenceChange('appearance.zoom', value)} />
-                </label>
-                <label className="setting-row"><span><strong>Outgoing message color</strong><small>Choose a color for your messages.</small></span>
-                  <input className="color-input" type="color" value={safeBubbleColor} onChange={(event) => onPreferenceChange('appearance.bubble_color', event.target.value)} aria-label="Outgoing message color" />
-                </label>
-                <div className="setting-row accent-setting-row"><span><strong>Theme accent</strong><small>Choose an accent. Message color follows it until you pick one.</small></span>
-                  <div className="accent-palette" role="group" aria-label="Theme accent color">
-                    {accentPresets.map((palette) => <button key={palette.name} className="accent-swatch" type="button" aria-label={`${palette.name} accent color`} aria-pressed={activeAccentPalette.name === palette.name} title={palette.name} style={{ '--swatch': palette.base } as React.CSSProperties} onClick={() => onPreferenceChange('appearance.accent_color', palette.name)}>
-                      {activeAccentPalette.name === palette.name && <Check size={14} />}
-                    </button>)}
-                    <label className={`accent-swatch accent-swatch-custom${isAccentHex(accentPreference) ? ' is-selected' : ''}`} title="Custom color" style={{ '--swatch': activeAccentPalette.base } as React.CSSProperties}>
-                      <input type="color" value={activeAccentPalette.base} aria-label="Custom accent color" onChange={(event) => onPreferenceChange('appearance.accent_color', event.target.value)} />
-                      {isAccentHex(accentPreference) && <Check size={14} />}
-                    </label>
-                  </div>
-                </div>
-                <div className="setting-row accent-setting-row"><span><strong>Chat wallpaper</strong><small>Add a subtle background to conversations.</small></span>
-                  <div className="wallpaper-picker" role="group" aria-label="Chat wallpaper">
-                    {chatWallpapers.map((wallpaper) => <button key={wallpaper.name} className="wallpaper-swatch" type="button" aria-label={`${wallpaper.name} wallpaper`} aria-pressed={activeWallpaper.name === wallpaper.name} title={wallpaper.name} style={{ '--wallpaper-swatch': wallpaper.swatch } as React.CSSProperties} onClick={() => onPreferenceChange('appearance.chat_wallpaper', wallpaper.name)}>
-                      {activeWallpaper.name === wallpaper.name && <Check size={13} />}
-                    </button>)}
-                  </div>
-                </div>
-                <PreferenceToggle label="Use pointer cursor on clickable controls" checked={preferenceBoolean(preferences, 'appearance.pointer_cursor', true)} onChange={(value) => onPreferenceChange('appearance.pointer_cursor', value)} />
-                <PreferenceToggle label="Show room previews" checked={preferenceBoolean(preferences, 'sidebar.show_previews', true)} onChange={(value) => onPreferenceChange('sidebar.show_previews', value)} />
-                <PreferenceToggle label="Show unread counts" checked={preferenceBoolean(preferences, 'sidebar.show_unread_counts', true)} onChange={(value) => onPreferenceChange('sidebar.show_unread_counts', value)} />
-                <PreferenceToggle label="Compact chat list" checked={preferenceBoolean(preferences, 'sidebar.compact_chat_list')} onChange={(value) => onPreferenceChange('sidebar.compact_chat_list', value)} />
-                <PreferenceToggle label="Show network labels in the chat list" checked={preferenceBoolean(preferences, 'sidebar.network_icons')} onChange={(value) => onPreferenceChange('sidebar.network_icons', value)} />
-                <label className="setting-row"><span><strong>Favorite chats</strong><small>List favorite rooms first, or only mark them with a star.</small></span>
-                  <select aria-label="Favorite chats" value={preferenceString(preferences, 'sidebar.pinned_style', 'Top of list')} onChange={(event) => onPreferenceChange('sidebar.pinned_style', event.target.value)}>
-                    {['Top of list', 'Star only'].map((value) => <option key={value}>{value}</option>)}
-                  </select>
-                </label>
-                <PreferenceToggle label="Animate new messages" checked={preferenceBoolean(preferences, 'appearance.message_animations', true)} onChange={(value) => onPreferenceChange('appearance.message_animations', value)} />
-                <PreferenceToggle label="Show message timestamps" checked={preferenceBoolean(preferences, 'appearance.show_timestamps', true)} onChange={(value) => onPreferenceChange('appearance.show_timestamps', value)} />
-                <PreferenceToggle label="Hide images and videos" checked={preferenceBoolean(preferences, 'appearance.hide_images_and_videos')} onChange={(value) => onPreferenceChange('appearance.hide_images_and_videos', value)} />
-                <PreferenceToggle label="Hide deleted messages" checked={preferenceBoolean(preferences, 'appearance.hide_deleted_messages')} onChange={(value) => onPreferenceChange('appearance.hide_deleted_messages', value)} />
-                <PreferenceToggle label="Balance message line wrapping" checked={preferenceBoolean(preferences, 'appearance.balanced_text')} onChange={(value) => onPreferenceChange('appearance.balanced_text', value)} />
-                <PreferenceToggle label="Use a 24-hour clock" checked={preferenceBoolean(preferences, 'appearance.time_24_hour')} onChange={(value) => onPreferenceChange('appearance.time_24_hour', value)} />
-                <PreferenceToggle label="Use relative timestamps" checked={preferenceBoolean(preferences, 'appearance.relative_timestamps')} onChange={(value) => onPreferenceChange('appearance.relative_timestamps', value)} />
-              </div>
-            )}
-            {tab === 'Notifications' && (
-              <div className="settings-section">
-                <h3>Notifications</h3>
-                <p className="settings-note">Alerts use your operating system's native notification service. macOS requests permission; Windows and Linux follow system notification settings.</p>
-                <div className="setting-row notification-permission"><span><strong>System permission</strong><small>{notificationPermission === 'granted' ? 'Allowed' : notificationPermission === 'denied' ? 'Blocked by the system. Open Notification Settings to allow alerts.' : notificationPermission === 'unsupported' ? 'Native notifications are unavailable. On macOS, launch the bundled Pinger.app; on Linux or Windows, use a desktop session with notifications enabled.' : 'Permission needed for desktop alerts.'}</small></span>
-                  <button className="settings-command" type="button" disabled={notificationPermission === 'granted' || notificationPermission === 'unsupported'} onClick={() => void enableSystemNotifications()}><Bell size={14} />{notificationPermission === 'granted' ? 'Allowed' : notificationPermission === 'denied' ? 'Open Settings' : notificationPermission === 'unsupported' ? 'Unavailable' : 'Enable'}</button>
-                </div>
-                <PreferenceToggle label="Enable notifications" checked={preferenceBoolean(preferences, 'notifications.enabled', true)} onChange={(value) => {
-                  onPreferenceChange('notifications.enabled', value)
-                  if (value) void enableSystemNotifications()
-                }} />
-                <PreferenceToggle label="Busy mode auto-replies" checked={preferenceBoolean(preferences, 'busy_mode.enabled')} onChange={(value) => onPreferenceChange('busy_mode.enabled', value)} />
-                <p className="settings-note">Automatically replies once in each direct chat while busy mode is on. Language detection runs on this device. For other languages, only the generic reply is sent to the configured AI endpoint for translation; without one, the reply uses English.</p>
-                <PreferenceToggle label="Notify while Pinger is focused" checked={!preferenceBoolean(preferences, 'notifications.only_when_unfocused', true)} onChange={(value) => onPreferenceChange('notifications.only_when_unfocused', !value)} />
-                <PreferenceToggle label="Play a notification sound" checked={preferenceBoolean(preferences, 'notifications.sound')} onChange={(value) => onPreferenceChange('notifications.sound', value)} />
-                <label className="setting-row"><span><strong>Notification volume</strong><small>Adjust the alert tone level.</small></span>
-                  <PreferenceRange label="Notification volume" min={0} max={100} step={5} value={preferenceNumber(preferences, 'notifications.volume', 50)} onChange={(value) => onPreferenceChange('notifications.volume', value)} />
-                </label>
-                <label className="setting-row"><span><strong>Notification content</strong><small>Control what appears outside the app.</small></span>
-                  <select value={preferenceString(preferences, 'notifications.privacy', 'Sender and message preview')} onChange={(event) => onPreferenceChange('notifications.privacy', event.target.value)}>
-                    {['Sender and message preview', 'Sender only', 'Hidden content'].map((value) => <option key={value}>{value}</option>)}
-                  </select>
-                </label>
-                <PreferenceToggle label="Direct message alerts" checked={preferenceBoolean(preferences, 'notifications.direct', true)} onChange={(value) => onPreferenceChange('notifications.direct', value)} />
-                <PreferenceToggle label="Mention alerts" checked={preferenceBoolean(preferences, 'notifications.mentions', true)} onChange={(value) => onPreferenceChange('notifications.mentions', value)} />
-                <PreferenceToggle label="Group message alerts" checked={preferenceBoolean(preferences, 'notifications.group')} onChange={(value) => onPreferenceChange('notifications.group', value)} />
-                {[['Direct message tone', 'notifications.sound_direct'], ['Mention tone', 'notifications.sound_mention'], ['Group message tone', 'notifications.sound_group']].map(([label, key]) => (
-                  <label key={key} className="setting-row"><span><strong>{label}</strong><small>Sound played for this kind of alert.</small></span>
-                    <select aria-label={label} value={preferenceString(preferences, key, 'Chime')} onChange={(event) => {
-                      const tone = event.currentTarget.value
-                      void onPreferenceChange(key, tone)
-                      playNotificationSound(preferenceNumber(preferences, 'notifications.volume', 50), tone)
-                    }}>
-                      {['Chime', 'Pulse', 'Soft', 'Silent'].map((value) => <option key={value}>{value}</option>)}
-                    </select>
-                  </label>
-                ))}
-                <label className="setting-row"><span><strong>Batch new messages</strong><small>Combine messages from the same room into one alert.</small></span>
-                  <select aria-label="Batch new messages" value={preferenceString(preferences, 'notifications.batch_seconds', '0')} onChange={(event) => onPreferenceChange('notifications.batch_seconds', event.target.value)}>
-                    <option value="0">Off</option>
-                    <option value="3">3 seconds</option>
-                    <option value="10">10 seconds</option>
-                    <option value="30">30 seconds</option>
-                  </select>
-                </label>
-                <label className="setting-row"><span><strong>Repeat unread reminder</strong><small>Remind you once about a room that is still unread.</small></span>
-                  <select aria-label="Repeat unread reminder" value={preferenceString(preferences, 'notifications.repeat_minutes', '0')} onChange={(event) => onPreferenceChange('notifications.repeat_minutes', event.target.value)}>
-                    <option value="0">Off</option>
-                    <option value="5">After 5 minutes</option>
-                    <option value="15">After 15 minutes</option>
-                    <option value="60">After 60 minutes</option>
-                  </select>
-                </label>
-                <PreferenceToggle label="Notify one-time codes immediately" checked={preferenceBoolean(preferences, 'notifications.otp_immediate', true)} onChange={(value) => onPreferenceChange('notifications.otp_immediate', value)} />
-                <PreferenceToggle label="Copy one-time codes automatically" checked={preferenceBoolean(preferences, 'notifications.otp_copy')} onChange={(value) => onPreferenceChange('notifications.otp_copy', value)} />
-                <label className="setting-row"><span><strong>Sound effects</strong><small>Play a short sound when a message is sent.</small></span>
-                  <select aria-label="Sound effects" value={preferenceString(preferences, 'sounds.effects', 'Off')} onChange={(event) => onPreferenceChange('sounds.effects', event.target.value)}>
-                    <option value="Off">Off</option>
-                    <option value="Sent messages">Sent messages</option>
-                  </select>
-                </label>
-              </div>
-            )}
-            {tab === 'Keyboard' && (
-              <div className="settings-section">
-                <h3>Keyboard</h3>
-                <PreferenceToggle label="Use Ctrl + Enter to send" checked={preferenceBoolean(preferences, 'composer.ctrl_enter')} onChange={(value) => onPreferenceChange('composer.ctrl_enter', value)} />
-                <PreferenceToggle label="Show formatting toolbar" checked={preferenceBoolean(preferences, 'composer.formatting_toolbar')} onChange={(value) => onPreferenceChange('composer.formatting_toolbar', value)} />
-                <PreferenceToggle label="Suggest emoji for :shortcodes:" checked={preferenceBoolean(preferences, 'emoji.autocomplete')} onChange={(value) => onPreferenceChange('emoji.autocomplete', value)} />
-                <PreferenceToggle label="Replace emoticons as you type" checked={preferenceBoolean(preferences, 'emoji.replace_emoticons', true)} onChange={(value) => onPreferenceChange('emoji.replace_emoticons', value)} />
-                <div className="emoticon-replacement-editor" id="emoticon-replacement-editor">
-                  <div>
-                    <strong>Custom emoji replacements</strong>
-                    <p className="settings-note">Add a symbol and emoji pair. Custom pairs override built-in faces such as `:)`.</p>
-                  </div>
-                  {customEmoticonDraft.length === 0 && <p className="settings-note">No custom replacements.</p>}
-                  {customEmoticonDraft.map(([symbol, emoji], index) => (
-                    <div className="emoticon-replacement-row" key={index}>
-                      <label><span>Symbol</span><input type="text" maxLength={16} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={symbol} aria-label={`Symbol for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 0, event.target.value)} /></label>
-                      <span className="emoticon-replacement-arrow" aria-hidden="true">→</span>
-                      <label><span>Emoji</span><input type="text" maxLength={16} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={emoji} aria-label={`Emoji for replacement ${index + 1}`} onChange={(event) => updateCustomEmoticon(index, 1, event.target.value)} /></label>
-                      <button type="button" className="icon-button" aria-label={`Remove replacement ${index + 1}`} title="Remove replacement" onClick={() => { setCustomEmoticonDraft((current) => current.filter((_, pairIndex) => pairIndex !== index)); setCustomEmoticonStatus('') }}><Trash2 size={14} /></button>
-                    </div>
-                  ))}
-                  <div className="emoticon-replacement-actions">
-                    <button className="settings-command" type="button" disabled={customEmoticonDraft.length >= 64} onClick={() => { setCustomEmoticonDraft((current) => [...current, ['', '']]); setCustomEmoticonStatus('') }}><Plus size={14} />Add mapping</button>
-                    <button className="settings-command" type="button" onClick={() => void saveCustomEmoticons()}><Check size={14} />Save mappings</button>
-                    <button className="settings-command" type="button" onClick={() => void resetCustomEmoticons()}><RotateCcw size={14} />Reset built-ins</button>
-                  </div>
-                  {customEmoticonStatus && <p className="settings-note" role="status">{customEmoticonStatus}</p>}
-                </div>
-                <PreferenceToggle label="Include timestamps when copying messages" checked={preferenceBoolean(preferences, 'clipboard.copy_timestamp')} onChange={(value) => onPreferenceChange('clipboard.copy_timestamp', value)} />
-                <PreferenceToggle label="Use Up to focus the message list when the composer is empty" checked={preferenceBoolean(preferences, 'composer.arrow_up_focus_timeline')} onChange={(value) => onPreferenceChange('composer.arrow_up_focus_timeline', value)} />
-                <PreferenceToggle label="Enable single-key shortcuts (N, U, A, F, R, J, K and the answered key)" checked={preferenceBoolean(preferences, 'shortcuts.single_keys', true)} onChange={(value) => onPreferenceChange('shortcuts.single_keys', value)} />
-                {!preferenceBoolean(preferences, 'shortcuts.single_keys', true) && <p className="settings-note" role="status">Single-key shortcuts are off. Use the message and room menus instead. Ctrl / ⌘ shortcuts still work.</p>}
-                <label className="setting-row"><span><strong>Mark answered shortcut</strong><small>Use one letter to mark the selected room answered.</small></span>
-                  <input className="shortcut-input" type="text" maxLength={1} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={preferenceString(preferences, 'shortcuts.mark_answered', 'E')} aria-label="Mark answered shortcut" onChange={(event) => { const value = event.target.value.toUpperCase(); if (value) onPreferenceChange('shortcuts.mark_answered', value) }} />
-                </label>
-                <button className="settings-command" type="button" onClick={() => setSnippetManagerOpen(true)}><FileText size={15} />Manage text snippets</button>
-                <p className="settings-note">Expand personal shortcuts while composing. Snippets are stored on this device.</p>
-                <div className="settings-search shortcut-search">
-                  <Search size={15} />
-                  <input
-                    type="search"
-                    value={shortcutSearchQuery}
-                    placeholder="Find a shortcut"
-                    aria-label="Search keyboard shortcuts"
-                    spellCheck={false}
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    onChange={(event) => setShortcutSearchQuery(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key !== 'Escape' || !shortcutSearchQuery) return
-                      event.preventDefault()
-                      event.stopPropagation()
-                      setShortcutSearchQuery('')
-                    }}
-                  />
-                  {shortcutSearchQuery && (
-                    <button type="button" className="icon-button" aria-label="Clear shortcut search" title="Clear search" onClick={() => setShortcutSearchQuery('')}><X size={14} /></button>
-                  )}
-                </div>
-                <dl className="keyboard-shortcut-list" aria-label="Keyboard shortcuts">
-                  {filteredKeyboardShortcuts.map(([keys, description]) => (
-                    <div className="keyboard-shortcut-row" key={description}>
-                      <dt>{description}</dt>
-                      <dd><kbd>{keys}</kbd></dd>
-                    </div>
-                  ))}
-                </dl>
-                {normalizedShortcutSearch && filteredKeyboardShortcuts.length === 0 && <p className="settings-note" role="status">No shortcuts match “{shortcutSearchQuery.trim()}”.</p>}
-              </div>
-            )}
-            {tab === 'History' && (
-              <div className="settings-section">
-                <h3>Message history</h3>
-                <label className="setting-row"><span><strong>Messages to load</strong><small>Load this many recent messages when opening a room.</small></span>
-                  <select value={preferenceString(preferences, 'history.initial_messages', '100')} onChange={(event) => onPreferenceChange('history.initial_messages', event.target.value)}>
-                    {['25', '50', '100', '250', '500', '1000'].map((value) => <option key={value} value={value}>{Number(value).toLocaleString()}</option>)}
-                  </select>
-                </label>
-              </div>
-            )}
-            {tab === 'Account' && (
-              <div className="settings-section">
-                <h3>Account</h3>
-                <div className="account-summary"><Avatar uri={profile.avatarUri} label={profile.displayName || profile.userId} className="profile-avatar" /><div><strong>{profile.displayName || profile.userId}</strong><span>{profile.userId}</span></div></div>
-                <div className="account-details"><span>Homeserver</span><strong>{profile.homeserver}</strong><span>This device</span><strong>{profile.deviceId}</strong><span>Encryption</span><strong>{profile.verified ? 'Verified' : 'Needs verification'}</strong></div>
-                <PreferenceToggle label="Send typing indicators" checked={preferenceBoolean(preferences, 'privacy.send_typing', true)} onChange={(value) => onPreferenceChange('privacy.send_typing', value)} />
-                <PreferenceToggle label="Content blur" checked={preferenceBoolean(preferences, 'privacy.incognito')} onChange={(value) => onPreferenceChange('privacy.incognito', value)} />
-                {preferenceBoolean(preferences, 'privacy.incognito') && <p className="settings-note" role="status">Content blur is active. Message text, names, and room images are blurred until hovered or focused. Read receipts are still sent when you open a room.</p>}
-                <p className="settings-note">Session data and encryption keys are stored locally on this device.</p>
-                {!logoutConfirm ? (
-                  <button className="settings-command is-danger" type="button" onClick={() => setLogoutConfirm(true)}><LogOut size={15} />Log out</button>
-                ) : (
-                  <div className="logout-confirm" role="group" aria-label="Confirm logout">
-                    <span>Log out and clear local session data?</span>
-                    <button type="button" onClick={() => setLogoutConfirm(false)}>Cancel</button>
-                    <button className="is-danger" type="button" disabled={logoutBusy} onClick={() => void confirmLogout()}>{logoutBusy ? 'Logging out…' : 'Log out'}</button>
-                  </div>
-                )}
-              </div>
-            )}
-            {tab === 'Devices' && (
-              <div className="settings-section">
-                <h3>Active devices</h3>
-                {devicesLoading && <p className="settings-note">Loading devices…</p>}
-                {devicesError && <p className="settings-error" role="alert">{devicesError}</p>}
-                {!devicesLoading && !devicesError && devices.length === 0 && <p className="settings-note">No devices were returned by the homeserver.</p>}
-                {devices.map((device) => (
-                  <article className="device-row" key={device.id}>
-                    <div><strong>{device.displayName || '(unnamed device)'}</strong><span>{device.id}{device.current ? ' · this device' : ''}</span><small>{device.lastSeenAt > 0 ? `Last active ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(device.lastSeenAt))}` : device.lastSeenIp || 'Last active time unavailable'}</small></div>
-                    {!device.current && (deviceRevokeID === device.id ? (
-                      <form className="logout-confirm device-revoke-confirm" aria-label={`Confirm revoking ${device.displayName || device.id}`} onSubmit={(event) => { event.preventDefault(); void revokeDevice(device) }}>
-                        <span>Enter your Matrix account password to revoke this device.</span>
-                        <label className="security-field"><span>Account password</span><input aria-label="Account password" type="password" autoComplete="current-password" required value={deviceRevokePassword} onChange={(event) => setDeviceRevokePassword(event.target.value)} /></label>
-                        <button type="button" disabled={deviceRevokeBusy} onClick={cancelDeviceRevoke}>Cancel</button>
-                        <button className="is-danger" type="submit" disabled={deviceRevokeBusy}>{deviceRevokeBusy ? 'Revoking…' : 'Revoke device'}</button>
-                      </form>
-                    ) : <button className="settings-command is-danger" type="button" onClick={() => { setDevicesError(''); setDeviceRevokePassword(''); setDeviceRevokeID(device.id) }}>Revoke</button>)}
-                  </article>
-                ))}
-              </div>
-            )}
-            {tab === 'Storage' && (
-              <div className="settings-section">
-                <h3>Local storage</h3>
-                {storageLoading && <p className="settings-note">Reading storage usage…</p>}
-                {storageError && <p className="settings-error" role="alert">{storageError}</p>}
-                {storage && <div className="storage-summary">
-                  <div><HardDrive size={16} /><span>Matrix database</span><strong>{formatBytes(storage.database.databaseBytes)}</strong></div>
-                  <div><HardDrive size={16} /><span>Database WAL</span><strong>{formatBytes(storage.database.walBytes)}</strong></div>
-                  <div><HardDrive size={16} /><span>Media cache</span><strong>{formatBytes(storage.media.bytes)} · {storage.media.files} files</strong></div>
-                </div>}
-                <button className="settings-command" type="button" disabled={storageLoading || storageAction !== ''} onClick={() => void runStorageAction('clear')}><HardDrive size={15} />{storageAction === 'clear' ? 'Clearing cache…' : 'Clear media cache'}</button>
-                <button className="settings-command" type="button" disabled={storageLoading || storageAction !== ''} onClick={() => void runStorageAction('optimize')}><HardDrive size={15} />{storageAction === 'optimize' ? 'Optimizing database…' : 'Optimize database'}</button>
-                <p className="settings-note">Clearing the media cache does not remove messages or encryption keys.</p>
-                <ChatStorageSettings />
-              </div>
-            )}
-            {tab === 'Security' && (
-              <div className="settings-section">
-                <h3>Encryption and room keys</h3>
-                <p className="settings-note">Device verification: {profile.verified ? 'Verified' : 'This device needs verification.'}</p>
-                <label className="security-field"><span>Backup passphrase</span><input type="password" autoComplete="new-password" value={backupPassphrase} onChange={(event) => setBackupPassphrase(event.target.value)} /></label>
-                <label className="security-field"><span>Confirm passphrase</span><input type="password" autoComplete="new-password" value={backupConfirmation} onChange={(event) => setBackupConfirmation(event.target.value)} /></label>
-                <button className="settings-command" type="button" disabled={keyBusy || !backupPassphrase || backupPassphrase !== backupConfirmation} onClick={() => void exportRoomKeys()}><Download size={15} />{keyBusy ? 'Working…' : 'Export room keys'}</button>
-                <label className="security-field"><span>Import passphrase</span><input type="password" autoComplete="off" value={importPassphrase} onChange={(event) => setImportPassphrase(event.target.value)} /></label>
-                <label className="settings-command file-command"><Upload size={15} />Import room key file<input type="file" accept=".txt,.json,application/octet-stream" disabled={keyBusy || !importPassphrase} onChange={(event) => void importRoomKeys(event)} /></label>
-                {keyStatus && <p className="settings-note" role="status">{keyStatus}</p>}
-              </div>
-            )}
-            {tab === 'AI' && (
-              <div className="settings-section">
-                <h3>AI</h3>
-                <p className="settings-note">Configure the local AI endpoint, Ghostwriter, and the instructions and tuning for each AI feature. AI replies are drafts and are never sent automatically.</p>
-                <div className="integration-status" aria-label="AI status">
-                  <div className="account-details"><span>Endpoint</span><strong>{preferenceString(preferences, 'ai.endpoint', '').trim() ? 'Set' : 'Not set'}</strong></div>
-                  <div className="account-details"><span>Ghostwriter</span><strong>{preferenceBoolean(preferences, 'ghostwriter.enabled') ? 'On' : 'Off'}</strong></div>
-                </div>
-                <LocalAISettings
-                  endpoint={preferenceString(preferences, 'ai.endpoint', '')}
-                  model={preferenceString(preferences, 'ai.model', '')}
-                  transcriptionModel={preferenceString(preferences, 'ai.transcription_model', '')}
-                  thinkingLevel={preferenceString(preferences, 'ai.thinking_level', 'none')}
-                  onSave={onPreferenceChange}
-                />
-                <ImageGenerationSettings
-                  binaryPath={preferenceString(preferences, 'ai.image.binary_path', '')}
-                  modelPath={preferenceString(preferences, 'ai.image.model_path', '')}
-                  idleMinutes={preferenceString(preferences, 'ai.image.idle_minutes', '3')}
-                  size={preferenceString(preferences, 'ai.image.size', '512x512')}
-                  steps={preferenceString(preferences, 'ai.image.steps', '')}
-                  guidanceScale={preferenceString(preferences, 'ai.image.cfg_scale', '')}
-                  sampler={preferenceString(preferences, 'ai.image.sampler', '')}
-                  negativePrompt={preferenceString(preferences, 'ai.image.negative_prompt', '')}
-                  onSave={onPreferenceChange}
-                />
-                <LocalAIAgentSettings agents={localAIAgents} onSave={(collection) => onPreferenceChange('ai.local_agents', serializeChatAgents(collection))} />
-                <LanguageSettings roles={resolveLanguageRoles(preferences)} onSave={onPreferenceChange} />
-                <GhostwriterSettings
-                  enabled={preferenceBoolean(preferences, 'ghostwriter.enabled')}
-                  provider={ghostwriterProvider}
-                  endpoint={preferenceString(preferences, 'ghostwriter.endpoint', ghostwriterDefaultEndpoints[ghostwriterProvider])}
-                  model={preferenceString(preferences, 'ghostwriter.model', '')}
-                  onSave={onPreferenceChange}
-                />
-                <AIPromptSettings preferences={preferences} onSave={onPreferenceChange} />
-              </div>
-            )}
-            {tab === 'Integrations' && (
-              <div className="settings-section">
-                <h3>Integrations</h3>
-                <p className="settings-note">Chat networks are detected from the active account's chats, using room names and DM users. This is a best-effort view. Connecting a network requires a bridge set up on your homeserver; Pinger cannot create bridge logins.</p>
-                <section className="ai-settings-form contact-dossier-settings">
-                  <h4>Contact dossier analysis</h4>
-                  <p className="settings-note">Uses recent direct-chat messages with your configured local Ghostwriter model to summarize conversations and track key facts. Requests are restricted to localhost, and results stay local.</p>
-                  <PreferenceToggle
-                    label="Enable contact dossier analysis"
-                    checked={preferenceBoolean(preferences, 'relationship_health.enabled')}
-                    onChange={(enabled) => void onPreferenceChange('relationship_health.enabled', enabled)}
-                  />
-                </section>
-                <div className="integration-status" aria-label="Detected chat networks">
-                  {chatNetworks.map(({ code, name }) => {
-                    const count = rooms.filter((room) => room.bridge === code).length
-                    return (
-                      <div key={code} className="account-details"><span>{name}</span><strong>{count > 0 ? `${count.toLocaleString()} ${count === 1 ? 'chat' : 'chats'} detected` : 'No chats detected'}</strong></div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-            {tab === 'Help' && (
-              <div className="settings-section">
-                <h3>Help center</h3>
-                <p className="settings-note">Answers to common questions about Pinger.</p>
-                <article className="help-item"><h4>Keyboard shortcuts</h4><p>The Keyboard tab lists every shortcut. Single-key shortcuts can be turned off there.</p><button className="settings-command" type="button" onClick={() => onTabChange('Keyboard')}>Open keyboard shortcuts</button></article>
-                <article className="help-item"><h4>Storage and media</h4><p>Clearing media removes cached files only. Messages and encryption keys stay, and media downloads again when you open it.</p><button className="settings-command" type="button" onClick={() => onTabChange('Storage')}>Open storage</button></article>
-                <article className="help-item"><h4>Local AI</h4><p>Pinger connects to a llama-server you run yourself. Set its address in AI settings. AI replies are drafts and are never sent automatically.</p></article>
-                <article className="help-item"><h4>Chat networks</h4><p>WhatsApp, Telegram and other networks appear when your homeserver has bridges set up. Pinger cannot create bridge logins.</p></article>
-                <article className="help-item"><h4>Encryption and room keys</h4><p>Export room keys from Security and protect the file with a passphrase. Keep the backup somewhere safe.</p></article>
-                <a className="settings-link" href="https://github.com/cataWalter/pinger/issues" target="_blank" rel="noreferrer">Report an issue</a>
-              </div>
-            )}
-            {tab === 'About' && (
-              <div className="settings-section">
-                <h3>Pinger</h3>
-                <AboutPinger />
-              </div>
-            )}
-          </div>
-        </DialogSurface>
-      </div>
-      {snippetManagerOpen && <SnippetSettingsModal
-        open
-        snippets={snippets}
-        onSnippetsChange={onSnippetsChange}
-        onClose={closeSnippetManager}
-      />}
-    </>
-  )
-}
-
-function IconTooltip({ label, className = '', children }: { label: string; className?: string; children: ReactNode }) {
-  return <div className={`icon-tooltip${className ? ` ${className}` : ''}`} data-tooltip={label}>{children}</div>
-}
-
-function PreferenceRange({ label, min, max, step, value, onChange }: {
-  label: string
-  min: number
-  max: number
-  step: number
-  value: number
-  onChange: (value: string) => Promise<boolean>
-}) {
-  const [draftValue, setDraftValue] = useState(value)
-  const latestValue = useRef(value)
-  const committedValue = useRef(value)
-
-  useEffect(() => {
-    latestValue.current = value
-    committedValue.current = value
-    setDraftValue(value)
-  }, [value])
-
-  function commitValue() {
-    const nextValue = latestValue.current
-    if (nextValue === committedValue.current) return
-    committedValue.current = nextValue
-    void onChange(String(nextValue)).then((saved) => {
-      if (saved) return
-      latestValue.current = value
-      committedValue.current = value
-      setDraftValue(value)
-    })
-  }
-
-  return (
-    <div className="setting-range">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={draftValue}
-        aria-label={label}
-        onChange={(event) => {
-          const nextValue = Number(event.currentTarget.value)
-          latestValue.current = nextValue
-          setDraftValue(nextValue)
-        }}
-        onPointerUp={commitValue}
-        onPointerCancel={commitValue}
-        onKeyUp={commitValue}
-        onBlur={commitValue}
-      />
-      <output>{draftValue}%</output>
-    </div>
-  )
-}
-
-function PreferenceToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <label className="setting-toggle">
-      <span>{label}</span>
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
-    </label>
+    <SettingsProvider>
+      <AppBody />
+    </SettingsProvider>
   )
 }
 

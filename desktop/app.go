@@ -46,6 +46,12 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 			log.Printf("could not import legacy preferences: %v", importErr)
 		}
 	}
+	if _, cleanupErr := sharedPreferences.DeleteRetired(); cleanupErr != nil {
+		log.Printf("could not remove preferences for retired features: %v", cleanupErr)
+	}
+	if cleanupErr := removeRetiredFeatureFiles(dataDir); cleanupErr != nil {
+		log.Printf("could not remove data files for retired features: %v", cleanupErr)
+	}
 	scheduledJobs, err := newScheduledJobStore(filepath.Join(filepath.Dir(preferencesPath), "scheduled-jobs.json"))
 	if err != nil {
 		_ = sharedPreferences.Close()
@@ -55,6 +61,10 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 	ctx, cancel := context.WithCancel(context.Background())
 	notifier := notifications.New()
 	service := &AppService{client: client, dataDir: dataDir, defaultDataDir: defaultDataDir, sharedPreferences: sharedPreferences, notifier: notifier, ctx: ctx, cancel: cancel, scheduled: scheduledJobs}
+	service.imageEngine.stateFile = imageEngineRecordPath(defaultDataDir)
+	if reapErr := reapOrphanedImageEngine(service.imageEngine.stateFile); reapErr != nil {
+		log.Printf("reap orphaned image engine: %v", reapErr)
+	}
 	if err = service.initializeAccounts(dataDir, mediaCacheDir); err != nil {
 		cancel()
 		_ = sharedPreferences.Close()
@@ -328,12 +338,6 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 		}
 		eventBatcher.EnqueueUpdate(update)
 	})
-	service.emitRelationshipHealth = func(update RelationshipHealthSnapshot) {
-		app.Event.Emit(relationshipHealthEventName, update)
-	}
-	service.emitContactDossier = func(update ContactDossierSnapshot) {
-		app.Event.Emit(contactDossierEventName, update)
-	}
 	service.emitLocalAIChatStream = func(chunk LocalAIChatStreamEvent) {
 		app.Event.Emit(localAIChatStreamEventName, chunk)
 	}

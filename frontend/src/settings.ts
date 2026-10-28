@@ -64,7 +64,6 @@ export const settingsEntries: SettingsEntry[] = [
 
   { id: 'notifications.system-permission', tab: 'Notifications', title: 'System permission', description: 'Allow Pinger to post desktop alerts.', keywords: 'permission notification centre macos allow' },
   { id: 'notifications.enabled', tab: 'Notifications', title: 'Enable notifications', description: 'Show alerts for new messages.', keywords: 'notification alerts enable' },
-  { id: 'notifications.busy-mode', tab: 'Notifications', title: 'Busy mode auto-replies', description: 'Reply once in each direct chat using the language of the latest 10 text messages.', keywords: 'busy away auto reply automatic response out of office' },
   { id: 'notifications.focused', tab: 'Notifications', title: 'Notify while Pinger is focused', description: 'Alert even when the app is open.', keywords: 'notification focused active window' },
   { id: 'notifications.sound', tab: 'Notifications', title: 'Play a notification sound', description: 'Play a sound with each alert.', keywords: 'notification sound alert' },
   { id: 'notifications.volume', tab: 'Notifications', title: 'Notification volume', description: 'Adjust the alert tone level.', keywords: 'volume alert sound level' },
@@ -120,12 +119,6 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'ai.test', tab: 'AI', title: 'Test endpoint', description: 'Check that the endpoint answers.', keywords: 'ai test connection endpoint' },
   { id: 'ai.agents', tab: 'AI', title: 'Chat agents', description: 'Create named agents with instructions for private model chats, and choose a default for new chats.', keywords: 'agent agents role persona instructions private local ai chat default', anchor: '.local-ai-agent-settings' },
   { id: 'ai.prompts', tab: 'AI', title: 'AI prompts and tuning', description: 'Edit the instructions, temperature (0.6 to 2), and token limit for each AI feature.', keywords: 'ai prompt prompts instructions system temperature max tokens tune agent summarize translate reply tone', anchor: '.ai-prompts-settings' },
-  { id: 'ai.ghostwriter', tab: 'AI', title: 'AI Ghostwriter', description: 'Draft context-aware replies using your local chat history and writing style.', keywords: 'ghostwriter autocomplete quick reply slash local ollama llama.cpp', anchor: '.ghostwriter-settings' },
-  { id: 'ai.ghostwriter-enabled', tab: 'AI', title: 'Enable local AI Ghostwriter', description: 'Show local reply chips, inline completions, and /ghost drafts.', keywords: 'ghostwriter opt in autocomplete replies', anchor: '.ghostwriter-settings .setting-toggle' },
-  { id: 'ai.ghostwriter-provider', tab: 'AI', title: 'Ghostwriter provider', description: 'Choose Ollama or an OpenAI-compatible local server.', keywords: 'ollama llama.cpp local provider', anchor: '.ghostwriter-settings select' },
-  { id: 'ai.ghostwriter-endpoint', tab: 'AI', title: 'Ghostwriter local endpoint', description: 'Must use localhost or a loopback IP address.', keywords: 'ghostwriter endpoint localhost privacy', anchor: '.ghostwriter-settings input[type="url"]' },
-  { id: 'ai.ghostwriter-model', tab: 'AI', title: 'Ghostwriter model', description: 'Model loaded by Ollama or your local server.', keywords: 'ghostwriter model qwen llama gguf', anchor: '.ghostwriter-settings input[type="text"]' },
-  { id: 'integrations.relationship-health', tab: 'Integrations', title: 'Keep in Touch reminders', description: 'Show local reminders when tracked contacts are due for a check-in.', keywords: 'keep in touch relationship health decay follow-up reminders local', anchor: '.relationship-health-settings .setting-toggle' },
   { id: 'integrations.networks', tab: 'Integrations', title: 'Detected chat networks', description: 'Bridged networks found in your chats.', keywords: 'bridges whatsapp telegram signal integration', anchor: '.integration-status' },
 
   { id: 'help.keyboard', tab: 'Help', title: 'Keyboard shortcuts', description: 'A quick tour of the shortcuts Pinger uses.', keywords: 'help shortcuts' },

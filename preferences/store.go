@@ -215,6 +215,94 @@ func (s *Store) Set(scope Scope, accountID, key string, value any) error {
 	return nil
 }
 
+// retiredPreferenceKeys lists exact keys written by features that have been removed.
+var retiredPreferenceKeys = map[string]bool{
+	"busy_mode.enabled":           true,
+	"ghostwriter.enabled":         true,
+	"ghostwriter.endpoint":        true,
+	"ghostwriter.provider":        true,
+	"ghostwriter.model":           true,
+	"relationship_health.enabled": true,
+}
+
+// retiredPreferencePrefixes lists key prefixes written by features that have been removed.
+var retiredPreferencePrefixes = []string{
+	"room.ghostwriter.",
+	"ai.feature.ghostwriter.",
+	"ai.feature.contact_dossier.",
+}
+
+func isRetiredPreferenceKey(key string) bool {
+	if retiredPreferenceKeys[key] {
+		return true
+	}
+	for _, prefix := range retiredPreferencePrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// DeleteRetired removes stored preferences written by removed features across all scopes.
+// It returns the number of rows deleted and is safe to call on every start.
+func (s *Store) DeleteRetired() (int, error) {
+	type storedKey struct {
+		scope     string
+		accountID string
+		key       string
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin retired preference cleanup: %w", err)
+	}
+	defer tx.Rollback()
+	var retired []storedKey
+	rows, err := tx.Query("SELECT scope, account_id, key FROM preferences")
+	if err != nil {
+		return 0, fmt.Errorf("read preferences for cleanup: %w", err)
+	}
+	for rows.Next() {
+		var row storedKey
+		if err := rows.Scan(&row.scope, &row.accountID, &row.key); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("decode preference key: %w", err)
+		}
+		if isRetiredPreferenceKey(row.key) {
+			retired = append(retired, row)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, fmt.Errorf("read preference keys: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, fmt.Errorf("close preference key rows: %w", err)
+	}
+	if len(retired) == 0 {
+		return 0, nil
+	}
+	var revision int64
+	if err := tx.QueryRow("SELECT revision FROM preference_meta WHERE id = 1").Scan(&revision); err != nil {
+		return 0, fmt.Errorf("read preference revision: %w", err)
+	}
+	revision++
+	for _, row := range retired {
+		if _, err := tx.Exec("DELETE FROM preferences WHERE scope = ? AND account_id = ? AND key = ?", row.scope, row.accountID, row.key); err != nil {
+			return 0, fmt.Errorf("delete retired preference %q: %w", row.key, err)
+		}
+	}
+	if _, err := tx.Exec("UPDATE preference_meta SET revision = ? WHERE id = 1", revision); err != nil {
+		return 0, fmt.Errorf("write preference revision: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit retired preference cleanup: %w", err)
+	}
+	s.markRevision(revision)
+	s.publish(Change{Revision: revision})
+	return len(retired), nil
+}
+
 func (s *Store) ImportLegacy(path, accountID string) (bool, error) {
 	if path == "" {
 		return false, errors.New("legacy preferences path is empty")
@@ -457,12 +545,12 @@ func preferenceEnabled(values map[string]any, key string, fallback bool) bool {
 func ValidateLocalHTTPEndpoint(raw string) error {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
-		return errors.New("Ghostwriter endpoint must be a localhost HTTP URL without a path")
+		return errors.New("AI endpoint must be a localhost HTTP URL without a path")
 	}
 	host := strings.ToLower(parsed.Hostname())
 	ip := net.ParseIP(host)
 	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return errors.New("Ghostwriter endpoint must use localhost or a loopback IP address")
+		return errors.New("AI endpoint must use localhost or a loopback IP address")
 	}
 	return nil
 }
@@ -517,7 +605,7 @@ func Validate(key string, value any) error {
 	if strings.HasPrefix(key, "ai.feature.") {
 		return validateAIFeaturePreference(key, value)
 	}
-	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted.", "room.needs_reply.", "room.tone_guard.", "room.ghostwriter."} {
+	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted.", "room.needs_reply.", "room.tone_guard."} {
 		if strings.HasPrefix(key, prefix) {
 			if strings.TrimPrefix(key, prefix) == "" {
 				return errors.New("room preference requires a room ID")
@@ -532,7 +620,7 @@ func Validate(key string, value any) error {
 	case "appearance.compact", "appearance.hide_deleted_messages", "appearance.hide_images_and_videos", "appearance.message_animations", "appearance.pointer_cursor", "appearance.show_avatars", "appearance.show_timestamps", "appearance.time_24_hour", "appearance.relative_timestamps",
 		"clipboard.copy_timestamp", "composer.arrow_up_focus_timeline", "composer.ctrl_enter", "composer.spellcheck", "notifications.enabled", "notifications.only_when_unfocused", "notifications.sound",
 		"sidebar.compact_chat_list", "sidebar.show_previews", "sidebar.show_unread_counts", "window.minimize_to_tray", "window.room_details_visible", "window.sidebar_visible", "system.launch_at_startup", "voice.autoplay_next",
-		"notifications.direct", "notifications.mentions", "notifications.group", "notifications.otp_immediate", "notifications.otp_copy", "sidebar.transparent", "sidebar.network_icons", "reactions.quick_enabled", "window.start_minimized", "window.quit_on_close", "window.menu_bar_icon", "downloads.ask_each_time", "appearance.balanced_text", "composer.formatting_toolbar", "emoji.autocomplete", "emoji.replace_emoticons", "privacy.incognito", "busy_mode.enabled", "ghostwriter.enabled", "relationship_health.enabled", "archive.automatic":
+		"notifications.direct", "notifications.mentions", "notifications.group", "notifications.otp_immediate", "notifications.otp_copy", "sidebar.transparent", "sidebar.network_icons", "reactions.quick_enabled", "window.start_minimized", "window.quit_on_close", "window.menu_bar_icon", "downloads.ask_each_time", "appearance.balanced_text", "composer.formatting_toolbar", "emoji.autocomplete", "emoji.replace_emoticons", "privacy.incognito", "archive.automatic":
 		if _, ok := value.(bool); !ok {
 			return fmt.Errorf("preference %q must be a boolean", key)
 		}
@@ -555,26 +643,6 @@ func Validate(key string, value any) error {
 		}
 		if endpoint != "" {
 			return ValidateAIEndpoint(endpoint)
-		}
-	case "ghostwriter.endpoint":
-		endpoint, ok := value.(string)
-		if !ok {
-			return errors.New("Ghostwriter endpoint must be a string")
-		}
-		if endpoint != "" {
-			return ValidateLocalHTTPEndpoint(endpoint)
-		}
-	case "ghostwriter.provider":
-		if !oneOf(value, "ollama", "openai-compatible") {
-			return errors.New("Ghostwriter provider has an unsupported value")
-		}
-	case "ghostwriter.model":
-		model, ok := value.(string)
-		if !ok {
-			return errors.New("Ghostwriter model must be a string")
-		}
-		if len(model) > 160 {
-			return errors.New("Ghostwriter model must be 160 characters or fewer")
 		}
 	case "ai.model", "ai.transcription_model", "appearance.bubble_color", "audio.input_device":
 		if _, ok := value.(string); !ok {
@@ -796,10 +864,8 @@ func validateKnownLanguages(value any) error {
 // aiFeatureIDs lists the AI features whose prompt, temperature, and token limit can be tuned from settings.
 // The IDs must match the feature catalog in desktop/ai_settings.go and frontend/src/aiSettings.ts.
 var aiFeatureIDs = map[string]bool{
-	"ghostwriter":           true,
 	"local_chat":            true,
 	"language_tutor":        true,
-	"contact_dossier":       true,
 	"ask_ai":                true,
 	"summarize":             true,
 	"draft_reply":           true,

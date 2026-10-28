@@ -98,6 +98,7 @@ type Room struct {
 	MarkedUnread    bool
 	Mentions        int
 	Unanswered      bool
+	NeedsReply      bool
 	LastEventID     string
 	LastEventSender string
 	LastEventAt     time.Time
@@ -392,6 +393,7 @@ func NewWithLogOutput(databasePath string, logOutput io.Writer) (*Client, error)
 	return client, nil
 }
 
+// SetRoomUnanswered with false marks the room answered for its latest event; Unanswered is unchanged.
 func (c *Client) SetRoomUnanswered(ctx context.Context, roomID string, unanswered bool) error {
 	ctx, finish, err := c.beginOperation(ctx)
 	if err != nil {
@@ -413,7 +415,7 @@ func (c *Client) SetRoomUnanswered(ctx context.Context, roomID string, unanswere
 		c.mu.Lock()
 		delete(c.dismissedEvents, roomID)
 		if current, ok := c.rooms[roomID]; ok {
-			current.Unanswered = roomNeedsReply(current, c.currentUserID(), "")
+			setRoomNeedsReply(&current, c.currentUserID(), "")
 			c.rooms[roomID] = current
 		}
 		c.mu.Unlock()
@@ -431,7 +433,7 @@ func (c *Client) SetRoomUnanswered(ctx context.Context, roomID string, unanswere
 		c.mu.Lock()
 		c.dismissedEvents[roomID] = eventID
 		if current, ok := c.rooms[roomID]; ok {
-			current.Unanswered = roomNeedsReply(current, c.currentUserID(), eventID)
+			setRoomNeedsReply(&current, c.currentUserID(), eventID)
 			c.rooms[roomID] = current
 		}
 		c.mu.Unlock()
@@ -1351,8 +1353,8 @@ func (c *Client) SendReply(ctx context.Context, roomID, text, replyTo string) er
 }
 
 func (c *Client) EditMessage(ctx context.Context, roomID, text, editID string) error {
-	if editID == "" {
-		return errors.New("edit target event ID is empty")
+	if editID == "" || strings.HasPrefix(editID, "~") {
+		return errors.New("cannot edit a message without a server event ID")
 	}
 	return c.sendMessage(ctx, roomID, text, &event.RelatesTo{
 		Type:    event.RelReplace,
@@ -1538,6 +1540,78 @@ func (c *Client) React(ctx context.Context, roomID, eventID, emoji string) error
 	c.mu.Unlock()
 	c.publishTimeline([]string{roomID}, "")
 	return nil
+}
+
+// RemoveReaction redacts the current user's reaction with emoji from an event.
+func (c *Client) RemoveReaction(ctx context.Context, roomID, eventID, emoji string) error {
+	if eventID == "" || strings.HasPrefix(eventID, "~") || strings.TrimSpace(emoji) == "" {
+		return errors.New("reaction removal requires a server event and emoji")
+	}
+	emoji = strings.TrimSpace(emoji)
+	ctx, finish, err := c.beginOperation(ctx)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	if c.engine.Account == nil {
+		return errors.New("reaction removal requires a logged-in account")
+	}
+	reactionID, err := findOwnReactionID(ctx, c.engine.Client, id.RoomID(roomID), id.EventID(eventID), c.engine.Account.UserID, emoji)
+	if err != nil {
+		return err
+	}
+	if reactionID != "" {
+		if _, err = c.engine.Client.RedactEvent(ctx, id.RoomID(roomID), reactionID); err != nil {
+			return fmt.Errorf("remove Matrix reaction: %w", err)
+		}
+	}
+	c.mu.Lock()
+	if messages, ok := c.local[roomID]; ok {
+		for key, message := range messages {
+			if message.ID != eventID {
+				continue
+			}
+			delete(message.Reacted, emoji)
+			messages[key] = message
+		}
+	}
+	c.mu.Unlock()
+	c.publishTimeline([]string{roomID}, "")
+	return nil
+}
+
+const (
+	reactionRelationPageLimit = 100
+	reactionRelationMaxPages  = 20
+)
+
+// findOwnReactionID returns the event ID of userID's annotation with emoji, or an empty ID when none exists.
+func findOwnReactionID(ctx context.Context, cli *mautrix.Client, roomID id.RoomID, eventID id.EventID, userID id.UserID, emoji string) (id.EventID, error) {
+	from := ""
+	for range reactionRelationMaxPages {
+		resp, err := cli.GetRelations(ctx, roomID, eventID, &mautrix.ReqGetRelations{
+			RelationType: event.RelAnnotation,
+			EventType:    event.EventReaction,
+			From:         from,
+			Limit:        reactionRelationPageLimit,
+		})
+		if err != nil {
+			return "", fmt.Errorf("list Matrix reactions: %w", err)
+		}
+		for _, evt := range resp.Chunk {
+			if evt.Sender != userID || evt.Content.ParseRaw(evt.Type) != nil {
+				continue
+			}
+			if evt.Content.AsReaction().RelatesTo.Key == emoji {
+				return evt.ID, nil
+			}
+		}
+		if resp.NextBatch == "" || len(resp.Chunk) == 0 {
+			break
+		}
+		from = resp.NextBatch
+	}
+	return "", nil
 }
 
 func (c *Client) RedactMessage(ctx context.Context, roomID, eventID string) error {
@@ -2162,7 +2236,7 @@ func (c *Client) handleBackendEvent(raw any) {
 							if message.Sender != "" {
 								room.LastEventSender = message.Sender
 							}
-							room.Unanswered = roomNeedsReply(room, c.currentUserID(), c.dismissedEvents[roomID])
+							setRoomNeedsReply(&room, c.currentUserID(), c.dismissedEvents[roomID])
 						}
 						c.rooms[roomID] = room
 					}
@@ -2315,6 +2389,7 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 			if isMessage && !evt.Timestamp.Time.Before(room.LastEventAt) {
 				room.LastEventAt = evt.Timestamp.Time
 				room.LastEventID = evt.ID.String()
+				room.LastEventSender = message.Sender
 			}
 			inTimeline := isTimelineEvent(syncRoom.Timeline, evt.RowID)
 			if isMessage && !previewResolved && evt.CanUseForPreview() {
@@ -2335,7 +2410,7 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 				c.pendingTimelineRooms[key] = struct{}{}
 			}
 		}
-		room.Unanswered = roomNeedsReply(room, c.currentUserID(), c.dismissedEvents[key])
+		setRoomNeedsReply(&room, c.currentUserID(), c.dismissedEvents[key])
 		c.rooms[key] = room
 		changed = append(changed, key)
 	}
@@ -2479,8 +2554,8 @@ func roomDisplayName(room *database.Room) string {
 }
 
 // bridgeLabel derives a Beeper-network style badge label from room metadata.
-// gomuks does not expose bridge protocol directly, so this uses the DM user
-// and alias heuristics as a best-effort label (WhatsApp/Telegram/Signal/...).
+// gomuks does not expose bridge protocol directly, so this uses the DM user,
+// alias, name, topic, and member heroes as a best-effort label (WhatsApp/Telegram/Signal/...).
 func bridgeLabel(room *database.Room) string {
 	if room == nil {
 		return ""
@@ -2497,6 +2572,12 @@ func bridgeLabel(room *database.Room) string {
 	}
 	if room.Topic != nil {
 		candidates = append(candidates, strings.ToLower(*room.Topic))
+	}
+	// Bridge ghost IDs such as @instagramgo_123 name the network even when the room name does not.
+	if room.LazyLoadSummary != nil {
+		for _, hero := range room.LazyLoadSummary.Heroes {
+			candidates = append(candidates, strings.ToLower(hero.String()))
+		}
 	}
 	for _, candidate := range candidates {
 		switch {
@@ -2760,8 +2841,9 @@ func (c *Client) refreshRoomFromTimeline(roomID string) {
 	if !ok {
 		return
 	}
-	for i := len(events) - 1; i >= 0; i-- {
-		message, ok := messageFromEvent(events[i])
+	// Timeline.Get returns newest first, so the first message found is the latest.
+	for _, evt := range events {
+		message, ok := messageFromEvent(evt)
 		if !ok {
 			continue
 		}
@@ -2769,14 +2851,14 @@ func (c *Client) refreshRoomFromTimeline(roomID string) {
 			room.LastSeen = message.Timestamp
 			room.Preview = message.Body
 		}
-		if events[i] != nil && !events[i].Timestamp.Time.Before(room.LastEventAt) {
-			room.LastEventAt = events[i].Timestamp.Time
-			room.LastEventID = events[i].ID.String()
-			room.LastEventSender = events[i].Sender.String()
+		if !evt.Timestamp.Time.Before(room.LastEventAt) {
+			room.LastEventAt = evt.Timestamp.Time
+			room.LastEventID = evt.ID.String()
+			room.LastEventSender = evt.Sender.String()
 		}
 		break
 	}
-	room.Unanswered = roomNeedsReply(room, c.currentUserID(), c.dismissedEvents[roomID])
+	setRoomNeedsReply(&room, c.currentUserID(), c.dismissedEvents[roomID])
 	c.rooms[roomID] = room
 }
 
@@ -2921,7 +3003,7 @@ func (c *Client) applyRoomPreview(roomID string, message Message) bool {
 		room.LastEventID = message.ID
 		room.LastEventSender = message.Sender
 	}
-	room.Unanswered = roomNeedsReply(room, c.currentUserID(), c.dismissedEvents[roomID])
+	setRoomNeedsReply(&room, c.currentUserID(), c.dismissedEvents[roomID])
 	c.rooms[roomID] = room
 	return true
 }
@@ -3079,9 +3161,38 @@ func (c *Client) populateEditHistories(ctx context.Context, roomID string, event
 			edits := editsByOriginal[eventID]
 			messages[index].Edited = len(edits) > 0
 			messages[index].EditHistory = editHistoryWithEvents(original, edits)
+			if latest := latestEdit(edits); latest != nil {
+				applyEditedBody(&messages[index], original, latest)
+			}
 		}
 	}
 	return nil
+}
+
+func latestEdit(edits []*database.Event) *database.Event {
+	var latest *database.Event
+	for _, edit := range edits {
+		if latest == nil || edit.Timestamp.Time.After(latest.Timestamp.Time) ||
+			(edit.Timestamp.Time.Equal(latest.Timestamp.Time) && edit.RowID > latest.RowID) {
+			latest = edit
+		}
+	}
+	return latest
+}
+
+// applyEditedBody shows the replacement text, because gomuks only swaps in m.new_content when LastEditRef is set.
+func applyEditedBody(message *Message, original, edit *database.Event) {
+	if message.Redacted || message.Encrypted || message.DecryptionError != "" {
+		return
+	}
+	withEdit := *original
+	withEdit.LastEditRef = edit
+	edited, ok := messageFromEvent(&withEdit)
+	if !ok {
+		return
+	}
+	message.Body = edited.Body
+	message.FormattedBody = edited.FormattedBody
 }
 
 func editHistoryWithEvents(evt *database.Event, edits []*database.Event) []string {
@@ -3169,11 +3280,20 @@ func (c *Client) storeLocalMessage(roomID string, message Message) {
 			room.LastEventAt = message.Timestamp
 			room.LastEventID = message.ID
 			room.LastEventSender = message.Sender
-			room.Unanswered = roomNeedsReply(room, c.currentUserID(), c.dismissedEvents[roomID])
+			setRoomNeedsReply(&room, c.currentUserID(), c.dismissedEvents[roomID])
 		}
 		c.rooms[roomID] = room
 	}
 	c.mu.Unlock()
+}
+
+// roomUnanswered reports whether the latest message is not from the user, ignoring answered marks.
+func roomUnanswered(room Room, userID string) bool {
+	// A stale unread count must not keep a room unanswered after the user replies.
+	if userID != "" && room.LastEventSender == userID {
+		return false
+	}
+	return room.Unread > 0 || (room.LastEventSender != "" && room.LastEventSender != userID)
 }
 
 func roomNeedsReply(room Room, userID, dismissedEventID string) bool {
@@ -3181,13 +3301,13 @@ func roomNeedsReply(room Room, userID, dismissedEventID string) bool {
 		(room.LastEventID == dismissedEventID || (room.LastEventID == "" && dismissedEventID == room.ID)) {
 		return false
 	}
-	// Answering the room clears it immediately. The server's unread count only
-	// drops on a later sync, so a stale Unread > 0 must not keep a room in the
-	// needs-reply view after the user has already replied.
-	if userID != "" && room.LastEventSender == userID {
-		return false
-	}
-	return room.Unread > 0 || (room.LastEventSender != "" && room.LastEventSender != userID)
+	return roomUnanswered(room, userID)
+}
+
+// setRoomNeedsReply sets Unanswered from the latest message and NeedsReply from the answered mark.
+func setRoomNeedsReply(room *Room, userID, dismissedEventID string) {
+	room.Unanswered = roomUnanswered(*room, userID)
+	room.NeedsReply = roomNeedsReply(*room, userID, dismissedEventID)
 }
 
 func (c *Client) currentUserID() string {
