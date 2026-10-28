@@ -78,7 +78,6 @@ jobs:
         run: |
           mkdir -p "dist/Pinger.app/Contents/MacOS" "dist/Pinger.app/Contents/Resources"
           cp build/darwin/icons.icns "dist/Pinger.app/Contents/Resources/icons.icns"
-          cp build/darwin/Assets.car "dist/Pinger.app/Contents/Resources/Assets.car"
           for arch in amd64 arm64; do
             clang_arch="$arch"
             if [ "$arch" = amd64 ]; then clang_arch=x86_64; fi
@@ -102,7 +101,6 @@ jobs:
             <key>CFBundleDisplayName</key><string>Pinger</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleIconFile</key><string>icons</string>
-            <key>CFBundleIconName</key><string>appicon</string>
             <key>CFBundleShortVersionString</key><string>${VERSION}</string>
             <key>CFBundleVersion</key><string>${GITHUB_RUN_NUMBER}</string>
             <key>LSMinimumSystemVersion</key><string>${MACOSX_DEPLOYMENT_TARGET}</string>

@@ -44,9 +44,6 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BINARY_PATH" "$APP_DIR/Contents/MacOS/$BINARY_NAME"
 cp "$ICON_PATH" "$APP_DIR/Contents/Resources/icons.icns"
-if [ -f "$ROOT_DIR/build/darwin/Assets.car" ]; then
-  cp "$ROOT_DIR/build/darwin/Assets.car" "$APP_DIR/Contents/Resources/Assets.car"
-fi
 cp "$ROOT_DIR/build/darwin/Info.plist" "$APP_DIR/Contents/Info.plist"
 
 bundle_version=${VERSION#v}
