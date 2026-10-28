@@ -428,6 +428,20 @@ jobs:
           EOF
           cp "$appdir/fi.mau.pinger.desktop" "$appdir/usr/share/applications/fi.mau.pinger.desktop"
 
+          # AppStream metadata keeps appimagetool from warning about missing upstream metadata.
+          mkdir -p "$appdir/usr/share/metainfo"
+          cat > "$appdir/usr/share/metainfo/fi.mau.pinger.metainfo.xml" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <component type="desktop-application">
+            <id>fi.mau.pinger</id>
+            <name>Pinger</name>
+            <summary>Desktop client for gomuks, a Matrix client</summary>
+            <metadata_license>CC0-1.0</metadata_license>
+            <project_license>AGPL-3.0-or-later</project_license>
+            <launchable type="desktop-id">fi.mau.pinger.desktop</launchable>
+          </component>
+          EOF
+
           for size in 16 32 48 64 128 256 512 1024; do
             dir="$appdir/usr/share/icons/hicolor/${size}x${size}/apps"
             mkdir -p "$dir"

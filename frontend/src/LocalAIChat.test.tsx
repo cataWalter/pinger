@@ -38,7 +38,8 @@ describe('LocalAIChat', () => {
   beforeEach(() => {
     Object.values(service).forEach((mock) => mock.mockReset())
     eventHandlers.clear()
-    let seq = 0
+    // Start above the fixture seqs (1, 2, ...) so appended messages never share a React key.
+    let seq = 100
     service.AICancel.mockResolvedValue(true)
     service.GenerateLocalAIChatTitle.mockResolvedValue('')
     service.AppendLocalAIChatMessage.mockImplementation(async (_chatID: string, message: object) => ({ ...message, seq: ++seq, createdAt: 1 }))
