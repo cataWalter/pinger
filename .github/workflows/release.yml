@@ -63,12 +63,11 @@ jobs:
       - name: Prepare build metadata
         shell: bash
         run: |
-          # Tag builds use the tag. Manual runs (GITHUB_REF_NAME=main) get a dev
-          # version so packaging tools never receive a non-numeric version.
+          # Branch builds get 0.<run number>, which increases with every run.
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="${GITHUB_REF_NAME}"
           else
-            version="0.0.0-dev.${GITHUB_SHA:0:12}"
+            version="0.${GITHUB_RUN_NUMBER}"
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"
           echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
@@ -210,7 +209,7 @@ jobs:
           if ($env:GITHUB_REF_TYPE -eq "tag") {
             $version = $env:GITHUB_REF_NAME
           } else {
-            $version = "0.0.0-dev." + $env:GITHUB_SHA.Substring(0, 12)
+            $version = "0.$env:GITHUB_RUN_NUMBER"
           }
           "VERSION=$version" >> $env:GITHUB_ENV
           "BUILD_DATE=$buildDate" >> $env:GITHUB_ENV
@@ -296,14 +295,13 @@ jobs:
       - name: Prepare build metadata
         shell: bash
         run: |
-          # Debian versions must start with a digit. Manual runs (GITHUB_REF_NAME=main)
-          # previously produced "Version: main" and failed dpkg-deb.
+          # Debian versions must start with a digit.
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="${GITHUB_REF_NAME}"
             deb_version="${GITHUB_REF_NAME#v}"
           else
-            version="0.0.0-dev.${GITHUB_SHA:0:12}"
-            deb_version="0.0.0+dev.${GITHUB_SHA:0:12}"
+            version="0.${GITHUB_RUN_NUMBER}"
+            deb_version="${version}"
           fi
           {
             echo "VERSION=${version}"
@@ -483,11 +481,11 @@ jobs:
         id: tag
         shell: bash
         run: |
-          # Commits to main publish a prerelease tagged by commit.
+          # Branch builds publish a prerelease tagged v0.<run number>.
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             tag="$GITHUB_REF_NAME"
           else
-            tag="v0.0.0-dev.${GITHUB_SHA:0:12}"
+            tag="v0.${GITHUB_RUN_NUMBER}"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
