@@ -430,7 +430,7 @@ jobs:
 
           # AppStream metadata keeps appimagetool from warning about missing upstream metadata.
           mkdir -p "$appdir/usr/share/metainfo"
-          cat > "$appdir/usr/share/metainfo/fi.mau.pinger.metainfo.xml" <<'EOF'
+          cat > "$appdir/usr/share/metainfo/fi.mau.pinger.appdata.xml" <<'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <component type="desktop-application">
             <id>fi.mau.pinger</id>
