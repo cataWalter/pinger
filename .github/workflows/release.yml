@@ -19,15 +19,15 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Render application icon
+      - name: Stage application icon
         run: |
           mkdir -p dist
           cp build/appicon.png dist/pinger.png
 
       - name: Upload application icon
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: application-icon
           path: dist/pinger.png
@@ -39,14 +39,18 @@ jobs:
     needs: [prepare-assets, test]
     env:
       # Matches the deployment target in build/darwin/Taskfile.yml and the
-      # "macOS 12 or newer" support statement in the README.
+      # "macOS 12 or newer" support statement in the README. The CGO flags pin
+      # both compiled objects and the final link to the same target, which
+      # silences the ld "built for newer macOS" warnings.
       MACOSX_DEPLOYMENT_TARGET: "12.0"
+      CGO_CFLAGS: "-mmacosx-version-min=12.0"
+      CGO_LDFLAGS: "-mmacosx-version-min=12.0 -Wl,-no_warn_duplicate_libraries"
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -58,7 +62,7 @@ jobs:
           "${RUNNER_TEMP}/wails-bin/wails3" generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -71,7 +75,7 @@ jobs:
           npm run build
 
       - name: Download application icon
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: application-icon
           path: build-assets
@@ -79,7 +83,14 @@ jobs:
       - name: Prepare build metadata
         shell: bash
         run: |
-          echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          # Tag builds use the tag. Manual runs (GITHUB_REF_NAME=main) get a dev
+          # version so packaging tools never receive a non-numeric version.
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME}"
+          else
+            version="0.0.0-dev.${GITHUB_SHA:0:12}"
+          fi
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
           echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
           mkdir -p dist
 
@@ -151,7 +162,7 @@ jobs:
           ls -lh dist/*.dmg
 
       - name: Upload platform artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-dmgs
           path: dist/*.dmg
@@ -164,10 +175,10 @@ jobs:
     needs: [test]
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -188,7 +199,7 @@ jobs:
           & (Join-Path $env:GOBIN "wails3.exe") generate bindings -f "-tags sqlite_fts5,goolm" -clean=true -ts -i
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -204,7 +215,12 @@ jobs:
         shell: pwsh
         run: |
           $buildDate = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
-          "VERSION=$env:GITHUB_REF_NAME" >> $env:GITHUB_ENV
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME
+          } else {
+            $version = "0.0.0-dev." + $env:GITHUB_SHA.Substring(0, 12)
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
           "BUILD_DATE=$buildDate" >> $env:GITHUB_ENV
           New-Item -ItemType Directory -Force dist | Out-Null
 
@@ -230,8 +246,16 @@ jobs:
           Remove-Item rsrc_windows_amd64.syso
           Compress-Archive -LiteralPath dist/pinger.exe -DestinationPath "dist/Pinger-$($env:VERSION)-windows-amd64.zip"
 
+      - name: Verify Windows icon is embedded
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $icon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path dist/pinger.exe).Path)
+          if ($null -eq $icon) { throw "dist/pinger.exe has no embedded icon" }
+          Write-Host "Embedded icon size: $($icon.Width)x$($icon.Height)"
+
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-zips
           path: dist/*.zip
@@ -242,11 +266,9 @@ jobs:
     name: Build Linux x64 deb and AppImage
     runs-on: ubuntu-24.04
     needs: [test]
-    env:
-      VERSION: ${{ github.ref_name }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: |
@@ -255,7 +277,7 @@ jobs:
             libgtk-4-dev libwebkitgtk-6.0-dev libsqlite3-dev imagemagick libfuse2
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -267,7 +289,7 @@ jobs:
           "${RUNNER_TEMP}/wails-bin/wails3" generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -282,9 +304,20 @@ jobs:
       - name: Prepare build metadata
         shell: bash
         run: |
-          echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
-          echo "DEB_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          # Debian versions must start with a digit. Manual runs (GITHUB_REF_NAME=main)
+          # previously produced "Version: main" and failed dpkg-deb.
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME}"
+            deb_version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-dev.${GITHUB_SHA:0:12}"
+            deb_version="0.0.0+dev.${GITHUB_SHA:0:12}"
+          fi
+          {
+            echo "VERSION=${version}"
+            echo "DEB_VERSION=${deb_version}"
+            echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_ENV"
           mkdir -p dist
 
       - name: Render application icons
@@ -327,7 +360,7 @@ jobs:
           Priority: optional
           Architecture: amd64
           Maintainer: Pinger <pinger@localhost>
-          Depends: libwebkitgtk-6.0-4
+          Depends: libgtk-4-1, libwebkitgtk-6.0-4
           Description: Desktop client for gomuks -- a Matrix client
            Pinger is a desktop client for gomuks, a Matrix client with
            SQLite caching and media storage.
@@ -359,6 +392,9 @@ jobs:
 
           dpkg-deb --root-owner-group --build "$stage" \
             "dist/Pinger-${VERSION}-linux-amd64.deb"
+          # Fail the build if the package does not carry the application icon.
+          dpkg-deb -c "dist/Pinger-${VERSION}-linux-amd64.deb" \
+            | grep -q 'usr/share/icons/hicolor/256x256/apps/pinger.png'
           ls -lh dist/*.deb
 
       - name: Build AppImage
@@ -411,7 +447,7 @@ jobs:
           ls -lh dist/*.AppImage
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-packages
           path: |
@@ -427,7 +463,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Download platform artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -437,7 +473,7 @@ jobs:
         run: shasum -a 256 ./*.dmg ./*.zip ./*.deb ./*.AppImage > checksums.txt
 
       - name: Publish release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: |

@@ -891,8 +891,11 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
     })
   }, [isImage, roomID, message.id])
 
+  const prepareMediaRef = useRef(prepareMedia)
+  prepareMediaRef.current = prepareMedia
+
   useEffect(() => {
-    if (isImage && nearViewport) void prepareMedia()
+    if (isImage && nearViewport) void prepareMediaRef.current()
   }, [isImage, nearViewport, roomID, message.id])
 
   useEffect(() => {

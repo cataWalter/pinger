@@ -10,4 +10,22 @@ export default defineConfig({
     strictPort: true,
   },
   plugins: [react(), wails("./bindings")],
+  build: {
+    rolldownOptions: {
+      output: {
+        // Split heavy vendor libraries out of the markdown chunk so no single
+        // chunk exceeds Vite's 500 kB warning threshold.
+        codeSplitting: {
+          groups: [
+            { name: "katex", test: /[\\/]node_modules[\\/]katex[\\/]/, priority: 30 },
+            { name: "highlight", test: /[\\/]node_modules[\\/](highlight\.js|lowlight)[\\/]/, priority: 30 },
+            { name: "react-vendor", test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 20 },
+            { name: "emoji", test: /[\\/]node_modules[\\/]emoji-picker-react[\\/]/, priority: 25 },
+            { name: "franc", test: /[\\/]node_modules[\\/]franc-min[\\/]/, priority: 25 },
+            { name: "vendor", test: /[\\/]node_modules[\\/]/, priority: 1 },
+          ],
+        },
+      },
+    },
+  },
 });

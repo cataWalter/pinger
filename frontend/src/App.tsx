@@ -1,4 +1,4 @@
-import { lazy, Fragment, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { lazy, Fragment, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Events } from '@wailsio/runtime'
 import { ArrowDown, ArrowLeft, ArrowUpRight, Archive, ArchiveRestore, Bold, ChevronDown, Bell, BellOff, BellRing, Check, Clock3, Code, CircleAlert, CircleDot, Copy, LockKeyhole, MessageCircleMore, Paperclip, Pencil, Reply, RotateCcw, ScrollText, Search, Settings, Send, ShieldCheck, Languages, Smile, Sparkles, Star, Trash2, UsersRound, X, Download, EyeOff, Folder, FolderPlus, GraduationCap, Heading1, Images, ImagePlus, Italic, Link, List, ListOrdered, Mic, Plus, Quote, Upload, Square, SquareCode, Strikethrough, Video } from 'lucide-react'
 import { QuickSwitcher } from './QuickSwitcher'
@@ -283,7 +283,7 @@ function AppBody() {
     historyRoomIDRef.current === selectedRoomID
       ? newestOtherAvatar(messages)
       : ''
-  ), [messages, selectedRoom?.avatar, selectedRoomID, historyRoomIDRef.current])
+  ), [messages, selectedRoom?.avatar, selectedRoomID])
   const selectedRoomAvatarSource = useMemo(() => matrixMXCMediaURL(selectedRoomAvatar), [selectedRoomAvatar])
   const typingStatus = formatTypingStatus(typingUsers, roomMembers, messages, selectedRoom?.direct ? selectedRoom.name : '')
   const imageEngineReady = preferenceString(preferences, 'ai.image.binary_path', '') !== '' && preferenceString(preferences, 'ai.image.model_path', '') !== ''
@@ -448,9 +448,10 @@ function AppBody() {
     onStartDirectChat: startDirectChat,
   }
 
+  const audioInputDevicePreference = preferenceString(preferences, 'audio.input_device', '')
   useEffect(() => {
-    setSelectedAudioInputDeviceId(preferenceString(preferences, 'audio.input_device', ''))
-  }, [preferences['audio.input_device']])
+    setSelectedAudioInputDeviceId(audioInputDevicePreference)
+  }, [audioInputDevicePreference])
 
   useEffect(() => {
     let active = true
@@ -473,6 +474,10 @@ function AppBody() {
   editTargetRef.current = editTarget
   const inboxAccountCount = snapshot?.accounts?.length ?? 0
   const activeAccountID = snapshot?.activeAccountId ?? ''
+  const archivedPreferenceKey = useCallback((roomID: string, accountID = '') => `room.archived.${accountID || activeAccountID || 'primary'}.${roomID}`, [activeAccountID])
+  // Subscription handlers read these through a ref so the event listeners are attached once.
+  const matrixUpdateHandlersRef = useRef({ archivedPreferenceKey, deliverNotification, queueNotificationBatch })
+  matrixUpdateHandlersRef.current = { archivedPreferenceKey, deliverNotification, queueNotificationBatch }
   useEffect(() => {
     if (inboxAccountCount < 2) return
     let active = true
@@ -524,13 +529,13 @@ function AppBody() {
         : 0
       return favoriteOrder || compareRoomActivity(left, right, today)
     })
-  }, [listRooms, search, preferences, roomScope, roomRefinements, localAIFolderFilter, localAIFolderIDByRoomID])
+  }, [listRooms, search, preferences, roomScope, roomRefinements, localAIFolderFilter, localAIFolderIDByRoomID, archivedPreferenceKey])
   // The open private chat takes the highlight, because the Matrix selection is cleared while it is open.
   const activeListRoomID = localAIChatOpen ? (localAIChatId ? localAIRoomID(localAIChatId) : '') : selectedRoomID
   const selectedRoomListIndex = filteredRooms.findIndex((room) => room.id === activeListRoomID && isActiveAccountRoom(room))
   const quickSwitcherRooms = useMemo(() => rankQuickSwitcherRooms(rooms, quickSwitcherQuery), [rooms, quickSwitcherQuery])
-  const needsReplyCount = useMemo(() => scopedRooms.filter((room) => isNeedsReplyRoom(room) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences])
-  const readRoomCount = useMemo(() => rooms.filter((room) => room.unread === 0 && !room.markedUnread && !preferenceBoolean(preferences, archivedPreferenceKey(room.id))).length, [rooms, preferences])
+  const needsReplyCount = useMemo(() => scopedRooms.filter((room) => isNeedsReplyRoom(room) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences, archivedPreferenceKey])
+  const readRoomCount = useMemo(() => rooms.filter((room) => room.unread === 0 && !room.markedUnread && !preferenceBoolean(preferences, archivedPreferenceKey(room.id))).length, [rooms, preferences, archivedPreferenceKey])
   const contextMenuRooms = roomContextMenu
     ? (selectedRoomIDs.includes(roomContextMenu.roomID) ? selectedRoomIDs : [roomContextMenu.roomID])
       .map((roomID) => rooms.find((room) => room.id === roomID))
@@ -984,8 +989,8 @@ function AppBody() {
         const updatedRoom = (update.rooms ?? []).find((room) => room.id === roomID)
         const previousRoom = previousRooms.find((room) => room.id === roomID)
         if (!updatedRoom?.lastEventId || !previousRoom || updatedRoom.lastEventId === previousRoom.lastEventId) continue
-        const key = archivedPreferenceKey(roomID, updatedRoom.accountId)
-        if (preferenceBoolean(preferencesRef.current, key)) void setPreference(key, false)
+        const key = matrixUpdateHandlersRef.current.archivedPreferenceKey(roomID, updatedRoom.accountId)
+        if (preferenceBoolean(preferencesRef.current, key)) void setPreferenceRef.current(key, false)
       }
       for (const notification of update.notifications ?? []) {
         const currentPreferences = preferencesRef.current
@@ -999,11 +1004,11 @@ function AppBody() {
         const batchSeconds = preferenceNumber(currentPreferences, 'notifications.batch_seconds', 0, 0, 30)
         const immediate = Boolean(oneTimeCode) && preferenceBoolean(currentPreferences, 'notifications.otp_immediate', true)
         if (batchSeconds > 0 && !immediate) {
-          queueNotificationBatch(notification, batchSeconds)
+          matrixUpdateHandlersRef.current.queueNotificationBatch(notification, batchSeconds)
           continue
         }
         const { title, body } = notificationText(currentPreferences, notification, notificationRoomName(notification))
-        deliverNotification(currentPreferences, notification, title, body)
+        matrixUpdateHandlersRef.current.deliverNotification(currentPreferences, notification, title, body)
       }
       // Background sync errors are not shown as banners.
       // Belt-and-braces: if the selected room's sidebar preview moved past the
@@ -1118,7 +1123,7 @@ function AppBody() {
       unsubscribeAttachmentSent()
       unsubscribeScheduledReminder()
     }
-  }, [])
+  }, [setSettingsOpen, setSettingsTab])
 
   useMatrixBatch<MatrixUpdate>((batch) => {
     for (const delta of batch.room_deltas ?? []) {
@@ -1350,6 +1355,9 @@ function AppBody() {
     }
   }
 
+  const loadOlderMessagesRef = useRef(loadOlderMessages)
+  loadOlderMessagesRef.current = loadOlderMessages
+
   // Keep the viewport filled. A room whose newest page is shorter than the
   // timeline box can't be scrolled at all, so the scroll handler below would
   // never fire and older history would stay stuck behind the button. This
@@ -1360,7 +1368,7 @@ function AppBody() {
     if (!selectedRoomID || loadingHistory || loadingOlder || !hasOlder) return
     if (!timeline || timeline.clientHeight <= 0) return
     if (timeline.scrollHeight > timeline.clientHeight) return
-    void loadOlderMessages()
+    void loadOlderMessagesRef.current()
   }, [selectedRoomID, loadingHistory, loadingOlder, hasOlder, messages])
 
   function messageSearchRequest(nextBatch = ''): MessageSearchRequest | null {
@@ -1476,10 +1484,6 @@ function AppBody() {
   }
 
   setPreferenceRef.current = setPreference
-
-  function archivedPreferenceKey(roomID: string, accountID = '') {
-    return `room.archived.${accountID || snapshot?.activeAccountId || 'primary'}.${roomID}`
-  }
 
   function nextRoomByBehavior(excludedRoomIDs: Set<string>, behavior: string) {
     const candidates = filteredRooms.filter((room) => !excludedRoomIDs.has(room.id) && isActiveAccountRoom(room))
@@ -1621,12 +1625,15 @@ function AppBody() {
     if (archivedRoomIDs.has(selectedRoomID)) showRoom(nextRoomAfterArchive(archivedRoomIDs))
   }
 
+  const archiveInactiveRoomsRef = useRef(archiveInactiveRooms)
+  archiveInactiveRoomsRef.current = archiveInactiveRooms
+
   useEffect(() => {
     if (!automaticArchiveEnabled) return
     const runArchive = () => {
       if (automaticArchiveInFlightRef.current) return
       automaticArchiveInFlightRef.current = true
-      void archiveInactiveRooms().finally(() => {
+      void archiveInactiveRoomsRef.current().finally(() => {
         automaticArchiveInFlightRef.current = false
       })
     }
