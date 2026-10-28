@@ -2,12 +2,17 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags:
       - "v*"
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -463,15 +468,28 @@ jobs:
 
   publish:
     name: Publish GitHub release
-    if: startsWith(github.ref, 'refs/tags/')
     needs: [build, build-windows, build-linux]
     runs-on: macos-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - name: Download platform artifacts
         uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          # Commits to main publish a prerelease tagged by commit.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v0.0.0-dev.${GITHUB_SHA:0:12}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Generate SHA-256 checksums
         working-directory: dist
@@ -480,6 +498,10 @@ jobs:
       - name: Publish release assets
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ github.ref_type != 'tag' }}
+          make_latest: ${{ github.ref_type == 'tag' }}
           generate_release_notes: true
           files: |
             dist/*.dmg
@@ -487,3 +509,11 @@ jobs:
             dist/*.deb
             dist/*.AppImage
             dist/checksums.txt
+
+  update-tap:
+    name: Update Homebrew cask
+    needs: [publish]
+    uses: ./.github/workflows/update-tap.yml
+    with:
+      tag: ${{ needs.publish.outputs.tag }}
+    secrets: inherit

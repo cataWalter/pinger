@@ -1,78 +1,79 @@
 name: Update Homebrew Tap
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to publish in the cask (e.g. v0.1.8)
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag di rilascio (es. v0.1.8)'
+        description: Release tag to publish in the cask (e.g. v0.1.8)
         required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-tap
+  cancel-in-progress: false
 
 jobs:
   update-cask:
-    runs-on: macos-latest
+    name: Update pinger cask
+    runs-on: ubuntu-latest
+    env:
+      REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
     steps:
-      - name: Resolve Tag
-        id: vars
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          else
-            TAG="${{ github.event.release.tag_name }}"
-          fi
-          VERSION="${TAG#v}"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Download DMG and Compute SHA-256
-        id: checksum
+      - name: Download DMG and compute SHA-256
+        id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.vars.outputs.tag }}"
-          VERSION="${{ steps.vars.outputs.version }}"
-          
-          ASSET_NAME=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq '.assets[] | select(.name | endswith(".dmg")) | .name' | head -n 1)
-          if [ -z "$ASSET_NAME" ]; then
-            ASSET_NAME="Pinger-v${VERSION}-macos-universal.dmg"
+          set -euo pipefail
+          assets="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
+          asset="$(printf '%s\n' "$assets" | grep '\.dmg$' | head -n 1 || true)"
+          if [ -z "$asset" ]; then
+            echo "No DMG asset on release $TAG" >&2
+            exit 1
           fi
-          
-          gh release download "$TAG" --repo "${{ github.repository }}" --pattern "$ASSET_NAME" --clobber
-          SHA256=$(shasum -a 256 "$ASSET_NAME" | awk '{print $1}')
-          
-          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
-          echo "asset_name=$ASSET_NAME" >> $GITHUB_OUTPUT
+          mkdir -p "$RUNNER_TEMP/dmg"
+          gh release download "$TAG" --repo "$REPO" --pattern "$asset" --dir "$RUNNER_TEMP/dmg" --clobber
+          sha="$(sha256sum "$RUNNER_TEMP/dmg/$asset" | awk '{print $1}')"
+          {
+            echo "version=${TAG#v}"
+            echo "asset=$asset"
+            echo "sha256=$sha"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Checkout homebrew-tap
-        uses: actions/checkout@v4
+      - name: Check out homebrew-tap
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/homebrew-tap
           token: ${{ secrets.TAP_GITHUB_TOKEN }}
           path: tap
 
-      - name: Update Cask
+      - name: Write cask
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          SHA256: ${{ steps.release.outputs.sha256 }}
+          ASSET: ${{ steps.release.outputs.asset }}
         run: |
-          VERSION="${{ steps.vars.outputs.version }}"
-          SHA256="${{ steps.checksum.outputs.sha256 }}"
-          ASSET_NAME="${{ steps.checksum.outputs.asset_name }}"
-          
-          if [[ "$ASSET_NAME" == *"v${VERSION}"* ]]; then
-            DMG_PATTERN="Pinger-v#{version}-macos-universal.dmg"
-          else
-            DMG_PATTERN="Pinger-#{version}-macos-universal.dmg"
-          fi
-
+          set -euo pipefail
           mkdir -p tap/Casks
-          cat <<CASK > tap/Casks/pinger.rb
+          cat > tap/Casks/pinger.rb <<CASK
           cask "pinger" do
             version "${VERSION}"
             sha256 "${SHA256}"
 
-            url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${DMG_PATTERN}"
+            url "https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
             name "Pinger"
             desc "Triage-focused Matrix desktop client with local AI assistance"
-            homepage "https://github.com/${{ github.repository }}"
+            homepage "https://github.com/${REPO}"
 
             depends_on macos: ">= :monterey"
 
@@ -90,16 +91,21 @@ jobs:
             ]
           end
           CASK
+          ruby -c tap/Casks/pinger.rb
 
-      - name: Commit and Push to homebrew-tap
+      - name: Commit and push to homebrew-tap
+        working-directory: tap
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
-          cd tap
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/pinger.rb
           if git diff --staged --quiet; then
-            echo "Nessuna modifica nel cask."
-          else
-            git commit -m "Update pinger cask to v${{ steps.vars.outputs.version }}"
-            git push origin main
+            echo "Cask already up to date for ${VERSION}."
+            exit 0
           fi
+          git commit -m "Update pinger cask to ${VERSION}"
+          git pull --rebase origin main
+          git push origin HEAD:main
