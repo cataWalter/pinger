@@ -14,6 +14,10 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # Last run number released as v0.<run>; later branch builds count from 0.1.
+  RELEASE_VERSION_OFFSET: "24"
+
 jobs:
   test:
     name: Test and vet
@@ -63,11 +67,10 @@ jobs:
       - name: Prepare build metadata
         shell: bash
         run: |
-          # Branch builds get 0.<run number>, which increases with every run.
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="${GITHUB_REF_NAME}"
           else
-            version="0.${GITHUB_RUN_NUMBER}"
+            version="0.$((GITHUB_RUN_NUMBER - RELEASE_VERSION_OFFSET))"
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"
           echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
@@ -133,17 +136,7 @@ jobs:
           hdiutil convert "$rw_dmg" -format UDZO -imagekey zlib-level=9 -o "$dmg"
           rm -rf "$work" "$rw_dmg"
 
-          # The Finder file icon lives in the DMG's resource fork.
-          icon_dir="$(mktemp -d)"
-          cp build/darwin/dmg-file-icon.png "$icon_dir/icon.png"
-          sips -i "$icon_dir/icon.png" >/dev/null
-          DeRez -only icns "$icon_dir/icon.png" > "$icon_dir/file-icon.rsrc"
-          Rez -append "$icon_dir/file-icon.rsrc" -o "$dmg"
-          SetFile -a C "$dmg"
-          rm -rf "$icon_dir"
-
           hdiutil verify "$dmg"
-          [[ "$(GetFileInfo -a "$dmg")" == *C* ]]
           hdiutil attach "$dmg" -readonly -noautoopen -nobrowse -mountpoint "$mount_point" >/dev/null
           test -f "$mount_point/.VolumeIcon.icns"
           [[ "$(GetFileInfo -a "$mount_point")" == *C* ]]
@@ -207,7 +200,7 @@ jobs:
           if ($env:GITHUB_REF_TYPE -eq "tag") {
             $version = $env:GITHUB_REF_NAME
           } else {
-            $version = "0.$env:GITHUB_RUN_NUMBER"
+            $version = "0.$([int]$env:GITHUB_RUN_NUMBER - [int]$env:RELEASE_VERSION_OFFSET)"
           }
           "VERSION=$version" >> $env:GITHUB_ENV
           "BUILD_DATE=$buildDate" >> $env:GITHUB_ENV
@@ -298,7 +291,7 @@ jobs:
             version="${GITHUB_REF_NAME}"
             deb_version="${GITHUB_REF_NAME#v}"
           else
-            version="0.${GITHUB_RUN_NUMBER}"
+            version="0.$((GITHUB_RUN_NUMBER - RELEASE_VERSION_OFFSET))"
             deb_version="${version}"
           fi
           {
@@ -479,11 +472,10 @@ jobs:
         id: tag
         shell: bash
         run: |
-          # Branch builds publish a prerelease tagged v0.<run number>.
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             tag="$GITHUB_REF_NAME"
           else
-            tag="v0.${GITHUB_RUN_NUMBER}"
+            tag="v0.$((GITHUB_RUN_NUMBER - RELEASE_VERSION_OFFSET))"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
