@@ -14,29 +14,10 @@ jobs:
     name: Test and vet
     uses: ./.github/workflows/ci.yml
 
-  prepare-assets:
-    name: Prepare application icon
-    runs-on: macos-latest
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v7
-
-      - name: Stage application icon
-        run: |
-          mkdir -p dist
-          cp build/appicon.png dist/pinger.png
-
-      - name: Upload application icon
-        uses: actions/upload-artifact@v7
-        with:
-          name: application-icon
-          path: dist/pinger.png
-          retention-days: 7
-
   build:
     name: Build macOS universal DMGs
     runs-on: macos-latest
-    needs: [prepare-assets, test]
+    needs: [test]
     env:
       # Matches the deployment target in build/darwin/Taskfile.yml and the
       # "macOS 12 or newer" support statement in the README. The CGO flags pin
@@ -74,12 +55,6 @@ jobs:
           npm ci
           npm run build
 
-      - name: Download application icon
-        uses: actions/download-artifact@v8
-        with:
-          name: application-icon
-          path: build-assets
-
       - name: Prepare build metadata
         shell: bash
         run: |
@@ -97,18 +72,9 @@ jobs:
       - name: Build universal macOS app
         shell: bash
         run: |
-          mkdir -p "dist/Pinger.app/Contents/MacOS" "dist/Pinger.app/Contents/Resources" "dist/Pinger.iconset"
-          for size in 16 32 128 256 512; do
-            sips -z "$size" "$size" build-assets/pinger.png \
-              --out "dist/Pinger.iconset/icon_${size}x${size}.png" >/dev/null
-          done
-          for size in 16 32 128 256 512; do
-            double=$((size * 2))
-            sips -z "$double" "$double" build-assets/pinger.png \
-              --out "dist/Pinger.iconset/icon_${size}x${size}@2x.png" >/dev/null
-          done
-          iconutil -c icns "dist/Pinger.iconset" \
-            -o "dist/Pinger.app/Contents/Resources/AppIcon.icns"
+          mkdir -p "dist/Pinger.app/Contents/MacOS" "dist/Pinger.app/Contents/Resources"
+          cp build/darwin/icons.icns "dist/Pinger.app/Contents/Resources/icons.icns"
+          cp build/darwin/Assets.car "dist/Pinger.app/Contents/Resources/Assets.car"
           for arch in amd64 arm64; do
             clang_arch="$arch"
             if [ "$arch" = amd64 ]; then clang_arch=x86_64; fi
@@ -131,7 +97,8 @@ jobs:
             <key>CFBundleName</key><string>Pinger</string>
             <key>CFBundleDisplayName</key><string>Pinger</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleIconFile</key><string>AppIcon</string>
+            <key>CFBundleIconFile</key><string>icons</string>
+            <key>CFBundleIconName</key><string>appicon</string>
             <key>CFBundleShortVersionString</key><string>${VERSION}</string>
             <key>CFBundleVersion</key><string>${GITHUB_RUN_NUMBER}</string>
             <key>LSMinimumSystemVersion</key><string>${MACOSX_DEPLOYMENT_TARGET}</string>
@@ -146,19 +113,39 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # GUI disk image: the signed app plus an /Applications symlink so the
-          # app can be dragged into place in Finder.
-          gui_stage="$(mktemp -d)"
-          cp -R "dist/Pinger.app" "$gui_stage/"
-          ln -s /Applications "$gui_stage/Applications"
-          hdiutil create \
-            -volname "Pinger" \
-            -srcfolder "$gui_stage" \
-            -ov -format UDZO -imagekey zlib-level=9 \
-            "dist/Pinger-${VERSION}-macos-universal.dmg"
-          rm -rf "$gui_stage"
+          dmg="dist/Pinger-${VERSION}-macos-universal.dmg"
+          work="$(mktemp -d)"
+          rw_dmg="$(mktemp -d)/rw.dmg"
+          mount_point="$(mktemp -d)"
 
-          hdiutil verify "dist/Pinger-${VERSION}-macos-universal.dmg"
+          # Signed app, /Applications symlink for drag-install, and the hidden volume icon.
+          cp -R "dist/Pinger.app" "$work/"
+          ln -s /Applications "$work/Applications"
+          cp build/darwin/icons.icns "$work/.VolumeIcon.icns"
+          SetFile -c icnC "$work/.VolumeIcon.icns"
+
+          hdiutil create -volname "Pinger" -srcfolder "$work" -ov -format UDRW "$rw_dmg"
+          hdiutil attach "$rw_dmg" -readwrite -noverify -noautoopen -nobrowse -mountpoint "$mount_point"
+          SetFile -a C "$mount_point"
+          hdiutil detach "$mount_point" -quiet
+          hdiutil convert "$rw_dmg" -format UDZO -imagekey zlib-level=9 -o "$dmg"
+          rm -rf "$work" "$rw_dmg"
+
+          # The Finder file icon lives in the DMG's resource fork.
+          icon_dir="$(mktemp -d)"
+          cp build/darwin/dmg-file-icon.png "$icon_dir/icon.png"
+          sips -i "$icon_dir/icon.png" >/dev/null
+          DeRez -only icns "$icon_dir/icon.png" > "$icon_dir/file-icon.rsrc"
+          Rez -append "$icon_dir/file-icon.rsrc" -o "$dmg"
+          SetFile -a C "$dmg"
+          rm -rf "$icon_dir"
+
+          hdiutil verify "$dmg"
+          [[ "$(GetFileInfo -a "$dmg")" == *C* ]]
+          hdiutil attach "$dmg" -readonly -noautoopen -nobrowse -mountpoint "$mount_point" >/dev/null
+          test -f "$mount_point/.VolumeIcon.icns"
+          [[ "$(GetFileInfo -a "$mount_point")" == *C* ]]
+          hdiutil detach "$mount_point" -quiet
           ls -lh dist/*.dmg
 
       - name: Upload platform artifacts
