@@ -517,6 +517,9 @@ func streamOpenAICompatibleCompletion(reader io.Reader, maxBytes int64, onChunk 
 			continue
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" {
+			continue
+		}
 		if data == "[DONE]" {
 			break
 		}
@@ -535,7 +538,7 @@ func streamOpenAICompatibleCompletion(reader io.Reader, maxBytes int64, onChunk 
 			if readErr := scanner.Err(); readErr != nil {
 				return "", fmt.Errorf("read OpenAI-compatible stream: %w", readErr)
 			}
-			return "", fmt.Errorf("decode OpenAI-compatible stream: %w", err)
+			return "", fmt.Errorf("decode OpenAI-compatible stream: %w (payload %q)", err, data)
 		}
 		if chunk.Error != nil {
 			return "", fmt.Errorf("AI endpoint error: %s", chunk.Error.Message)
