@@ -24,7 +24,7 @@ import { useMatrixBatch } from './useMatrixBatch'
 import { DialogSurface } from './DialogSurface'
 import LocalAIChat from './LocalAIChat'
 import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID, LOCAL_AI_FOLDER_NAME_CHARACTERS, LOCAL_AI_TITLE_CHARACTERS, type LocalAIChatKind, useLocalAIChatList } from './localAIChats'
-import { type MatrixUpdate, type MatrixNotification, type PreferenceValues, type RoomScope, type RoomRefinements, type OutgoingMessage, type MessageMenuItem, type AIAcceptAction, type AIPanel, type AIStreamChunk, type AIStreamHandler, type LanguageTutorState, type ChatTranslationState, type ChatExportState, type ChatExportProgressEvent, type ScheduledDraft, type MediaGalleryFilter, hasGalleryMedia, mediaGalleryMessageKey, type TimelineMessageActions, type RoomButtonActions, IN_APP_NOTICE_TIMEOUT_MS, EMPTY_ROOMS, newestPersistentMessage, formatTypingStatus, newestOtherAvatar, describeError, chatExportStatusText, isTextEntryTarget, displayMessageBody, initials, Avatar, localDateTimeInputValue, preferenceBoolean, preferenceString, preferenceNumber, parseTimeSuggestionMinutes, reconcileRoomSnapshots, mergeTimelineMessages, timelineMessageID, incomingSinceOwnMessage, isDirectLikeRoom, isUnansweredRoom, isNeedsReplyRoom, isUnreadRoom, primaryModifierLabel, TimelineMessageList, roomActivityAt, compareRoomActivity, rankQuickSwitcherRooms, playNotificationSound, notificationAllowed, notificationTone, notificationText, detectOneTimeCode, type CaptureKind, type RecordedUpload, type StagedAttachment, type MediaApprovalRequest, mediaKindForFile, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, requestLocalAsset, encodeVoiceNoteWav, RoomButton, reportRoomListVisibleRange, VirtualRoomList, IconTooltip } from './appShared'
+import { type MatrixUpdate, type MatrixNotification, type PreferenceValues, type RoomScope, type RoomRefinements, type OutgoingMessage, type MessageMenuItem, type AIAcceptAction, type AIPanel, type AIStreamChunk, type AIStreamHandler, type LanguageTutorState, type ChatTranslationState, type ChatExportState, type ChatExportProgressEvent, type ScheduledDraft, type MediaGalleryFilter, hasGalleryMedia, mediaGalleryMessageKey, type TimelineMessageActions, type RoomButtonActions, IN_APP_NOTICE_TIMEOUT_MS, EMPTY_ROOMS, newestPersistentMessage, formatTypingStatus, newestOtherAvatar, describeError, chatExportStatusText, isTextEntryTarget, displayMessageBody, initials, Avatar, localDateTimeInputValue, preferenceBoolean, preferenceString, preferenceNumber, parseTimeSuggestionMinutes, reconcileRoomSnapshots, mergeTimelineMessages, timelineMessageID, incomingSinceOwnMessage, isDirectLikeRoom, isUnansweredRoom, isNeedsReplyRoom, isUnreadRoom, primaryModifierLabel, TimelineMessageList, roomActivityAt, compareRoomActivity, rankQuickSwitcherRooms, playNotificationSound, notificationAllowed, notificationTone, notificationText, detectOneTimeCode, type NotificationText, type CaptureKind, type RecordedUpload, type StagedAttachment, type MediaApprovalRequest, mediaKindForFile, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, requestLocalAsset, encodeVoiceNoteWav, RoomButton, reportRoomListVisibleRange, VirtualRoomList, IconTooltip } from './appShared'
 
 const SettingsDialog = lazy(() => import('./SettingsDialog').then((module) => ({ default: module.SettingsDialog })))
 const AIResultDialogs = lazy(() => import('./AIResultDialogs').then((module) => ({ default: module.AIResultDialogs })))
@@ -1007,8 +1007,8 @@ function AppBody() {
           matrixUpdateHandlersRef.current.queueNotificationBatch(notification, batchSeconds)
           continue
         }
-        const { title, body } = notificationText(currentPreferences, notification, notificationRoomName(notification))
-        matrixUpdateHandlersRef.current.deliverNotification(currentPreferences, notification, title, body)
+        const text = notificationText(currentPreferences, notification, notificationRoomName(notification))
+        matrixUpdateHandlersRef.current.deliverNotification(currentPreferences, notification, text)
       }
       // Background sync errors are not shown as banners.
       // Belt-and-braces: if the selected room's sidebar preview moved past the
@@ -1083,7 +1083,7 @@ function AppBody() {
       showScheduledNotice(`${roomName}: ${body}`)
       void refreshScheduledJobs()
       if (nativeNotificationsRef.current) {
-        void AppService.SendNotification(`Reminder · ${roomName}`, body, reminder.roomId).catch((notificationError: unknown) => setScheduledJobsError(describeError(notificationError)))
+        void AppService.SendNotification({ title: `Reminder · ${roomName}`, subtitle: '', body, roomId: reminder.roomId, accountId: '', senderAvatar: '' }).catch((notificationError: unknown) => setScheduledJobsError(describeError(notificationError)))
       } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try {
           const notification = new Notification(`Reminder · ${roomName}`, { body })
@@ -2353,16 +2353,23 @@ function AppBody() {
     playNotificationSound(preferenceNumber(preferences, 'notifications.volume', 50), notificationTone(preferences, category))
   }
 
-  function deliverNotification(preferences: PreferenceValues, notification: MatrixNotification, title: string, body: string, scheduleRepeat = true) {
+  function deliverNotification(preferences: PreferenceValues, notification: MatrixNotification, text: NotificationText, scheduleRepeat = true) {
     if (nativeNotificationsRef.current) {
-      void AppService.SendNotification(title, body, notification.roomId)
+      void AppService.SendNotification({
+        title: text.title,
+        subtitle: text.subtitle,
+        body: text.body,
+        roomId: notification.roomId,
+        accountId: notification.accountId ?? '',
+        senderAvatar: notification.senderAvatar ?? '',
+      })
         .then((delivered) => {
           if (delivered) playNotificationAlert(preferences, notification.category)
         })
         .catch((notificationError: unknown) => setError(describeError(notificationError)))
     } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       try {
-        const systemNotification = new Notification(title, { body })
+        const systemNotification = new Notification(text.title, { body: text.subtitle ? `${text.subtitle}: ${text.body}` : text.body })
         systemNotification.onclick = () => {
           window.focus()
           showRoom(notification.roomId)
@@ -2395,15 +2402,18 @@ function AppBody() {
     const [first] = batch.notifications
     if (!notificationAllowed(preferences, roomID, first.category)) return
     if (batch.notifications.length === 1) {
-      const { title, body } = notificationText(preferences, first, notificationRoomName(first))
-      deliverNotification(preferences, first, title, body)
+      deliverNotification(preferences, first, notificationText(preferences, first, notificationRoomName(first)))
       return
     }
     const hidden = preferenceString(preferences, 'notifications.privacy', 'Sender and message preview') === 'Hidden content'
     const senders = [...new Set(batch.notifications.map((item) => item.sender).filter(Boolean))]
-    const title = hidden ? 'Matrix' : notificationRoomName(first)
-    const body = hidden ? 'New activity' : `${batch.notifications.length} new messages${senders.length > 0 ? ` from ${senders.slice(0, 3).join(', ')}` : ''}`
-    deliverNotification(preferences, first, title, body)
+    const roomName = notificationRoomName(first)
+    const singleSender = senders.length === 1 && first.category !== 'direct'
+    const body = `${batch.notifications.length} new messages${senders.length > 0 ? ` from ${senders.slice(0, 3).join(', ')}` : ''}`
+    const text: NotificationText = hidden
+      ? { title: 'Matrix', subtitle: '', body: 'New activity' }
+      : { title: senders.length === 1 ? senders[0] : roomName, subtitle: singleSender ? roomName : '', body }
+    deliverNotification(preferences, first, text)
   }
 
   function scheduleRepeatReminder(preferences: PreferenceValues, notification: MatrixNotification) {
@@ -2421,7 +2431,7 @@ function AppBody() {
       if (!notificationAllowed(current, notification.roomId, notification.category)) return
       const roomName = notificationRoomName(notification)
       const hidden = preferenceString(current, 'notifications.privacy', 'Sender and message preview') === 'Hidden content'
-      deliverNotification(current, notification, hidden ? 'Matrix' : `Still unread · ${roomName}`, 'You still have unread messages.', false)
+      deliverNotification(current, notification, { title: hidden ? 'Matrix' : `Still unread · ${roomName}`, subtitle: '', body: 'You still have unread messages.' }, false)
     }, minutes * 60_000)
     reminders.set(notification.roomId, timer)
   }

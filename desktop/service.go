@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"mychat/logging"
 	"mychat/matrix"
 	"mychat/notifications"
 	sharedpreferences "mychat/preferences"
@@ -36,6 +38,7 @@ type AppService struct {
 	sharedPreferences      *sharedpreferences.Store
 	preferencesUnsubscribe func()
 	notifier               notifications.Notifier
+	permissionMu           sync.Mutex
 	ctx                    context.Context
 	cancel                 context.CancelFunc
 	quit                   func()
@@ -214,11 +217,14 @@ type MediaCleanupResult struct {
 }
 
 type Notification struct {
-	RoomID  string `json:"roomId"`
-	Room    string `json:"room"`
-	Sender  string `json:"sender"`
-	Body    string `json:"body"`
-	Mention bool   `json:"mention"`
+	RoomID       string `json:"roomId"`
+	AccountID    string `json:"accountId"`
+	Room         string `json:"room"`
+	Sender       string `json:"sender"`
+	SenderAvatar string `json:"senderAvatar"`
+	Body         string `json:"body"`
+	Mention      bool   `json:"mention"`
+	Category     string `json:"category"`
 }
 
 type Update struct {
@@ -911,14 +917,109 @@ func (s *AppService) OpenNotificationSettings() error {
 	return notifications.OpenSystemSettings()
 }
 
-func (s *AppService) SendNotification(title, body, roomID string) (bool, error) {
-	if s.notifier == nil || !s.notifier.Supported() || s.notifier.Permission() != "granted" {
+// NotificationAlert is one native alert requested by the frontend.
+// AccountID and SenderAvatar are optional; the avatar is loaded from the account's media cache.
+type NotificationAlert struct {
+	Title        string `json:"title"`
+	Subtitle     string `json:"subtitle"`
+	Body         string `json:"body"`
+	RoomID       string `json:"roomId"`
+	AccountID    string `json:"accountId"`
+	SenderAvatar string `json:"senderAvatar"`
+}
+
+func (s *AppService) SendNotification(alert NotificationAlert) (bool, error) {
+	if s.notifier == nil || !s.notifier.Supported() {
 		return false, nil
 	}
-	if err := s.notifier.Send(title, body, roomID, false); err != nil {
+	if s.notifier.Permission() != "granted" {
+		granted, err := s.ensureNotificationPermission()
+		if err != nil || !granted {
+			return false, err
+		}
+	}
+	message := notifications.Message{
+		Title:    alert.Title,
+		Subtitle: alert.Subtitle,
+		Body:     alert.Body,
+		RoomID:   alert.RoomID,
+	}
+	avatarPath, cleanup := s.notificationAvatarFile(alert.AccountID, alert.SenderAvatar)
+	defer cleanup()
+	message.AvatarPath = avatarPath
+	if err := s.notifier.Send(message); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+const (
+	notificationAvatarTimeout  = 3 * time.Second
+	notificationAvatarMaxBytes = 5 << 20
+)
+
+// notificationAvatarFile writes the sender avatar to a temp file for a native alert.
+// It returns an empty path when no avatar can be used; the alert is still sent without it.
+// The returned cleanup removes the temp file and must run after the alert is sent.
+func (s *AppService) notificationAvatarFile(accountID, mxc string) (string, func()) {
+	noop := func() {}
+	if accountID == "" || mxc == "" {
+		return "", noop
+	}
+	client := s.accountClientsSnapshot()[accountID]
+	if client == nil {
+		return "", noop
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), notificationAvatarTimeout)
+	defer cancel()
+	data, err := client.DownloadAvatar(ctx, mxc)
+	if err != nil {
+		logging.For("service").Warn().Err(err).Msg("could not load sender avatar for notification")
+		return "", noop
+	}
+	ext := notificationAvatarExtension(data)
+	if ext == "" || len(data) > notificationAvatarMaxBytes {
+		return "", noop
+	}
+	file, err := os.CreateTemp("", "pinger-avatar-*"+ext)
+	if err != nil {
+		logging.For("service").Warn().Err(err).Msg("could not create sender avatar file for notification")
+		return "", noop
+	}
+	path := file.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	_, writeErr := file.Write(data)
+	if err = errors.Join(writeErr, file.Close()); err != nil {
+		cleanup()
+		logging.For("service").Warn().Err(err).Msg("could not write sender avatar file for notification")
+		return "", noop
+	}
+	return path, cleanup
+}
+
+// notificationAvatarExtension returns the file extension for image types native alerts accept, or an empty string.
+func notificationAvatarExtension(data []byte) string {
+	switch http.DetectContentType(data) {
+	case "image/png":
+		return ".png"
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	default:
+		return ""
+	}
+}
+
+// ensureNotificationPermission prompts once so alerts work without flipping the settings toggle.
+func (s *AppService) ensureNotificationPermission() (bool, error) {
+	s.permissionMu.Lock()
+	defer s.permissionMu.Unlock()
+	if s.notifier.Permission() == "granted" {
+		return true, nil
+	}
+	permission, err := s.notifier.RequestPermission()
+	return permission == "granted", err
 }
 
 func (s *AppService) Logout() error {
@@ -1112,6 +1213,12 @@ func tagRooms(rooms []Room, accountID string) {
 	}
 }
 
+func tagNotifications(notifications []Notification, accountID string) {
+	for i := range notifications {
+		notifications[i].AccountID = accountID
+	}
+}
+
 func mapRoomsWithPreferences(rooms []matrix.Room, preferences map[string]any) []Room {
 	mapped := mapRooms(rooms)
 	for i := range mapped {
@@ -1171,11 +1278,13 @@ func mapUpdate(update matrix.Update, preferences map[string]any) Update {
 			continue
 		}
 		notifications = append(notifications, Notification{
-			RoomID:  notification.RoomID,
-			Room:    notification.Room,
-			Sender:  notification.Sender,
-			Body:    notification.Body,
-			Mention: notification.Mention,
+			RoomID:       notification.RoomID,
+			Room:         notification.Room,
+			Sender:       notification.Sender,
+			SenderAvatar: notification.SenderAvatar,
+			Body:         notification.Body,
+			Mention:      notification.Mention,
+			Category:     notification.Category,
 		})
 	}
 	return Update{

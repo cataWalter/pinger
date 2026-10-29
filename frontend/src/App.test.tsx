@@ -2285,12 +2285,19 @@ describe('room history updates', () => {
     act(() => {
       harness.eventHandlers.get('matrix:update')?.({
         data: {
-          notifications: [{ roomId: secondRoom.id, room: secondRoom.name, sender: 'Alice', body: 'A native alert' }],
+          notifications: [{ roomId: secondRoom.id, accountId: 'acct-1', room: secondRoom.name, sender: 'Alice', senderAvatar: 'mxc://example.org/alice', body: 'A native alert' }],
         },
       })
     })
 
-    await waitFor(() => expect(harness.service.SendNotification).toHaveBeenCalledWith('Alice · Second room', 'A native alert', secondRoom.id))
+    await waitFor(() => expect(harness.service.SendNotification).toHaveBeenCalledWith({
+      title: 'Alice',
+      subtitle: 'Second room',
+      body: 'A native alert',
+      roomId: secondRoom.id,
+      accountId: 'acct-1',
+      senderAvatar: 'mxc://example.org/alice',
+    }))
     act(() => {
       harness.eventHandlers.get('notification:open-room')?.({ data: secondRoom.id })
     })
@@ -2334,7 +2341,7 @@ describe('room history updates', () => {
         },
       })
     })
-    await waitFor(() => expect(harness.service.SendNotification).toHaveBeenCalledWith('Bob · Second room', 'group chatter', secondRoom.id))
+    await waitFor(() => expect(harness.service.SendNotification).toHaveBeenCalledWith(expect.objectContaining({ title: 'Bob', subtitle: 'Second room', body: 'group chatter', roomId: secondRoom.id })))
   })
 
   it('combines batched alerts from one room into a single notification', async () => {
@@ -2364,7 +2371,7 @@ describe('room history updates', () => {
         vi.advanceTimersByTime(3000)
       })
       expect(harness.service.SendNotification).toHaveBeenCalledTimes(1)
-      expect(harness.service.SendNotification).toHaveBeenCalledWith('Second room', '2 new messages from Alice, Bob', secondRoom.id)
+      expect(harness.service.SendNotification).toHaveBeenCalledWith(expect.objectContaining({ title: 'Second room', subtitle: '', body: '2 new messages from Alice, Bob', roomId: secondRoom.id }))
     } finally {
       vi.useRealTimers()
     }

@@ -15,6 +15,17 @@ import (
 	"time"
 )
 
+func TestStreamOpenAICompatibleCompletionSkipsEmptyDataLines(t *testing.T) {
+	stream := "data:\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n"
+	got, err := streamOpenAICompatibleCompletion(strings.NewReader(stream), 1024, func(string) {})
+	if err != nil {
+		t.Fatalf("streamOpenAICompatibleCompletion() error = %v", err)
+	}
+	if got != "hi" {
+		t.Fatalf("streamOpenAICompatibleCompletion() = %q, want %q", got, "hi")
+	}
+}
+
 func TestValidateAIEndpointRequiresHTTPURL(t *testing.T) {
 	for _, endpoint := range []string{"http://localhost:8080", "https://ai.example.net/base"} {
 		if err := validateAIEndpoint(endpoint); err != nil {

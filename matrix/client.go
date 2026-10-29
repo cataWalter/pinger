@@ -206,12 +206,13 @@ const (
 )
 
 type Notification struct {
-	RoomID   string
-	Room     string
-	Sender   string
-	Body     string
-	Mention  bool
-	Category string
+	RoomID       string
+	Room         string
+	Sender       string
+	SenderAvatar string
+	Body         string
+	Mention      bool
+	Category     string
 }
 
 func notificationCategory(direct, highlight bool) string {
@@ -2346,17 +2347,21 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 				}
 				c.notifiedEvents[eventID] = struct{}{}
 				if message, ok := messageFromEvent(notification.Event); ok {
+					profiled := []Message{message}
+					c.populateMessageProfiles(context.Background(), key, profiled)
+					message = profiled[0]
 					sender := message.SenderName
 					if sender == "" {
 						sender = message.Sender
 					}
 					c.pendingNotifications = append(c.pendingNotifications, Notification{
-						RoomID:   key,
-						Room:     room.Name,
-						Sender:   sender,
-						Body:     message.Body,
-						Mention:  notification.Highlight,
-						Category: notificationCategory(room.Direct, notification.Highlight),
+						RoomID:       key,
+						Room:         room.Name,
+						Sender:       sender,
+						SenderAvatar: message.Avatar,
+						Body:         message.Body,
+						Mention:      notification.Highlight,
+						Category:     notificationCategory(room.Direct, notification.Highlight),
 					})
 				}
 			}

@@ -20,6 +20,6 @@ func (nativeNotifier) RequestPermission() (string, error) {
 	return "unsupported", nil
 }
 
-func (nativeNotifier) Send(string, string, string, bool) error {
+func (nativeNotifier) Send(Message) error {
 	return nil
 }

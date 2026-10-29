@@ -12,15 +12,19 @@ import (
 )
 
 type recordedNotification struct {
-	title  string
-	body   string
-	roomID string
-	sound  bool
+	title    string
+	subtitle string
+	body     string
+	roomID   string
+	avatar   string
+	sound    bool
 }
 
 type recordingNotifier struct {
-	sent       []recordedNotification
-	permission string
+	sent         []recordedNotification
+	permission   string
+	denyRequests bool
+	requests     int
 }
 
 func (n *recordingNotifier) Supported() bool { return true }
@@ -33,12 +37,24 @@ func (n *recordingNotifier) Permission() string {
 }
 
 func (n *recordingNotifier) RequestPermission() (string, error) {
+	n.requests++
+	if n.denyRequests {
+		n.permission = "denied"
+		return "denied", nil
+	}
 	n.permission = "granted"
 	return "granted", nil
 }
 
-func (n *recordingNotifier) Send(title, body, roomID string, sound bool) error {
-	n.sent = append(n.sent, recordedNotification{title: title, body: body, roomID: roomID, sound: sound})
+func (n *recordingNotifier) Send(message notifications.Message) error {
+	n.sent = append(n.sent, recordedNotification{
+		title:    message.Title,
+		subtitle: message.Subtitle,
+		body:     message.Body,
+		roomID:   message.RoomID,
+		avatar:   message.AvatarPath,
+		sound:    message.Sound,
+	})
 	return nil
 }
 
@@ -184,27 +200,81 @@ func TestAppServiceNotificationMethodsUseInjectedNotifier(t *testing.T) {
 	if got := service.NotificationPermission(); got != "default" {
 		t.Fatalf("permission = %q, want default", got)
 	}
-	delivered, err := service.SendNotification("Pinger", "New message", "!room:example.org")
+	delivered, err := service.SendNotification(NotificationAlert{Title: "Pinger", Body: "New message", RoomID: "!room:example.org"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if delivered {
-		t.Fatal("notification was reported delivered before permission was granted")
+	if !delivered {
+		t.Fatal("first notification was not delivered after prompting for permission")
 	}
-	if len(notifier.sent) != 0 {
-		t.Fatal("notification was sent before permission was granted")
+	if notifier.requests != 1 {
+		t.Fatalf("permission requests = %d, want 1", notifier.requests)
 	}
 	if got, err := service.RequestNotificationPermission(); err != nil || got != "granted" {
 		t.Fatalf("requested permission = %q, %v; want granted", got, err)
 	}
-	delivered, err = service.SendNotification("Pinger", "New message", "!room:example.org")
+	delivered, err = service.SendNotification(NotificationAlert{Title: "Pinger", Body: "New message", RoomID: "!room:example.org"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !delivered {
 		t.Fatal("notification was not reported delivered after permission was granted")
 	}
-	if len(notifier.sent) != 1 || notifier.sent[0] != (recordedNotification{title: "Pinger", body: "New message", roomID: "!room:example.org"}) {
+	if notifier.requests != 2 {
+		t.Fatalf("permission requests = %d, want 2 (no extra prompt after grant)", notifier.requests)
+	}
+	if len(notifier.sent) != 2 || notifier.sent[0] != (recordedNotification{title: "Pinger", body: "New message", roomID: "!room:example.org"}) {
 		t.Fatalf("sent notifications = %+v", notifier.sent)
+	}
+}
+
+func TestAppServiceSendNotificationSkipsDeniedPermission(t *testing.T) {
+	notifier := &recordingNotifier{denyRequests: true}
+	service := &AppService{notifier: notifier}
+
+	delivered, err := service.SendNotification(NotificationAlert{Title: "Pinger", Body: "New message", RoomID: "!room:example.org"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivered || len(notifier.sent) != 0 {
+		t.Fatalf("delivered = %v, sent = %+v; want nothing sent when denied", delivered, notifier.sent)
+	}
+}
+
+func TestAppServiceSendNotificationWithoutOpenAccountSendsWithoutAvatar(t *testing.T) {
+	notifier := &recordingNotifier{permission: "granted"}
+	service := &AppService{notifier: notifier}
+
+	delivered, err := service.SendNotification(NotificationAlert{
+		Title:        "Alice",
+		Subtitle:     "General",
+		Body:         "hello",
+		RoomID:       "!room:example.org",
+		AccountID:    "missing",
+		SenderAvatar: "mxc://example.org/avatar",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !delivered || len(notifier.sent) != 1 {
+		t.Fatalf("delivered = %v, sent = %+v; want one alert", delivered, notifier.sent)
+	}
+	want := recordedNotification{title: "Alice", subtitle: "General", body: "hello", roomID: "!room:example.org"}
+	if notifier.sent[0] != want {
+		t.Fatalf("sent = %+v, want %+v", notifier.sent[0], want)
+	}
+}
+
+func TestNotificationAvatarExtension(t *testing.T) {
+	tests := map[string][]byte{
+		".png": []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"),
+		".jpg": []byte("\xff\xd8\xff\xe0\x00\x10JFIF"),
+		".gif": []byte("GIF89a\x01\x00\x01\x00"),
+		"":     []byte("<html><body>not an image</body></html>"),
+	}
+	for want, data := range tests {
+		if got := notificationAvatarExtension(data); got != want {
+			t.Fatalf("extension for %q = %q, want %q", data[:4], got, want)
+		}
 	}
 }

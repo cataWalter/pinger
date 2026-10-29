@@ -78,16 +78,20 @@ func (n *nativeNotifier) SetClickHandler(handler func(roomID string)) {
 	})
 }
 
-func (n *nativeNotifier) Send(title, body, roomID string, sound bool) error {
+func (n *nativeNotifier) Send(message Message) error {
 	if !n.started.Load() {
 		return nil
 	}
 	options := wailsnotifications.NotificationOptions{
-		ID:    fmt.Sprintf("pinger-%d-%d", time.Now().UnixNano(), n.nextID.Add(1)),
-		Title: title,
-		Body:  body,
-		Sound: &wailsnotifications.NotificationSound{Silent: !sound},
-		Data:  map[string]interface{}{"roomId": roomID},
+		ID:       fmt.Sprintf("pinger-%d-%d", time.Now().UnixNano(), n.nextID.Add(1)),
+		Title:    message.Title,
+		Subtitle: message.Subtitle,
+		Body:     message.Body,
+		Sound:    &wailsnotifications.NotificationSound{Silent: !message.Sound},
+		Data:     map[string]interface{}{"roomId": message.RoomID},
+	}
+	if message.AvatarPath != "" {
+		options.Attachments = []wailsnotifications.NotificationAttachment{{ID: "avatar", Path: message.AvatarPath}}
 	}
 	return n.service.SendNotification(options)
 }

@@ -26,12 +26,16 @@ export type MatrixUpdate = {
 
 export type MatrixNotification = {
   roomId: string
+  accountId?: string
   room: string
   sender: string
+  senderAvatar?: string
   body: string
   mention: boolean
   category: string
 }
+
+export type NotificationText = { title: string; subtitle: string; body: string }
 
 export type PreferenceValues = NonNullable<Snapshot['preferences']>
 export type RoomScope = 'all' | 'archived' | 'local-ai'
@@ -723,8 +727,11 @@ export function notificationTone(preferences: PreferenceValues, category: string
   return preferenceString(preferences, keys[category] ?? 'notifications.sound_mention', 'Chime')
 }
 
-export function notificationText(preferences: PreferenceValues, notification: MatrixNotification, roomName: string) {
-  let title = notification.sender ? `${notification.sender} · ${roomName}` : roomName
+export function notificationText(preferences: PreferenceValues, notification: MatrixNotification, roomName: string): NotificationText {
+  // The sender is the title. Group and mention alerts show the room as the subtitle.
+  const direct = notification.category === 'direct'
+  let title = notification.sender || roomName
+  let subtitle = notification.sender && !direct ? roomName : ''
   let body = notification.body
   switch (preferenceString(preferences, 'notifications.privacy', 'Sender and message preview')) {
     case 'Sender only':
@@ -732,10 +739,11 @@ export function notificationText(preferences: PreferenceValues, notification: Ma
       break
     case 'Hidden content':
       title = 'Matrix'
+      subtitle = ''
       body = 'New activity'
       break
   }
-  return { title, body }
+  return { title, subtitle, body }
 }
 
 export function detectOneTimeCode(body: string) {

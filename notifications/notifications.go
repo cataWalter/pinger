@@ -2,11 +2,21 @@ package notifications
 
 import "context"
 
+// Message is one native alert. AvatarPath is an optional local image file.
+type Message struct {
+	Title      string
+	Subtitle   string
+	Body       string
+	RoomID     string
+	AvatarPath string
+	Sound      bool
+}
+
 type Notifier interface {
 	Supported() bool
 	Permission() string
 	RequestPermission() (string, error)
-	Send(title, body, roomID string, sound bool) error
+	Send(message Message) error
 }
 
 type Lifecycle interface {

@@ -468,6 +468,7 @@ func (s *AppService) startAccountEventPump(accountID string, client *matrix.Clie
 				if s.currentAccountID() == accountID {
 					mapped := mapUpdate(update, s.preferenceValuesForAccount(accountID))
 					tagRooms(mapped.Rooms, accountID)
+					tagNotifications(mapped.Notifications, accountID)
 					emit(mapped)
 				}
 			}
