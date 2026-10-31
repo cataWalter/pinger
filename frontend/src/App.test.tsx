@@ -1,6 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Profiler } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AccountSummary, Message, Room, Snapshot } from '../bindings/mychat/desktop/models.js'
 import App from './App'
@@ -1477,9 +1476,8 @@ describe('room history updates', () => {
     expect(harness.markdownRenderCount).toBe(initialRenderCount)
   })
 
-  it('skips rerendering for unchanged Matrix room snapshots', async () => {
-    const onRender = vi.fn()
-    render(<Profiler id="App" onRender={onRender}><App /></Profiler>)
+  it('skips message rerenders and history reloads for unchanged Matrix room snapshots', async () => {
+    render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
     const emitUnchangedUpdate = async () => {
       await act(async () => {
@@ -1501,10 +1499,15 @@ describe('room history updates', () => {
     }
 
     await emitUnchangedUpdate()
-    const renderCount = onRender.mock.calls.length
+    const message = screen.getByText('latest message')
+    const renderCount = harness.markdownRenderCount
+    const historyCalls = harness.service.History.mock.calls.length
+    await emitUnchangedUpdate()
     await emitUnchangedUpdate()
 
-    expect(onRender).toHaveBeenCalledTimes(renderCount)
+    expect(harness.markdownRenderCount).toBe(renderCount)
+    expect(harness.service.History).toHaveBeenCalledTimes(historyCalls)
+    expect(screen.getByText('latest message')).toBe(message)
   })
 
   it('applies room updates from a consolidated Matrix batch', async () => {
