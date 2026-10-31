@@ -33,6 +33,29 @@ describe('MarkdownMessage', () => {
     expect(openURL).toHaveBeenCalledWith('mychat/desktop.AppService.OpenExternalURL', url)
   })
 
+  it('does not load Markdown images before an explicit user action', () => {
+    const url = 'https://example.invalid/recipient-tracker.png'
+    const { container } = render(<MarkdownMessage body={`![Shared image](${url})`} />)
+
+    expect(container.querySelector('img')).toBeNull()
+    expect(openURL).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('link', { name: 'Shared image' }))
+    expect(openURL).toHaveBeenCalledWith('mychat/desktop.AppService.OpenExternalURL', url)
+  })
+
+  it('renders images with unsafe URLs without a loadable element', () => {
+    const { container } = render(<MarkdownMessage body="![Unsafe image](javascript:alert%281%29)" />)
+    expect(container.querySelector('img, a')).toBeNull()
+    expect(screen.getByText('Unsafe image')).toBeTruthy()
+  })
+
+  it('renders inline and display mathematics without KaTeX errors', () => {
+    const { container } = render(<MarkdownMessage body={'Inline $x^2$.\n\n$$\n\\frac{1}{2}\n$$'} />)
+    expect(container.querySelectorAll('.katex')).toHaveLength(2)
+    expect(container.querySelector('.katex-display')).not.toBeNull()
+    expect(container.querySelector('.katex-error')).toBeNull()
+  })
+
   it('shows an error if the system browser cannot open a link', async () => {
     openURL.mockRejectedValueOnce(new Error('launcher failed'))
     const url = 'https://example.com'

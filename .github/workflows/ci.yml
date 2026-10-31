@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  GOTOOLCHAIN: go1.26.10
+
 jobs:
   checks:
     runs-on: macos-latest
@@ -41,25 +44,151 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3
         run: |
           npm ci
+          npm run icons
+          npm run icons:check
           npm run test
           npm run lint
           npm run build
 
-      - name: Install Chromium
+      - name: Install desktop browser engines
         working-directory: frontend
-        run: npx playwright install chromium
+        run: npx playwright install chromium webkit
 
-      - name: Browser smoke test
+      - name: Desktop UI browser tests
         working-directory: frontend
         run: npm run test:browser
+
+      - name: Frontend dependency audit
+        working-directory: frontend
+        run: npm audit --audit-level=moderate
 
       - name: Test
         run: go test -tags "sqlite_fts5 goolm" ./...
 
+      - name: Stateful package race tests
+        timeout-minutes: 10
+        run: go test -race -count=1 -tags "sqlite_fts5 goolm" ./desktop ./matrix ./preferences
+
       - name: Vet
         run: go vet -tags "sqlite_fts5 goolm" ./...
 
+      - name: Correctness static analysis
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks='SA*' -tags sqlite_fts5,goolm ./...
+
+      - name: Reachable Go vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -tags sqlite_fts5,goolm ./...
+
+      - name: Boundary fuzz tests
+        timeout-minutes: 5
+        run: |
+          go test -tags sqlite_fts5,goolm ./preferences -run '^$' -fuzz '^FuzzValidateLocalHTTPEndpoint$' -fuzztime=30s -parallel=2
+          go test -tags sqlite_fts5,goolm ./desktop -run '^$' -fuzz '^FuzzParseMediaAssetPath$' -fuzztime=30s -parallel=2
+          go test -tags sqlite_fts5,goolm ./matrix -run '^$' -fuzz '^FuzzMessageFromEvent$' -fuzztime=30s -parallel=2
+
       - name: Build
         run: go build -tags "sqlite_fts5 goolm" .
+
+      - name: Upload browser failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-failure-screenshots
+          path: frontend/.vitest/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  windows-checks:
+    runs-on: windows-latest
+    env:
+      CGO_ENABLED: "1"
+      CC: gcc
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up MinGW-w64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-gcc
+          path-type: inherit
+
+      - name: Generate Wails bindings
+        shell: pwsh
+        run: |
+          $env:GOBIN = Join-Path $env:RUNNER_TEMP "wails-bin"
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
+          & (Join-Path $env:GOBIN "wails3.exe") generate bindings -f "-tags sqlite_fts5,goolm" -clean=true -ts -i
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Compile package tests
+        run: go test -run '^$' -tags "sqlite_fts5 goolm" ./...
+
+      - name: Build Windows application
+        run: go build -tags "sqlite_fts5 goolm" -o bin/pinger-ci.exe .
+
+  linux-checks:
+    runs-on: ubuntu-24.04
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install native build dependencies
+        run: |
+          sudo -n apt-get update
+          sudo -n apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsqlite3-dev
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Generate Wails bindings
+        run: |
+          GOBIN="${RUNNER_TEMP}/wails-bin" go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
+          "${RUNNER_TEMP}/wails-bin/wails3" generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Compile package tests
+        run: go test -run '^$' -tags "sqlite_fts5 goolm" ./...
+
+      - name: Build Linux application
+        run: go build -tags "sqlite_fts5 goolm" -o bin/pinger-ci .

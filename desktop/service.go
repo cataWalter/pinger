@@ -228,16 +228,18 @@ type Notification struct {
 }
 
 type Update struct {
-	Rooms                 []Room              `json:"rooms"`
-	SlidingSyncListCounts map[string]int      `json:"slidingSyncListCounts"`
-	ChangedRoomID         []string            `json:"changedRoomId"`
-	TimelineChangedRoomID []string            `json:"timelineChangedRoomId"`
-	TypingUsers           map[string][]string `json:"typingUsers"`
-	Notifications         []Notification      `json:"notifications"`
-	Error                 string              `json:"error"`
-	InitialSyncComplete   bool                `json:"initialSyncComplete"`
-	NeedsVerification     bool                `json:"needsVerification"`
-	ConnectionState       string              `json:"connectionState"`
+	AccountID               string              `json:"accountId"`
+	NotificationPreferences map[string]any      `json:"notificationPreferences"`
+	Rooms                   []Room              `json:"rooms"`
+	SlidingSyncListCounts   map[string]int      `json:"slidingSyncListCounts"`
+	ChangedRoomID           []string            `json:"changedRoomId"`
+	TimelineChangedRoomID   []string            `json:"timelineChangedRoomId"`
+	TypingUsers             map[string][]string `json:"typingUsers"`
+	Notifications           []Notification      `json:"notifications"`
+	Error                   string              `json:"error"`
+	InitialSyncComplete     bool                `json:"initialSyncComplete"`
+	NeedsVerification       bool                `json:"needsVerification"`
+	ConnectionState         string              `json:"connectionState"`
 }
 
 func (s *AppService) Snapshot() (Snapshot, error) {
@@ -637,7 +639,7 @@ func (s *AppService) SaveMedia(mxc, filename string) (string, error) {
 			return "", nil
 		}
 	} else {
-		target = uniqueDownloadPath(directory, name)
+		return saveDownload(directory, name, data)
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return "", fmt.Errorf("create download folder: %w", err)
@@ -677,18 +679,34 @@ func safeDownloadName(filename string) string {
 	return name
 }
 
-// uniqueDownloadPath returns a path in directory that does not overwrite an existing file, appending " (n)" before the extension when needed.
-func uniqueDownloadPath(directory, name string) string {
+func saveDownload(directory, name string, data []byte) (string, error) {
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return "", fmt.Errorf("create download folder: %w", err)
+	}
 	ext := filepath.Ext(name)
 	base := strings.TrimSuffix(name, ext)
-	candidate := filepath.Join(directory, name)
-	for i := 1; i < 1000; i++ {
-		if _, err := os.Stat(candidate); errors.Is(err, os.ErrNotExist) {
-			return candidate
+	for index := 0; index < 1000; index++ {
+		candidateName := name
+		if index > 0 {
+			candidateName = fmt.Sprintf("%s (%d)%s", base, index, ext)
 		}
-		candidate = filepath.Join(directory, fmt.Sprintf("%s (%d)%s", base, i, ext))
+		candidate := filepath.Join(directory, candidateName)
+		file, err := os.OpenFile(candidate, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("create download: %w", err)
+		}
+		_, writeErr := file.Write(data)
+		closeErr := file.Close()
+		if writeErr != nil || closeErr != nil {
+			_ = os.Remove(candidate)
+			return "", fmt.Errorf("save attachment: %w", errors.Join(writeErr, closeErr))
+		}
+		return candidate, nil
 	}
-	return candidate
+	return "", fmt.Errorf("no available download filename for %q after 1000 attempts", name)
 }
 
 func (s *AppService) StorageUsage() (StorageUsage, error) {
@@ -939,10 +957,11 @@ func (s *AppService) SendNotification(alert NotificationAlert) (bool, error) {
 		}
 	}
 	message := notifications.Message{
-		Title:    alert.Title,
-		Subtitle: alert.Subtitle,
-		Body:     alert.Body,
-		RoomID:   alert.RoomID,
+		Title:     alert.Title,
+		Subtitle:  alert.Subtitle,
+		Body:      alert.Body,
+		RoomID:    alert.RoomID,
+		AccountID: alert.AccountID,
 	}
 	avatarPath, cleanup := s.notificationAvatarFile(alert.AccountID, alert.SenderAvatar)
 	defer cleanup()
@@ -1113,25 +1132,28 @@ func (s *AppService) startScheduledJobWorker() {
 }
 
 type scheduledMessageSender interface {
-	SendMessage(context.Context, string, string) error
-	SendReply(context.Context, string, string, string) error
+	SendScheduledMessage(context.Context, string, string, string, string, func(string) error) error
 }
 
 func dispatchScheduledMessage(ctx context.Context, sender scheduledMessageSender, job ScheduledJob) error {
-	if job.ReplyToEventID != "" {
-		return sender.SendReply(ctx, job.RoomID, job.Text, job.ReplyToEventID)
-	}
-	return sender.SendMessage(ctx, job.RoomID, job.Text)
+	return sender.SendScheduledMessage(ctx, job.RoomID, job.Text, job.ReplyToEventID, job.TransactionID, nil)
 }
 
 func dispatchDueScheduledMessagesForAccount(ctx context.Context, store *scheduledJobStore, accountID string, sender scheduledMessageSender, now int64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	jobs, err := store.claimDueForAccount(scheduledMessageKind, now, accountID)
 	if err != nil {
 		return err
 	}
 	for _, job := range jobs {
 		startedAt := time.Now().UnixMilli()
-		sendErr := dispatchScheduledMessage(ctx, sender, job)
+		sendCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		sendErr := sender.SendScheduledMessage(sendCtx, job.RoomID, job.Text, job.ReplyToEventID, job.TransactionID, func(transactionID string) error {
+			return store.recordTransaction(job.ID, transactionID)
+		})
+		cancel()
 		if finishErr := store.finishMessage(job.ID, sendErr, startedAt, time.Now().UnixMilli()); finishErr != nil {
 			log.Printf("finish scheduled message %s: %v", job.ID, finishErr)
 		}
@@ -1143,14 +1165,21 @@ func (s *AppService) processDueScheduledJobs() {
 	if s.scheduled == nil || s.ctx.Err() != nil {
 		return
 	}
+	if err := s.scheduled.flushPendingCompletions(); err != nil {
+		log.Printf("persist scheduled message completions: %v", err)
+	}
 	now := time.Now().UnixMilli()
 	for accountID, client := range s.accountClientsSnapshot() {
 		if !client.IsLoggedIn() || client.ConnectionState() != matrix.StateConnected {
 			continue
 		}
-		if err := dispatchDueScheduledMessagesForAccount(s.ctx, s.scheduled, accountID, client, now); err != nil {
-			log.Printf("claim scheduled messages for account %s: %v", accountID, err)
-		}
+		s.workers.Add(1)
+		go func() {
+			defer s.workers.Done()
+			if err := dispatchDueScheduledMessagesForAccount(s.ctx, s.scheduled, accountID, client, now); err != nil && s.ctx.Err() == nil {
+				log.Printf("claim scheduled messages for account %s: %v", accountID, err)
+			}
+		}()
 	}
 	reminders, err := s.scheduled.claimDue(scheduledReminderKind, now)
 	if err != nil {
@@ -1168,6 +1197,11 @@ func (s *AppService) close() {
 	s.cancel()
 	s.imageEngine.stop()
 	s.workers.Wait()
+	if s.scheduled != nil {
+		if err := s.scheduled.flushPendingCompletions(); err != nil {
+			log.Printf("persist scheduled message completions on shutdown: %v", err)
+		}
+	}
 	if s.preferencesUnsubscribe != nil {
 		s.preferencesUnsubscribe()
 		s.preferencesUnsubscribe = nil

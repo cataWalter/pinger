@@ -80,14 +80,15 @@ export type ScheduledDraftDialogProps = {
 }
 
 export function ScheduledDraftDialog({ draft, rooms, dueAt, setDueAt, setDraft, saving, error, suggestions, onSubmit, onClose }: ScheduledDraftDialogProps) {
+  const close = () => { if (!saving) onClose() }
   return (
-    <div className="room-info-scrim" role="presentation" onClick={onClose}>
-      <DialogSurface className="room-info-dialog scheduled-editor" labelledBy="scheduled-editor-title" onClose={onClose} onClick={(event) => event.stopPropagation()}>
+    <div className="room-info-scrim" role="presentation" onClick={close}>
+      <DialogSurface className="room-info-dialog scheduled-editor" labelledBy="scheduled-editor-title" onClose={close} onClick={(event) => event.stopPropagation()}>
         <header className="room-info-header">
           <div><span className="eyebrow">{draft.kind === 'message' ? draft.replyToEventID ? 'SCHEDULE REPLY' : 'SCHEDULE SEND' : 'MESSAGE REMINDER'}</span><h2 id="scheduled-editor-title">{draft.kind === 'message' ? draft.replyToEventID ? 'Schedule reply' : 'Schedule message' : 'Set reminder'}</h2></div>
-          <button className="icon-button" type="button" aria-label="Close schedule dialog" onClick={onClose}><X size={16} /></button>
+          <button className="icon-button" type="button" aria-label="Close schedule dialog" disabled={saving} onClick={close}><X size={16} /></button>
         </header>
-        <form className="scheduled-editor-form" onSubmit={onSubmit}>
+        <form className="scheduled-editor-form" aria-busy={saving} onSubmit={onSubmit}>
           <div className="room-info-content scheduled-editor-content">
             <p className="scheduled-editor-room">To {rooms.find((room) => room.id === draft.roomID)?.name || draft.roomID}</p>
             {draft.kind === 'message'
@@ -96,17 +97,17 @@ export function ScheduledDraftDialog({ draft, rooms, dueAt, setDueAt, setDraft, 
                 <p className="scheduled-draft-preview">{draft.text}</p>
               </>
               : <>
-                <label>Reminder note <input type="text" value={draft.text} onChange={(event) => setDraft((current) => current?.kind === 'reminder' ? { ...current, text: event.target.value } : current)} placeholder="Optional note" spellCheck={false} autoCorrect="off" autoCapitalize="off" /></label>
+                <label>Reminder note <input type="text" disabled={saving} value={draft.text} onChange={(event) => setDraft((current) => current?.kind === 'reminder' ? { ...current, text: event.target.value } : current)} placeholder="Optional note" spellCheck={false} autoCorrect="off" autoCapitalize="off" /></label>
                 <label className="scheduled-archive-toggle">
                   <input type="checkbox" aria-label="Archive room after setting reminder" checked={Boolean(draft.archiveAfter)} disabled={saving} onChange={(event) => setDraft((current) => current?.kind === 'reminder' ? { ...current, archiveAfter: event.target.checked } : current)} />
                   <span>Archive this room after setting the reminder</span>
                 </label>
               </>}
             <label>{draft.kind === 'message' ? 'Send at' : 'Remind me at'}
-              <input type="datetime-local" required value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+              <input type="datetime-local" required disabled={saving} value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
             </label>
             <div className="scheduled-time-suggestions" role="group" aria-label="Time suggestions">
-              {suggestions.map((minutes) => <button key={minutes} className="settings-command" type="button" onClick={() => setDueAt(localDateTimeInputValue(Date.now() + minutes * 60_000))}>{formatTimeSuggestion(minutes)}</button>)}
+              {suggestions.map((minutes) => <button key={minutes} className="settings-command" type="button" disabled={saving} onClick={() => setDueAt(localDateTimeInputValue(Date.now() + minutes * 60_000))}>{formatTimeSuggestion(minutes)}</button>)}
             </div>
             {error && <p className="room-info-state is-error" role="alert">{error}</p>}
           </div>

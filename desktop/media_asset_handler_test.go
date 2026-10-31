@@ -6,13 +6,42 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
 
 	"mychat/matrix"
 )
+
+func FuzzParseMediaAssetPath(f *testing.F) {
+	for _, path := range []string{"/media/matrix/%21room%3Aexample.org/%24event", "/media/mxc/example.org/image", "/media/matrix/../event", "/media/matrix/room/%2Fescape", "/media/matrix/room/%00", "/media/matrix/room/event/extra", ""} {
+		f.Add(path)
+	}
+	f.Fuzz(func(t *testing.T, path string) {
+		source, roomID, eventID, err := parseMediaAssetPath(path)
+		if err != nil {
+			return
+		}
+		for _, segment := range []string{source, roomID, eventID} {
+			if segment == "" || segment == "." || segment == ".." || strings.TrimSpace(segment) != segment || strings.ContainsAny(segment, "/\\") {
+				t.Fatalf("accepted unsafe media segment %q", segment)
+			}
+			for _, char := range segment {
+				if unicode.IsControl(char) {
+					t.Fatalf("accepted control character in media segment %q", segment)
+				}
+			}
+		}
+		roundTrip := mediaAssetPathPrefix + strings.Join([]string{url.PathEscape(source), url.PathEscape(roomID), url.PathEscape(eventID)}, "/")
+		newSource, newRoomID, newEventID, err := parseMediaAssetPath(roundTrip)
+		if err != nil || newSource != source || newRoomID != roomID || newEventID != eventID {
+			t.Fatalf("media path did not round-trip: %q", path)
+		}
+	})
+}
 
 type testMediaAssetSource struct {
 	path     string

@@ -86,6 +86,7 @@ tasks:
       - dist/**/*
     deps:
       - task: install:frontend:deps
+      - task: generate:icons
       - task: generate:bindings
         vars:
           BUILD_FLAGS:
@@ -191,15 +192,25 @@ tasks:
       - wails3 generate bindings -f '{{.BUILD_FLAGS | default "-tags sqlite_fts5,goolm"}}' -clean=true{{if eq .OBFUSCATED "true"}} -obfuscated{{end}} -ts -i
 
   generate:icons:
-    summary: Generates the Mac `.icns` from an image (macOS only).
+    summary: Generates application, native, Linux, and browser icons from the SVG source
     run: once
-    dir: build
+    deps:
+      - task: install:frontend:deps
     sources:
-      - "appicon.png"
+      - assets/pinger.svg
+      - scripts/generate-icons.mjs
+      - frontend/package-lock.json
     generates:
-      - "darwin/icons.icns"
+      - build/appicon.png
+      - build/darwin/icons.icns
+      - build/windows/icon.ico
+      - build/linux/icons/**/*.png
+      - frontend/public/pinger.svg
+      - frontend/public/pinger.png
+      - frontend/public/favicon-16.png
+      - frontend/public/favicon-32.png
     cmds:
-      - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename=
+      - node scripts/generate-icons.mjs
 
   dev:frontend:
     summary: Runs the frontend in development mode

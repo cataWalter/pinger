@@ -1,5 +1,4 @@
-import { useEffect, useRef } from 'react'
-import { unstable_batchedUpdates } from 'react-dom'
+import { useEffect, useEffectEvent } from 'react'
 import { Events } from '@wailsio/runtime'
 import type { Message } from '../bindings/mychat/desktop/models.js'
 
@@ -32,11 +31,10 @@ export type MatrixBatchPayload<TUpdate = unknown> = {
 }
 
 export function useMatrixBatch<TUpdate>(onBatch: (batch: MatrixBatchPayload<TUpdate>) => void) {
-  const onBatchRef = useRef(onBatch)
-  onBatchRef.current = onBatch
+  const handleBatch = useEffectEvent(onBatch)
 
   useEffect(() => Events.On('matrix:batch_update', (event: { data: unknown }) => {
     const batch = event.data as MatrixBatchPayload<TUpdate>
-    unstable_batchedUpdates(() => onBatchRef.current(batch))
+    handleBatch(batch)
   }), [])
 }

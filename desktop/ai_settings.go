@@ -9,8 +9,9 @@ import (
 
 // Feature IDs used in ai.feature.<id>.* preferences. Keep in sync with preferences/store.go.
 const (
-	aiFeatureLocalChat     = "local_chat"
-	aiFeatureLanguageTutor = "language_tutor"
+	aiFeatureLocalChat        = "local_chat"
+	aiFeatureLanguageTutor    = "language_tutor"
+	aiFeatureSuggestedReplies = "suggested_replies"
 )
 
 const (
@@ -57,6 +58,14 @@ var aiBackendFeatureDefaults = []AIFeatureDefault{
 		Prompt:      languageTutorSystemPrompt,
 		Temperature: languageTutorTemperature,
 		MaxTokens:   languageTutorMaxTokens,
+	},
+	{
+		ID:          aiFeatureSuggestedReplies,
+		Label:       "Suggested replies",
+		Description: "Three reply options based on the latest messages in the open room. Picking one fills the composer draft.",
+		Prompt:      suggestedRepliesSystemPrompt,
+		Temperature: suggestedRepliesTemperature,
+		MaxTokens:   suggestedRepliesMaxTokens,
 	},
 }
 

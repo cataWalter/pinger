@@ -82,7 +82,7 @@ func collectRoomHistory(fetch func(before int64) (HistoryPage, error), backfill 
 		if !page.HasMore {
 			break
 		}
-		if page.Before <= 0 || (before != 0 && page.Before >= before) {
+		if page.Before == 0 || (before != 0 && page.Before >= before) {
 			return nil, errors.New("room history pagination did not advance")
 		}
 		before = page.Before

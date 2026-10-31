@@ -83,6 +83,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'keyboard.ctrl-enter', tab: 'Keyboard', title: 'Use Ctrl + Enter to send', description: 'Send a message with Ctrl + Enter.', keywords: 'send enter composer' },
   { id: 'keyboard.spellcheck', tab: 'Keyboard', title: 'Spellcheck messages', description: 'Check spelling while you type.', keywords: 'spellcheck spell check' },
   { id: 'keyboard.formatting-toolbar', tab: 'Keyboard', title: 'Show formatting toolbar', description: 'Show bold, italic and link controls.', keywords: 'formatting toolbar bold italic' },
+  { id: 'keyboard.ghost-text', tab: 'Keyboard', title: 'Suggest text while typing', description: 'Show a faint continuation of your draft from the local AI while you write or reply. Press Tab to accept or Escape to dismiss. On by default.', keywords: 'ghost autocomplete suggest predictive text completion tab ai' },
   { id: 'keyboard.emoji-autocomplete', tab: 'Keyboard', title: 'Suggest emoji for :shortcodes:', description: 'Complete :shortcodes: as you type.', keywords: 'emoji autocomplete shortcode' },
   { id: 'keyboard.emoticon-replacement', tab: 'Keyboard', title: 'Replace emoticons as you type', description: 'Turn :-) into an emoji while typing and when sending. On by default.', keywords: 'emoticon emoji replace' },
   { id: 'keyboard.custom-emoticon-replacements', tab: 'Keyboard', title: 'Custom emoji replacements', description: 'Choose which emoji a text symbol becomes.', keywords: 'emoticon emoji custom mapping symbol', anchor: '#emoticon-replacement-editor' },

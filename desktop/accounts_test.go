@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -77,5 +78,35 @@ func TestAccountRegistryRejectsUnknownActiveAccount(t *testing.T) {
 	}
 	if err = registry.SetActive("unknown"); err == nil {
 		t.Fatal("SetActive accepted an unknown account")
+	}
+}
+
+func TestMapAccountUpdatePreservesBackgroundNotificationOwnership(t *testing.T) {
+	update := mapAccountUpdate(matrix.Update{
+		Notifications: []matrix.Notification{{RoomID: "!room:example.org", Body: "hello", Category: "direct"}},
+	}, "second", map[string]any{"notifications.privacy": "Hidden content", "ai.endpoint": "private"})
+	if update.AccountID != "second" || len(update.Notifications) != 1 || update.Notifications[0].AccountID != "second" {
+		t.Fatalf("background account ownership lost: %+v", update)
+	}
+	if update.NotificationPreferences["notifications.privacy"] != "Hidden content" {
+		t.Fatal("notification privacy preference lost")
+	}
+	if _, exists := update.NotificationPreferences["ai.endpoint"]; exists {
+		t.Fatal("unrelated preferences included in notification update")
+	}
+}
+
+func TestMapAccountUpdateSerializesEmptyNotificationPreferences(t *testing.T) {
+	update := mapAccountUpdate(matrix.Update{}, "second", nil)
+	data, err := json.Marshal(update)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]json.RawMessage
+	if err = json.Unmarshal(data, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if string(payload["notificationPreferences"]) != "{}" {
+		t.Fatalf("empty account preferences omitted from update: %s", data)
 	}
 }

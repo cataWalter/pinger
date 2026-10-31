@@ -36,23 +36,28 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 
 - Sign in to several Matrix accounts from the avatar menu at the bottom of the sidebar. The inbox can show every account or scope to one, and `Ctrl+Alt+1`–`Ctrl+Alt+9` switches the active account.
 - Every account keeps its own database, preferences, and AI profiles under the data directory.
+- Unsent composer drafts and staged attachments stay separate for each account and room while the app is running. Switching accounts preserves them; logging out discards that account's drafts and staged files. Pending confirmations and AI suggestions close when switching accounts.
 
 **Messaging**
 
 - Reply and quick-reaction controls stay visible; replying opens a quoted reply composer; reactions show as chips. The message **context menu** offers Reply, React, Bookmark, Mark as unread, Copy (plain or with timestamp), Forward…, a "Received at" timestamp, Set reminder, and — when an AI endpoint is configured — Translate, Draft reply with AI, and Explain message; your own messages add Edit and Delete, and failed sends add Retry sending.
 - **Forward** text messages to any other room of the same account; bookmarks and read-state changes are stored locally.
 - In direct chats, your own messages show a **Seen at** timestamp derived from the other person's read receipt.
-- The composer accepts pasted images and files dropped onto the window (50 MiB per attachment), completes `@` mentions from the room member list, suggests emoji for `:shortcodes:`, optionally replaces emoticons as you type, and offers an optional formatting toolbar (bold, italic, inline code, strikethrough) with spellcheck.
+- The composer accepts pasted images and files dropped onto the window (50 MiB per attachment), completes `@` mentions from the room member list, suggests emoji for `:shortcodes:`, and optionally replaces emoticons as you type. The **Formatting** menu preserves the selected draft text; Settings can keep the full formatting toolbar expanded.
 - **Voice notes** record straight from the composer with a selectable microphone (up to 4 minutes / 50 MiB); the next voice note can auto-play. Any audio message can be **transcribed with AI** and the transcript inserted into the composer as a draft.
 - An optional **undo send** window (5–30 seconds) holds outgoing messages briefly so they can be recalled.
 
 **Scheduled messages & reminders**
 
-- **Send Later** schedules a draft — or a reply — for a future time; **Remind Later** sets a reminder on any message. Delays run from 1 minute to 7 days, with default delays and quick time suggestions configurable in Settings → General.
-- The queue dialog (clock icon in the header) lists pending, fired, and failed jobs and lets you reschedule, edit, or cancel them. Reminders surface as an in-app notice and a desktop notification, and can archive the room afterwards.
+- **Send Later**, in the composer's **Delivery options** menu, schedules a draft — or a reply — for a future time; the same menu starts video recording. **Remind Later** sets a reminder on any message. Delays run from 1 minute to 7 days, with default delays and quick time suggestions configurable in Settings → General.
+- The queue dialog, under **Room actions → Scheduled messages and reminders**, lists pending, fired, and failed jobs and lets you reschedule, edit, or cancel them. Its count remains visible in the header. Reminders surface as an in-app notice and a desktop notification, and can archive the room afterwards.
 - Jobs persist in `scheduled-jobs.json` and fire from a background worker while Pinger is running.
+- Scheduled messages remain in the sending state until Matrix confirms delivery. Failed or interrupted jobs retain their transaction ID for retry; check the room before retrying an interrupted send.
+- Temporary failures to save a delivery result are retried without resending the message. An app exit before storage recovers still requires interrupted-send recovery on the next launch.
 
 **AI assistance**
+
+- The composer's **AI tools** menu groups Language Tutor, suggested replies, image generation, summarization, and translation. Active image generation keeps a directly accessible Stop control.
 
 - Configure an OpenAI-compatible endpoint in Settings → Integrations (endpoint URL, optional model name, translation language, connection test) — including a llama-server you run yourself.
 - Actions: **Ask AI** (answer a question using room context), draft a reply, explain or translate a selected message, rewrite or shorten composer text, summarize a room, identify chat topics and themes, analyze a two-person conversation, and run a per-room chat agent. **Translate chat to English** batches the room history so a whole conversation can be translated at once, and audio messages can be transcribed (optional transcription model in Settings → Integrations). Results can be inserted into the composer as a draft or reply.
@@ -62,13 +67,15 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 
 **Room details & media**
 
-- The header toggles the sidebar; **Details** opens a panel with the room ID and topic, chat-agent profiles, the member list, and a Leave room button. The header also carries favorite, mute, message search, and scheduled-queue buttons.
+- **Room details** opens a panel with the room ID and topic, chat-agent profiles, the member list, and a Leave room button. Search and details stay visible in the header; **Room actions** contains the media gallery, export, scheduled queue, favorite, and mute commands. Favorite and muted indicators remain visible beside the room title.
 - Room/member avatars and attachments are downloaded from Matrix content URIs and stored in the on-disk media cache; avatars are also cached in memory for the session and resized for display. Missing images use a generated initials icon.
+- Images embedded in Markdown are displayed as links and only open in the system browser when clicked. Automatic downloads reserve unique filenames without overwriting existing files.
 
 **Appearance**
 
-- System default plus ten themes — Light, Dark, OLED black, Bosco, Rosa, Dracula, Midnight, Slate, Solarized, Sepia — each with its own default outgoing-message color, plus independent accent palettes and chat wallpapers.
+- System default plus eleven themes — Light, Dark, VS Code, OLED black, Bosco, Rosa, Dracula, Midnight, Slate, Solarized, Sepia — with visual previews, independent accent palettes, and chat wallpapers. Existing theme names and custom colors are preserved; text and focus colors are derived for readability.
 - Font size (Small/Medium/Large), app zoom 75–125% (`Ctrl`/`⌘` + `+` / `-` / `0`), compact chat list, room previews, unread badges, network labels for bridged chats, favorite placement (top of list or star only), message animations, 24-hour or relative timestamps, optional hiding of media and deleted messages, balanced line wrapping, and a pointer cursor on clickable controls.
+- Motion is restrained and follows the OS reduced-motion preference. Message entrances apply only to new visible arrivals, not history loads, older-page prepends, or receipt updates.
 
 **System tray & notifications**
 
@@ -145,7 +152,7 @@ Targets macOS 12+, Windows x64 (WebView2 Runtime), and Linux x64.
 
 ### Prerequisites
 
-- [Go 1.26+](https://go.dev/dl/)
+- [Go 1.26.10](https://go.dev/dl/); scripts and tasks explicitly select this patched compiler because Go 1.27 requires macOS 13 and cannot retain macOS 12 support
 - [Node.js 22+](https://nodejs.org/) with npm
 - Wails CLI **v3.0.0-beta.30** (must match `go.mod`):
   `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30`
@@ -201,21 +208,36 @@ For a native executable without the desktop installer, run `wails3 task build:li
 
 ## Development & checks
 
+Application artwork is maintained in [assets/pinger.svg](assets/pinger.svg). Regenerate app PNGs, macOS ICNS, Windows ICO, Linux launcher sizes, and browser favicons with `npm --prefix frontend run icons`; verify freshness and native resolutions with `npm --prefix frontend run icons:check`. Both commands need frontend dependencies and the matching Wails CLI (resolved from `PATH`, `GOBIN`, or `GOPATH/bin`; `WAILS_COMMAND` can override it). Task builds, macOS packaging, and release jobs regenerate icons automatically. Local Windows Task builds also embed the ICO and application manifest.
+
+macOS tray artwork uses native monochrome templates; Windows variants follow system appearance rather than the chat theme, and Linux uses a colored mark. Linux alerts without a room avatar use cached application artwork; existing avatar attachments are preserved.
+
 Build the frontend before compiling Go. The same checks run in CI on every push to `main` and pull request; backend checks don't launch a desktop window:
 
 ```sh
 npm --prefix frontend ci
-npm --prefix frontend exec -- playwright install chromium
+npm --prefix frontend exec -- playwright install chromium webkit
 npm --prefix frontend test
 npm --prefix frontend run test:browser
 npm --prefix frontend run lint
 npm --prefix frontend run build
+npm --prefix frontend audit --audit-level=moderate
+export GOTOOLCHAIN=go1.26.10
 go test -tags "sqlite_fts5 goolm" ./...
+go test -race -count=1 -tags "sqlite_fts5 goolm" ./desktop ./matrix ./preferences
 go vet -tags "sqlite_fts5 goolm" ./...
+go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks='SA*' -tags sqlite_fts5,goolm ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -tags sqlite_fts5,goolm ./...
 go build -tags "sqlite_fts5 goolm" .
 ```
 
-Frontend performance regression coverage currently checks render counts, including that composer typing does not rerender timeline Markdown. It does not establish wall-clock or memory baselines for large histories.
+CI also runs 30-second, two-worker fuzz campaigns for local AI endpoint validation, media path parsing, and Matrix message content. To run one locally, use `go test -tags sqlite_fts5,goolm ./matrix -run '^$' -fuzz '^FuzzMessageFromEvent$' -fuzztime=30s -parallel=2`; the other targets are `FuzzValidateLocalHTTPEndpoint` in `./preferences` and `FuzzParseMediaAssetPath` in `./desktop`.
+
+Windows and Linux PR jobs compile the package tests and native application using the release pipeline's CGO setup. They do not exercise native windows, notifications, or operating-system permissions. Production JavaScript and CSS explicitly target Safari 15 for macOS 12; current Playwright WebKit is not a substitute for testing that minimum operating system.
+
+Frontend performance regressions cover render counts, including that composer typing does not rerender timeline Markdown, and per-render clock/relative formatter reuse. A local formatting microbenchmark measured roughly 311 ms versus 5 ms for 10,000 timestamps; this is not a whole-application frame-rate or memory benchmark. Large-history virtualization remains a separate measured change.
+
+Dependabot proposes weekly dependency and action updates. Wails Go, CLI, and JavaScript runtime upgrades remain coordinated manually so their versions stay aligned. Vulnerability scans gate reachable Go findings and moderate-or-higher npm advisories; module-only advisories must still be reviewed separately.
 
 ## Releases
 

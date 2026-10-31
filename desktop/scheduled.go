@@ -38,6 +38,7 @@ type ScheduledJob struct {
 	Text           string `json:"text"`
 	EventID        string `json:"eventId"`
 	ReplyToEventID string `json:"replyToEventId,omitempty"`
+	TransactionID  string `json:"transactionId,omitempty"`
 	DueAt          int64  `json:"dueAt"`
 	CreatedAt      int64  `json:"createdAt"`
 	Status         string `json:"status"`
@@ -49,9 +50,10 @@ type ScheduledJob struct {
 }
 
 type scheduledJobStore struct {
-	mu   sync.Mutex
-	path string
-	jobs []ScheduledJob
+	mu                           sync.Mutex
+	path                         string
+	jobs                         []ScheduledJob
+	completionPersistencePending bool
 }
 
 func newScheduledJobStore(path string) (*scheduledJobStore, error) {
@@ -222,7 +224,6 @@ func (s *scheduledJobStore) finishMessage(id string, sendErr error, startedAt, f
 		if job.ID != id || job.Status != scheduledSending {
 			continue
 		}
-		previous := *job
 		if sendErr != nil {
 			job.Status = scheduledFailed
 			job.Error = sendErr.Error()
@@ -235,15 +236,39 @@ func (s *scheduledJobStore) finishMessage(id string, sendErr error, startedAt, f
 			if job.RepeatWeekly {
 				job.DueAt = nextWeeklyOccurrence(finishedAt, job.RepeatWeekday, job.RepeatHour, job.RepeatMinute)
 				job.Status = scheduledPending
+				job.TransactionID = ""
 			}
 		}
 		if err := s.saveLocked(); err != nil {
-			*job = previous
+			s.completionPersistencePending = true
 			return err
 		}
 		return nil
 	}
 	return errors.New("scheduled message is no longer being sent")
+}
+
+func (s *scheduledJobStore) flushPendingCompletions() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.completionPersistencePending {
+		return nil
+	}
+	if err := s.saveLocked(); err != nil {
+		return err
+	}
+	s.completionPersistencePending = false
+	return nil
+}
+
+func (s *scheduledJobStore) recordTransaction(id, transactionID string) error {
+	return s.updateJob(id, func(job *ScheduledJob) error {
+		if job.Status != scheduledSending {
+			return errors.New("scheduled message is no longer being sent")
+		}
+		job.TransactionID = transactionID
+		return nil
+	})
 }
 
 func nextWeeklyOccurrence(after int64, weekday, hour, minute int) int64 {

@@ -16,19 +16,14 @@ export CGO_ENABLED="${CGO_ENABLED:-1}"
 export CGO_CFLAGS="${CGO_CFLAGS:--mmacosx-version-min=12.0}"
 export CGO_LDFLAGS="${CGO_LDFLAGS:--mmacosx-version-min=12.0}"
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
+export GOTOOLCHAIN=go1.26.10
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "This script must run on macOS." >&2
   exit 1
 fi
 
-if [ ! -f "$ICON_PATH" ]; then
-  command -v wails3 >/dev/null 2>&1 || {
-    echo "wails3 is required to generate build/darwin/icons.icns." >&2
-    exit 1
-  }
-  (cd "$ROOT_DIR/build" && wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename=)
-fi
+npm --prefix "$ROOT_DIR/frontend" run icons
 
 mkdir -p "$BIN_DIR"
 npm --prefix "$ROOT_DIR/frontend" run build

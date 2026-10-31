@@ -89,6 +89,7 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 	app := application.New(application.Options{
 		Name:        "Pinger",
 		Description: "A Matrix desktop client",
+		Icon:        applicationIcon,
 		Services: []application.Service{
 			application.NewService(service),
 			application.NewService(NewLanguageTutorService(service)),
@@ -184,7 +185,9 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 	}
 
 	icons := trayIcons()
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == "darwin" {
+		icons = macOSTrayIcons()
+	} else if runtime.GOOS == "linux" {
 		linuxIcons, iconErr := linuxTrayIcons()
 		if iconErr != nil {
 			log.Printf("prepare Linux tray icons: %v", iconErr)
@@ -201,6 +204,14 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 	}
 	trayDarkMode.Store(trayIconUsesDarkVariant(trayThemePreference(), app.Env.IsDarkMode()))
 	setTrayIcon := func() {
+		if runtime.GOOS == "darwin" {
+			icon := icons.normal
+			if trayHasUnread.Load() {
+				icon = icons.unread
+			}
+			tray.SetTemplateIcon(icon)
+			return
+		}
 		if trayDarkMode.Load() {
 			if trayHasUnread.Load() {
 				tray.SetIcon(icons.darkModeUnread)
@@ -232,9 +243,9 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 		showMainWindow()
 	})
 	if handler, ok := notifier.(notifications.ClickHandler); ok {
-		handler.SetClickHandler(func(roomID string) {
+		handler.SetClickHandler(func(accountID, roomID string) {
 			showMainWindow()
-			app.Event.Emit(notificationOpenRoomName, roomID)
+			app.Event.Emit(notificationOpenRoomName, map[string]string{"accountId": accountID, "roomId": roomID})
 		})
 	}
 	markAllRoomsRead := func() {
@@ -322,6 +333,10 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 
 	lastUnread := -1
 	service.startEventPump(func(update Update) {
+		if update.AccountID != service.currentAccountID() {
+			eventBatcher.EnqueueUpdate(update)
+			return
+		}
 		unread := 0
 		for _, room := range update.Rooms {
 			unread += room.Unread

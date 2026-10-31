@@ -1,5 +1,9 @@
 import { useEffect, useRef, type MouseEventHandler, type ReactNode } from 'react'
 
+export function hasOpenDialog(): boolean {
+  return document.querySelector('[aria-modal="true"]') !== null
+}
+
 export interface DialogSurfaceProps {
   children: ReactNode
   className: string

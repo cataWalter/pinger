@@ -41,7 +41,7 @@ func TestLinuxTrayIconsUseCompactTransparentMark(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode unread Linux tray icon: %v", err)
 	}
-	badge := color.NRGBAModel.Convert(unread.At(bounds.Dx()*27/32, bounds.Dy()*11/64)).(color.NRGBA)
+	badge := color.NRGBAModel.Convert(unread.At(bounds.Dx()*35/44, bounds.Dy()*9/44)).(color.NRGBA)
 	if badge.R < 220 || badge.G > 100 || badge.B > 100 {
 		t.Fatalf("Linux unread badge pixel = %+v, want red", badge)
 	}

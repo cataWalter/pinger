@@ -1,5 +1,8 @@
 version: '3'
 
+env:
+  GOTOOLCHAIN: go1.26.10
+
 vars:
   APP_NAME: "pinger"
   BIN_DIR: "bin"
@@ -47,9 +50,25 @@ tasks:
     platforms: [windows]
     deps:
       - task: common:build:frontend
+      - task: generate:windows:resources
     cmds:
       - powershell -NoProfile -Command "New-Item -ItemType Directory -Force bin | Out-Null"
       - go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o bin/pinger.exe .
+
+  generate:windows:resources:
+    summary: Embeds the native icon and application manifest in Windows builds
+    platforms: [windows]
+    vars:
+      ARCH: '{{.ARCH | default ARCH}}'
+    deps:
+      - task: common:generate:icons
+    sources:
+      - build/windows/icon.ico
+      - build/windows/pinger.exe.manifest
+    generates:
+      - rsrc_windows_{{.ARCH}}.syso
+    cmds:
+      - wails3 generate syso -arch {{.ARCH}} -icon build/windows/icon.ico -manifest build/windows/pinger.exe.manifest -out rsrc_windows_{{.ARCH}}.syso
 
   dev:
     summary: Runs the application in development mode

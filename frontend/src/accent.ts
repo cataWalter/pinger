@@ -72,7 +72,7 @@ function hexChannels(hex: string): number[] {
   return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff]
 }
 
-function mixHex(from: string, to: string, amount: number): string {
+export function mixHex(from: string, to: string, amount: number): string {
   const start = hexChannels(from)
   const end = hexChannels(to)
   const channels = start.map((channel, index) => Math.round(channel + (end[index] - channel) * amount))
@@ -82,4 +82,31 @@ function mixHex(from: string, to: string, amount: number): string {
 function rgba(hex: string, alpha: number): string {
   const [red, green, blue] = hexChannels(hex)
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`
+}
+
+export function contrastRatio(first: string, second: string): number {
+  const luminance = (hex: string) => {
+    const channels = hexChannels(hex).map((channel) => {
+      const normalized = channel / 255
+      return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4
+    })
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+  }
+  const firstLuminance = luminance(first)
+  const secondLuminance = luminance(second)
+  return (Math.max(firstLuminance, secondLuminance) + 0.05) / (Math.min(firstLuminance, secondLuminance) + 0.05)
+}
+
+export function readableForeground(background: string): string {
+  return contrastRatio('#ffffff', background) >= contrastRatio('#000000', background) ? '#ffffff' : '#000000'
+}
+
+export function accessibleColor(color: string, background: string, minimum = 4.5): string {
+  if (contrastRatio(color, background) >= minimum) return color
+  const target = readableForeground(background)
+  for (let step = 1; step <= 100; step++) {
+    const candidate = mixHex(color, target, step / 100)
+    if (contrastRatio(candidate, background) >= minimum) return candidate
+  }
+  return target
 }

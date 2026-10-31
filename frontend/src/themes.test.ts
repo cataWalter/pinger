@@ -1,7 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { SYSTEM_THEME_NAME, defaultBubbleColorForTheme, findThemeByName, themeIdForPreference, themeModeForPreference, themes } from './themes'
+import { SYSTEM_THEME_NAME, defaultBubbleColorForTheme, findThemeByName, themeCssVariables, themeIdForPreference, themeModeForPreference, themePaletteFor, themes } from './themes'
+import { accentPaletteFor, contrastRatio } from './accent'
 
 describe('themes', () => {
+  it('provides readable surfaces and custom accent roles in every theme', () => {
+    for (const theme of themes) {
+      const palette = themePaletteFor(theme.id)
+      expect(contrastRatio(palette.text, palette.surface), theme.name).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio(palette.sidebarText, palette.sidebar), theme.name).toBeGreaterThanOrEqual(4.5)
+      for (const color of ['#000000', '#ffffff', '#ff0000', '#00ff00', '#00ffff', '#ff00ff']) {
+        const variables = themeCssVariables(theme.id, accentPaletteFor(color), color)
+        expect(contrastRatio(variables['--accent-text'], palette.surface), `${theme.name} ${color}`).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(variables['--on-bubble'], color)).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(variables['--sidebar-accent'], palette.sidebar)).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(variables['--muted'], palette.surface)).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(variables['--selected-text'], variables['--surface-selected'])).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(variables['--on-accent'], variables['--accent-hover'])).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(variables['--sidebar-muted'], variables['--sidebar-active'])).toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(variables['--control-border'], palette.panel)).toBeGreaterThanOrEqual(3)
+        expect(contrastRatio(variables['--on-signal'], variables['--signal'])).toBeGreaterThanOrEqual(4.5)
+      }
+    }
+  })
+
   it('defines eleven unique themes that are each light or dark', () => {
     expect(themes).toHaveLength(11)
     expect(new Set(themes.map((theme) => theme.id)).size).toBe(11)

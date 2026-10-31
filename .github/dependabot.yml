@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: github.com/wailsapp/wails/v3
+    groups:
+      go-patches:
+        patterns: ["*"]
+        update-types: [patch]
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "@wailsio/runtime"
+    groups:
+      react:
+        patterns: [react, react-dom, "@types/react", "@types/react-dom"]
+      frontend-patches:
+        patterns: ["*"]
+        update-types: [patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

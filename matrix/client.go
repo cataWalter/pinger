@@ -250,6 +250,7 @@ type Client struct {
 	closeOnce       sync.Once
 	eventMu         sync.Mutex
 	sendMu          sync.Mutex
+	scheduledSends  map[string]chan error
 	startMu         sync.Mutex
 	directChatMu    sync.Mutex
 	slidingSyncMu   sync.RWMutex
@@ -842,6 +843,9 @@ func (c *Client) HistoryPageWithLimit(ctx context.Context, roomID string, before
 	if err := c.populateEditHistories(ctx, roomID, events, messages); err != nil {
 		log.Printf("read Matrix edit history for room %s: %v", roomID, err)
 	}
+	if err := c.populateOwnReactions(ctx, roomID, messages); err != nil {
+		log.Printf("read Matrix own reactions for room %s: %v", roomID, err)
+	}
 	if parsedTimelineEvents == 0 {
 		for _, evt := range events {
 			if evt != nil {
@@ -1330,6 +1334,96 @@ func (c *Client) SendMessage(ctx context.Context, roomID, text string) error {
 	return c.sendMessage(ctx, roomID, text, nil, nil)
 }
 
+func (c *Client) SendScheduledMessage(ctx context.Context, roomID, text, replyTo, transactionID string, onQueued func(string) error) error {
+	if strings.TrimSpace(text) == "" {
+		return errors.New("scheduled message cannot be empty")
+	}
+	ctx, finish, err := c.beginOperation(ctx)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	c.sendMu.Lock()
+	var evt *database.Event
+	if transactionID != "" {
+		evt, err = c.engine.DB.Event.GetByTransactionID(ctx, transactionID)
+		if err == nil && (evt == nil || evt.RoomID != id.RoomID(roomID)) {
+			err = errors.New("scheduled message transaction not found in its room; check the room before retrying")
+		}
+		if err == nil && evt.ID != "" && !strings.HasPrefix(evt.ID.String(), "~") {
+			c.sendMu.Unlock()
+			return nil
+		}
+		if err == nil {
+			evt, err = c.engine.Resend(ctx, transactionID)
+		}
+	} else {
+		var relation *event.RelatesTo
+		if replyTo != "" {
+			relation = &event.RelatesTo{InReplyTo: &event.InReplyTo{EventID: id.EventID(replyTo)}}
+		}
+		evt, err = c.engine.SendMessage(ctx, id.RoomID(roomID), nil, nil, text, relation, nil, nil)
+	}
+	if err != nil {
+		c.sendMu.Unlock()
+		return fmt.Errorf("queue scheduled Matrix message: %w", err)
+	}
+	if evt == nil || evt.TransactionID == "" {
+		c.sendMu.Unlock()
+		return errors.New("scheduled message has no delivery transaction; check the room before retrying")
+	}
+	if c.scheduledSends == nil {
+		c.scheduledSends = make(map[string]chan error)
+	}
+	completion := make(chan error, 1)
+	c.scheduledSends[evt.TransactionID] = completion
+	if message, ok := messageFromEvent(evt); ok {
+		message.Sending = true
+		message.Own = c.isOwnMessage(message)
+		c.storeLocalMessage(roomID, message)
+	}
+	if onQueued != nil {
+		err = onQueued(evt.TransactionID)
+	}
+	c.sendMu.Unlock()
+	defer func() {
+		c.sendMu.Lock()
+		if c.scheduledSends[evt.TransactionID] == completion {
+			delete(c.scheduledSends, evt.TransactionID)
+		}
+		c.sendMu.Unlock()
+	}()
+	c.publishTimeline([]string{roomID}, "")
+	if err != nil {
+		return fmt.Errorf("persist scheduled transaction; message may already be sending: %w", err)
+	}
+	select {
+	case sendErr := <-completion:
+		return sendErr
+	case <-ctx.Done():
+		return fmt.Errorf("delivery not confirmed; check the room before retrying: %w", ctx.Err())
+	}
+}
+
+func (c *Client) completeScheduledSendLocked(evt *jsoncmd.SendComplete) {
+	if evt.Event == nil {
+		return
+	}
+	completion := c.scheduledSends[evt.Event.TransactionID]
+	if completion == nil {
+		return
+	}
+	sendErr := evt.Error
+	if sendErr == nil && evt.Event.SendError != "" && evt.Event.SendError != "not sent" {
+		sendErr = errors.New(evt.Event.SendError)
+	}
+	if sendErr == nil && (evt.Event.ID == "" || strings.HasPrefix(evt.Event.ID.String(), "~")) {
+		return
+	}
+	delete(c.scheduledSends, evt.Event.TransactionID)
+	completion <- sendErr
+}
+
 func (c *Client) SendMessageWithMentions(ctx context.Context, roomID, text string, userIDs []string) error {
 	mentions := &event.Mentions{}
 	for _, userID := range userIDs {
@@ -1446,7 +1540,8 @@ func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, da
 	var encryptedFile *attachment.EncryptedFile
 	if encrypted {
 		encryptedFile = attachment.NewEncryptedFile()
-		uploadData = encryptedFile.Encrypt(data)
+		uploadData = bytes.Clone(data)
+		encryptedFile.EncryptInPlace(uploadData)
 	}
 	uploadType := mimeType
 	if encrypted {
@@ -1557,14 +1652,8 @@ func (c *Client) RemoveReaction(ctx context.Context, roomID, eventID, emoji stri
 	if c.engine.Account == nil {
 		return errors.New("reaction removal requires a logged-in account")
 	}
-	reactionID, err := findOwnReactionID(ctx, c.engine.Client, id.RoomID(roomID), id.EventID(eventID), c.engine.Account.UserID, emoji)
-	if err != nil {
+	if err = redactOwnReactions(ctx, c.engine.Client, id.RoomID(roomID), id.EventID(eventID), c.engine.Account.UserID, emoji); err != nil {
 		return err
-	}
-	if reactionID != "" {
-		if _, err = c.engine.Client.RedactEvent(ctx, id.RoomID(roomID), reactionID); err != nil {
-			return fmt.Errorf("remove Matrix reaction: %w", err)
-		}
 	}
 	c.mu.Lock()
 	if messages, ok := c.local[roomID]; ok {
@@ -1586,9 +1675,23 @@ const (
 	reactionRelationMaxPages  = 20
 )
 
-// findOwnReactionID returns the event ID of userID's annotation with emoji, or an empty ID when none exists.
-func findOwnReactionID(ctx context.Context, cli *mautrix.Client, roomID id.RoomID, eventID id.EventID, userID id.UserID, emoji string) (id.EventID, error) {
+func redactOwnReactions(ctx context.Context, cli *mautrix.Client, roomID id.RoomID, eventID id.EventID, userID id.UserID, emoji string) error {
+	reactionIDs, err := findOwnReactionIDs(ctx, cli, roomID, eventID, userID, emoji)
+	if err != nil {
+		return err
+	}
+	for _, reactionID := range reactionIDs {
+		if _, err = cli.RedactEvent(ctx, roomID, reactionID); err != nil {
+			return fmt.Errorf("remove Matrix reaction %s: %w", reactionID, err)
+		}
+	}
+	return nil
+}
+
+func findOwnReactionIDs(ctx context.Context, cli *mautrix.Client, roomID id.RoomID, eventID id.EventID, userID id.UserID, emoji string) ([]id.EventID, error) {
 	from := ""
+	var reactionIDs []id.EventID
+	seen := make(map[id.EventID]bool)
 	for range reactionRelationMaxPages {
 		resp, err := cli.GetRelations(ctx, roomID, eventID, &mautrix.ReqGetRelations{
 			RelationType: event.RelAnnotation,
@@ -1597,22 +1700,27 @@ func findOwnReactionID(ctx context.Context, cli *mautrix.Client, roomID id.RoomI
 			Limit:        reactionRelationPageLimit,
 		})
 		if err != nil {
-			return "", fmt.Errorf("list Matrix reactions: %w", err)
+			return nil, fmt.Errorf("list Matrix reactions: %w", err)
 		}
 		for _, evt := range resp.Chunk {
-			if evt.Sender != userID || evt.Content.ParseRaw(evt.Type) != nil {
+			if evt == nil || evt.ID == "" || seen[evt.ID] || evt.Sender != userID || evt.Content.ParseRaw(evt.Type) != nil {
 				continue
 			}
-			if evt.Content.AsReaction().RelatesTo.Key == emoji {
-				return evt.ID, nil
+			relation := evt.Content.AsReaction().RelatesTo
+			if relation.EventID == eventID && relation.Type == event.RelAnnotation && relation.Key == emoji {
+				reactionIDs = append(reactionIDs, evt.ID)
+				seen[evt.ID] = true
 			}
 		}
-		if resp.NextBatch == "" || len(resp.Chunk) == 0 {
-			break
+		if resp.NextBatch == "" {
+			return reactionIDs, nil
+		}
+		if resp.NextBatch == from {
+			return nil, errors.New("Matrix reaction pagination did not advance")
 		}
 		from = resp.NextBatch
 	}
-	return "", nil
+	return nil, errors.New("Matrix reaction pagination exceeded the page limit")
 }
 
 func (c *Client) RedactMessage(ctx context.Context, roomID, eventID string) error {
@@ -2247,6 +2355,7 @@ func (c *Client) handleBackendEvent(raw any) {
 					c.storeFailedMessage(evt.Event.RoomID.String(), message)
 				}
 			}
+			c.completeScheduledSendLocked(evt)
 			c.sendMu.Unlock()
 			errorMessage := ""
 			if evt.Error != nil {
@@ -3172,6 +3281,55 @@ func (c *Client) populateEditHistories(ctx context.Context, roomID string, event
 		}
 	}
 	return nil
+}
+
+// populateOwnReactions marks the current user's reactions so their chips remove instead of adding a duplicate.
+func (c *Client) populateOwnReactions(ctx context.Context, roomID string, messages []Message) error {
+	if c.engine.Account == nil {
+		return nil
+	}
+	eventIDs := make([]id.EventID, 0, len(messages))
+	for _, message := range messages {
+		if message.ID != "" && !strings.HasPrefix(message.ID, "~") {
+			eventIDs = append(eventIDs, id.EventID(message.ID))
+		}
+	}
+	if len(eventIDs) == 0 {
+		return nil
+	}
+	reactions, err := c.engine.DB.Event.GetReactions(ctx, id.RoomID(roomID), eventIDs...)
+	if err != nil {
+		return err
+	}
+	applyOwnReactions(messages, reactions, c.engine.Account.UserID)
+	return nil
+}
+
+// applyOwnReactions sets Reacted for each emoji the user has annotated on a message.
+func applyOwnReactions(messages []Message, reactions map[id.EventID]*database.GetReactionsResult, userID id.UserID) {
+	for index := range messages {
+		result := reactions[id.EventID(messages[index].ID)]
+		if result == nil {
+			continue
+		}
+		for _, evt := range result.Events {
+			if evt == nil || evt.Sender != userID {
+				continue
+			}
+			var content struct {
+				RelatesTo struct {
+					Key string `json:"key"`
+				} `json:"m.relates_to"`
+			}
+			if json.Unmarshal(evt.Content, &content) != nil || content.RelatesTo.Key == "" {
+				continue
+			}
+			if messages[index].Reacted == nil {
+				messages[index].Reacted = make(map[string]bool)
+			}
+			messages[index].Reacted[content.RelatesTo.Key] = true
+		}
+	}
 }
 
 func latestEdit(edits []*database.Event) *database.Event {

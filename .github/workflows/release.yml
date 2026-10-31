@@ -17,6 +17,7 @@ concurrency:
 env:
   # Last run number released as v0.<run>; later branch builds count from 0.1.
   RELEASE_VERSION_OFFSET: "24"
+  GOTOOLCHAIN: go1.26.10
 
 jobs:
   test:
@@ -29,9 +30,9 @@ jobs:
     needs: [test]
     env:
       # Matches the deployment target in build/darwin/Taskfile.yml and the
-      # "macOS 12 or newer" support statement in the README. The CGO flags pin
-      # both compiled objects and the final link to the same target, which
-      # silences the ld "built for newer macOS" warnings.
+      # "macOS 12 or newer" support statement in the README. Go 1.26 is the
+      # last compiler line supporting that runtime; CGO flags alone cannot
+      # restore compatibility with a newer compiler.
       MACOSX_DEPLOYMENT_TARGET: "12.0"
       CGO_CFLAGS: "-mmacosx-version-min=12.0"
       CGO_LDFLAGS: "-mmacosx-version-min=12.0 -Wl,-no_warn_duplicate_libraries"
@@ -60,8 +61,12 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3
         run: |
           npm ci
+          npm run icons
+          npm run icons:check
           npm run build
 
       - name: Prepare build metadata
@@ -93,24 +98,14 @@ jobs:
             -output "dist/Pinger.app/Contents/MacOS/pinger"
           rm dist/pinger-amd64 dist/pinger-arm64
           lipo -info "dist/Pinger.app/Contents/MacOS/pinger"
-          cat > "dist/Pinger.app/Contents/Info.plist" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleExecutable</key><string>pinger</string>
-            <key>CFBundleIdentifier</key><string>fi.mau.pinger</string>
-            <key>CFBundleName</key><string>Pinger</string>
-            <key>CFBundleDisplayName</key><string>Pinger</string>
-            <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleIconFile</key><string>icons</string>
-            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-            <key>CFBundleVersion</key><string>${GITHUB_RUN_NUMBER}</string>
-            <key>LSMinimumSystemVersion</key><string>${MACOSX_DEPLOYMENT_TARGET}</string>
-            <key>NSHighResolutionCapable</key><true/>
-          </dict>
-          </plist>
-          EOF
+          plist="dist/Pinger.app/Contents/Info.plist"
+          cp build/darwin/Info.plist "$plist"
+          /usr/bin/plutil -replace CFBundleShortVersionString -string "${VERSION}" "$plist"
+          /usr/bin/plutil -replace CFBundleVersion -string "${GITHUB_RUN_NUMBER}" "$plist"
+          /usr/bin/plutil -replace LSMinimumSystemVersion -string "${MACOSX_DEPLOYMENT_TARGET}" "$plist"
+          /usr/bin/plutil -lint "$plist"
+          test -n "$(/usr/bin/plutil -extract NSMicrophoneUsageDescription raw -o - "$plist")"
+          test -n "$(/usr/bin/plutil -extract NSCameraUsageDescription raw -o - "$plist")"
           codesign --force --deep --sign - "dist/Pinger.app"
           codesign --verify --deep --strict "dist/Pinger.app"
 
@@ -189,8 +184,12 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3.exe
         run: |
           npm ci
+          npm run icons
+          npm run icons:check
           npm run build
 
       - name: Prepare build metadata
@@ -279,8 +278,12 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3
         run: |
           npm ci
+          npm run icons
+          npm run icons:check
           npm run build
 
       - name: Prepare build metadata
@@ -305,9 +308,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist/icons
-          for size in 16 32 48 64 128 256 512 1024; do
-            convert build/appicon.png -resize "${size}x${size}" -strip \
-              "dist/icons/${size}.png"
+          for size in 16 24 32 48 64 128 256 512 1024; do
+            cp "build/linux/icons/${size}x${size}/pinger.png" "dist/icons/${size}.png"
           done
 
       - name: Build Linux x64 binaries
@@ -362,7 +364,7 @@ jobs:
           Terminal=false
           EOF
 
-          for size in 16 32 48 64 128 256 512 1024; do
+          for size in 16 24 32 48 64 128 256 512 1024; do
             dir="$stage/usr/share/icons/hicolor/${size}x${size}/apps"
             mkdir -p "$dir"
             cp "dist/icons/${size}.png" "$dir/pinger.png"
@@ -427,7 +429,7 @@ jobs:
           </component>
           EOF
 
-          for size in 16 32 48 64 128 256 512 1024; do
+          for size in 16 24 32 48 64 128 256 512 1024; do
             dir="$appdir/usr/share/icons/hicolor/${size}x${size}/apps"
             mkdir -p "$dir"
             cp "dist/icons/${size}.png" "$dir/pinger.png"

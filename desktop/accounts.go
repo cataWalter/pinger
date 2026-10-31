@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	"mychat/logging"
@@ -465,15 +466,24 @@ func (s *AppService) startAccountEventPump(accountID string, client *matrix.Clie
 						Str("detail", update.Error).
 						Msg("Matrix update reported an error")
 				}
-				if s.currentAccountID() == accountID {
-					mapped := mapUpdate(update, s.preferenceValuesForAccount(accountID))
-					tagRooms(mapped.Rooms, accountID)
-					tagNotifications(mapped.Notifications, accountID)
-					emit(mapped)
-				}
+				emit(mapAccountUpdate(update, accountID, s.preferenceValuesForAccount(accountID)))
 			}
 		}
 	}()
+}
+
+func mapAccountUpdate(update matrix.Update, accountID string, preferences map[string]any) Update {
+	mapped := mapUpdate(update, preferences)
+	mapped.AccountID = accountID
+	mapped.NotificationPreferences = make(map[string]any)
+	for key, value := range preferences {
+		if strings.HasPrefix(key, "notifications.") || strings.HasPrefix(key, "room.muted.") {
+			mapped.NotificationPreferences[key] = value
+		}
+	}
+	tagRooms(mapped.Rooms, accountID)
+	tagNotifications(mapped.Notifications, accountID)
+	return mapped
 }
 
 func (r *accountRegistry) saveOrRestore(previous accountRegistryData) error {

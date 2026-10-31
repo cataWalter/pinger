@@ -3,6 +3,8 @@ package desktop
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -63,5 +65,41 @@ func TestAILocalHTTPClientDisablesProxyAndRejectsNonLoopback(t *testing.T) {
 	}
 	if _, err := dialLocalAILoopback(context.Background(), "tcp", "192.0.2.1:80"); err == nil {
 		t.Fatal("dialLocalAILoopback accepted a non-loopback address")
+	}
+}
+
+func TestAILocalCompletionRejectsRedirects(t *testing.T) {
+	for _, statusCode := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(http.StatusText(statusCode), func(t *testing.T) {
+			var received atomic.Bool
+			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				received.Store(true)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer remote.Close()
+			local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, remote.URL, statusCode)
+			}))
+			defer local.Close()
+			_, err := aiProviderCompletion(context.Background(), aiLocalHTTPClient, AIProviderOpenAICompatible, local.URL, "test", ghostTextMessages("private history", "private draft"), aiCompletionOptions{}, nil)
+			if err == nil {
+				t.Fatal("local completion accepted a redirect")
+			}
+			if received.Load() {
+				t.Fatal("redirect destination received private content")
+			}
+		})
+	}
+}
+
+func TestAILocalCompletionAcceptsLoopbackResponse(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":" world"}}]}`))
+	}))
+	defer local.Close()
+	completion, err := aiProviderCompletion(context.Background(), aiLocalHTTPClient, AIProviderOpenAICompatible, local.URL, "test", ghostTextMessages("", "hello"), aiCompletionOptions{}, nil)
+	if err != nil || completion != "world" {
+		t.Fatalf("local completion = %q, %v; want world", completion, err)
 	}
 }

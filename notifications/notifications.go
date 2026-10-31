@@ -8,6 +8,7 @@ type Message struct {
 	Subtitle   string
 	Body       string
 	RoomID     string
+	AccountID  string
 	AvatarPath string
 	Sound      bool
 }
@@ -25,5 +26,5 @@ type Lifecycle interface {
 }
 
 type ClickHandler interface {
-	SetClickHandler(func(roomID string))
+	SetClickHandler(func(accountID, roomID string))
 }

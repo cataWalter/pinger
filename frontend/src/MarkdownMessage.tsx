@@ -52,6 +52,13 @@ function MarkdownMessage({ body, className = 'message-body' }: { body: string; c
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: true }]]}
         components={{
+          img({ alt, src }) {
+            if (!src) return <span>{alt || 'Image'}</span>
+            return <a href={src} target="_blank" rel="noreferrer" onClick={(event) => {
+              event.preventDefault()
+              void openLink(src)
+            }}>{alt || 'Image'}</a>
+          },
           a({ children, href }) {
             return <a href={href} target="_blank" rel="noreferrer" onClick={(event) => {
               if (!href) return

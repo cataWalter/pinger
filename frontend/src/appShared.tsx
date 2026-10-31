@@ -1,6 +1,7 @@
-import { Fragment, lazy, memo, Suspense, useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode } from 'react'
+import { Fragment, lazy, memo, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUpRight, Bot, Copy, FileText, MessageSquare, Sparkles, Star, X, Download, ZoomIn, ZoomOut } from 'lucide-react'
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
+import { ArrowUpRight, Bot, Check, Copy, FileText, MessageSquare, Sparkles, Star, X, Download, ZoomIn, ZoomOut } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type AIMessage, type ChatExportResult, type Member, type Message, type Room, type Snapshot, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
 import { fuzzyScore } from './fuzzy'
@@ -13,6 +14,8 @@ import { isLocalAIRoomID, type LocalAIChatIcon } from './localAIChats'
 export const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
 
 export type MatrixUpdate = {
+  accountId?: string
+  notificationPreferences?: PreferenceValues
   rooms: Room[]
   slidingSyncListCounts?: Record<string, number> | null
   timelineChangedRoomId: string[] | null
@@ -25,6 +28,7 @@ export type MatrixUpdate = {
 }
 
 export type MatrixNotification = {
+  preferences?: PreferenceValues
   roomId: string
   accountId?: string
   room: string
@@ -41,7 +45,7 @@ export type PreferenceValues = NonNullable<Snapshot['preferences']>
 export type RoomScope = 'all' | 'archived' | 'local-ai'
 export type RoomRefinements = { unanswered: boolean; needsReply: boolean; favorite: boolean }
 export type OutgoingMessage = { roomID: string; text: string; replyTo: Message | null; mentionUserIDs: string[] }
-export type MessageMenuItem = { key: string; label: string; ariaLabel: string; icon: ReactElement; danger?: boolean; disabled?: boolean; separatorBefore?: boolean; run: () => void }
+export type MessageMenuItem = { key: string; label: string; ariaLabel: string; icon: ReactElement; danger?: boolean; disabled?: boolean; meta?: boolean; separatorBefore?: boolean; run: () => void }
 export type AIAcceptAction = { kind: 'none' } | { kind: 'draft' | 'rewrite' } | { kind: 'reply'; target: Message }
 export type AIPanel = {
   title: string
@@ -59,7 +63,7 @@ export type AIPanel = {
 }
 export type AIStreamChunk = { requestId: string; text: string; reset?: boolean }
 export type AIStreamHandler = (chunk: AIStreamChunk) => void
-export type LanguageTutorState = { mode: 'draft' | 'message'; originalText: string; explanationLanguage: string; analysis: TutorAnalysis | null; busy: boolean; error: string; requestID: string; preview: string }
+export type LanguageTutorState = { accountID: string; roomID: string; mode: 'draft' | 'message'; originalText: string; explanationLanguage: string; analysis: TutorAnalysis | null; busy: boolean; error: string; requestID: string; preview: string }
 export type ChatTranslationState = { requestID: number; roomID: string; targetLanguage: string; targetMessageIDs: string[]; analyses: Record<string, TutorAnalysis>; busy: boolean; status: string; error: string }
 export type ChatExportState = { roomID: string; phase: 'running' | 'done' | 'failed'; stage: string; mediaDone: number; mediaTotal: number; result: ChatExportResult | null; error: string }
 export type ChatExportProgressEvent = { roomId: string; stage: string; messages: number; mediaDone: number; mediaTotal: number }
@@ -487,11 +491,49 @@ export function primaryModifierLabel() {
   return /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
 }
 
+export function preferredScrollBehavior(behavior: ScrollBehavior = 'smooth'): ScrollBehavior {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : behavior
+}
+
+export function appendedTimelineMessageIDs(previous: Message[], next: Message[]): Set<string> {
+  if (previous.length === 0) return new Set()
+  const tail = previous[previous.length - 1]
+  const tailIndex = next.findIndex((message) => timelineMessageID(message) === timelineMessageID(tail) || Boolean(tail.transactionId && message.transactionId === tail.transactionId))
+  if (tailIndex < 0) return new Set()
+  const known = new Set(previous.flatMap((message) => [message.id, message.transactionId].filter(Boolean)))
+  return new Set(next.slice(tailIndex + 1).filter((message) => !known.has(message.id) && !known.has(message.transactionId)).map(timelineMessageID))
+}
+
+export const VIRTUAL_TIMELINE_THRESHOLD = 200
+
+export type TimelineListHandle = {
+  virtualized: boolean
+  focusMessage: (eventID: string) => boolean
+}
+
+export function timelineFirstItemIndex(previous: Message[], next: Message[], firstIndex: number) {
+  if (previous.length === 0 || next.length === 0) return firstIndex
+  const matches = (candidate: Message, reference: Message) => Boolean(
+    (candidate.id && candidate.id === reference.id)
+    || (candidate.transactionId && candidate.transactionId === reference.transactionId),
+  )
+  const prepended = next.findIndex((message) => matches(message, previous[0]))
+  if (prepended >= 0) return Math.max(1, firstIndex - prepended)
+  const removed = previous.findIndex((message) => matches(message, next[0]))
+  return removed >= 0 ? firstIndex + removed : firstIndex
+}
+
+const virtualTimelineComponents = {
+  Header: ({ context }: { context?: { header?: ReactNode; zoom?: number } }) => <div style={{ zoom: context?.zoom ?? 1, display: 'flex', flexDirection: 'column' }}>{context?.header}</div>,
+}
+
 export const TimelineMessageList = memo(function TimelineMessageList({
   messages,
+  header,
   hideDeleted,
   preferences,
   currentUserID,
+  accountID,
   selectedRoomID,
   groupChat,
   chatTranslation,
@@ -500,11 +542,15 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   autoPlayNextMessageId,
   canUseTranscriptAsDraft,
   actionsRef,
+  scrollParentRef,
+  listHandleRef,
 }: {
   messages: Message[]
+  header?: ReactNode
   hideDeleted: boolean
   preferences: PreferenceValues
   currentUserID: string
+  accountID: string
   selectedRoomID: string
   groupChat: boolean
   chatTranslation: ChatTranslationState | null
@@ -513,11 +559,90 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   autoPlayNextMessageId: string | null
   canUseTranscriptAsDraft: boolean
   actionsRef: { current: TimelineMessageActions }
+  scrollParentRef?: RefObject<HTMLDivElement | null>
+  listHandleRef?: RefObject<TimelineListHandle | null>
 }) {
   const visibleMessages = hideDeleted ? messages.filter((message) => !message.redacted) : messages
+  const scope = `${accountID}:${selectedRoomID}`
+  const virtualized = Boolean(scrollParentRef && visibleMessages.length > VIRTUAL_TIMELINE_THRESHOLD)
+  const timelineZoom = preferenceNumber(preferences, 'appearance.zoom', 100, 75, 125) / 100
+  const firstRowRef = useRef<HTMLElement>(null)
+  const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null)
+  const virtualRef = useRef<VirtuosoHandle>(null)
+  const focusFrameRef = useRef<number | null>(null)
+  const [anchor, setAnchor] = useState({ scope, source: messages, visible: visibleMessages, hideDeleted, firstIndex: 1000000 })
+  const previousRef = useRef<{ scope: string; messages: Message[] } | null>(null)
+  const animateMessages = preferenceBoolean(preferences, 'appearance.message_animations', true)
+  const formatTimestamp = createTimelineTimeFormatter(preferences)
 
-  return <>
-    {visibleMessages.map((message, index) => {
+  if (anchor.scope !== scope || anchor.source !== messages || anchor.hideDeleted !== hideDeleted) {
+    setAnchor({
+      scope,
+      source: messages,
+      visible: visibleMessages,
+      hideDeleted,
+      firstIndex: anchor.scope === scope ? timelineFirstItemIndex(anchor.visible, visibleMessages, anchor.firstIndex) : 1000000,
+    })
+  }
+
+  useEffect(() => {
+    setScrollParent(scrollParentRef?.current ?? null)
+  }, [scrollParentRef, selectedRoomID])
+
+  useLayoutEffect(() => {
+    if (!listHandleRef) return
+    listHandleRef.current = {
+      virtualized,
+      focusMessage: (eventID) => {
+        const index = visibleMessages.findIndex((message) => message.id === eventID || message.transactionId === eventID)
+        if (index < 0 || !virtualRef.current) return false
+        virtualRef.current.scrollToIndex({ index, align: 'center', behavior: 'auto' })
+        if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current)
+        let remainingFrames = 60
+        const focus = () => {
+          const target = Array.from(scrollParentRef?.current?.querySelectorAll<HTMLElement>('[data-event-id]') ?? [])
+            .find((row) => row.dataset.eventId === eventID)
+          target?.focus({ preventScroll: true })
+          if (target && document.activeElement === target) {
+            focusFrameRef.current = null
+          } else if (--remainingFrames > 0) {
+            focusFrameRef.current = requestAnimationFrame(focus)
+          } else {
+            focusFrameRef.current = null
+          }
+        }
+        focusFrameRef.current = requestAnimationFrame(focus)
+        return true
+      },
+    }
+    return () => {
+      listHandleRef.current = null
+      if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current)
+      focusFrameRef.current = null
+    }
+  }, [listHandleRef, virtualized, visibleMessages, anchor.firstIndex, scrollParentRef])
+
+  useEffect(() => {
+    const scope = `${accountID}:${selectedRoomID}`
+    const previous = previousRef.current
+    const timeline = scrollParentRef?.current ?? firstRowRef.current?.closest('.timeline')
+    const rows = timeline?.querySelectorAll<HTMLElement>('.message-row') ?? []
+    const changedScope = previous?.scope !== scope
+    const additions = !changedScope && previous ? appendedTimelineMessageIDs(previous.messages, messages) : new Set<string>()
+    if (changedScope || !animateMessages) {
+      for (const row of rows) delete row.dataset.liveMessage
+    } else if (additions.size > 0 && preferredScrollBehavior() !== 'auto') {
+      const viewport = timeline?.getBoundingClientRect()
+      for (const row of rows) {
+        if (!additions.has(row.dataset.eventId ?? '')) continue
+        const bounds = row.getBoundingClientRect()
+        if (viewport && bounds.bottom > viewport.top && bounds.top < viewport.bottom) row.dataset.liveMessage = 'true'
+      }
+    }
+    previousRef.current = { scope, messages }
+  }, [messages, accountID, selectedRoomID, animateMessages, scrollParentRef])
+
+  function renderMessage(index: number, message: Message) {
       const ownMessage = isOwnMessage(message, currentUserID)
       const messageID = timelineMessageID(message)
       const translatedAnalysis = !ownMessage ? chatTranslation?.analyses[messageID] : undefined
@@ -544,7 +669,7 @@ export const TimelineMessageList = memo(function TimelineMessageList({
       return (
         <Fragment key={message.id || message.transactionId}>
           {showDayDivider && message.timestamp > 0 && <div className="day-divider" aria-label={formatDayLabel(message.timestamp)}><span>{formatDayLabel(message.timestamp)}</span></div>}
-          <article className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''} ${showTranslation ? 'has-translation' : ''} ${isContextTarget ? 'is-context-target' : ''} ${groupChat && !ownMessage ? 'is-group-incoming' : ''}`} data-event-id={messageID} tabIndex={messageID ? -1 : undefined} style={{ '--message-index': Math.min(index, 12) } as React.CSSProperties} onDoubleClick={() => actionsRef.current.onDoubleClick(message)} onContextMenu={(event) => {
+          <article ref={index === 0 ? firstRowRef : undefined} className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''} ${showTranslation ? 'has-translation' : ''} ${isContextTarget ? 'is-context-target' : ''} ${groupChat && !ownMessage ? 'is-group-incoming' : ''}`} data-event-id={messageID} tabIndex={messageID ? -1 : undefined} onAnimationEnd={(event) => { if (event.target === event.currentTarget) delete event.currentTarget.dataset.liveMessage }} onDoubleClick={() => actionsRef.current.onDoubleClick(message)} onContextMenu={(event) => {
             if (!selectedRoomID) return
             event.preventDefault()
             actionsRef.current.onOpenContextMenu(message, event.clientX, event.clientY)
@@ -558,7 +683,7 @@ export const TimelineMessageList = memo(function TimelineMessageList({
             <div className="message-body-wrap">
               {!grouped && <div className="message-meta">
                 {showSender && <button className="message-sender-name" type="button" title={`Start a direct chat with ${senderName}`} aria-label={`Start a direct chat with ${senderName}`} onClick={() => actionsRef.current.onStartDirectChat(message)}>{senderName}</button>}
-                {message.timestamp > 0 && preferenceBoolean(preferences, 'appearance.show_timestamps', true) && <time>{formatTimelineTime(message.timestamp, preferences)}</time>}
+                {message.timestamp > 0 && preferenceBoolean(preferences, 'appearance.show_timestamps', true) && <time>{formatTimestamp(message.timestamp)}</time>}
                 {message.edited && <span className="edited-mark" title={message.editHistory?.length ? message.editHistory.join('\n') : 'Edited message'}>edited{(message.editHistory?.length ?? 0) > 0 && ` (${message.editHistory?.length} prior)`}</span>}
               </div>}
               {message.replyToEventId && <button className="reply-preview" type="button" title="Jump to quoted message" onClick={() => actionsRef.current.onFocusMessage(message.replyToEventId)}>
@@ -600,8 +725,28 @@ export const TimelineMessageList = memo(function TimelineMessageList({
           </article>
         </Fragment>
       )
-    })}
-  </>
+  }
+
+  if (virtualized) {
+    if (!scrollParent) return null
+    return <Virtuoso<Message, { header?: ReactNode; zoom?: number }>
+      ref={virtualRef}
+      className="virtual-timeline"
+      components={virtualTimelineComponents}
+      context={{ header, zoom: timelineZoom }}
+      customScrollParent={scrollParent}
+      data={visibleMessages}
+      firstItemIndex={anchor.firstIndex}
+      computeItemKey={(_index, message) => timelineMessageID(message)}
+      itemSize={(element, field) => element[field]}
+      defaultItemHeight={48}
+      increaseViewportBy={{ top: 240, bottom: 240 }}
+      initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
+      itemContent={(index, message) => <div style={{ zoom: timelineZoom, display: 'flex', flexDirection: 'column', minWidth: 0 }}>{renderMessage(index - anchor.firstIndex, message)}</div>}
+    />
+  }
+
+  return <>{header}{visibleMessages.map((message, index) => renderMessage(index, message))}</>
 })
 
 export const chatWallpapers = [
@@ -642,13 +787,24 @@ export function compareRoomActivity(left: Room, right: Room, today: number) {
 }
 
 export function formatTimelineTime(timestamp: number, preferences: PreferenceValues) {
-  if (preferenceBoolean(preferences, 'appearance.relative_timestamps') && isWithinDay(timestamp)) {
-    const minutes = Math.round((timestamp - Date.now()) / 60_000)
-    const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
-    if (Math.abs(minutes) < 60) return relative.format(minutes, 'minute')
-    return relative.format(Math.round(minutes / 60), 'hour')
+  return createTimelineTimeFormatter(preferences)(timestamp)
+}
+
+export function createTimelineTimeFormatter(preferences: PreferenceValues): (timestamp: number) => string {
+  const useRelativeTime = preferenceBoolean(preferences, 'appearance.relative_timestamps')
+  const use24Hour = preferenceBoolean(preferences, 'appearance.time_24_hour')
+  let clock: Intl.DateTimeFormat | undefined
+  let relative: Intl.RelativeTimeFormat | undefined
+  return (timestamp) => {
+    if (useRelativeTime && isWithinDay(timestamp)) {
+      const minutes = Math.round((timestamp - Date.now()) / 60_000)
+      relative ??= new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+      if (Math.abs(minutes) < 60) return relative.format(minutes, 'minute')
+      return relative.format(Math.round(minutes / 60), 'hour')
+    }
+    clock ??= new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: !use24Hour })
+    return clock.format(new Date(timestamp))
   }
-  return formatTime(timestamp, preferenceBoolean(preferences, 'appearance.time_24_hour'))
 }
 
 export function formatMediaGalleryDateTime(timestamp: number, preferences: PreferenceValues) {
@@ -768,7 +924,7 @@ export function quickReactionOptions(preferences: PreferenceValues) {
 
 export type CaptureKind = 'voice' | 'video'
 export type RecordedUpload = { kind: CaptureKind; durationMilliseconds: number }
-export type StagedAttachment = { id: string; roomID: string; file: File; previewURL: string }
+export type StagedAttachment = { id: string; accountID: string; roomID: string; file: File; previewURL: string }
 export type MediaApprovalItem = { key: string; name: string; kind: 'image' | 'video' | 'audio' | 'file'; sizeBytes: number; previewURL: string }
 export type MediaApprovalRequest = { items: MediaApprovalItem[]; onApprove: () => void; onCancel?: () => void }
 export const mediaApprovalKindLabels: Record<MediaApprovalItem['kind'], string> = { image: 'Image', video: 'Video', audio: 'Audio', file: 'File' }
@@ -1282,4 +1438,106 @@ export function LanguageTutorAnalysisDetails({ analysis, originalText }: { analy
 
 export function IconTooltip({ label, className = '', children }: { label: string; className?: string; children: ReactNode }) {
   return <div className={`icon-tooltip${className ? ` ${className}` : ''}`} data-tooltip={label}>{children}</div>
+}
+
+export type ActionMenuEntry = {
+  label: string
+  icon: ReactNode
+  onSelect: () => void
+  disabled?: boolean
+  active?: boolean
+  count?: number
+  title?: string
+}
+
+export function ActionMenu({ label, icon, items, side = 'bottom', showLabel = false, disabled = false, count = 0 }: {
+  label: string
+  icon: ReactNode
+  items: ActionMenuEntry[]
+  side?: 'top' | 'bottom'
+  showLabel?: boolean
+  disabled?: boolean
+  count?: number
+}) {
+  const [open, setOpen] = useState(false)
+  const id = useId()
+  const rootRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const focusLastRef = useRef(false)
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const position = () => {
+      const menu = menuRef.current
+      const trigger = triggerRef.current
+      if (!menu || !trigger) return
+      menu.style.setProperty('--menu-shift', '0px')
+      const bounds = menu.getBoundingClientRect()
+      const scale = menu.offsetWidth > 0 ? bounds.width / menu.offsetWidth : 1
+      const anchor = trigger.getBoundingClientRect()
+      const availableHeight = side === 'top' ? anchor.top - 16 : window.innerHeight - anchor.bottom - 16
+      menu.style.maxHeight = `${Math.max(32, availableHeight / scale)}px`
+      const shift = bounds.left < 8 ? 8 - bounds.left : bounds.right > window.innerWidth - 8 ? window.innerWidth - 8 - bounds.right : 0
+      menu.style.setProperty('--menu-shift', `${shift / scale}px`)
+    }
+    position()
+    window.addEventListener('resize', position)
+    return () => window.removeEventListener('resize', position)
+  }, [open, side])
+
+  useEffect(() => {
+    if (!open) return
+    const enabled = menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')
+    const initial = enabled?.[focusLastRef.current ? enabled.length - 1 : 0]
+    const target = initial ?? menuRef.current
+    target?.focus()
+    const outside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', outside)
+    return () => document.removeEventListener('pointerdown', outside)
+  }, [open])
+
+  function close() {
+    setOpen(false)
+    triggerRef.current?.focus()
+  }
+
+  function navigate(event: KeyboardEvent<HTMLDivElement>) {
+    const enabled = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
+    const current = enabled.indexOf(document.activeElement as HTMLButtonElement)
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      close()
+    } else if (event.key === 'Tab') {
+      close()
+    } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) && enabled.length > 0) {
+      event.preventDefault()
+      event.stopPropagation()
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? enabled.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length
+      enabled[next].focus()
+    }
+  }
+
+  return <div className="action-menu-control" data-side={side} ref={rootRef}>
+    <IconTooltip label={label}>
+      <button ref={triggerRef} className={`icon-button action-menu-trigger${showLabel ? ' has-label' : ''}`} type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={() => { if (open) close(); else { focusLastRef.current = false; setOpen(true) } }} onKeyDown={(event) => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault()
+          event.stopPropagation()
+          focusLastRef.current = event.key === 'ArrowUp'
+          setOpen(true)
+        }
+      }}>
+        {icon}{showLabel && <span>{label}</span>}{count > 0 && <span className="action-menu-count">{count}</span>}
+      </button>
+    </IconTooltip>
+    {open && <div id={id} className="action-menu" role="menu" aria-label={label} ref={menuRef} tabIndex={-1} onKeyDown={navigate}>
+      {items.map((item) => <button key={item.label} type="button" role={item.active === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-label={item.label} aria-description={item.count ? `${item.count} items` : undefined} aria-checked={item.active} title={item.title} tabIndex={-1} disabled={item.disabled} onClick={() => { close(); item.onSelect() }}>
+        {item.icon}<span>{item.label}</span>{item.count !== undefined && item.count > 0 && <small aria-hidden="true">{item.count}</small>}{item.active && <Check className="action-menu-check" size={14} aria-hidden="true" />}
+      </button>)}
+    </div>}
+  </div>
 }

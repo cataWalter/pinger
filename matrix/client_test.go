@@ -19,6 +19,22 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
+func FuzzMessageFromEvent(f *testing.F) {
+	for _, content := range []string{`{"msgtype":"m.text","body":"hello"}`, `{"msgtype":"m.image","body":"image.png","url":"mxc://example.org/image"}`, `{"msgtype":"com.beeper.gallery","com.beeper.gallery.images":[]}`, `{"msgtype":"m.text","body":{}}`, `null`, `[]`, ``} {
+		f.Add([]byte(content))
+	}
+	f.Fuzz(func(t *testing.T, content []byte) {
+		if len(content) > 64*1024 {
+			t.Skip()
+		}
+		evt := &database.Event{ID: "$fuzz", Sender: "@fuzz:example.org", Type: event.EventMessage.Type, Content: json.RawMessage(content)}
+		message, ok := messageFromEvent(evt)
+		if ok && (message.ID != string(evt.ID) || message.Sender != string(evt.Sender)) {
+			t.Fatalf("parsed message changed event identity: %+v", message)
+		}
+	})
+}
+
 func TestMessageFromEvent(t *testing.T) {
 	timestamp := time.Date(2026, time.October, 14, 17, 0, 0, 0, time.UTC)
 	evt := &database.Event{
@@ -41,6 +57,38 @@ func TestMessageFromEvent(t *testing.T) {
 	}
 	if message.FormattedBody != "<strong>hello</strong>" {
 		t.Fatalf("formatted body = %q", message.FormattedBody)
+	}
+}
+
+func TestScheduledSendCompletionWaitsForServerResult(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		eventID    id.EventID
+		sendError  string
+		wantResult bool
+		wantError  bool
+	}{
+		{name: "pending is not delivered", eventID: "~pending"},
+		{name: "server confirmed", eventID: "$server", wantResult: true},
+		{name: "delivery failed", eventID: "~pending", sendError: "server rejected message", wantResult: true, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			completion := make(chan error, 1)
+			client := &Client{scheduledSends: map[string]chan error{"txn": completion}}
+			client.completeScheduledSendLocked(&jsoncmd.SendComplete{Event: &database.Event{
+				ID: test.eventID, TransactionID: "txn", SendError: test.sendError,
+			}})
+			select {
+			case err := <-completion:
+				if !test.wantResult || (err != nil) != test.wantError {
+					t.Fatalf("completion = %v, want result=%v error=%v", err, test.wantResult, test.wantError)
+				}
+			default:
+				if test.wantResult {
+					t.Fatal("delivery completion was not reported")
+				}
+			}
+		})
 	}
 }
 

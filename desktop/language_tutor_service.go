@@ -128,7 +128,7 @@ func (s *LanguageTutorService) Analyze(text, mode, explanation, requestID string
 			s.appService.emitAIStream(AIStreamEvent{RequestID: requestID, Text: text, Reset: reset})
 		}
 	}
-	analysis, err := analyzeLanguageTutor(ctx, aiHTTPClient, endpoint, model, tuning, request, onChunk)
+	analysis, err := analyzeLanguageTutor(ctx, aiLocalHTTPClient, endpoint, model, tuning, request, onChunk)
 	if err != nil && ctx.Err() == context.Canceled {
 		return TutorAnalysis{}, errAIRunStopped
 	}

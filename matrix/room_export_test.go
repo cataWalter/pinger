@@ -94,6 +94,38 @@ func TestCollectRoomHistoryDeduplicatesOverlappingPages(t *testing.T) {
 	assertMessageIDs(t, messages, "$1", "$2", "$3")
 }
 
+func TestCollectRoomHistorySupportsNegativeCursors(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		cursors []int64
+	}{
+		{name: "crosses into backfilled history", cursors: []int64{20, -2, -40}},
+		{name: "starts in backfilled history", cursors: []int64{-2, -20, -40}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pages := map[int64]HistoryPage{
+				0:               {Messages: []Message{{ID: "$5"}, {ID: "$6"}}, Before: test.cursors[0], HasMore: true},
+				test.cursors[0]: {Messages: []Message{{ID: "$3"}, {ID: "$4"}}, Before: test.cursors[1], HasMore: true},
+				test.cursors[1]: {Messages: []Message{{ID: "$1"}, {ID: "$2"}}, Before: test.cursors[2], HasMore: false},
+			}
+			messages, err := collectRoomHistory(func(before int64) (HistoryPage, error) {
+				page, exists := pages[before]
+				if !exists {
+					t.Fatalf("unexpected cursor %d", before)
+				}
+				return page, nil
+			}, func() error {
+				t.Fatal("backfill should not run for an existing timeline")
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("collectRoomHistory() error = %v", err)
+			}
+			assertMessageIDs(t, messages, "$1", "$2", "$3", "$4", "$5", "$6")
+		})
+	}
+}
+
 func TestCollectRoomHistoryBackfillsEmptyLocalTimelineOnce(t *testing.T) {
 	backfills := 0
 	fetches := 0

@@ -11,6 +11,8 @@ export default defineConfig({
   },
   plugins: [react(), wails("./bindings")],
   build: {
+    target: "safari15",
+    cssTarget: "safari15",
     rolldownOptions: {
       output: {
         // Split heavy vendor libraries out of the markdown chunk so no single

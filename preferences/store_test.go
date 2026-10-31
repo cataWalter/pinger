@@ -2,12 +2,34 @@ package preferences
 
 import (
 	"encoding/json"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func FuzzValidateLocalHTTPEndpoint(f *testing.F) {
+	for _, raw := range []string{"http://localhost:11434", "http://127.0.0.1:8080/", "http://[::1]:8080", "https://localhost", "http://example.org", "http://user@localhost", "http://localhost/path", "http://localhost?secret=value", ""} {
+		f.Add(raw)
+	}
+	f.Fuzz(func(t *testing.T, raw string) {
+		if ValidateLocalHTTPEndpoint(raw) != nil {
+			return
+		}
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+			t.Fatalf("accepted unsafe local endpoint %q", raw)
+		}
+		host := strings.ToLower(parsed.Hostname())
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			t.Fatalf("accepted non-loopback endpoint %q", raw)
+		}
+	})
+}
 
 func TestValidateHideImagesAndVideosPreference(t *testing.T) {
 	const key = "appearance.hide_images_and_videos"

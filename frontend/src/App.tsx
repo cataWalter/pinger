@@ -1,6 +1,6 @@
 import { lazy, Fragment, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Events } from '@wailsio/runtime'
-import { ArrowDown, ArrowLeft, ArrowUpRight, Archive, ArchiveRestore, Bold, ChevronDown, Bell, BellOff, BellRing, Check, Clock3, Code, CircleAlert, CircleDot, Copy, LockKeyhole, MessageCircleMore, Paperclip, Pencil, Reply, RotateCcw, ScrollText, Search, Settings, Send, ShieldCheck, Languages, Smile, Sparkles, Star, Trash2, UsersRound, X, Download, EyeOff, Folder, FolderPlus, GraduationCap, Heading1, Images, ImagePlus, Italic, Link, List, ListOrdered, Mic, Plus, Quote, Upload, Square, SquareCode, Strikethrough, Video } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUpRight, Archive, ArchiveRestore, Bold, ChevronDown, Bell, BellOff, BellRing, Check, Clock3, Code, CircleAlert, CircleDot, Copy, LockKeyhole, MessageCircleMore, MoreHorizontal, Paperclip, Pencil, Reply, RotateCcw, ScrollText, Search, Settings, Send, ShieldCheck, Languages, Smile, Sparkles, Star, Trash2, UsersRound, X, Download, EyeOff, Folder, FolderPlus, GraduationCap, Heading1, Images, ImagePlus, Italic, Link, List, ListChecks, ListOrdered, Mic, Plus, Quote, Upload, Square, SquareCode, Strikethrough, Video } from 'lucide-react'
 import { QuickSwitcher } from './QuickSwitcher'
 import { ProfilePhotoViewer } from './ProfilePhotoViewer'
 import { RoomInfoDialog } from './RoomInfoDialog'
@@ -9,8 +9,10 @@ import EmojiPicker from 'emoji-picker-react'
 import { AppService, LanguageTutorService } from '../bindings/mychat/desktop'
 import { type AIMessage, type Member, type MenuState, type Message, type MessageSearchRequest, type MessageSearchResult, type Room, type ScheduledJob, type Snapshot, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
 import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, type ComposerFormat, type EmojiQuery } from './composerText'
+import { useComposerGhostText } from './useComposerGhostText'
+import { hasOpenDialog } from './DialogSurface'
 import { DEFAULT_ACCENT_NAME, accentCssVariables, accentPaletteFor } from './accent'
-import { SYSTEM_THEME_NAME, themeIdForPreference, themeModeForPreference } from './themes'
+import { SYSTEM_THEME_NAME, themeCssVariables, themeIdForPreference, themeModeForPreference } from './themes'
 import { SETTINGS_TABS } from './settings'
 import { SnippetPopover } from './SnippetPopover'
 import { loadSnippets, saveSnippets, type Snippet } from './snippets'
@@ -22,7 +24,9 @@ import { languageName, resolveAIFeatureTuning, resolveLanguageRoles, type AIFeat
 import { matrixMXCMediaURL } from './ChatMediaRenderer'
 import { useMatrixBatch } from './useMatrixBatch'
 import { DialogSurface } from './DialogSurface'
+import { ActionMenu, preferredScrollBehavior, VIRTUAL_TIMELINE_THRESHOLD, type TimelineListHandle } from './appShared'
 import LocalAIChat from './LocalAIChat'
+import { SuggestedRepliesPicker, type SuggestedRepliesState } from './SuggestedRepliesPicker'
 import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID, LOCAL_AI_FOLDER_NAME_CHARACTERS, LOCAL_AI_TITLE_CHARACTERS, type LocalAIChatKind, useLocalAIChatList } from './localAIChats'
 import { type MatrixUpdate, type MatrixNotification, type PreferenceValues, type RoomScope, type RoomRefinements, type OutgoingMessage, type MessageMenuItem, type AIAcceptAction, type AIPanel, type AIStreamChunk, type AIStreamHandler, type LanguageTutorState, type ChatTranslationState, type ChatExportState, type ChatExportProgressEvent, type ScheduledDraft, type MediaGalleryFilter, hasGalleryMedia, mediaGalleryMessageKey, type TimelineMessageActions, type RoomButtonActions, IN_APP_NOTICE_TIMEOUT_MS, EMPTY_ROOMS, newestPersistentMessage, formatTypingStatus, newestOtherAvatar, describeError, chatExportStatusText, isTextEntryTarget, displayMessageBody, initials, Avatar, localDateTimeInputValue, preferenceBoolean, preferenceString, preferenceNumber, parseTimeSuggestionMinutes, reconcileRoomSnapshots, mergeTimelineMessages, timelineMessageID, incomingSinceOwnMessage, isDirectLikeRoom, isUnansweredRoom, isNeedsReplyRoom, isUnreadRoom, primaryModifierLabel, TimelineMessageList, roomActivityAt, compareRoomActivity, rankQuickSwitcherRooms, playNotificationSound, notificationAllowed, notificationTone, notificationText, detectOneTimeCode, type NotificationText, type CaptureKind, type RecordedUpload, type StagedAttachment, type MediaApprovalRequest, mediaKindForFile, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, requestLocalAsset, encodeVoiceNoteWav, RoomButton, reportRoomListVisibleRange, VirtualRoomList, IconTooltip } from './appShared'
 
@@ -39,6 +43,8 @@ const MediaGalleryDialog = lazy(() => import('./RoomDialogs').then((module) => (
 
 function AppBody() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
+  const activeAccountID = snapshot?.activeAccountId ?? ''
+  const workspaceGenerationRef = useRef(0)
   const connectionProblem = useConnectionProblem(snapshot?.connectionState === 'offline')
   const [systemPrefersDark, setSystemPrefersDark] = useState(() =>
     typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches,
@@ -63,6 +69,8 @@ function AppBody() {
   const [roomRefinements, setRoomRefinements] = useState<RoomRefinements>({ unanswered: false, needsReply: false, favorite: false })
   const [inboxAccountScope, setInboxAccountScope] = useState('all')
   const [otherAccountRooms, setOtherAccountRooms] = useState<Room[]>([])
+  const otherAccountRoomsRef = useRef(otherAccountRooms)
+  otherAccountRoomsRef.current = otherAccountRooms
   const [messages, setMessages] = useState<Message[]>([])
   const [olderCursor, setOlderCursor] = useState(0)
   const [hasOlder, setHasOlder] = useState(false)
@@ -76,6 +84,8 @@ function AppBody() {
   const [summaryStatus, setSummaryStatus] = useState('')
   const summaryLoadingRef = useRef(false)
   const [composeText, setComposeText] = useState('')
+  const [composeCaretAtEnd, setComposeCaretAtEnd] = useState(true)
+  const ghostLayerRef = useRef<HTMLDivElement>(null)
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([])
   const [mediaApproval, setMediaApproval] = useState<MediaApprovalRequest | null>(null)
   const [snippets, setSnippets] = useState<Snippet[]>(() => loadSnippets())
@@ -175,6 +185,7 @@ function AppBody() {
   const pendingHistoryRefreshRoomIDRef = useRef('')
   const editTargetRef = useRef<Message | null>(null)
   const markRoomAnsweredRef = useRef<(roomID: string) => Promise<void>>(async () => { })
+  const showRoomRef = useRef<(roomID: string) => void>(() => { })
   const preferencesRef = useRef<PreferenceValues>({})
   const setPreferenceRef = useRef<(key: string, value: boolean | string) => Promise<boolean>>(async () => false)
   const automaticArchiveInFlightRef = useRef(false)
@@ -191,9 +202,11 @@ function AppBody() {
   const currentUserIDRef = useRef('')
   const currentDisplayNameRef = useRef('')
   const draftsRef = useRef(new Map<string, string>())
+  const accountDraftsRef = useRef(new Map<string, Map<string, string>>())
   const triageBusyRef = useRef(false)
   const dragDepthRef = useRef(0)
   const timelineRef = useRef<HTMLDivElement>(null)
+  const timelineListRef = useRef<TimelineListHandle>(null)
   const timelineHeightBeforePrepend = useRef<number | null>(null)
   const stickToBottomRef = useRef(true)
   const roomSwitchRef = useRef(false)
@@ -245,6 +258,9 @@ function AppBody() {
   const [aiPanel, setAIPanel] = useState<AIPanel | null>(null)
   const [languageTutorState, setLanguageTutorState] = useState<LanguageTutorState | null>(null)
   const languageTutorRequestRef = useRef('')
+  // suggestedReplies is the open reply picker for one room. Its request is tracked in suggestedRepliesRequestRef.
+  const [suggestedReplies, setSuggestedReplies] = useState<SuggestedRepliesState | null>(null)
+  const suggestedRepliesRequestRef = useRef('')
   // imageSendRun tracks an image being generated from the composer draft for roomID. Progress arrives on local-ai:image-progress.
   const [imageSendRun, setImageSendRun] = useState<{ requestID: string; roomID: string; stage: string; step: number; totalSteps: number } | null>(null)
   // generatedImageReview holds a generated image that waits for approval before it is sent.
@@ -261,8 +277,10 @@ function AppBody() {
 
   useEffect(() => {
     chatTranslationRequestRef.current++
+    cancelAIRequest(chatTranslationAIRequestRef.current)
+    chatTranslationAIRequestRef.current = ''
     setChatTranslation(null)
-  }, [selectedRoomID])
+  }, [selectedRoomID, activeAccountID])
 
   useEffect(() => {
     let active = true
@@ -473,11 +491,10 @@ function AppBody() {
   hasOlderRef.current = hasOlder
   editTargetRef.current = editTarget
   const inboxAccountCount = snapshot?.accounts?.length ?? 0
-  const activeAccountID = snapshot?.activeAccountId ?? ''
   const archivedPreferenceKey = useCallback((roomID: string, accountID = '') => `room.archived.${accountID || activeAccountID || 'primary'}.${roomID}`, [activeAccountID])
   // Subscription handlers read these through a ref so the event listeners are attached once.
-  const matrixUpdateHandlersRef = useRef({ archivedPreferenceKey, deliverNotification, queueNotificationBatch })
-  matrixUpdateHandlersRef.current = { archivedPreferenceKey, deliverNotification, queueNotificationBatch }
+  const matrixUpdateHandlersRef = useRef({ archivedPreferenceKey, deliverNotification, queueNotificationBatch, openNotificationRoom, deliverMatrixNotifications, activeAccountID })
+  matrixUpdateHandlersRef.current = { archivedPreferenceKey, deliverNotification, queueNotificationBatch, openNotificationRoom, deliverMatrixNotifications, activeAccountID }
   useEffect(() => {
     if (inboxAccountCount < 2) return
     let active = true
@@ -547,6 +564,7 @@ function AppBody() {
   const contextMenuHasUnread = contextMenuRooms.some((room) => room.unread > 0 || room.markedUnread)
   const contextMenuNeedsArchive = contextMenuRooms.some((room) => !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId)))
   const contextMenuNeedsFavorite = contextMenuRooms.some((room) => !room.favorite)
+  const contextMenuNeedsMute = contextMenuRooms.some((room) => !room.muted)
   const contextMenuChatID = roomContextMenu ? localAIChatIDFromRoomID(roomContextMenu.roomID) : null
   const contextMenuLocalAIRoom = contextMenuChatID === null ? null : localAIRooms.find((room) => room.id === roomContextMenu?.roomID) ?? null
   const contextMenuLocalAIInAll = contextMenuChatID !== null && preferenceBoolean(preferences, localAIIncludeInAllPreference(contextMenuChatID))
@@ -604,17 +622,19 @@ function AppBody() {
   }, [])
 
   async function refreshScheduledJobs() {
+    const generation = workspaceGenerationRef.current
     setScheduledLoading(true)
     try {
       const jobs = await AppService.ScheduledJobs()
+      if (workspaceGenerationRef.current !== generation) return
       const nextJobs = jobs ?? []
       setScheduledJobs(nextJobs)
       setScheduledTimes(Object.fromEntries(nextJobs.map((job) => [job.id, localDateTimeInputValue(job.dueAt)])))
       setScheduledJobsError('')
     } catch (jobsError) {
-      setScheduledJobsError(describeError(jobsError))
+      if (workspaceGenerationRef.current === generation) setScheduledJobsError(describeError(jobsError))
     } finally {
-      setScheduledLoading(false)
+      if (workspaceGenerationRef.current === generation) setScheduledLoading(false)
     }
   }
 
@@ -756,7 +776,7 @@ function AppBody() {
   function scrollTimelineToBottom(behavior: ScrollBehavior = 'auto') {
     const timeline = timelineRef.current
     if (!timeline) return
-    if (typeof timeline.scrollTo === 'function') timeline.scrollTo({ top: timeline.scrollHeight, behavior })
+    if (typeof timeline.scrollTo === 'function') timeline.scrollTo({ top: timeline.scrollHeight, behavior: preferredScrollBehavior(behavior) })
     else timeline.scrollTop = timeline.scrollHeight
   }
 
@@ -770,24 +790,24 @@ function AppBody() {
     if (!timeline || !eventID) return
     const target = Array.from(timeline.querySelectorAll<HTMLElement>('[data-event-id]'))
       .find((element) => element.dataset.eventId === eventID)
-    if (!target) return
-    target.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+    stickToBottomRef.current = false
+    if (!target) {
+      timelineListRef.current?.focusMessage(eventID)
+      return
+    }
+    target.scrollIntoView?.({ behavior: preferredScrollBehavior(), block: 'center' })
     target.focus({ preventScroll: true })
   }
 
   function focusTimelineItem(index: number) {
-    const timeline = timelineRef.current
-    const items = timeline ? Array.from(timeline.querySelectorAll<HTMLElement>('[data-event-id]')) : []
-    const target = items[index]
-    if (!target) return
-    target.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
-    target.focus({ preventScroll: true })
+    const message = visibleMessages[index]
+    if (message) focusTimelineMessage(timelineMessageID(message))
   }
 
   function moveTimelineFocus(direction: number, boundary?: 'first' | 'last') {
     const timeline = timelineRef.current
     if (!timeline) return
-    const items = Array.from(timeline.querySelectorAll<HTMLElement>('[data-event-id]'))
+    const items = visibleMessages
     if (items.length === 0) return
     if (boundary) {
       focusTimelineItem(boundary === 'first' ? 0 : items.length - 1)
@@ -796,7 +816,7 @@ function AppBody() {
     const activeItem = document.activeElement instanceof HTMLElement
       ? document.activeElement.closest<HTMLElement>('[data-event-id]')
       : null
-    const currentIndex = activeItem ? items.indexOf(activeItem) : -1
+    const currentIndex = activeItem ? items.findIndex((message) => timelineMessageID(message) === activeItem.dataset.eventId) : -1
     const nextIndex = currentIndex < 0
       ? direction > 0 ? 0 : items.length - 1
       : currentIndex + direction
@@ -840,7 +860,7 @@ function AppBody() {
     if (!timeline) return
     const previousHeight = timelineHeightBeforePrepend.current
     if (previousHeight !== null) {
-      timeline.scrollTop += timeline.scrollHeight - previousHeight
+      if (!timelineListRef.current?.virtualized) timeline.scrollTop += timeline.scrollHeight - previousHeight
       timelineHeightBeforePrepend.current = null
       return
     }
@@ -892,7 +912,7 @@ function AppBody() {
     pinnedScrollTopRef.current = null
     setReplyTarget(null)
     setEditTarget(null)
-  }, [selectedRoomID])
+  }, [selectedRoomID, activeAccountID])
 
   useEffect(() => {
     if (!emojiPickerOpen) return
@@ -939,7 +959,7 @@ function AppBody() {
       .catch((membersError: unknown) => { if (active) setRoomMembersError(describeError(membersError)) })
       .finally(() => { if (active) setRoomMembersLoading(false) })
     return () => { active = false }
-  }, [selectedRoomID])
+  }, [selectedRoomID, activeAccountID])
 
   useEffect(() => {
     if (!selectedRoomID || !preferenceBoolean(preferences, 'privacy.send_typing', true)) return
@@ -956,6 +976,11 @@ function AppBody() {
     let active = true
     const applyMatrixUpdate = (update: MatrixUpdate) => {
       if (!active) return
+      matrixUpdateHandlersRef.current.deliverMatrixNotifications(update)
+      if (update.accountId && update.accountId !== matrixUpdateHandlersRef.current.activeAccountID) {
+        setOtherAccountRooms((current) => [...current.filter((room) => room.accountId !== update.accountId), ...(update.rooms ?? [])])
+        return
+      }
       const previousRooms = roomsRef.current
       const nextTypingUsers = update.typingUsers?.[selectedRoomRef.current] ?? []
       setSnapshot((current) => {
@@ -991,24 +1016,6 @@ function AppBody() {
         if (!updatedRoom?.lastEventId || !previousRoom || updatedRoom.lastEventId === previousRoom.lastEventId) continue
         const key = matrixUpdateHandlersRef.current.archivedPreferenceKey(roomID, updatedRoom.accountId)
         if (preferenceBoolean(preferencesRef.current, key)) void setPreferenceRef.current(key, false)
-      }
-      for (const notification of update.notifications ?? []) {
-        const currentPreferences = preferencesRef.current
-        if (!notificationAllowed(currentPreferences, notification.roomId, notification.category)) continue
-        if (notification.roomId === selectedRoomRef.current) continue
-        if (preferenceBoolean(currentPreferences, 'notifications.only_when_unfocused', true) && document.hasFocus()) continue
-        const oneTimeCode = detectOneTimeCode(notification.body)
-        if (oneTimeCode && preferenceBoolean(currentPreferences, 'notifications.otp_copy')) {
-          void navigator.clipboard?.writeText(oneTimeCode).catch(() => undefined)
-        }
-        const batchSeconds = preferenceNumber(currentPreferences, 'notifications.batch_seconds', 0, 0, 30)
-        const immediate = Boolean(oneTimeCode) && preferenceBoolean(currentPreferences, 'notifications.otp_immediate', true)
-        if (batchSeconds > 0 && !immediate) {
-          matrixUpdateHandlersRef.current.queueNotificationBatch(notification, batchSeconds)
-          continue
-        }
-        const text = notificationText(currentPreferences, notification, notificationRoomName(notification))
-        matrixUpdateHandlersRef.current.deliverNotification(currentPreferences, notification, text)
       }
       // Background sync errors are not shown as banners.
       // Belt-and-braces: if the selected room's sidebar preview moved past the
@@ -1064,10 +1071,10 @@ function AppBody() {
       if (active) menuActionRef.current(String(event.data))
     })
     const unsubscribeNotificationOpenRoom = Events.On('notification:open-room', (event: { data: unknown }) => {
-      const roomID = event.data as string | undefined
-      if (active && roomID) {
+      const target = typeof event.data === 'string' ? { roomId: event.data, accountId: '' } : event.data as { roomId?: string; accountId?: string } | undefined
+      if (active && target?.roomId) {
         window.focus()
-        showRoom(roomID)
+        matrixUpdateHandlersRef.current.openNotificationRoom(target.accountId ?? '', target.roomId)
       }
     })
     const unsubscribeAttachmentSent = Events.On('matrix:attachment-sent', (event: { data: unknown }) => {
@@ -1083,13 +1090,13 @@ function AppBody() {
       showScheduledNotice(`${roomName}: ${body}`)
       void refreshScheduledJobs()
       if (nativeNotificationsRef.current) {
-        void AppService.SendNotification({ title: `Reminder · ${roomName}`, subtitle: '', body, roomId: reminder.roomId, accountId: '', senderAvatar: '' }).catch((notificationError: unknown) => setScheduledJobsError(describeError(notificationError)))
+        void AppService.SendNotification({ title: `Reminder · ${roomName}`, subtitle: '', body, roomId: reminder.roomId, accountId: reminder.accountId, senderAvatar: '' }).catch((notificationError: unknown) => setScheduledJobsError(describeError(notificationError)))
       } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try {
           const notification = new Notification(`Reminder · ${roomName}`, { body })
           notification.onclick = () => {
             window.focus()
-            showRoom(reminder.roomId)
+            matrixUpdateHandlersRef.current.openNotificationRoom(reminder.accountId, reminder.roomId)
             setScheduledJobsOpen(true)
           }
         } catch (notificationError) {
@@ -1145,7 +1152,8 @@ function AppBody() {
     mediaGalleryRequestRef.current++
     setMediaGalleryOpen(false)
     setMediaGalleryLoading(false)
-  }, [selectedRoomID])
+    setMediaGalleryItems([])
+  }, [selectedRoomID, activeAccountID])
 
   useEffect(() => {
     if (!selectedRoomID) {
@@ -1157,6 +1165,7 @@ function AppBody() {
     }
 
     let active = true
+    const generation = workspaceGenerationRef.current
     const searchJump = pendingSearchJumpRef.current?.roomID === selectedRoomID ? pendingSearchJumpRef.current : null
     if (pendingSearchJumpRef.current && !searchJump) pendingSearchJumpRef.current = null
     historyRoomIDRef.current = ''
@@ -1170,7 +1179,7 @@ function AppBody() {
     void (async () => {
       try {
         let page = await AppService.History(selectedRoomID, 0)
-        if (!active) return
+        if (!active || workspaceGenerationRef.current !== generation) return
         let loadedMessages = page.messages ?? []
         let nextBefore = page.before
         let hasMore = page.hasMore
@@ -1181,7 +1190,7 @@ function AppBody() {
           hasMore && nextBefore > searchJump.timelineCursor && jumpPages < 500
         ) {
           page = await AppService.History(selectedRoomID, nextBefore)
-          if (!active) return
+          if (!active || workspaceGenerationRef.current !== generation) return
           const olderMessages = page.messages ?? []
           if (olderMessages.length === 0 || page.before === nextBefore) {
             hasMore = false
@@ -1206,14 +1215,14 @@ function AppBody() {
           setHistoryRevision((revision) => revision + 1)
         }
       } catch (historyError) {
-        if (active) setError(describeError(historyError))
+        if (active && workspaceGenerationRef.current === generation) setError(describeError(historyError))
       } finally {
-        if (active) setLoadingHistory(false)
+        if (active && workspaceGenerationRef.current === generation) setLoadingHistory(false)
       }
     })()
 
     return () => { active = false }
-  }, [selectedRoomID, historyPageRevision])
+  }, [selectedRoomID, activeAccountID, historyPageRevision])
 
   useEffect(() => {
     const searchJump = pendingSearchJumpRef.current
@@ -1234,9 +1243,10 @@ function AppBody() {
     }
 
     let active = true
+    const generation = workspaceGenerationRef.current
     AppService.History(roomID, 0)
       .then((page) => {
-        if (!active || selectedRoomRef.current !== roomID) return
+        if (!active || selectedRoomRef.current !== roomID || workspaceGenerationRef.current !== generation) return
         setMessages((current) => mergeTimelineMessages(current, page.messages ?? []))
         if (!hasOlderRef.current) setOlderCursor(page.before)
         if (page.hasMore) setHasOlder(true)
@@ -1246,16 +1256,17 @@ function AppBody() {
       })
 
     return () => { active = false }
-  }, [historyRevision, selectedRoomID])
+  }, [historyRevision, selectedRoomID, activeAccountID])
 
   useEffect(() => {
     if (!selectedRoomID || loadingHistory || historyRoomIDRef.current !== selectedRoomID) return
+    const generation = workspaceGenerationRef.current
     const eventID = selectedRoom?.lastEventId || newestPersistentMessage(messages)?.id
     if (!eventID || lastReadEventByRoom.current.get(selectedRoomID) === eventID) return
     lastReadEventByRoom.current.set(selectedRoomID, eventID)
     void AppService.MarkRead(selectedRoomID, eventID)
       .then(() => setSnapshot((current) => {
-        if (!current) return current
+        if (!current || workspaceGenerationRef.current !== generation) return current
         const room = (current.rooms ?? []).find((candidate) => candidate.id === selectedRoomID)
         if (!room || (room.lastEventId && room.lastEventId !== eventID)) return current
         return {
@@ -1266,20 +1277,22 @@ function AppBody() {
         }
       }))
       .catch((readError: unknown) => {
+        if (workspaceGenerationRef.current !== generation) return
         if (lastReadEventByRoom.current.get(selectedRoomID) === eventID) lastReadEventByRoom.current.delete(selectedRoomID)
         setError(describeError(readError))
       })
-  }, [loadingHistory, messages, selectedRoom?.lastEventId, selectedRoom?.unread, selectedRoom?.mentions, selectedRoomID])
+  }, [loadingHistory, messages, selectedRoom?.lastEventId, selectedRoom?.unread, selectedRoom?.mentions, selectedRoomID, activeAccountID])
 
   async function loadOlderMessages() {
     if (!selectedRoomID || !hasOlder || loadingOlder || loadingOlderRef.current) return
     const roomID = selectedRoomID
+    const generation = workspaceGenerationRef.current
     timelineHeightBeforePrepend.current = timelineRef.current?.scrollHeight ?? null
     loadingOlderRef.current = true
     setLoadingOlder(true)
     try {
       const page = await AppService.History(roomID, olderCursor)
-      if (selectedRoomRef.current !== roomID) return
+      if (selectedRoomRef.current !== roomID || workspaceGenerationRef.current !== generation) return
       setMessages((current) => {
         const currentKeys = new Set(current.map((message) => message.id || message.transactionId))
         const olderMessages = (page.messages ?? []).filter((message) => !currentKeys.has(message.id || message.transactionId))
@@ -1292,11 +1305,14 @@ function AppBody() {
       setOlderCursor(page.before)
       setHasOlder(page.hasMore && page.before !== olderCursor)
     } catch (historyError) {
+      if (workspaceGenerationRef.current !== generation) return
       setError(describeError(historyError))
       timelineHeightBeforePrepend.current = null
     } finally {
-      loadingOlderRef.current = false
-      setLoadingOlder(false)
+      if (workspaceGenerationRef.current === generation) {
+        loadingOlderRef.current = false
+        setLoadingOlder(false)
+      }
     }
   }
 
@@ -1709,10 +1725,11 @@ function AppBody() {
       { key: 'copy', label: 'Copy message', ariaLabel: 'Copy message', icon: <Copy size={14} />, disabled: !body, separatorBefore: true, run: () => void copyMessage(message) },
       { key: 'copy-timestamp', label: 'Copy with timestamp', ariaLabel: 'Copy message with timestamp', icon: <Clock3 size={14} />, disabled: !body, run: () => void copyMessage(message, true) },
       { key: 'forward', label: 'Forward...', ariaLabel: 'Forward message', icon: <ArrowUpRight size={14} />, disabled: !manageable || !body || Boolean(message.mediaUri || message.mediaType || message.mediaMime) || !canForward, run: () => openMessageForward(message) },
-      { key: 'received-at', label: `Received at ${receivedAt}`, ariaLabel: `Received at ${receivedAt}`, icon: <Clock3 size={14} />, disabled: true, separatorBefore: true, run: () => { } },
+      { key: 'received-at', label: `Received at ${receivedAt}`, ariaLabel: `Received at ${receivedAt}`, icon: <Clock3 size={14} />, meta: true, separatorBefore: true, run: () => { } },
       { key: 'remind', label: 'Set reminder', ariaLabel: 'Set reminder for message', icon: <BellRing size={14} />, disabled: !manageable, separatorBefore: true, run: () => openReminder(message) },
-      { key: 'language-tutor', label: 'Analyze with Language Tutor', ariaLabel: 'Analyze message with Language Tutor', icon: <Languages size={14} />, disabled: !aiEnabled || !body || Boolean(message.redacted), run: () => void analyzeWithLanguageTutor(body, 'message') },
+      { key: 'language-tutor', label: 'Analyze with Language Tutor', ariaLabel: 'Analyze message with Language Tutor', icon: <Languages size={14} />, disabled: !aiEnabled || !body || Boolean(message.redacted), separatorBefore: true, run: () => void analyzeWithLanguageTutor(body, 'message') },
       { key: 'ai-reply', label: 'Draft reply with AI', ariaLabel: 'Draft reply with local AI', icon: <Reply size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => draftAIReply(message) },
+      { key: 'ai-suggest-replies', label: 'Suggest replies with AI', ariaLabel: 'Suggest three replies with local AI', icon: <ListChecks size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => void suggestRepliesForRoom(selectedRoomID) },
       { key: 'ai-explain', label: 'Explain message', ariaLabel: 'Explain message with local AI', icon: <Sparkles size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => explainMessage(message) },
     ]
     if (message.own && manageable) {
@@ -1796,13 +1813,18 @@ function AppBody() {
   }
   markRoomAnsweredRef.current = markRoomAnswered
 
-  async function applyBulkRoomAction(action: 'answered' | 'needs-reply' | 'read' | 'unread' | 'archive' | 'restore' | 'favorite' | 'unfavorite', targetRooms: Room[]) {
+  async function applyBulkRoomAction(action: 'answered' | 'needs-reply' | 'read' | 'unread' | 'archive' | 'restore' | 'favorite' | 'unfavorite' | 'mute' | 'unmute', targetRooms: Room[]) {
     const targetRoomIDs = new Set(targetRooms.map((room) => room.id))
     setRoomContextMenu(null)
     clearRoomSelection()
 
     if (action === 'favorite' || action === 'unfavorite') {
       for (const room of targetRooms) await setPreference(`room.favorite.${room.id}`, action === 'favorite')
+      return
+    }
+
+    if (action === 'mute' || action === 'unmute') {
+      for (const room of targetRooms) await setPreference(`room.muted.${room.id}`, action === 'mute')
       return
     }
 
@@ -1905,9 +1927,9 @@ function AppBody() {
   function handleRoomActionShortcut(event: KeyboardEvent<HTMLElement>, targetRooms: Room[]) {
     const key = event.key.toLowerCase()
     if (!singleKeyShortcuts || event.repeat || event.nativeEvent.isComposing || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false
-    if (!['n', 'u', 'a', 'f'].includes(key) || targetRooms.length === 0) return false
+    if (!['n', 'u', 'a', 'f', 'm'].includes(key) || targetRooms.length === 0) return false
 
-    let action: 'needs-reply' | 'read' | 'unread' | 'archive' | 'restore' | 'favorite' | 'unfavorite'
+    let action: 'needs-reply' | 'read' | 'unread' | 'archive' | 'restore' | 'favorite' | 'unfavorite' | 'mute' | 'unmute'
     let actionRooms = targetRooms
     if (key === 'n') {
       action = 'needs-reply'
@@ -1917,6 +1939,8 @@ function AppBody() {
       action = targetRooms.some(isUnreadRoom) ? 'read' : 'unread'
     } else if (key === 'a') {
       action = targetRooms.some((room) => !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))) ? 'archive' : 'restore'
+    } else if (key === 'm') {
+      action = targetRooms.some((room) => !room.muted) ? 'mute' : 'unmute'
     } else {
       action = targetRooms.some((room) => !room.favorite) ? 'favorite' : 'unfavorite'
     }
@@ -1966,6 +1990,14 @@ function AppBody() {
     })
   }
 
+  showRoomRef.current = showRoom
+
+  // Clear the open room when the filter hides every room so the empty state shows.
+  useEffect(() => {
+    if (!selectedRoomID || localAIChatOpen || filteredRooms.length > 0) return
+    showRoomRef.current('')
+  }, [selectedRoomID, localAIChatOpen, filteredRooms.length])
+
   function isActiveAccountRoom(room: Room) {
     return !room.accountId || room.accountId === snapshot?.activeAccountId
   }
@@ -2000,7 +2032,7 @@ function AppBody() {
   }
 
   function handleApplicationKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (settingsOpen || roomInfoOpen || leaveConfirmOpen || redactTarget || quickSwitcherOpen || messageContextMenu) return
+    if (hasOpenDialog() || quickSwitcherOpen || messageContextMenu) return
     if (event.key === 'Escape' && searchOpen) {
       event.preventDefault()
       closeMessageSearch()
@@ -2196,6 +2228,38 @@ function AppBody() {
   }
 
   function resetAccountWorkspace(state: Snapshot) {
+    workspaceGenerationRef.current++
+    cancelSuggestedReplies()
+    closeLanguageTutor()
+    closeAIResult()
+    cancelAIRequest(imageSendRun?.requestID ?? '')
+    cancelAIRequest(chatTranslationAIRequestRef.current)
+    chatTranslationAIRequestRef.current = ''
+    chatTranslationRequestRef.current++
+    setChatTranslation(null)
+    setImageSendRun(null)
+    setGeneratedImageReview(null)
+    setMediaApproval(null)
+    setScheduledDraft(null)
+    setScheduledJobsOpen(false)
+    setUndoRoomID('')
+    if (undoToastTimerRef.current !== null) window.clearTimeout(undoToastTimerRef.current)
+    setRoomContextMenu(null)
+    setMessageContextMenu(null)
+    setForwardingMessage(null)
+    setRedactTarget(null)
+    setRoomInfoOpen(false)
+    setLeaveConfirmOpen(false)
+    setRoomMembers([])
+    setTypingUsers([])
+    setSelectedRoomIDs([])
+    pendingSearchJumpRef.current = null
+    loadingOlderRef.current = false
+    setLoadingOlder(false)
+    summaryLoadingRef.current = false
+    setSummaryStatus('')
+    accountDraftsRef.current.set(activeAccountID, draftsRef.current)
+    draftsRef.current = accountDraftsRef.current.get(state.activeAccountId) ?? new Map<string, string>()
     setSnapshot(state)
     setSelectedRoomID((state.rooms ?? [])[0]?.id ?? '')
     setMobilePane('rooms')
@@ -2209,7 +2273,6 @@ function AppBody() {
     setSearchNextBatch('')
     setScheduledJobs([])
     setScheduledTimes({})
-    draftsRef.current.clear()
     lastReadEventByRoom.current.clear()
     historyRoomIDRef.current = ''
     pendingHistoryRefreshRoomIDRef.current = ''
@@ -2217,6 +2280,7 @@ function AppBody() {
   }
 
   async function switchAccount(accountID: string, roomID = '') {
+    if (busy || voiceCaptureStatus || scheduledSaving || scheduledBusyID || forwardBusy || leavingRoom) return
     if (accountID === snapshot?.activeAccountId) {
       setAccountManagerOpen(false)
       if (roomID) showRoom(roomID)
@@ -2279,6 +2343,8 @@ function AppBody() {
     }
     setScheduledSaving(true)
     setScheduledDialogError('')
+    const generation = workspaceGenerationRef.current
+    const sourceDraft = draftsRef.current.get(scheduledDraft.roomID) ?? scheduledDraft.text
     try {
       if (scheduledDraft.kind === 'message') {
         if (scheduledDraft.replyToEventID) {
@@ -2286,21 +2352,25 @@ function AppBody() {
         } else {
           await AppService.ScheduleMessage(scheduledDraft.roomID, scheduledDraft.text, dueAt)
         }
-        draftsRef.current.delete(scheduledDraft.roomID)
-        if (selectedRoomRef.current === scheduledDraft.roomID) setComposeText('')
-        setMentionBindings([])
-        setMentionStart(-1)
-        setReplyTarget(null)
+        if (workspaceGenerationRef.current !== generation) return
+        if (draftsRef.current.get(scheduledDraft.roomID) === sourceDraft) draftsRef.current.delete(scheduledDraft.roomID)
+        if (selectedRoomRef.current === scheduledDraft.roomID && composeTextRef.current === sourceDraft) {
+          setComposeText('')
+          setMentionBindings([])
+          setMentionStart(-1)
+          setReplyTarget((current) => current?.id === scheduledDraft.replyToEventID ? null : current)
+        }
       } else {
         await AppService.ScheduleReminder(scheduledDraft.roomID, scheduledDraft.eventID, scheduledDraft.text, dueAt)
+        if (workspaceGenerationRef.current !== generation) return
         if (scheduledDraft.archiveAfter) await setRoomArchived(scheduledDraft.roomID, true)
       }
-      setScheduledDraft(null)
+      setScheduledDraft((current) => current === scheduledDraft ? null : current)
       await refreshScheduledJobs()
     } catch (scheduleError) {
-      setScheduledDialogError(describeError(scheduleError))
+      if (workspaceGenerationRef.current === generation) setScheduledDialogError(describeError(scheduleError))
     } finally {
-      setScheduledSaving(false)
+      if (workspaceGenerationRef.current === generation) setScheduledSaving(false)
     }
   }
 
@@ -2348,6 +2418,45 @@ function AppBody() {
     return notification.room || roomsRef.current.find((room) => room.id === notification.roomId)?.name || notification.roomId
   }
 
+  function notificationPreferences(notification: MatrixNotification) {
+    return notification.accountId && notification.accountId !== matrixUpdateHandlersRef.current.activeAccountID
+      ? notification.preferences ?? preferencesRef.current
+      : preferencesRef.current
+  }
+
+  function notificationRoomIsSelected(notification: MatrixNotification) {
+    return (!notification.accountId || notification.accountId === matrixUpdateHandlersRef.current.activeAccountID) && notification.roomId === selectedRoomRef.current
+  }
+
+  function notificationKey(notification: MatrixNotification) {
+    return JSON.stringify([notification.accountId ?? activeAccountID, notification.roomId])
+  }
+
+  function deliverMatrixNotifications(update: MatrixUpdate) {
+    for (const item of update.notifications ?? []) {
+      const notification = { ...item, accountId: item.accountId ?? update.accountId, preferences: update.notificationPreferences }
+      const currentPreferences = notificationPreferences(notification)
+      if (!notificationAllowed(currentPreferences, notification.roomId, notification.category) || notificationRoomIsSelected(notification)) continue
+      if (preferenceBoolean(currentPreferences, 'notifications.only_when_unfocused', true) && document.hasFocus()) continue
+      const oneTimeCode = detectOneTimeCode(notification.body)
+      if (oneTimeCode && preferenceBoolean(currentPreferences, 'notifications.otp_copy')) {
+        void navigator.clipboard?.writeText(oneTimeCode).catch(() => undefined)
+      }
+      const batchSeconds = preferenceNumber(currentPreferences, 'notifications.batch_seconds', 0, 0, 30)
+      const immediate = Boolean(oneTimeCode) && preferenceBoolean(currentPreferences, 'notifications.otp_immediate', true)
+      if (batchSeconds > 0 && !immediate) {
+        queueNotificationBatch(notification, batchSeconds)
+        continue
+      }
+      deliverNotification(currentPreferences, notification, notificationText(currentPreferences, notification, notificationRoomName(notification)))
+    }
+  }
+
+  function openNotificationRoom(accountID: string, roomID: string) {
+    if (accountID && accountID !== activeAccountID) void switchAccount(accountID, roomID)
+    else showRoom(roomID)
+  }
+
   function playNotificationAlert(preferences: PreferenceValues, category: string) {
     if (!preferenceBoolean(preferences, 'notifications.sound')) return
     playNotificationSound(preferenceNumber(preferences, 'notifications.volume', 50), notificationTone(preferences, category))
@@ -2361,7 +2470,7 @@ function AppBody() {
         body: text.body,
         roomId: notification.roomId,
         accountId: notification.accountId ?? '',
-        senderAvatar: notification.senderAvatar ?? '',
+        senderAvatar: preferenceString(preferences, 'notifications.privacy', 'Sender and message preview') === 'Hidden content' ? '' : notification.senderAvatar ?? '',
       })
         .then((delivered) => {
           if (delivered) playNotificationAlert(preferences, notification.category)
@@ -2372,7 +2481,7 @@ function AppBody() {
         const systemNotification = new Notification(text.title, { body: text.subtitle ? `${text.subtitle}: ${text.body}` : text.body })
         systemNotification.onclick = () => {
           window.focus()
-          showRoom(notification.roomId)
+          matrixUpdateHandlersRef.current.openNotificationRoom(notification.accountId ?? '', notification.roomId)
         }
         playNotificationAlert(preferences, notification.category)
       } catch (notificationError) {
@@ -2384,23 +2493,24 @@ function AppBody() {
 
   function queueNotificationBatch(notification: MatrixNotification, batchSeconds: number) {
     const batches = notificationBatchesRef.current
-    const existing = batches.get(notification.roomId)
+    const key = notificationKey(notification)
+    const existing = batches.get(key)
     if (existing) {
       existing.notifications.push(notification)
       return
     }
-    const timer = window.setTimeout(() => flushNotificationBatch(notification.roomId), batchSeconds * 1000)
-    batches.set(notification.roomId, { notifications: [notification], timer })
+    const timer = window.setTimeout(() => flushNotificationBatch(key), batchSeconds * 1000)
+    batches.set(key, { notifications: [notification], timer })
   }
 
   function flushNotificationBatch(roomID: string) {
     const batch = notificationBatchesRef.current.get(roomID)
     notificationBatchesRef.current.delete(roomID)
     if (!batch || batch.notifications.length === 0) return
-    const preferences = preferencesRef.current
-    if (selectedRoomRef.current === roomID) return
     const [first] = batch.notifications
-    if (!notificationAllowed(preferences, roomID, first.category)) return
+    const preferences = notificationPreferences(first)
+    if (notificationRoomIsSelected(first)) return
+    if (!notificationAllowed(preferences, first.roomId, first.category)) return
     if (batch.notifications.length === 1) {
       deliverNotification(preferences, first, notificationText(preferences, first, notificationRoomName(first)))
       return
@@ -2419,21 +2529,24 @@ function AppBody() {
   function scheduleRepeatReminder(preferences: PreferenceValues, notification: MatrixNotification) {
     const minutes = preferenceNumber(preferences, 'notifications.repeat_minutes', 0, 0, 60)
     const reminders = repeatRemindersRef.current
-    const existing = reminders.get(notification.roomId)
+    const key = notificationKey(notification)
+    const existing = reminders.get(key)
     if (existing !== undefined) window.clearTimeout(existing)
-    reminders.delete(notification.roomId)
+    reminders.delete(key)
     if (minutes <= 0) return
     const timer = window.setTimeout(() => {
-      reminders.delete(notification.roomId)
-      const current = preferencesRef.current
-      const room = roomsRef.current.find((item) => item.id === notification.roomId)
-      if (!room || (room.unread <= 0 && !room.markedUnread) || selectedRoomRef.current === notification.roomId) return
+      reminders.delete(key)
+      const current = notificationPreferences(notification)
+      const accountID = matrixUpdateHandlersRef.current.activeAccountID
+      const candidateRooms = notification.accountId && notification.accountId !== accountID ? otherAccountRoomsRef.current : roomsRef.current
+      const room = candidateRooms.find((item) => item.id === notification.roomId)
+      if (!room || (room.unread <= 0 && !room.markedUnread) || notificationRoomIsSelected(notification)) return
       if (!notificationAllowed(current, notification.roomId, notification.category)) return
       const roomName = notificationRoomName(notification)
       const hidden = preferenceString(current, 'notifications.privacy', 'Sender and message preview') === 'Hidden content'
       deliverNotification(current, notification, { title: hidden ? 'Matrix' : `Still unread · ${roomName}`, subtitle: '', body: 'You still have unread messages.' }, false)
     }, minutes * 60_000)
-    reminders.set(notification.roomId, timer)
+    reminders.set(key, timer)
   }
 
   function startReaction(message: Message) {
@@ -2473,7 +2586,7 @@ function AppBody() {
   }
 
   // Staged files are sent with the next message and are held back while a message is being edited.
-  const stagedRoomAttachments = stagedAttachments.filter((item) => item.roomID === selectedRoomID)
+  const stagedRoomAttachments = stagedAttachments.filter((item) => item.accountID === activeAccountID && item.roomID === selectedRoomID)
   const sendableStagedAttachments = editTarget ? [] : stagedRoomAttachments
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
@@ -2599,6 +2712,7 @@ function AppBody() {
       }
       staged.push({
         id: globalThis.crypto?.randomUUID?.() ?? `staged-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        accountID: activeAccountID,
         roomID,
         file,
         previewURL: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
@@ -2874,8 +2988,7 @@ function AppBody() {
     const suffix = composeText.slice(mentionEnd)
     const separator = suffix.startsWith(' ') ? '' : ' '
     const nextText = composeText.slice(0, mentionStart) + token + separator + suffix
-    setComposeText(nextText)
-    if (!editTarget && selectedRoomID) draftsRef.current.set(selectedRoomID, nextText)
+    setComposeDraft(nextText)
     setMentionBindings((current) => [
       ...current.filter((binding) => binding.token !== token && nextText.includes(binding.token)),
       { token, userID: member.id },
@@ -2936,6 +3049,7 @@ function AppBody() {
   }
 
   function runMenuAction(action: string) {
+    if (hasOpenDialog() && (action !== 'undo' || !isTextEntryTarget(document.activeElement))) return
     if (action.startsWith('account:')) {
       void switchAccount(action.slice('account:'.length))
       return
@@ -3112,15 +3226,17 @@ function AppBody() {
     const prompt = sourceDraft.trim()
     if (!roomID || !prompt || busy || editTarget || imageSendRun || generatedImageReview) return
     const requestID = newAIRequestID()
+    const generation = workspaceGenerationRef.current
     setError('')
     setImageSendRun({ requestID, roomID, stage: 'starting', step: 0, totalSteps: 0 })
     try {
       const encoded = await AppService.GenerateRoomImage(prompt, requestID)
+      if (workspaceGenerationRef.current !== generation) return
       setGeneratedImageReview({ roomID, prompt, sourceDraft, encoded })
     } catch (imageError) {
-      setError(describeError(imageError))
+      if (workspaceGenerationRef.current === generation) setError(describeError(imageError))
     } finally {
-      setImageSendRun(null)
+      if (workspaceGenerationRef.current === generation) setImageSendRun(null)
     }
   }
 
@@ -3168,7 +3284,7 @@ function AppBody() {
     cancelAIRequest(languageTutorRequestRef.current)
     const requestID = newAIRequestID()
     languageTutorRequestRef.current = requestID
-    setLanguageTutorState({ mode, originalText, explanationLanguage: explanation, analysis: null, busy: true, error: '', requestID, preview: '' })
+    setLanguageTutorState({ accountID: activeAccountID, roomID: selectedRoomID, mode, originalText, explanationLanguage: explanation, analysis: null, busy: true, error: '', requestID, preview: '' })
     const unregister = registerAIStream(requestID, (chunk) => {
       setLanguageTutorState((current) => current?.requestID === requestID
         ? { ...current, preview: (chunk.reset ? '' : current.preview) + chunk.text }
@@ -3198,10 +3314,72 @@ function AppBody() {
   function useLanguageTutorDraft() {
     const text = languageTutorState?.analysis?.text_to_insert.trim()
     if (languageTutorState?.mode !== 'draft' || !text || editTarget) return
+    if (languageTutorState.accountID !== activeAccountID || languageTutorState.roomID !== selectedRoomRef.current) {
+      closeLanguageTutor()
+      return
+    }
     setComposeDraft(text)
     closeLanguageTutor()
     requestAnimationFrame(() => composerInputRef.current?.focus())
   }
+
+  // suggestRepliesForRoom asks Local AI for three reply options based on the latest messages in roomID.
+  async function suggestRepliesForRoom(roomID: string) {
+    if (!roomID || !aiEnabled || editTarget) return
+    cancelAIRequest(suggestedRepliesRequestRef.current)
+    const requestID = newAIRequestID()
+    suggestedRepliesRequestRef.current = requestID
+    setSuggestedReplies((previous) => ({ roomId: roomID, requestId: requestID, status: 'loading', suggestions: previous?.roomId === roomID ? previous.suggestions : [], error: '' }))
+    try {
+      const result = await AppService.AISuggestReplies(roomID, requestID)
+      if (suggestedRepliesRequestRef.current !== requestID) return
+      setSuggestedReplies({ roomId: roomID, requestId: requestID, status: 'ready', suggestions: result.suggestions ?? [], error: '' })
+    } catch (suggestError) {
+      if (suggestedRepliesRequestRef.current !== requestID) return
+      setSuggestedReplies({ roomId: roomID, requestId: requestID, status: 'error', suggestions: [], error: describeError(suggestError) })
+    } finally {
+      if (suggestedRepliesRequestRef.current === requestID) suggestedRepliesRequestRef.current = ''
+    }
+  }
+
+  // cancelSuggestedReplies stops a pending request and closes the picker.
+  function cancelSuggestedReplies() {
+    const requestID = suggestedRepliesRequestRef.current
+    suggestedRepliesRequestRef.current = ''
+    setSuggestedReplies(null)
+    cancelAIRequest(requestID)
+  }
+
+  // useSuggestedReply fills the composer with the chosen option. It does not send the message or change the reply target.
+  function useSuggestedReply(text: string) {
+    setSuggestedReplies(null)
+    setComposeDraft(text)
+    requestAnimationFrame(() => composerInputRef.current?.focus())
+  }
+
+  // Close the picker when the open room changes so its options never apply to another room.
+  useEffect(() => {
+    const requestID = suggestedRepliesRequestRef.current
+    suggestedRepliesRequestRef.current = ''
+    setSuggestedReplies(null)
+    cancelAIRequest(requestID)
+  }, [selectedRoomID, activeAccountID])
+
+  useEffect(() => {
+    const requestID = languageTutorRequestRef.current
+    languageTutorRequestRef.current = ''
+    setLanguageTutorState(null)
+    cancelAIRequest(requestID)
+  }, [selectedRoomID, activeAccountID])
+
+  // Ghost text is a faint continuation of the draft from the local AI. It is on unless composer.ghost_text is disabled.
+  const ghostText = useComposerGhostText({
+    enabled: aiEnabled && !editTarget && preferenceBoolean(preferences, 'composer.ghost_text', true),
+    accountID: activeAccountID,
+    roomID: selectedRoomID,
+    text: composeText,
+    caretAtEnd: composeCaretAtEnd,
+  })
 
   function closeAIResult() {
     cancelAIRequest(activeAIRequestRef.current)
@@ -3217,6 +3395,7 @@ function AppBody() {
       return
     }
     const roomID = selectedRoomID
+    const generation = workspaceGenerationRef.current
     let fetched: Message[] = []
     let cursor = olderCursor
     let moreHistory = hasOlder
@@ -3231,9 +3410,9 @@ function AppBody() {
 
     try {
       while (moreHistory) {
-        if (selectedRoomRef.current !== roomID) return
+        if (selectedRoomRef.current !== roomID || workspaceGenerationRef.current !== generation) return
         const page = await AppService.History(roomID, cursor)
-        if (selectedRoomRef.current !== roomID) return
+        if (selectedRoomRef.current !== roomID || workspaceGenerationRef.current !== generation) return
         if (page.before === cursor && page.hasMore) throw new Error('Could not continue loading the rest of this chat history.')
         fetched = mergeTimelineMessages(fetched, page.messages ?? [])
         cursor = page.before
@@ -3241,7 +3420,7 @@ function AppBody() {
         setSummaryStatus(`Loading older messages… (${loadedMessages().length.toLocaleString()} loaded)`)
       }
 
-      if (selectedRoomRef.current !== roomID) return
+      if (selectedRoomRef.current !== roomID || workspaceGenerationRef.current !== generation) return
       const context = promptMessages(loadedMessages())
       if (!context.some((message) => message.body.trim() && !message.redacted)) {
         setError('There are no messages to summarize yet.')
@@ -3249,13 +3428,15 @@ function AppBody() {
       }
       startLocalAIChat(buildSummaryChatDraft(context, aiInstructions('summarize')), 'summary')
     } catch (summaryError) {
-      if (selectedRoomRef.current === roomID) setError(describeError(summaryError))
+      if (selectedRoomRef.current === roomID && workspaceGenerationRef.current === generation) setError(describeError(summaryError))
     } finally {
-      summaryLoadingRef.current = false
-      setSummaryStatus('')
-      if (pagingHistory) {
-        loadingOlderRef.current = false
-        setLoadingOlder(false)
+      if (workspaceGenerationRef.current === generation) {
+        summaryLoadingRef.current = false
+        setSummaryStatus('')
+        if (pagingHistory) {
+          loadingOlderRef.current = false
+          setLoadingOlder(false)
+        }
       }
     }
   }
@@ -3263,6 +3444,7 @@ function AppBody() {
   async function translateRecentMessages() {
     if (!selectedRoomID || !aiEnabled || (!hasAIConversationContext && !hasOlder)) return
     const roomID = selectedRoomID
+    const generation = workspaceGenerationRef.current
     const requestID = chatTranslationRequestRef.current + 1
     chatTranslationRequestRef.current = requestID
     const currentUserID = snapshot?.profile.userId ?? ''
@@ -3356,7 +3538,7 @@ function AppBody() {
         setChatTranslation((current) => current?.requestID === requestID ? { ...current, busy: false, error: describeError(translationError), status: '' } : current)
       }
     } finally {
-      if (pagingHistory) {
+      if (pagingHistory && workspaceGenerationRef.current === generation) {
         loadingOlderRef.current = false
         setLoadingOlder(false)
       }
@@ -3568,6 +3750,14 @@ function AppBody() {
     setChatExport((current) => current?.phase === 'running' ? { ...current, error: '' } : null)
   }
 
+  // Ghost text is hidden while a mention or emoji picker owns Tab and Enter.
+  const ghostSuffix = (mentionStart >= 0 && mentionOptions.length > 0) || emojiOptions.length > 0 ? '' : ghostText.suffix
+  // acceptGhostText appends the suggestion to the draft. The next pause asks for a suggestion for the longer draft.
+  function acceptGhostText() {
+    setComposeDraft(composeText + ghostSuffix)
+    setComposeCaretAtEnd(true)
+  }
+
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     const snippetHandled = snippetExpander.handleKeyDown(
       event,
@@ -3628,6 +3818,18 @@ function AppBody() {
         return
       }
     }
+    if (ghostSuffix) {
+      if (event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault()
+        acceptGhostText()
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        ghostText.dismiss()
+        return
+      }
+    }
     const ctrlEnter = preferenceBoolean(preferences, 'composer.ctrl_enter')
     if (event.key === 'Enter' && !event.shiftKey && (!ctrlEnter || event.ctrlKey)) {
       event.preventDefault()
@@ -3650,7 +3852,7 @@ function AppBody() {
       <main className="auth-screen">
         <section className="auth-panel" aria-labelledby="auth-title">
           <div className="auth-brand">
-            <span className="brand-glyph"><MessageCircleMore size={22} strokeWidth={2.1} /></span>
+            <img className="brand-glyph" src="/pinger.svg" alt="" />
             <span>Pinger</span>
           </div>
           <div className="auth-heading">
@@ -3680,7 +3882,7 @@ function AppBody() {
           <div className="auth-footnote"><LockKeyhole size={14} /><span>Session and encryption keys stay on this device.</span></div>
         </section>
         <div className="auth-side" aria-hidden="true">
-          <div className="auth-side-mark">P.</div>
+          <img className="auth-side-mark" src="/pinger.svg" alt="" />
           <div className="auth-side-grid" />
           <div className="auth-side-bottom"><span>PINGER</span><span>01 / 01</span></div>
         </div>
@@ -3702,7 +3904,7 @@ function AppBody() {
       <main className="auth-screen">
         <section className="auth-panel" aria-labelledby="verify-title">
           <div className="auth-brand">
-            <span className="brand-glyph"><ShieldCheck size={21} /></span>
+            <img className="brand-glyph" src="/pinger.svg" alt="" />
             <span>Pinger</span>
           </div>
           <div className="auth-heading">
@@ -3724,7 +3926,7 @@ function AppBody() {
           <div className="auth-footnote"><LockKeyhole size={14} /><span>Your key is used locally to verify encryption.</span></div>
         </section>
         <div className="auth-side" aria-hidden="true">
-          <div className="auth-side-mark">P.</div>
+          <img className="auth-side-mark" src="/pinger.svg" alt="" />
           <div className="auth-side-grid" />
           <div className="auth-side-bottom"><span>PINGER</span><span>01 / 01</span></div>
         </div>
@@ -3741,6 +3943,8 @@ function AppBody() {
       onDragLeave={handleFileDragLeave}
       onDrop={handleFileDrop}
       data-theme={themeChoice}
+      data-ui="desktop"
+      data-theme-mode={themeModeForPreference(preferenceString(preferences, 'appearance.theme', SYSTEM_THEME_NAME), systemPrefersDark)}
       data-mobile-pane={mobilePane}
       data-content-blur={preferenceBoolean(preferences, 'privacy.incognito')}
       data-message-animations={preferenceBoolean(preferences, 'appearance.message_animations', true)}
@@ -3755,6 +3959,7 @@ function AppBody() {
         '--own-bubble': safeBubbleColor,
         '--app-zoom': `${appZoom}%`,
         ...accentCssVariables(accentPalette),
+        ...themeCssVariables(themeChoice, accentPalette, safeBubbleColor),
       } as React.CSSProperties}
     >
       <aside className="sidebar">
@@ -3763,7 +3968,7 @@ function AppBody() {
           <label className="room-search">
             <Search size={16} />
             <input ref={roomSearchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a room" aria-label="Find a room" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
-            {search && <button type="button" aria-label="Clear room search" onClick={() => setSearch('')}>×</button>}
+            {search && <button type="button" aria-label="Clear room search" title="Clear room search" onClick={() => setSearch('')}><X size={16} /></button>}
           </label>
           <div className="room-filters" role="group" aria-label="Filter rooms">
             {inboxAccountCount > 1 && (
@@ -3773,16 +3978,16 @@ function AppBody() {
               </select>
             )}
             <div className="room-scope-filters" role="group" aria-label="Room visibility">
-              <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-pressed={roomScope === 'all'} aria-keyshortcuts="Control+Shift+A Meta+Shift+A" title="All rooms (Ctrl / ⌘ + Shift + A)" onClick={() => { setRoomScope('all') }}><MessageCircleMore size={13} /><span className="filter-label">All</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧A</kbd></button>
-              <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => { setRoomScope('archived'); setRoomRefinements({ unanswered: false, needsReply: false, favorite: false }) }}><Archive size={13} /><span className="filter-label">Archive</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧H</kbd></button>
+              <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-pressed={roomScope === 'all'} aria-keyshortcuts="Control+Shift+A Meta+Shift+A" title="All rooms (Ctrl / ⌘ + Shift + A)" onClick={() => { setRoomScope('all') }}><MessageCircleMore size={13} /><span className="filter-label">All</span></button>
+              <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => { setRoomScope('archived'); setRoomRefinements({ unanswered: false, needsReply: false, favorite: false }) }}><Archive size={13} /><span className="filter-label">Archive</span></button>
+              <button type="button" className={roomScope === 'local-ai' ? 'is-active' : ''} aria-label="Local AI chats" aria-pressed={roomScope === 'local-ai'} title="Private model chats" onClick={() => setRoomScope((current) => current === 'local-ai' ? 'all' : 'local-ai')}><Sparkles size={14} /><span className="filter-label">Local AI</span></button>
             </div>
             <div className="room-refinement-filters" role="group" aria-label="Room categories">
-              <button type="button" className={roomRefinements.unanswered ? 'is-active' : ''} aria-label="Unanswered rooms" aria-pressed={roomRefinements.unanswered} aria-keyshortcuts="Control+Shift+R Meta+Shift+R" title="Unanswered rooms (Ctrl / ⌘ + Shift + R)" onClick={() => { setRoomRefinements((current) => ({ ...current, unanswered: !current.unanswered })) }}><Reply size={14} /><span className="filter-label">Unanswered</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧R</kbd></button>
+              <button type="button" className={roomRefinements.unanswered ? 'is-active' : ''} aria-label="Unanswered rooms" aria-pressed={roomRefinements.unanswered} aria-keyshortcuts="Control+Shift+R Meta+Shift+R" title="Unanswered rooms (Ctrl / ⌘ + Shift + R)" onClick={() => { setRoomRefinements((current) => ({ ...current, unanswered: !current.unanswered })) }}><Reply size={14} /><span className="filter-label">Unanswered</span></button>
               <button type="button" className={roomRefinements.needsReply ? 'is-active' : ''} aria-label="Needs reply" aria-pressed={roomRefinements.needsReply} aria-keyshortcuts={`${answeredShortcut} Control+Shift+U Meta+Shift+U`} title={`Needs reply (Ctrl / ⌘ + Shift + U; ${answeredShortcut} marks answered)`} onClick={() => { setRoomRefinements((current) => ({ ...current, needsReply: !current.needsReply })) }} onKeyDown={(event) => handleMarkAnsweredKeyDown(event, selectedRoomID)}>
-                <CircleDot size={14} /><span className="filter-label">Needs reply</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧U</kbd>{needsReplyCount > 0 && <span className="filter-count">{needsReplyCount}</span>}
+                <CircleDot size={14} /><span className="filter-label">Needs reply</span>{needsReplyCount > 0 && <span className="filter-count">{needsReplyCount}</span>}
               </button>
-              <button type="button" className={roomRefinements.favorite ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={roomRefinements.favorite} aria-keyshortcuts="Control+Shift+F Meta+Shift+F" title="Favorites (Ctrl / ⌘ + Shift + F)" onClick={() => { setRoomRefinements((current) => ({ ...current, favorite: !current.favorite })) }}><Star size={14} /><span className="filter-label">Favorites</span><kbd aria-hidden="true">{primaryModifierLabel()}⇧F</kbd></button>
-              <button type="button" className={roomScope === 'local-ai' ? 'is-active' : ''} aria-label="Local AI chats" aria-pressed={roomScope === 'local-ai'} title="Private model chats" onClick={() => setRoomScope((current) => current === 'local-ai' ? 'all' : 'local-ai')}><Sparkles size={14} /><span className="filter-label">Local AI</span></button>
+              <button type="button" className={roomRefinements.favorite ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={roomRefinements.favorite} aria-keyshortcuts="Control+Shift+F Meta+Shift+F" title="Favorites (Ctrl / ⌘ + Shift + F)" onClick={() => { setRoomRefinements((current) => ({ ...current, favorite: !current.favorite })) }}><Star size={14} /><span className="filter-label">Favorites</span></button>
             </div>
           </div>
           {roomScope === 'local-ai' && <div className="local-ai-folder-bar" role="group" aria-label="AI chat folders">
@@ -3943,6 +4148,10 @@ function AppBody() {
               <Star size={15} fill={contextMenuNeedsFavorite ? 'none' : 'currentColor'} />
               <span>{contextMenuIsBulk ? `${contextMenuNeedsFavorite ? 'Add' : 'Remove'} ${contextMenuRooms.length} ${contextMenuNeedsFavorite ? 'to' : 'from'} Favorites` : contextMenuNeedsFavorite ? 'Add to Favorites' : 'Remove from Favorites'}</span><kbd aria-hidden="true">F</kbd>
             </button>}
+            {contextMenuRooms.length > 0 && <button type="button" role="menuitem" aria-keyshortcuts="M" title="Mute or unmute notifications (M)" onClick={() => void applyBulkRoomAction(contextMenuNeedsMute ? 'mute' : 'unmute', contextMenuRooms)}>
+              {contextMenuNeedsMute ? <BellOff size={15} /> : <Bell size={15} />}
+              <span>{contextMenuIsBulk ? `${contextMenuNeedsMute ? 'Mute' : 'Unmute'} notifications for ${contextMenuRooms.length} chats` : contextMenuNeedsMute ? 'Mute notifications' : 'Unmute notifications'}</span><kbd aria-hidden="true">M</kbd>
+            </button>}
           </div>}
         </>
         <div className="sidebar-profile">
@@ -3999,23 +4208,12 @@ function AppBody() {
               <div className="conversation-title">
                 <h2>{selectedRoom.name || selectedRoom.id}</h2>
               </div>
+              <span className="conversation-state-icons">
+                {selectedRoom.favorite && <Star size={13} fill="currentColor" aria-label="Favorite room" />}
+                {selectedRoom.muted && <BellOff size={13} aria-label="Notifications muted" />}
+              </span>
               <div className="conversation-actions">
                 <div className="conversation-action-group" role="group" aria-label="Conversation utilities">
-                  <IconTooltip label="Scheduled messages">
-                    <button className="icon-button scheduled-jobs-button" type="button" aria-label="Scheduled messages and reminders" onClick={openScheduledJobs}>
-                      <Clock3 size={16} />{scheduledJobCount > 0 && <span className="scheduled-job-count">{scheduledJobCount}</span>}
-                    </button>
-                  </IconTooltip>
-                  <IconTooltip label="Media gallery">
-                    <button className="icon-button" type="button" aria-label="Media gallery" disabled={loadingHistory} onClick={() => void openMediaGallery()}>
-                      <Images size={16} />
-                    </button>
-                  </IconTooltip>
-                  <IconTooltip label="Export chat">
-                    <button className="icon-button" type="button" aria-label="Export chat" disabled={chatExport?.phase === 'running'} onClick={() => void exportSelectedRoomChat()}>
-                      <Download size={16} />
-                    </button>
-                  </IconTooltip>
                   <IconTooltip label="Search messages">
                     <button className="icon-button" type="button" aria-label="Search messages" onClick={() => setSearchOpen(true)}>
                       <Search size={16} />
@@ -4024,28 +4222,6 @@ function AppBody() {
                 </div>
                 <div className="conversation-action-group" role="group" aria-label="Room controls">
                   {isNeedsReplyRoom(selectedRoom) && <IconTooltip label="Mark room answered"><button className="icon-button" type="button" aria-label="Mark room answered" onClick={() => void markRoomAnswered(selectedRoom.id)}><Check size={16} /></button></IconTooltip>}
-                  <IconTooltip label={selectedRoom.favorite ? 'Remove from Favorites' : 'Add to Favorites'}>
-                    <button
-                      className={`icon-button ${selectedRoom.favorite ? 'is-selected' : ''}`}
-                      type="button"
-                      aria-label={selectedRoom.favorite ? 'Remove from Favorites' : 'Add to Favorites'}
-                      aria-pressed={selectedRoom.favorite}
-                      onClick={() => void setPreference(`room.favorite.${selectedRoom.id}`, !selectedRoom.favorite)}
-                    >
-                      <Star size={16} fill={selectedRoom.favorite ? 'currentColor' : 'none'} />
-                    </button>
-                  </IconTooltip>
-                  <IconTooltip label={selectedRoom.muted ? 'Unmute room' : 'Mute room'}>
-                    <button
-                      className={`icon-button ${selectedRoom.muted ? 'is-selected' : ''}`}
-                      type="button"
-                      aria-label={selectedRoom.muted ? 'Unmute room' : 'Mute room'}
-                      aria-pressed={selectedRoom.muted}
-                      onClick={() => void setPreference(`room.muted.${selectedRoom.id}`, !selectedRoom.muted)}
-                    >
-                      {selectedRoom.muted ? <BellOff size={16} /> : <Bell size={16} />}
-                    </button>
-                  </IconTooltip>
                 </div>
                 <div className="conversation-action-group" role="group" aria-label="Room details">
                   <IconTooltip label="Room details">
@@ -4053,13 +4229,20 @@ function AppBody() {
                       <UsersRound size={16} />
                     </button>
                   </IconTooltip>
+                  <ActionMenu key={`${activeAccountID}:${selectedRoomID}`} label="Room actions" icon={<MoreHorizontal size={18} />} count={scheduledJobCount} items={[
+                    { label: 'Scheduled messages and reminders', icon: <Clock3 size={16} />, onSelect: openScheduledJobs, count: scheduledJobCount },
+                    { label: 'Media gallery', icon: <Images size={16} />, onSelect: () => void openMediaGallery(), disabled: loadingHistory },
+                    { label: 'Export chat', icon: <Download size={16} />, onSelect: () => void exportSelectedRoomChat(), disabled: chatExport?.phase === 'running' },
+                    { label: selectedRoom.favorite ? 'Remove from Favorites' : 'Add to Favorites', icon: <Star size={16} />, active: selectedRoom.favorite, onSelect: () => void setPreference(`room.favorite.${selectedRoom.id}`, !selectedRoom.favorite) },
+                    { label: selectedRoom.muted ? 'Unmute room' : 'Mute room', icon: <BellOff size={16} />, active: selectedRoom.muted, onSelect: () => void setPreference(`room.muted.${selectedRoom.id}`, !selectedRoom.muted) },
+                  ]} />
                 </div>
               </div>
             </>
           ) : (
             <>
               <div className="conversation-title">
-                <h2>Matrix</h2>
+                <h2>Pinger</h2>
                 <span>Choose a room to start chatting</span>
               </div>
               <div className="conversation-actions">
@@ -4199,9 +4382,9 @@ function AppBody() {
                 </section>
               )}
 
-              {error && <div className="inline-error" role="alert"><CircleAlert size={15} />{error}<button aria-label="Dismiss error" title="Dismiss error" onClick={() => setError('')}>×</button></div>}
+              {error && <div className="inline-error" role="alert"><CircleAlert size={15} />{error}<button aria-label="Dismiss error" title="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}
 
-              <div className="timeline" key={selectedRoomID} ref={timelineRef} role="region" aria-label="Message timeline" tabIndex={0} onKeyDown={handleTimelineKeyDown} onScroll={(event) => {
+              <div className="timeline" key={selectedRoomID} ref={timelineRef} role="region" aria-label="Message timeline" data-virtualized={visibleMessages.length > VIRTUAL_TIMELINE_THRESHOLD} style={visibleMessages.length > VIRTUAL_TIMELINE_THRESHOLD ? { zoom: 100 / appZoom } : undefined} tabIndex={0} onKeyDown={handleTimelineKeyDown} onScroll={(event) => {
                 const element = event.currentTarget
                 const atPinnedPosition = pinnedScrollTopRef.current !== null && Math.abs(element.scrollTop - pinnedScrollTopRef.current) < 1
                 // Only a scroll away from the bottom that is not our own pin stops following the newest message.
@@ -4217,16 +4400,17 @@ function AppBody() {
                 {!selectedRoom && <div className="timeline-empty"><MessageCircleMore size={25} /><span>Select a room</span></div>}
                 {selectedRoom && loadingHistory && messages.length === 0 && <div className="timeline-empty"><span className="loading-mark" />Loading messages</div>}
                 {selectedRoom && !loadingHistory && visibleMessages.length === 0 && <div className="timeline-empty"><MessageCircleMore size={25} /><span>{messages.length > 0 ? 'Deleted messages are hidden' : hasOlder ? 'No messages in the past 24 hours' : 'No messages yet'}</span></div>}
-                {selectedRoom && hasOlder && (
-                  <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={loadOlderMessages} disabled={loadingOlder}>
-                    {loadingOlder ? <><span className="loading-mark" />Loading older messages</> : 'Load older messages'}
-                  </button>
-                )}
                 <TimelineMessageList
                   messages={messages}
+                  header={selectedRoom && hasOlder ? (
+                    <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={loadOlderMessages} disabled={loadingOlder}>
+                      {loadingOlder ? <><span className="loading-mark" />Loading older messages</> : 'Load older messages'}
+                    </button>
+                  ) : null}
                   hideDeleted={preferenceBoolean(preferences, 'appearance.hide_deleted_messages')}
                   preferences={preferences}
                   currentUserID={snapshot?.profile.userId ?? ''}
+                  accountID={activeAccountID}
                   selectedRoomID={selectedRoomID}
                   groupChat={Boolean(selectedRoom && !isDirectLikeRoom(selectedRoom))}
                   chatTranslation={chatTranslation?.roomID === selectedRoomID ? chatTranslation : null}
@@ -4235,6 +4419,8 @@ function AppBody() {
                   autoPlayNextMessageId={autoPlayNextMessageId}
                   canUseTranscriptAsDraft={!editTarget}
                   actionsRef={timelineMessageActionsRef}
+                  scrollParentRef={timelineRef}
+                  listHandleRef={timelineListRef}
                 />
                 {chatTranslation?.roomID === selectedRoomID && <div className="chat-translation-status">
                   {chatTranslation.busy && <p role="status">{chatTranslation.status}</p>}
@@ -4252,17 +4438,19 @@ function AppBody() {
                 {messageContextMenuItems(messageContextMenu.message).map((item) => (
                   <Fragment key={item.key}>
                     {item.separatorBefore && <div className="message-context-separator" role="separator" />}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={item.danger ? 'is-danger' : undefined}
-                      aria-label={item.ariaLabel}
-                      title={item.ariaLabel}
-                      disabled={item.disabled}
-                      onClick={() => { setMessageContextMenu(null); item.run() }}
-                    >
-                      {item.icon}<span>{item.label}</span>
-                    </button>
+                    {item.meta
+                      ? <div className="message-context-meta">{item.icon}<span>{item.label}</span></div>
+                      : <button
+                        type="button"
+                        role="menuitem"
+                        className={item.danger ? 'is-danger' : undefined}
+                        aria-label={item.ariaLabel}
+                        title={item.ariaLabel}
+                        disabled={item.disabled}
+                        onClick={() => { setMessageContextMenu(null); item.run() }}
+                      >
+                        {item.icon}<span>{item.label}</span>
+                      </button>}
                   </Fragment>
                 ))}
               </div>}
@@ -4295,10 +4483,9 @@ function AppBody() {
                 </div>}
                 {stagedRoomAttachments.length > 0 && <ul className="composer-staged-attachments" aria-label="Attachments to send">
                   {stagedRoomAttachments.map((item) => (
-                    <li key={item.id}>
-                      {item.previewURL ? <img src={item.previewURL} alt="" /> : <Paperclip size={12} />}
-                      <span>{item.file.name || 'Attachment'}</span>
-                      <button className="icon-button" type="button" aria-label={`Remove ${item.file.name || 'attachment'}`} disabled={busy} onClick={() => removeStagedAttachment(item)}><X size={12} /></button>
+                    <li key={item.id} className={item.previewURL ? 'is-image' : 'is-file'}>
+                      {item.previewURL ? <img src={item.previewURL} alt="Image attachment preview" /> : <><Paperclip size={14} /><span>{item.file.name || 'Attachment'}</span></>}
+                      <button className="icon-button attachment-remove" type="button" aria-label={`Remove ${item.file.name || 'attachment'}`} title="Remove attachment" disabled={busy} onClick={() => removeStagedAttachment(item)}><X size={14} /></button>
                     </li>
                   ))}
                 </ul>}
@@ -4323,25 +4510,28 @@ function AppBody() {
                           if (composeTextRef.current === value && document.activeElement === composerInputRef.current) composerInputRef.current?.setSelectionRange(converted.cursor, converted.cursor)
                         })
                       }
-                      composeTextRef.current = value
-                      setComposeText(value)
-                      if (!editTarget && selectedRoomID) {
-                        if (value) draftsRef.current.set(selectedRoomID, value)
-                        else draftsRef.current.delete(selectedRoomID)
-                      }
+                      setComposeDraft(value)
                       setMentionBindings((current) => current.every(({ token }) => value.includes(token))
                         ? current
                         : current.filter(({ token }) => value.includes(token)))
                       updateMentionQuery(value, converted.cursor)
                       updateEmojiQuery(value, converted.cursor)
                       snippetExpander.handleChange(value, converted.cursor)
+                      setComposeCaretAtEnd(converted.cursor === value.length)
                     }}
                     onKeyDown={handleComposerKeyDown}
-                    onClick={(event) => snippetExpander.handleClick(event.currentTarget.value, event.currentTarget.selectionStart)}
+                    onClick={(event) => {
+                      setComposeCaretAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length)
+                      snippetExpander.handleClick(event.currentTarget.value, event.currentTarget.selectionStart)
+                    }}
                     onKeyUp={(event) => {
+                      setComposeCaretAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length)
                       if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
                         snippetExpander.handleKeyUp(event.currentTarget.value, event.currentTarget.selectionStart)
                       }
+                    }}
+                    onScroll={(event) => {
+                      if (ghostLayerRef.current) ghostLayerRef.current.scrollTop = event.currentTarget.scrollTop
                     }}
                     onPaste={handleComposerPaste}
                     placeholder={selectedRoom ? `Message ${selectedRoom.name || selectedRoom.id}` : 'Select a room to start'}
@@ -4351,6 +4541,10 @@ function AppBody() {
                     disabled={!selectedRoom || busy || voiceCaptureStatus !== null}
                     rows={1}
                   />
+                  <div className="composer-ghost" ref={ghostLayerRef} aria-hidden="true">
+                    <span className="composer-ghost-typed">{composeText}</span>
+                    <span className="composer-ghost-suggestion">{ghostSuffix}</span>
+                  </div>
                   {snippetMenuVisible && snippetMatch && <SnippetPopover
                     inputRef={composerInputRef}
                     value={composeText}
@@ -4383,6 +4577,18 @@ function AppBody() {
                       </div>
                     </div>}
                     <div className="composer-tool-group composer-tool-group-message" role="group" aria-label="Message tools">
+                      {!preferenceBoolean(preferences, 'composer.formatting_toolbar') && <ActionMenu key={`format:${activeAccountID}:${selectedRoomID}`} label="Formatting" icon={<Bold size={16} />} side="top" disabled={!selectedRoom || busy} items={[
+                        { label: 'Bold', icon: <Bold size={15} />, onSelect: () => applyFormatting('bold') },
+                        { label: 'Italic', icon: <Italic size={15} />, onSelect: () => applyFormatting('italic') },
+                        { label: 'Strikethrough', icon: <Strikethrough size={15} />, onSelect: () => applyFormatting('strikethrough') },
+                        { label: 'Inline code', icon: <Code size={15} />, onSelect: () => applyFormatting('inlineCode') },
+                        { label: 'Insert link', icon: <Link size={15} />, onSelect: () => applyFormatting('link') },
+                        { label: 'Heading', icon: <Heading1 size={15} />, onSelect: () => applyFormatting('heading') },
+                        { label: 'Bulleted list', icon: <List size={15} />, onSelect: () => applyFormatting('bulletList') },
+                        { label: 'Numbered list', icon: <ListOrdered size={15} />, onSelect: () => applyFormatting('numberedList') },
+                        { label: 'Quote', icon: <Quote size={15} />, onSelect: () => applyFormatting('quote') },
+                        { label: 'Code block', icon: <SquareCode size={15} />, onSelect: () => applyFormatting('codeBlock') },
+                      ]} />}
                       <div className="composer-tool-cluster" role="group" aria-label="Add content">
                         <IconTooltip label="Attach file"><button className="icon-button" type="button" aria-label="Attach file" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onClick={() => attachmentInputRef.current?.click()}><Paperclip size={15} /></button></IconTooltip>
                         <div className="composer-emoji-control" ref={composerEmojiControlRef}>
@@ -4402,26 +4608,27 @@ function AppBody() {
                       </div>
                       <div className="composer-tool-cluster" role="group" aria-label="Delivery options">
                         <IconTooltip label={voiceRecordingActive ? 'Stop and send voice note' : 'Record voice note'}><button className="icon-button" type="button" aria-label={voiceRecordingActive ? 'Stop and send voice note' : 'Record voice note'} aria-pressed={voiceRecordingActive} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing' || videoRecordingActive} onClick={() => voiceRecordingActive ? stopRecording() : void startRecording('voice')}>{voiceRecordingActive ? <Square size={15} /> : <Mic size={15} />}</button></IconTooltip>
-                        <IconTooltip label={videoRecordingActive ? 'Stop and send video message' : 'Record video message'}><button className="icon-button" type="button" aria-label={videoRecordingActive ? 'Stop and send video message' : 'Record video message'} aria-pressed={videoRecordingActive} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing' || voiceRecordingActive} onClick={() => videoRecordingActive ? stopRecording() : void startRecording('video')}>{videoRecordingActive ? <Square size={15} /> : <Video size={15} />}</button></IconTooltip>
-                        <IconTooltip label={replyTarget ? 'Schedule reply' : 'Schedule message'}><button className="icon-button" type="button" aria-label={replyTarget ? 'Schedule reply' : 'Schedule message'} disabled={!selectedRoom || !composeText.trim() || busy || voiceCaptureStatus !== null || Boolean(editTarget)} onClick={openScheduleMessage}><Clock3 size={15} /></button></IconTooltip>
+                        {videoRecordingActive && <IconTooltip label="Stop and send video message"><button className="icon-button is-recording" type="button" aria-label="Stop and send video message" onClick={stopRecording}><Square size={15} /></button></IconTooltip>}
+                        <ActionMenu key={`delivery:${activeAccountID}:${selectedRoomID}`} label="Delivery options" icon={<ChevronDown size={16} />} side="top" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} items={[
+                          { label: 'Record video message', icon: <Video size={15} />, onSelect: () => void startRecording('video') },
+                          { label: replyTarget ? 'Schedule reply' : 'Schedule message', icon: <Clock3 size={15} />, onSelect: openScheduleMessage, disabled: !composeText.trim() || Boolean(editTarget) },
+                        ]} />
                       </div>
+                      <ActionMenu key={`ai:${activeAccountID}:${selectedRoomID}`} label="AI tools" icon={<Sparkles size={15} />} showLabel side="top" items={[
+                        { label: 'Analyze draft with Language Tutor', icon: <GraduationCap size={15} />, onSelect: () => void analyzeWithLanguageTutor(composeText, 'draft'), disabled: !selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget) },
+                        { label: 'Suggest replies', icon: <Reply size={15} />, onSelect: () => void suggestRepliesForRoom(selectedRoomID), disabled: !selectedRoom || busy || !aiEnabled || Boolean(editTarget) },
+                        { label: 'Generate image from draft', icon: <ImagePlus size={15} />, onSelect: () => void generateImageToRoom(), title: imageButtonTooltip, disabled: Boolean(imageRunHere) || !selectedRoom || !imageEngineReady || !composeText.trim() || busy || Boolean(editTarget) || imageSendRun !== null || generatedImageReview !== null },
+                        { label: 'Summarize with Local AI', icon: <ScrollText size={15} />, onSelect: () => void summarizeRoom(), disabled: !selectedRoom || busy || loadingOlder || Boolean(summaryStatus) || !aiEnabled || (!hasAIConversationContext && !hasOlder) },
+                        { label: translateRecentLabel, icon: <Languages size={15} />, onSelect: () => void translateRecentMessages(), disabled: !selectedRoom || busy || loadingOlder || !aiEnabled || (!hasAIConversationContext && !hasOlder) },
+                        ...(chatTranslation?.roomID === selectedRoomID ? [{ label: 'Clear message translations', icon: <X size={15} />, onSelect: clearChatTranslation }] : []),
+                      ]} />
+                      {imageRunHere && <IconTooltip label="Stop image generation"><button className="icon-button is-recording" type="button" aria-label="Stop image generation" onClick={stopImageGeneration}><Square size={15} /></button></IconTooltip>}
                     </div>
                   </div>
-                  <div className="composer-toolbar-row composer-toolbar-row-assist">
-                    <div className="composer-tool-group composer-tool-group-ai" role="group" aria-label="AI tools">
-                      <span className="composer-tool-group-label" aria-hidden="true"><Sparkles size={13} />AI</span>
-                      <div className="composer-tool-cluster" role="group" aria-label="Draft assistance">
-                        <IconTooltip label={aiEnabled ? 'Analyze draft with Language Tutor · Ctrl+Shift+T' : 'Analyze draft with Language Tutor · set up a local AI endpoint'}><button className="composer-assist-button" type="button" aria-label="Analyze draft with Language Tutor" disabled={!selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget)} onClick={() => void analyzeWithLanguageTutor(composeText, 'draft')}><GraduationCap size={14} /><span>Tutor</span></button></IconTooltip>
-                        <IconTooltip label={imageButtonTooltip}><button className="composer-assist-button" type="button" aria-label={imageRunHere ? 'Stop image generation' : 'Generate image from draft'} disabled={!imageRunHere && (!selectedRoom || !imageEngineReady || !composeText.trim() || busy || Boolean(editTarget) || imageSendRun !== null || generatedImageReview !== null)} onClick={imageRunHere ? stopImageGeneration : () => void generateImageToRoom()}>{imageRunHere ? <Square size={14} /> : <ImagePlus size={14} />}<span>{imageRunHere ? 'Stop' : 'Image'}</span></button></IconTooltip>
-                      </div>
-                      <div className="composer-tool-cluster" role="group" aria-label="Conversation analysis and translation">
-                        <IconTooltip label={summaryStatus || (aiEnabled ? 'Prepare a summary in Local AI' : 'Prepare a summary in Local AI · unavailable')}><button className="composer-assist-button" type="button" aria-label="Summarize with Local AI" aria-busy={Boolean(summaryStatus)} disabled={!selectedRoom || busy || loadingOlder || Boolean(summaryStatus) || !aiEnabled || (!hasAIConversationContext && !hasOlder)} onClick={() => void summarizeRoom()}>{summaryStatus ? <span className="loading-mark" aria-hidden="true" /> : <ScrollText size={14} />}<span>Summarize</span></button></IconTooltip>
-                        <IconTooltip label={aiEnabled ? translateRecentLabel : `${translateRecentLabel} · unavailable`}><button className="composer-assist-button" type="button" aria-label={translateRecentLabel} disabled={!selectedRoom || busy || loadingOlder || !aiEnabled || (!hasAIConversationContext && !hasOlder)} onClick={() => void translateRecentMessages()}><Languages size={14} /><span>Translate</span></button></IconTooltip>
-                        {chatTranslation?.roomID === selectedRoomID && <IconTooltip label="Clear message translations"><button className="composer-assist-button" type="button" aria-label="Clear message translations" onClick={clearChatTranslation}><X size={14} /><span>Clear translations</span></button></IconTooltip>}
-                      </div>
-                    </div>
-                    <span className={`composer-hint${voiceCaptureStatus !== null || busy || imageRunHere ? ' is-status' : ''}`}>{voiceCaptureStatus === 'recording' ? `Recording ${captureNoun} · click stop to send` : voiceCaptureStatus === 'processing' ? `Preparing ${captureNoun}…` : imageRunHere ? imageRunStatus : selectedRoom ? busy ? 'Sending…' : preferenceBoolean(preferences, 'composer.ctrl_enter') ? 'Ctrl + Enter to send' : 'Enter to send · Shift + Enter for a new line' : ' '}</span>
-                  </div>
+                  {suggestedReplies && suggestedReplies.roomId === selectedRoomID && (
+                    <SuggestedRepliesPicker state={suggestedReplies} hasDraft={composeText.trim() !== ''} onUse={useSuggestedReply} onRegenerate={() => void suggestRepliesForRoom(suggestedReplies.roomId)} onClose={cancelSuggestedReplies} />
+                  )}
+                  {(voiceCaptureStatus !== null || busy || imageRunHere || summaryStatus) && <span className="composer-operation-status" role="status">{voiceCaptureStatus === 'recording' ? `Recording ${captureNoun}` : voiceCaptureStatus === 'processing' ? `Preparing ${captureNoun}…` : imageRunHere ? imageRunStatus : summaryStatus || 'Sending…'}</span>}
                   <IconTooltip label={editTarget ? 'Save edit' : 'Send message'} className="send-tooltip">
                     <button className="send-button" type="submit" aria-label={editTarget ? 'Save edit' : 'Send message'} disabled={!selectedRoom || (!composeText.trim() && sendableStagedAttachments.length === 0) || busy || voiceCaptureStatus !== null}>
                       {editTarget ? <Check size={17} /> : <Send size={17} />}
@@ -4520,6 +4727,13 @@ function AppBody() {
             onClose={() => setSettingsOpen(false)}
             onLogout={async () => {
               await AppService.Logout()
+              draftsRef.current.clear()
+              accountDraftsRef.current.delete(activeAccountID)
+              setStagedAttachments((current) => current.filter((item) => {
+                if (item.accountID !== activeAccountID) return true
+                if (item.previewURL) URL.revokeObjectURL(item.previewURL)
+                return false
+              }))
               setSettingsOpen(false)
               try {
                 resetAccountWorkspace(await AppService.Snapshot())

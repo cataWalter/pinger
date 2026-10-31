@@ -4,7 +4,7 @@ import { AppService } from '../bindings/mychat/desktop'
 import { type AppBuildInfo, type Device, type MediaCacheUsage, type MediaCleanupResult, type Room, type RoomStorage, type Snapshot, type StorageUsage, type UpdateStatus } from '../bindings/mychat/desktop/models.js'
 import { parseCustomEmoticonReplacements, type EmoticonReplacement } from './composerText'
 import { DEFAULT_ACCENT_NAME, accentPaletteFor, accentPresets, isAccentHex } from './accent'
-import { SYSTEM_THEME_NAME, findThemeByName, themes as appearanceThemes } from './themes'
+import { SYSTEM_THEME_NAME, findThemeByName, themePaletteFor, themes as appearanceThemes } from './themes'
 import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
 import { type Snippet } from './snippets'
 import { EMPTY_CHAT_AGENTS, parseChatAgents, serializeChatAgents, type ChatAgentCollection } from './aiPrompts'
@@ -973,6 +973,17 @@ export function SettingsDialog({
                     {appearanceThemes.map((entry) => <option key={entry.id} value={entry.name}>{entry.name} ({entry.mode})</option>)}
                   </select>
                 </label>
+                <div className="theme-previews" role="group" aria-label="Theme previews">
+                  {appearanceThemes.map((entry) => {
+                    const palette = themePaletteFor(entry.id)
+                    return <button key={entry.id} className={`theme-preview${theme === entry.name ? ' is-selected' : ''}`} type="button" aria-label={`${entry.name} theme`} aria-pressed={theme === entry.name} onClick={() => onPreferenceChange('appearance.theme', entry.name)}>
+                      <span className="theme-preview-art" aria-hidden="true" style={{ '--preview-canvas': palette.canvas, '--preview-sidebar': palette.sidebar, '--preview-surface': palette.surface, '--preview-border': palette.border, '--preview-bubble': entry.bubbleColor } as React.CSSProperties}>
+                        <span className="theme-preview-sidebar" /><span className="theme-preview-conversation" />
+                      </span>
+                      <span>{entry.name}</span>
+                    </button>
+                  })}
+                </div>
                 <label className="setting-row"><span><strong>Font size</strong><small>Adjust room and message text.</small></span>
                   <select value={fontSize} onChange={(event) => onPreferenceChange('appearance.font_size', event.target.value)}>
                     {['Small', 'Medium', 'Large'].map((value) => <option key={value}>{value}</option>)}
@@ -1087,6 +1098,7 @@ export function SettingsDialog({
                 <h3>Keyboard</h3>
                 <PreferenceToggle label="Use Ctrl + Enter to send" checked={preferenceBoolean(preferences, 'composer.ctrl_enter')} onChange={(value) => onPreferenceChange('composer.ctrl_enter', value)} />
                 <PreferenceToggle label="Show formatting toolbar" checked={preferenceBoolean(preferences, 'composer.formatting_toolbar')} onChange={(value) => onPreferenceChange('composer.formatting_toolbar', value)} />
+                <PreferenceToggle label="Suggest text while typing (Tab to accept)" checked={preferenceBoolean(preferences, 'composer.ghost_text', true)} onChange={(value) => onPreferenceChange('composer.ghost_text', value)} />
                 <PreferenceToggle label="Suggest emoji for :shortcodes:" checked={preferenceBoolean(preferences, 'emoji.autocomplete')} onChange={(value) => onPreferenceChange('emoji.autocomplete', value)} />
                 <PreferenceToggle label="Replace emoticons as you type" checked={preferenceBoolean(preferences, 'emoji.replace_emoticons', true)} onChange={(value) => onPreferenceChange('emoji.replace_emoticons', value)} />
                 <div className="emoticon-replacement-editor" id="emoticon-replacement-editor">

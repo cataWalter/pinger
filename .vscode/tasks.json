@@ -21,7 +21,10 @@
       "command": "go",
       "args": ["run", "-tags=sqlite_fts5,goolm", "."],
       "options": {
-        "cwd": "${workspaceFolder}"
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "GOTOOLCHAIN": "go1.26.10"
+        }
       },
       "problemMatcher": [],
       "presentation": {

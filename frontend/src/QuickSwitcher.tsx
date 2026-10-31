@@ -8,7 +8,7 @@ export function QuickSwitcher({ results, query, activeIndex, inputRef, onQueryCh
   results: Room[]
   query: string
   activeIndex: number
-  inputRef: RefObject<HTMLInputElement>
+  inputRef: RefObject<HTMLInputElement | null>
   onQueryChange: (query: string) => void
   onActiveIndexChange: Dispatch<SetStateAction<number>>
   onSelect: (roomID: string) => void
