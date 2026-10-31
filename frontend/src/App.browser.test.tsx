@@ -152,8 +152,9 @@ describe('browser smoke', () => {
     })) })
     try {
       const { container } = renderApp()
+      const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
+      await user.click(await within(roomList).findByRole('button', { name: /Nora Bennett/ }))
       await screen.findByText('See you there.')
-      await user.click(within(screen.getByRole('navigation', { name: 'Rooms' })).getByRole('button', { name: /Nora Bennett/ }))
       await document.fonts.ready
       await settleSurfaces()
       const draft = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement

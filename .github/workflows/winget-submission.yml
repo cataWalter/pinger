@@ -79,19 +79,19 @@ jobs:
 
           # 2. Locale Manifest
           cat <<LOCALE > "$MANIFEST_DIR/cataWalter.Pinger.locale.en-US.yaml"
-PackageIdentifier: cataWalter.Pinger
-PackageVersion: ${VERSION}
-PackageLocale: en-US
-Publisher: cataWalter
-PublisherUrl: https://github.com/cataWalter
-PackageName: Pinger
-PackageUrl: https://github.com/cataWalter/pinger
-License: GPL-3.0
-LicenseUrl: https://github.com/cataWalter/pinger/blob/main/LICENSE
-ShortDescription: Triage-focused Matrix desktop client with local AI assistance
-ManifestType: defaultLocale
-ManifestVersion: 1.6.0
-LOCALE
+          PackageIdentifier: cataWalter.Pinger
+          PackageVersion: ${VERSION}
+          PackageLocale: en-US
+          Publisher: cataWalter
+          PublisherUrl: https://github.com/cataWalter
+          PackageName: Pinger
+          PackageUrl: https://github.com/cataWalter/pinger
+          License: AGPL-3.0
+          LicenseUrl: https://github.com/cataWalter/pinger/blob/main/LICENSE
+          ShortDescription: Triage-focused Matrix desktop client with local AI assistance
+          ManifestType: defaultLocale
+          ManifestVersion: 1.6.0
+          LOCALE
 
           # 3. Installer Manifest
           if [[ "$ASSET_NAME" =~ \.zip$ ]]; then
@@ -100,62 +100,62 @@ LOCALE
               EXE_NAME="pinger.exe"
             fi
             cat <<INSTALLER > "$MANIFEST_DIR/cataWalter.Pinger.installer.yaml"
-# yaml-language-server: \$schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
-PackageIdentifier: cataWalter.Pinger
-PackageVersion: ${VERSION}
-InstallerType: zip
-NestedInstallerType: portable
-NestedInstallerFiles:
-  - RelativeFilePath: ${EXE_NAME}
-    PortableCommandAlias: pinger
-Commands:
-  - pinger
-ReleaseDate: $(date +%F)
-Installers:
-  - Architecture: x64
-    InstallerUrl: ${URL}
-    InstallerSha256: ${SHA256}
-ManifestType: installer
-ManifestVersion: 1.6.0
-INSTALLER
+          # yaml-language-server: \$schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+          PackageIdentifier: cataWalter.Pinger
+          PackageVersion: ${VERSION}
+          InstallerType: zip
+          NestedInstallerType: portable
+          NestedInstallerFiles:
+            - RelativeFilePath: ${EXE_NAME}
+              PortableCommandAlias: pinger
+          Commands:
+            - pinger
+          ReleaseDate: $(date +%F)
+          Installers:
+            - Architecture: x64
+              InstallerUrl: ${URL}
+              InstallerSha256: ${SHA256}
+          ManifestType: installer
+          ManifestVersion: 1.6.0
+          INSTALLER
           elif [[ "$ASSET_NAME" =~ (setup|installer) ]]; then
             cat <<INSTALLER > "$MANIFEST_DIR/cataWalter.Pinger.installer.yaml"
-# yaml-language-server: \$schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
-PackageIdentifier: cataWalter.Pinger
-PackageVersion: ${VERSION}
-MinimumOSVersion: 10.0.0.0
-InstallerType: nullsoft
-Scope: user
-InstallModes:
-  - interactive
-  - silent
-InstallerSwitches:
-  Silent: /S
-  SilentWithProgress: /S
-UpgradeBehavior: install
-ReleaseDate: $(date +%F)
-Installers:
-  - Architecture: x64
-    InstallerUrl: ${URL}
-    InstallerSha256: ${SHA256}
-ManifestType: installer
-ManifestVersion: 1.6.0
-INSTALLER
+          # yaml-language-server: \$schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+          PackageIdentifier: cataWalter.Pinger
+          PackageVersion: ${VERSION}
+          MinimumOSVersion: 10.0.0.0
+          InstallerType: nullsoft
+          Scope: user
+          InstallModes:
+            - interactive
+            - silent
+          InstallerSwitches:
+            Silent: /S
+            SilentWithProgress: /S
+          UpgradeBehavior: install
+          ReleaseDate: $(date +%F)
+          Installers:
+            - Architecture: x64
+              InstallerUrl: ${URL}
+              InstallerSha256: ${SHA256}
+          ManifestType: installer
+          ManifestVersion: 1.6.0
+          INSTALLER
           else
             cat <<INSTALLER > "$MANIFEST_DIR/cataWalter.Pinger.installer.yaml"
-# yaml-language-server: \$schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
-PackageIdentifier: cataWalter.Pinger
-PackageVersion: ${VERSION}
-Commands:
-  - pinger
-Installers:
-  - Architecture: x64
-    InstallerType: portable
-    InstallerUrl: ${URL}
-    InstallerSha256: ${SHA256}
-ManifestType: installer
-ManifestVersion: 1.6.0
-INSTALLER
+          # yaml-language-server: \$schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+          PackageIdentifier: cataWalter.Pinger
+          PackageVersion: ${VERSION}
+          Commands:
+            - pinger
+          Installers:
+            - Architecture: x64
+              InstallerType: portable
+              InstallerUrl: ${URL}
+              InstallerSha256: ${SHA256}
+          ManifestType: installer
+          ManifestVersion: 1.6.0
+          INSTALLER
           fi
 
           git config user.name "github-actions[bot]"
@@ -170,6 +170,6 @@ INSTALLER
             --base master \
             --title "New package: cataWalter.Pinger version ${VERSION}" \
             --body "### Contribution Log
-* Package: **cataWalter.Pinger**
-* Version: **${VERSION}**
-* Repository: https://github.com/${{ github.repository }}"
+          * Package: **cataWalter.Pinger**
+          * Version: **${VERSION}**
+          * Repository: https://github.com/${{ github.repository }}"
