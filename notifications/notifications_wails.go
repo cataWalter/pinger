@@ -29,7 +29,7 @@ func New() Notifier {
 }
 
 func (n *nativeNotifier) Start(ctx context.Context) error {
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == "linux" || runtime.GOOS == "windows" {
 		directory, err := os.UserCacheDir()
 		if err == nil {
 			n.iconPath, err = cacheNotificationIcon(filepath.Join(directory, "pinger", "notification-icons"), application.Get().Config().Icon)
@@ -106,16 +106,20 @@ func (n *nativeNotifier) Send(message Message) error {
 		Sound:    &wailsnotifications.NotificationSound{Silent: !message.Sound},
 		Data:     map[string]interface{}{"roomId": message.RoomID, "accountId": message.AccountID},
 	}
-	options.Attachments = notificationAttachments(message.AvatarPath, n.iconPath)
+	options.Attachments = notificationAttachments(runtime.GOOS, message.AvatarPath, n.iconPath)
 	return n.service.SendNotification(options)
 }
 
-func notificationAttachments(avatarPath, iconPath string) []wailsnotifications.NotificationAttachment {
+func notificationAttachments(platform, avatarPath, iconPath string) []wailsnotifications.NotificationAttachment {
+	attachmentType := ""
+	if platform == "windows" {
+		attachmentType = "appLogoOverride"
+	}
 	if avatarPath != "" {
-		return []wailsnotifications.NotificationAttachment{{ID: "avatar", Path: avatarPath}}
+		return []wailsnotifications.NotificationAttachment{{ID: "avatar", Path: avatarPath, Type: attachmentType}}
 	}
 	if iconPath != "" {
-		return []wailsnotifications.NotificationAttachment{{ID: "application", Path: iconPath}}
+		return []wailsnotifications.NotificationAttachment{{ID: "application", Path: iconPath, Type: attachmentType}}
 	}
 	return nil
 }

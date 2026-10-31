@@ -8,6 +8,47 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
+type testNeedsReplyDockBadge struct {
+	label   string
+	removed bool
+}
+
+func (badge *testNeedsReplyDockBadge) SetBadge(label string) error {
+	badge.label = label
+	return nil
+}
+
+func (badge *testNeedsReplyDockBadge) RemoveBadge() error {
+	badge.removed = true
+	return nil
+}
+
+func TestNeedsReplyCountersShowNumbersAndClearAtZero(t *testing.T) {
+	for _, test := range []struct {
+		count int
+		label string
+	}{
+		{count: -1, label: ""},
+		{count: 0, label: ""},
+		{count: 1, label: "1"},
+		{count: 17, label: "17"},
+		{count: 1234, label: "1234"},
+	} {
+		t.Run(fmt.Sprint(test.count), func(t *testing.T) {
+			if label := needsReplyCounterLabel(test.count); label != test.label {
+				t.Fatalf("menu-bar label = %q, want %q", label, test.label)
+			}
+			badge := &testNeedsReplyDockBadge{}
+			if err := setNeedsReplyDockBadge(badge, test.count); err != nil {
+				t.Fatal(err)
+			}
+			if badge.label != test.label || badge.removed != (test.count <= 0) {
+				t.Fatalf("Dock badge: label=%q removed=%v", badge.label, badge.removed)
+			}
+		})
+	}
+}
+
 // menuItemsUnder returns every item in menu, including items in nested submenus.
 func menuItemsUnder(menu *application.Menu) []*application.MenuItem {
 	var items []*application.MenuItem

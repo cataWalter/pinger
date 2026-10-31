@@ -5,7 +5,7 @@ import { ArrowUpRight, Bot, Check, Copy, FileText, MessageSquare, Sparkles, Star
 import { AppService } from '../bindings/mychat/desktop'
 import { type AIMessage, type ChatExportResult, type Member, type Message, type Room, type Snapshot, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
 import { fuzzyScore } from './fuzzy'
-import { languageName, type AIFeatureID } from './aiSettings'
+import { AI_ACTION_SHORTCUTS, languageName, type AIFeatureID } from './aiSettings'
 import { matrixMediaURL, matrixMXCMediaURL } from './ChatMediaRenderer'
 import { VoiceMessagePlayer } from './VoiceMessagePlayer'
 import { DialogSurface } from './DialogSurface'
@@ -45,7 +45,7 @@ export type PreferenceValues = NonNullable<Snapshot['preferences']>
 export type RoomScope = 'all' | 'archived' | 'local-ai'
 export type RoomRefinements = { unanswered: boolean; needsReply: boolean; favorite: boolean }
 export type OutgoingMessage = { roomID: string; text: string; replyTo: Message | null; mentionUserIDs: string[] }
-export type MessageMenuItem = { key: string; label: string; ariaLabel: string; icon: ReactElement; danger?: boolean; disabled?: boolean; meta?: boolean; separatorBefore?: boolean; run: () => void }
+export type MessageMenuItem = { key: string; label: string; ariaLabel: string; icon: ReactElement; primaryShiftKey?: string; danger?: boolean; disabled?: boolean; meta?: boolean; separatorBefore?: boolean; run: () => void }
 export type AIAcceptAction = { kind: 'none' } | { kind: 'draft' | 'rewrite' } | { kind: 'reply'; target: Message }
 export type AIPanel = {
   title: string
@@ -565,6 +565,8 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   const visibleMessages = hideDeleted ? messages.filter((message) => !message.redacted) : messages
   const scope = `${accountID}:${selectedRoomID}`
   const virtualized = Boolean(scrollParentRef && visibleMessages.length > VIRTUAL_TIMELINE_THRESHOLD)
+  const visibleMessagesRef = useRef(visibleMessages)
+  visibleMessagesRef.current = visibleMessages
   const timelineZoom = preferenceNumber(preferences, 'appearance.zoom', 100, 75, 125) / 100
   const firstRowRef = useRef<HTMLElement>(null)
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null)
@@ -596,7 +598,20 @@ export const TimelineMessageList = memo(function TimelineMessageList({
       focusMessage: (eventID) => {
         const index = visibleMessages.findIndex((message) => message.id === eventID || message.transactionId === eventID)
         if (index < 0 || !virtualRef.current) return false
-        virtualRef.current.scrollToIndex({ index, align: 'center', behavior: 'auto' })
+        let initialRowOffset: number | null = null
+        virtualRef.current.scrollToIndex({
+          get index() {
+            return Math.max(0, visibleMessagesRef.current.findIndex((message) => message.id === eventID || message.transactionId === eventID))
+          },
+          get offset() {
+            const row = Array.from(scrollParentRef?.current?.querySelectorAll<HTMLElement>('[data-event-id]') ?? [])
+              .find((row) => row.dataset.eventId === eventID)
+            const item = row?.closest<HTMLElement>('[data-index]')
+            const currentOffset = row && item ? row.getBoundingClientRect().top - item.getBoundingClientRect().top : 0
+            return initialRowOffset === null ? 0 : currentOffset - initialRowOffset
+          },
+          align: index === 0 ? 'start' : 'center', behavior: 'auto',
+        })
         if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current)
         let remainingFrames = 60
         const focus = () => {
@@ -604,6 +619,8 @@ export const TimelineMessageList = memo(function TimelineMessageList({
             .find((row) => row.dataset.eventId === eventID)
           target?.focus({ preventScroll: true })
           if (target && document.activeElement === target) {
+            const item = target.closest<HTMLElement>('[data-index]')
+            if (item) initialRowOffset = target.getBoundingClientRect().top - item.getBoundingClientRect().top
             focusFrameRef.current = null
           } else if (--remainingFrames > 0) {
             focusFrameRef.current = requestAnimationFrame(focus)
@@ -1194,9 +1211,10 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
         <button className="icon-button audio-download" type="button" title={`Download ${filename}`} aria-label={`Download ${filename}`} disabled={loading} onClick={() => void downloadFile()}><Download size={15} /></button>
       </div>}
       {isAudio && <div className="audio-transcription-controls">
-        <button className="audio-transcribe-button" type="button" title={aiEnabled ? 'Upload this audio to the configured endpoint for transcription.' : 'Set an AI endpoint in Settings > AI.'} disabled={!aiEnabled || transcriptionLoading} onClick={() => void transcribeAudio()}>
+        <button className="audio-transcribe-button" type="button" aria-label={transcriptionLoading ? 'Transcribing audio' : 'Transcribe with AI'} aria-keyshortcuts={`Control+Shift+${AI_ACTION_SHORTCUTS.transcribeAudio.key} Meta+Shift+${AI_ACTION_SHORTCUTS.transcribeAudio.key}`} title={`${aiEnabled ? 'Upload this audio to the configured endpoint for transcription.' : 'Set an AI endpoint in Settings > AI.'} (${primaryShiftShortcutLabel(AI_ACTION_SHORTCUTS.transcribeAudio.key)})`} disabled={!aiEnabled || transcriptionLoading} onClick={() => void transcribeAudio()}>
           {transcriptionLoading ? <span className="loading-mark" /> : <Sparkles size={14} />}
           {transcriptionLoading ? 'Transcribing…' : 'Transcribe with AI'}
+          <kbd aria-hidden="true">{primaryShiftShortcutLabel(AI_ACTION_SHORTCUTS.transcribeAudio.key)}</kbd>
         </button>
         <small>{aiEnabled ? 'Audio is sent to the configured endpoint, which may be remote.' : 'Set an AI endpoint in Settings > AI to transcribe audio.'}</small>
       </div>}
@@ -1444,10 +1462,21 @@ export type ActionMenuEntry = {
   label: string
   icon: ReactNode
   onSelect: () => void
+  primaryShiftKey?: string
   disabled?: boolean
   active?: boolean
   count?: number
   title?: string
+}
+
+export function primaryShiftShortcutKey(event: globalThis.KeyboardEvent) {
+  if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey || event.repeat || event.isComposing) return ''
+  return event.code.match(/^Key([A-Z])$/)?.[1] ?? event.key.toUpperCase()
+}
+
+export function primaryShiftShortcutLabel(key: string) {
+  const modifier = primaryModifierLabel()
+  return modifier === '⌘' ? `⌘⇧${key}` : `${modifier}+Shift+${key}`
 }
 
 export function ActionMenu({ label, icon, items, side = 'bottom', showLabel = false, disabled = false, count = 0 }: {
@@ -1505,6 +1534,17 @@ export function ActionMenu({ label, icon, items, side = 'bottom', showLabel = fa
   }
 
   function navigate(event: KeyboardEvent<HTMLDivElement>) {
+    const shortcutKey = primaryShiftShortcutKey(event.nativeEvent)
+    const shortcut = shortcutKey ? items.find((item) => item.primaryShiftKey === shortcutKey) : undefined
+    if (shortcut) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (!shortcut.disabled) {
+        close()
+        shortcut.onSelect()
+      }
+      return
+    }
     const enabled = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
     const current = enabled.indexOf(document.activeElement as HTMLButtonElement)
     if (event.key === 'Escape') {
@@ -1534,9 +1574,9 @@ export function ActionMenu({ label, icon, items, side = 'bottom', showLabel = fa
         {icon}{showLabel && <span>{label}</span>}{count > 0 && <span className="action-menu-count">{count}</span>}
       </button>
     </IconTooltip>
-    {open && <div id={id} className="action-menu" role="menu" aria-label={label} ref={menuRef} tabIndex={-1} onKeyDown={navigate}>
-      {items.map((item) => <button key={item.label} type="button" role={item.active === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-label={item.label} aria-description={item.count ? `${item.count} items` : undefined} aria-checked={item.active} title={item.title} tabIndex={-1} disabled={item.disabled} onClick={() => { close(); item.onSelect() }}>
-        {item.icon}<span>{item.label}</span>{item.count !== undefined && item.count > 0 && <small aria-hidden="true">{item.count}</small>}{item.active && <Check className="action-menu-check" size={14} aria-hidden="true" />}
+    {open && <div id={id} className={`action-menu${items.some((item) => item.primaryShiftKey) ? ' has-shortcuts' : ''}`} role="menu" aria-label={label} ref={menuRef} tabIndex={-1} onKeyDown={navigate}>
+      {items.map((item) => <button key={item.label} type="button" role={item.active === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-label={item.label} aria-description={item.count ? `${item.count} items` : undefined} aria-keyshortcuts={item.primaryShiftKey ? `Control+Shift+${item.primaryShiftKey} Meta+Shift+${item.primaryShiftKey}` : undefined} aria-checked={item.active} title={item.title} tabIndex={-1} disabled={item.disabled} onClick={() => { close(); item.onSelect() }}>
+        {item.icon}<span>{item.label}</span>{item.primaryShiftKey && <kbd aria-hidden="true">{primaryShiftShortcutLabel(item.primaryShiftKey)}</kbd>}{item.count !== undefined && item.count > 0 && <small aria-hidden="true">{item.count}</small>}{item.active && <Check className="action-menu-check" size={14} aria-hidden="true" />}
       </button>)}
     </div>}
   </div>

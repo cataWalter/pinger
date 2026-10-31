@@ -58,6 +58,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 **AI assistance**
 
 - The composer's **AI tools** menu groups Language Tutor, suggested replies, image generation, summarization, and translation. Active image generation keeps a directly accessible Stop control.
+- Press **Tab** in the composer to expand ghost-text suggestions, including a trailing space for the next word; **Escape** dismisses them. AI action shortcuts are shown in menus and Settings → Keyboard.
 
 - Configure an OpenAI-compatible endpoint in Settings → Integrations (endpoint URL, optional model name, translation language, connection test) — including a llama-server you run yourself.
 - Actions: **Ask AI** (answer a question using room context), draft a reply, explain or translate a selected message, rewrite or shorten composer text, summarize a room, identify chat topics and themes, analyze a two-person conversation, and run a per-room chat agent. **Translate chat to English** batches the room history so a whole conversation can be translated at once, and audio messages can be transcribed (optional transcription model in Settings → Integrations). Results can be inserted into the composer as a draft or reply.
@@ -82,6 +83,8 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - Alerts use the operating system's native notification service: Notification Center on macOS, toast notifications on Windows, and the freedesktop notification service on Linux. macOS requires the bundled Pinger app identity; Windows and Linux use system notification settings. Desktop settings control permission, focus, sound and volume, content privacy (sender + preview, sender only, or hidden), and separate alerts for direct messages, mentions, and group messages with a per-category tone (Chime, Pulse, Soft, Silent). Muted rooms never notify. Settings → Notifications can open the OS notification settings for Pinger.
 - Optional batching combines new messages into one alert; a repeat reminder re-surfaces a still-unread room (after 5, 15, or 60 minutes); one-time codes can alert immediately and copy the code to the clipboard; an optional sound effect plays when a message is sent.
 - Reopen the window, mark all rooms read, or quit from the tray menu; the tray icon and tooltip reflect unread activity and follow the system light/dark appearance. Closing the window can minimize to tray; the startup preference registers the app with the OS. Clicking a notification focuses the app and opens the relevant room.
+- On macOS, the Dock badge and menu-bar number match the sidebar's Needs reply total: rooms awaiting a reply, excluding archived rooms and following the inbox account scope. Both numbers disappear when the total is zero.
+- All desktop platforms use the shared Pinger artwork. Windows embeds the ICO in the executable and uses the avatar or Pinger fallback as the toast logo; Linux supplies the window PNG and matches the installed `fi.mau.pinger.desktop` entry for GTK4/Wayland dock icons. macOS uses the bundled ICNS and runtime Dock icon. Notification avatars take priority over fallback artwork.
 
 **Settings** (`Ctrl+,` / `⌘,`)
 
@@ -120,14 +123,25 @@ Press `?` in the app (or open Settings → Keyboard) for the authoritative list.
 | `Ctrl+Shift+U` | Filter to needs-reply rooms only |
 | `Ctrl+Shift+A` | Show all rooms (clear filters) |
 | `Ctrl+Shift+L` | Jump to the latest messages |
+| `Ctrl`/`⌘` + `Shift+T` | Analyze the composer draft with Language Tutor |
+| `Ctrl`/`⌘` + `Shift+B` | Suggest replies |
+| `Ctrl`/`⌘` + `Shift+J` | Generate an image from the draft for approval |
+| `Ctrl`/`⌘` + `Shift+O` | Prepare a Local AI summary chat |
+| `Ctrl`/`⌘` + `Shift+Y` | Translate messages received since your last message |
+| `Ctrl`/`⌘` + `Shift+X` | Clear message translations |
+| `Ctrl`/`⌘` + `Shift+C` | Analyze the focused message with Language Tutor |
+| `Ctrl`/`⌘` + `Shift+D` | Draft a reply to the focused message |
+| `Ctrl`/`⌘` + `Shift+E` | Explain the focused message |
+| `Ctrl`/`⌘` + `Shift+V` | Transcribe the focused audio message |
+| `Ctrl`/`⌘` + `Shift+M` | Start a private model chat |
 | `Ctrl+1` … `Ctrl+9` | Jump to room by list position |
 | `Ctrl+Alt+1` … `Ctrl+Alt+9` | Switch Matrix account |
 | `Ctrl`/`⌘` + `+` / `-` / `0` | Zoom in / out / reset app zoom |
 | `↑` `↓` `Home` `End` | Navigate the room list |
 | `Shift+F10` | Open the room actions menu |
 | `Home` / `End` | Focus the first / latest message in the timeline |
-| `Escape` | Close search or dialog |
-| `Tab` / `Shift+Tab` | Move between controls |
+| `Escape` | Dismiss ghost text or close search or dialog |
+| `Tab` / `Shift+Tab` | Accept visible ghost text with Tab; otherwise move between controls |
 | `Enter` or `Ctrl+Enter` / `⌘↩` | Send message *(toggleable in Settings → Keyboard)* |
 | `Shift+Enter` | New line in the composer |
 
@@ -188,7 +202,7 @@ wails3 task dev
 
 Hot-reloads the frontend via Vite and rebuilds the Go app on change.
 
-For a native executable without the desktop installer, run `wails3 task build:linux` on Linux or `wails3 task build:windows` on Windows. These write to `bin/`; Windows builds require MinGW-w64 GCC on `PATH`. The Windows ZIP and Linux DEB/AppImage installers are produced by manually dispatching the release workflow; local builds do not create those installer formats.
+For a native executable without the desktop installer, run `wails3 task build:linux` on Linux or `wails3 task build:windows` on Windows. These write to `bin/`; Windows builds require MinGW-w64 GCC on `PATH`. The Windows ZIP and Linux DEB/AppImage installers are produced by the release workflow; local builds do not create those installer formats.
 
 ## Project structure
 
@@ -241,7 +255,9 @@ Dependabot proposes weekly dependency and action updates. Wails Go, CLI, and Jav
 
 ## Releases
 
-Pushing a `v*` tag runs the release workflow, which builds universal (arm64 + amd64) macOS binaries on `macos-latest`, x64 Windows binaries on `windows-latest`, and x64 Linux binaries on `ubuntu-24.04`, then publishes a GitHub Release. Manually dispatching the workflow uploads the same packages as workflow artifacts without publishing a release.
+The release workflow builds universal (arm64 + amd64) macOS binaries on `macos-latest`, x64 Windows binaries on `windows-latest`, and x64 Linux binaries on `ubuntu-24.04`, then publishes a GitHub Release. Pushing `main` or manually dispatching a branch build publishes a numbered prerelease; pushing a `v*` tag publishes a stable release. Every release must pass the complete CI workflow first.
+
+After publication, the workflow updates the [Homebrew tap](https://github.com/cataWalter/homebrew-tap) with the macOS DMG URL and SHA-256 checksum. Install with `brew install --cask catawalter/tap/pinger`, or update an existing installation with `brew update && brew upgrade --cask pinger`.
 
 The committed `package-lock.json` makes npm the canonical package manager for CI and release builds. The root Taskfile also has optional Bun, pnpm, and Yarn adapters for local use, but those paths are not covered by CI and have no committed lockfiles.
 

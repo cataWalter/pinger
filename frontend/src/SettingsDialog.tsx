@@ -8,7 +8,7 @@ import { SYSTEM_THEME_NAME, findThemeByName, themePaletteFor, themes as appearan
 import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
 import { type Snippet } from './snippets'
 import { EMPTY_CHAT_AGENTS, parseChatAgents, serializeChatAgents, type ChatAgentCollection } from './aiPrompts'
-import { resolveLanguageRoles } from './aiSettings'
+import { AI_ACTION_SHORTCUTS, resolveLanguageRoles } from './aiSettings'
 import { LanguageSettings } from './LanguageSettings'
 import { AIPromptSettings } from './AIPromptSettings'
 import { DialogSurface } from './DialogSurface'
@@ -478,7 +478,9 @@ export function SettingsDialog({
     ['Ctrl / ⌘ + 0', 'Reset app zoom'],
     ['Ctrl / ⌘ + Shift + P', 'Toggle content blur'],
     ['Ctrl / ⌘ + Shift + I', 'Toggle hiding images and videos'],
-    ['Ctrl + Shift + T', 'Analyze draft with Language Tutor'],
+    ...Object.values(AI_ACTION_SHORTCUTS).map<[string, string]>(({ key, description }) => [`Ctrl / ⌘ + Shift + ${key}`, description]),
+    ['Tab', 'Expand AI text suggestion'],
+    ['Escape', 'Dismiss AI text suggestion'],
     ['Ctrl / ⌘ + Shift + A', 'Show all rooms'],
     ['Ctrl / ⌘ + Shift + U', 'Show needs-reply rooms'],
     ['Ctrl / ⌘ + Shift + M', 'Start a private model chat'],

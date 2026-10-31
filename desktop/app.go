@@ -16,6 +16,7 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+	"github.com/wailsapp/wails/v3/pkg/services/dock"
 	"mychat/matrix"
 	"mychat/notifications"
 	sharedpreferences "mychat/preferences"
@@ -106,9 +107,18 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
+		Linux: application.LinuxOptions{
+			ApplicationID: "fi.mau.pinger",
+		},
 		OnShutdown: shutdown,
 	})
-	app.SetIcon(applicationIcon)
+	if len(applicationIcon) > 0 {
+		app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(_ *application.ApplicationEvent) {
+			application.InvokeAsync(func() {
+				app.SetIcon(applicationIcon)
+			})
+		})
+	}
 	eventBatcher := NewEventBatcher(ctx, defaultEventBatchFlushInterval)
 	eventBatcher.SetEmitter(func(eventName string, payload BatchedPayload) {
 		app.Event.Emit(eventName, payload)
@@ -178,6 +188,9 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 		Hidden:             startMinimized && menuBarIconEnabled(),
 		Mac: application.MacWindow{
 			WindowLevel: application.MacWindowLevelNormal,
+		},
+		Linux: application.LinuxWindow{
+			Icon: applicationIcon,
 		},
 	})
 	showMainWindow := func() {
@@ -263,7 +276,43 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 		menus.refreshAccounts()
 		menus.syncPreferences(service.preferenceValues())
 	}
+	var needsReplyCount atomic.Int64
+	var counterMu sync.Mutex
+	lastNeedsReplyCount := -1
+	var dockBadge *dock.DockService
+	if runtime.GOOS == "darwin" {
+		dockBadge = dock.New()
+	}
+	refreshNeedsReplyCounter := func() {
+		if dockBadge == nil {
+			return
+		}
+		counterMu.Lock()
+		defer counterMu.Unlock()
+		if ctx.Err() != nil {
+			return
+		}
+		count := int(needsReplyCount.Load())
+		if count == lastNeedsReplyCount {
+			return
+		}
+		tray.SetLabel(needsReplyCounterLabel(count))
+		if badgeErr := setNeedsReplyDockBadge(dockBadge, count); badgeErr != nil {
+			log.Printf("update Needs reply Dock badge: %v", badgeErr)
+			return
+		}
+		lastNeedsReplyCount = count
+	}
+	if dockBadge != nil {
+		app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(_ *application.ApplicationEvent) {
+			go refreshNeedsReplyCounter()
+		})
+	}
 	service.menuStateChanged = func(state MenuState) {
+		if dockBadge != nil {
+			needsReplyCount.Store(int64(max(0, state.NeedsReplyCount)))
+			go refreshNeedsReplyCounter()
+		}
 		application.InvokeAsync(func() {
 			menus.applyState(state)
 		})

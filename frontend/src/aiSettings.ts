@@ -40,6 +40,19 @@ export const AI_TEMPERATURE_MIN = 0.6
 export const AI_TEMPERATURE_MAX = 2
 export const AI_MAX_TOKENS_LIMIT = 8192
 
+export const AI_ACTION_SHORTCUTS = {
+  analyzeDraft: { key: 'T', description: 'Analyze draft with Language Tutor' },
+  suggestReplies: { key: 'B', description: 'Suggest replies' },
+  generateImage: { key: 'J', description: 'Generate image from draft' },
+  summarize: { key: 'O', description: 'Summarize with Local AI' },
+  translate: { key: 'Y', description: 'Translate recent messages' },
+  clearTranslations: { key: 'X', description: 'Clear message translations' },
+  analyzeMessage: { key: 'C', description: 'Analyze focused message with Language Tutor' },
+  draftReply: { key: 'D', description: 'Draft reply to focused message with AI' },
+  explainMessage: { key: 'E', description: 'Explain focused message with AI' },
+  transcribeAudio: { key: 'V', description: 'Transcribe focused audio message with AI' },
+} as const
+
 // Codes must match tutorLanguageNames in preferences/store.go.
 export const LANGUAGE_OPTIONS: readonly { code: string; name: string }[] = [
   { code: 'ar', name: 'Arabic' },

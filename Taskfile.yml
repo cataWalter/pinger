@@ -65,10 +65,12 @@ tasks:
     sources:
       - build/windows/icon.ico
       - build/windows/pinger.exe.manifest
+      - scripts/generate-windows-resources.go
+      - go.mod
     generates:
       - rsrc_windows_{{.ARCH}}.syso
     cmds:
-      - wails3 generate syso -arch {{.ARCH}} -icon build/windows/icon.ico -manifest build/windows/pinger.exe.manifest -out rsrc_windows_{{.ARCH}}.syso
+      - go run scripts/generate-windows-resources.go -arch {{.ARCH}} -icon build/windows/icon.ico -manifest build/windows/pinger.exe.manifest -out rsrc_windows_{{.ARCH}}.syso
 
   dev:
     summary: Runs the application in development mode

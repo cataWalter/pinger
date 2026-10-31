@@ -208,7 +208,7 @@ jobs:
       - name: Generate Windows application resources
         shell: pwsh
         run: |
-          & (Join-Path $env:RUNNER_TEMP "wails-bin\wails3.exe") generate syso `
+          go run scripts/generate-windows-resources.go `
             -arch amd64 `
             -icon build/windows/icon.ico `
             -manifest build/windows/pinger.exe.manifest `

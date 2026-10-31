@@ -75,6 +75,7 @@ type MenuState struct {
 	RoomFavorite     bool   `json:"roomFavorite"`
 	RoomUnanswered   bool   `json:"roomUnanswered"`
 	RoomNeedsReply   bool   `json:"roomNeedsReply"`
+	NeedsReplyCount  int    `json:"needsReplyCount"`
 	PrivateChatOpen  bool   `json:"privateChatOpen"`
 	PrivateChatInAll bool   `json:"privateChatInAll"`
 	DraftReady       bool   `json:"draftReady"`
@@ -108,6 +109,25 @@ func (s *AppService) SetMenuState(state MenuState) {
 	if s.menuStateChanged != nil {
 		s.menuStateChanged(state)
 	}
+}
+
+type needsReplyDockBadge interface {
+	SetBadge(string) error
+	RemoveBadge() error
+}
+
+func needsReplyCounterLabel(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return strconv.Itoa(count)
+}
+
+func setNeedsReplyDockBadge(badge needsReplyDockBadge, count int) error {
+	if count <= 0 {
+		return badge.RemoveBadge()
+	}
+	return badge.SetBadge(needsReplyCounterLabel(count))
 }
 
 // notifyAccountsChanged asks the native menu to rebuild the account submenu.

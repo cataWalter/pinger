@@ -10606,7 +10606,10 @@ day-divider::after,
 .action-menu-control[data-side='top'] .action-menu { top: auto; right: auto; bottom: calc(100% + 8px); left: var(--menu-shift, 0px); }
 .action-menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 7px 10px; border: 0; border-radius: 4px; text-align: left; color: var(--ink); background: transparent; font-size: 13px; line-height: 1.4; }
 .action-menu button > svg { flex: 0 0 auto; color: var(--muted); }
-.action-menu button > span { flex: 1; }
+.action-menu button > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.action-menu.has-shortcuts { width: min(320px, calc(100vw - 32px)); }
+.action-menu kbd, .message-context-menu kbd, .audio-transcribe-button kbd { flex: 0 0 auto; margin-left: auto; color: var(--muted); font-family: inherit; font-size: 11px; white-space: nowrap; }
+.message-context-menu button > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .action-menu button:hover:not(:disabled), .action-menu button:focus-visible { outline: 0; color: var(--selected-text); background: var(--surface-selected); }
 .action-menu button[aria-checked='true'] { color: var(--accent-text); }
 .action-menu button .action-menu-check { flex: 0 0 auto; }

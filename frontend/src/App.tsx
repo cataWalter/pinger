@@ -20,11 +20,11 @@ import { useSnippetExpander } from './useSnippetExpander'
 import { ConnectionStatusBanner } from './ConnectionStatusBanner'
 import { useConnectionProblem } from './useConnectionProblem'
 import { EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, buildExplainPrompt, buildReplyPrompt, buildSummaryChatDraft, parseChatAgents, serializeChatAgents, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage, endsWithAssistantTurn } from './aiPrompts'
-import { languageName, resolveAIFeatureTuning, resolveLanguageRoles, type AIFeatureID } from './aiSettings'
+import { AI_ACTION_SHORTCUTS, languageName, resolveAIFeatureTuning, resolveLanguageRoles, type AIFeatureID } from './aiSettings'
 import { matrixMXCMediaURL } from './ChatMediaRenderer'
 import { useMatrixBatch } from './useMatrixBatch'
 import { DialogSurface } from './DialogSurface'
-import { ActionMenu, preferredScrollBehavior, VIRTUAL_TIMELINE_THRESHOLD, type TimelineListHandle } from './appShared'
+import { ActionMenu, preferredScrollBehavior, primaryShiftShortcutKey, primaryShiftShortcutLabel, VIRTUAL_TIMELINE_THRESHOLD, type ActionMenuEntry, type TimelineListHandle } from './appShared'
 import LocalAIChat from './LocalAIChat'
 import { SuggestedRepliesPicker, type SuggestedRepliesState } from './SuggestedRepliesPicker'
 import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID, LOCAL_AI_FOLDER_NAME_CHARACTERS, LOCAL_AI_TITLE_CHARACTERS, type LocalAIChatKind, useLocalAIChatList } from './localAIChats'
@@ -1310,8 +1310,14 @@ function AppBody() {
       timelineHeightBeforePrepend.current = null
     } finally {
       if (workspaceGenerationRef.current === generation) {
-        loadingOlderRef.current = false
         setLoadingOlder(false)
+        if (timelineListRef.current?.virtualized) {
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (workspaceGenerationRef.current === generation) loadingOlderRef.current = false
+          }))
+        } else {
+          loadingOlderRef.current = false
+        }
       }
     }
   }
@@ -1727,10 +1733,10 @@ function AppBody() {
       { key: 'forward', label: 'Forward...', ariaLabel: 'Forward message', icon: <ArrowUpRight size={14} />, disabled: !manageable || !body || Boolean(message.mediaUri || message.mediaType || message.mediaMime) || !canForward, run: () => openMessageForward(message) },
       { key: 'received-at', label: `Received at ${receivedAt}`, ariaLabel: `Received at ${receivedAt}`, icon: <Clock3 size={14} />, meta: true, separatorBefore: true, run: () => { } },
       { key: 'remind', label: 'Set reminder', ariaLabel: 'Set reminder for message', icon: <BellRing size={14} />, disabled: !manageable, separatorBefore: true, run: () => openReminder(message) },
-      { key: 'language-tutor', label: 'Analyze with Language Tutor', ariaLabel: 'Analyze message with Language Tutor', icon: <Languages size={14} />, disabled: !aiEnabled || !body || Boolean(message.redacted), separatorBefore: true, run: () => void analyzeWithLanguageTutor(body, 'message') },
-      { key: 'ai-reply', label: 'Draft reply with AI', ariaLabel: 'Draft reply with local AI', icon: <Reply size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => draftAIReply(message) },
-      { key: 'ai-suggest-replies', label: 'Suggest replies with AI', ariaLabel: 'Suggest three replies with local AI', icon: <ListChecks size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => void suggestRepliesForRoom(selectedRoomID) },
-      { key: 'ai-explain', label: 'Explain message', ariaLabel: 'Explain message with local AI', icon: <Sparkles size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => explainMessage(message) },
+      { key: 'language-tutor', label: 'Analyze with Language Tutor', ariaLabel: 'Analyze message with Language Tutor', primaryShiftKey: AI_ACTION_SHORTCUTS.analyzeMessage.key, icon: <Languages size={14} />, disabled: !aiEnabled || !body || Boolean(message.redacted), separatorBefore: true, run: () => void analyzeWithLanguageTutor(body, 'message') },
+      { key: 'ai-reply', label: 'Draft reply with AI', ariaLabel: 'Draft reply with local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.draftReply.key, icon: <Reply size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => draftAIReply(message) },
+      { key: 'ai-suggest-replies', label: 'Suggest replies with AI', ariaLabel: 'Suggest three replies with local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.suggestReplies.key, icon: <ListChecks size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => void suggestRepliesForRoom(selectedRoomID) },
+      { key: 'ai-explain', label: 'Explain message', ariaLabel: 'Explain message with local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.explainMessage.key, icon: <Sparkles size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => explainMessage(message) },
     ]
     if (message.own && manageable) {
       items.push({ key: 'edit', label: 'Edit', ariaLabel: 'Edit message', icon: <Pencil size={13} />, run: () => { setReplyTarget(null); setEditTarget(message); setComposeText(message.body); setMentionBindings([]); setMentionStart(-1) } })
@@ -2032,7 +2038,9 @@ function AppBody() {
   }
 
   function handleApplicationKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (hasOpenDialog() || quickSwitcherOpen || messageContextMenu) return
+    if (event.defaultPrevented || hasOpenDialog() || quickSwitcherOpen) return
+    if (handleAIShortcut(event)) return
+    if (messageContextMenu) return
     if (event.key === 'Escape' && searchOpen) {
       event.preventDefault()
       closeMessageSearch()
@@ -3031,13 +3039,14 @@ function AppBody() {
       roomFavorite: menuRoomFavorite,
       roomUnanswered: menuRoomUnanswered,
       roomNeedsReply: menuRoomNeedsReply,
+      needsReplyCount,
       privateChatOpen: menuPrivateChatOpen,
       privateChatInAll: menuPrivateChatInAll,
       draftReady: menuDraftReady,
       filter: menuFilter,
     }
     void AppService.SetMenuState(menuState)
-  }, [menuRoomSelected, menuRoomUnread, menuRoomArchived, menuRoomFavorite, menuRoomUnanswered, menuRoomNeedsReply, menuPrivateChatOpen, menuPrivateChatInAll, menuDraftReady, menuFilter])
+  }, [menuRoomSelected, menuRoomUnread, menuRoomArchived, menuRoomFavorite, menuRoomUnanswered, menuRoomNeedsReply, needsReplyCount, menuPrivateChatOpen, menuPrivateChatInAll, menuDraftReady, menuFilter])
 
   function applyMenuFilter(filter: string) {
     setRoomScope(filter === 'archived' ? 'archived' : filter === 'private' ? 'local-ai' : 'all')
@@ -3499,34 +3508,27 @@ function AppBody() {
       if (targetMessages.length === 0) throw new Error('There are no incoming text messages since your last message in this chat.')
       const targetMessageIDs = targetMessages.map(timelineMessageID)
       setChatTranslation((current) => current?.requestID === requestID
-        ? { ...current, targetMessageIDs, status: 'Translating…' }
+        ? { ...current, targetMessageIDs, status: 'Translating 0%…' }
         : current)
 
       for (const [index, message] of targetMessages.entries()) {
         if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
         const analysisRequestID = newAIRequestID()
-        let receivedCharacters = 0
-        const showMessageProgress = () => setChatTranslation((current) => current?.requestID === requestID
-          ? { ...current, status: `Translating ${index + 1} of ${targetMessages.length}… (${receivedCharacters.toLocaleString()} characters received)` }
+        setChatTranslation((current) => current?.requestID === requestID
+          ? { ...current, status: `Translating ${Math.round(index * 100 / targetMessages.length)}%…` }
           : current)
-        const unregisterStream = registerAIStream(analysisRequestID, (chunk) => {
-          receivedCharacters = (chunk.reset ? 0 : receivedCharacters) + chunk.text.length
-          showMessageProgress()
-        })
         chatTranslationAIRequestRef.current = analysisRequestID
         let analysis: TutorAnalysis
         try {
-          showMessageProgress()
           analysis = await LanguageTutorService.Analyze(message.body, 'message', explanation, analysisRequestID)
         } finally {
-          unregisterStream()
           if (chatTranslationAIRequestRef.current === analysisRequestID) chatTranslationAIRequestRef.current = ''
         }
         if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
         if (!analysis.translation.trim()) throw new Error('Language Tutor returned an empty translation.')
         const messageID = timelineMessageID(message)
         setChatTranslation((current) => current?.requestID === requestID
-          ? { ...current, analyses: { ...current.analyses, [messageID]: analysis }, status: `Translated ${index + 1} of ${targetMessages.length}…` }
+          ? { ...current, analyses: { ...current.analyses, [messageID]: analysis }, status: `Translated ${Math.round((index + 1) * 100 / targetMessages.length)}%…` }
           : current)
       }
 
@@ -3754,8 +3756,52 @@ function AppBody() {
   const ghostSuffix = (mentionStart >= 0 && mentionOptions.length > 0) || emojiOptions.length > 0 ? '' : ghostText.suffix
   // acceptGhostText appends the suggestion to the draft. The next pause asks for a suggestion for the longer draft.
   function acceptGhostText() {
-    setComposeDraft(composeText + ghostSuffix)
+    const completed = composeText + ghostSuffix
+    setComposeDraft(/\s$/.test(completed) ? completed : `${completed} `)
     setComposeCaretAtEnd(true)
+  }
+
+  function composerAIItems(): ActionMenuEntry[] {
+    return [
+      { label: 'Analyze draft with Language Tutor', primaryShiftKey: AI_ACTION_SHORTCUTS.analyzeDraft.key, icon: <GraduationCap size={15} />, onSelect: () => void analyzeWithLanguageTutor(composeText, 'draft'), disabled: !selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget) },
+      { label: 'Suggest replies', primaryShiftKey: AI_ACTION_SHORTCUTS.suggestReplies.key, icon: <Reply size={15} />, onSelect: () => void suggestRepliesForRoom(selectedRoomID), disabled: !selectedRoom || busy || !aiEnabled || Boolean(editTarget) },
+      { label: 'Generate image from draft', primaryShiftKey: AI_ACTION_SHORTCUTS.generateImage.key, icon: <ImagePlus size={15} />, onSelect: () => void generateImageToRoom(), title: imageButtonTooltip, disabled: Boolean(imageRunHere) || !selectedRoom || !imageEngineReady || !composeText.trim() || busy || Boolean(editTarget) || imageSendRun !== null || generatedImageReview !== null },
+      { label: 'Summarize with Local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.summarize.key, icon: <ScrollText size={15} />, onSelect: () => void summarizeRoom(), disabled: !selectedRoom || busy || loadingOlder || Boolean(summaryStatus) || !aiEnabled || (!hasAIConversationContext && !hasOlder) },
+      { label: translateRecentLabel, primaryShiftKey: AI_ACTION_SHORTCUTS.translate.key, icon: <Languages size={15} />, onSelect: () => void translateRecentMessages(), disabled: !selectedRoom || busy || loadingOlder || !aiEnabled || (!hasAIConversationContext && !hasOlder) },
+      ...(chatTranslation?.roomID === selectedRoomID ? [{ label: 'Clear message translations', primaryShiftKey: AI_ACTION_SHORTCUTS.clearTranslations.key, icon: <X size={15} />, onSelect: clearChatTranslation }] : []),
+    ]
+  }
+
+  function handleAIShortcut(event: KeyboardEvent<HTMLElement>) {
+    if (localAIChatOpen || roomContextMenu || (isTextEntryTarget(event.target) && event.target !== composerInputRef.current)) return false
+    const shortcutKey = primaryShiftShortcutKey(event.nativeEvent)
+    if (!shortcutKey) return false
+    const row = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-event-id]') : null
+    if (shortcutKey === AI_ACTION_SHORTCUTS.transcribeAudio.key) {
+      const button = row?.querySelector<HTMLButtonElement>('.audio-transcribe-button')
+      if (!button) return false
+      event.preventDefault()
+      event.stopPropagation()
+      button.click()
+      return true
+    }
+    const message = messageContextMenu?.message ?? messages.find((item) => timelineMessageID(item) === row?.dataset.eventId)
+    const messageCommand = message ? messageContextMenuItems(message).find((item) => item.primaryShiftKey === shortcutKey) : undefined
+    if (messageCommand) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (!messageCommand.disabled) {
+        setMessageContextMenu(null)
+        messageCommand.run()
+      }
+      return true
+    }
+    const command = composerAIItems().find((item) => item.primaryShiftKey === shortcutKey)
+    if (!command) return false
+    event.preventDefault()
+    event.stopPropagation()
+    if (!command.disabled) command.onSelect()
+    return true
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -3764,11 +3810,6 @@ function AppBody() {
       !(mentionStart >= 0 && mentionOptions.length > 0) && emojiOptions.length === 0,
     )
     if (snippetHandled) return
-    if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 't') {
-      event.preventDefault()
-      void analyzeWithLanguageTutor(composeText, 'draft')
-      return
-    }
     if (event.key === 'ArrowUp' && !composeText && preferenceBoolean(preferences, 'composer.arrow_up_focus_timeline')) {
       event.preventDefault()
       timelineRef.current?.focus()
@@ -4445,11 +4486,12 @@ function AppBody() {
                         role="menuitem"
                         className={item.danger ? 'is-danger' : undefined}
                         aria-label={item.ariaLabel}
+                        aria-keyshortcuts={item.primaryShiftKey ? `Control+Shift+${item.primaryShiftKey} Meta+Shift+${item.primaryShiftKey}` : undefined}
                         title={item.ariaLabel}
                         disabled={item.disabled}
                         onClick={() => { setMessageContextMenu(null); item.run() }}
                       >
-                        {item.icon}<span>{item.label}</span>
+                        {item.icon}<span>{item.label}</span>{item.primaryShiftKey && <kbd aria-hidden="true">{primaryShiftShortcutLabel(item.primaryShiftKey)}</kbd>}
                       </button>}
                   </Fragment>
                 ))}
@@ -4614,14 +4656,7 @@ function AppBody() {
                           { label: replyTarget ? 'Schedule reply' : 'Schedule message', icon: <Clock3 size={15} />, onSelect: openScheduleMessage, disabled: !composeText.trim() || Boolean(editTarget) },
                         ]} />
                       </div>
-                      <ActionMenu key={`ai:${activeAccountID}:${selectedRoomID}`} label="AI tools" icon={<Sparkles size={15} />} showLabel side="top" items={[
-                        { label: 'Analyze draft with Language Tutor', icon: <GraduationCap size={15} />, onSelect: () => void analyzeWithLanguageTutor(composeText, 'draft'), disabled: !selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget) },
-                        { label: 'Suggest replies', icon: <Reply size={15} />, onSelect: () => void suggestRepliesForRoom(selectedRoomID), disabled: !selectedRoom || busy || !aiEnabled || Boolean(editTarget) },
-                        { label: 'Generate image from draft', icon: <ImagePlus size={15} />, onSelect: () => void generateImageToRoom(), title: imageButtonTooltip, disabled: Boolean(imageRunHere) || !selectedRoom || !imageEngineReady || !composeText.trim() || busy || Boolean(editTarget) || imageSendRun !== null || generatedImageReview !== null },
-                        { label: 'Summarize with Local AI', icon: <ScrollText size={15} />, onSelect: () => void summarizeRoom(), disabled: !selectedRoom || busy || loadingOlder || Boolean(summaryStatus) || !aiEnabled || (!hasAIConversationContext && !hasOlder) },
-                        { label: translateRecentLabel, icon: <Languages size={15} />, onSelect: () => void translateRecentMessages(), disabled: !selectedRoom || busy || loadingOlder || !aiEnabled || (!hasAIConversationContext && !hasOlder) },
-                        ...(chatTranslation?.roomID === selectedRoomID ? [{ label: 'Clear message translations', icon: <X size={15} />, onSelect: clearChatTranslation }] : []),
-                      ]} />
+                      <ActionMenu key={`ai:${activeAccountID}:${selectedRoomID}`} label="AI tools" icon={<Sparkles size={15} />} showLabel side="top" items={composerAIItems()} />
                       {imageRunHere && <IconTooltip label="Stop image generation"><button className="icon-button is-recording" type="button" aria-label="Stop image generation" onClick={stopImageGeneration}><Square size={15} /></button></IconTooltip>}
                     </div>
                   </div>

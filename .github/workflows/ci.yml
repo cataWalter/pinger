@@ -140,12 +140,28 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3.exe
         run: |
           npm ci
+          npm run icons
+          npm run icons:check
           npm run build
+
+      - name: Generate Windows application resources
+        shell: pwsh
+        run: |
+          go run scripts/generate-windows-resources.go `
+            -arch amd64 `
+            -icon build/windows/icon.ico `
+            -manifest build/windows/pinger.exe.manifest `
+            -out rsrc_windows_amd64.syso
 
       - name: Compile package tests
         run: go test -run '^$' -tags "sqlite_fts5 goolm" ./...
+
+      - name: Test notification icon selection
+        run: go test -tags "sqlite_fts5 goolm" ./notifications -run 'TestNotificationAttachments|TestNotificationIconCache' -count=1
 
       - name: Build Windows application
         run: go build -tags "sqlite_fts5 goolm" -o bin/pinger-ci.exe .
@@ -183,12 +199,19 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3
         run: |
           npm ci
+          npm run icons
+          npm run icons:check
           npm run build
 
       - name: Compile package tests
         run: go test -run '^$' -tags "sqlite_fts5 goolm" ./...
+
+      - name: Test notification icon selection
+        run: go test -tags "sqlite_fts5 goolm" ./notifications -run 'TestNotificationAttachments|TestNotificationIconCache' -count=1
 
       - name: Build Linux application
         run: go build -tags "sqlite_fts5 goolm" -o bin/pinger-ci .

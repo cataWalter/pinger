@@ -73,6 +73,7 @@ const service = vi.hoisted(() => {
     RoomMembers: vi.fn(() => Promise.resolve([])),
     ListLocalAIChats: vi.fn(() => Promise.resolve([])),
     ListLocalAIChatFolders: vi.fn(() => Promise.resolve([])),
+    AIGhostText: vi.fn(() => Promise.resolve('')),
     SetActiveRoom: vi.fn(() => Promise.resolve()),
     UpdateVisibleRange: vi.fn(() => Promise.resolve()),
   }
@@ -121,6 +122,53 @@ function rgbHex(value: string) {
 }
 
 describe('browser smoke', () => {
+  it.each([
+    [390, 844, 100],
+    [760, 600, 125],
+    [1100, 780, 100],
+  ])('keeps AI shortcuts bounded and expands ghost text with Tab at %i x %i and %i percent zoom', async (width, height, zoom) => {
+    const user = userEvent.setup()
+    await page.viewport(width, height)
+    const snapshot = await service.Snapshot()
+    service.Snapshot.mockResolvedValueOnce({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080', 'appearance.zoom': String(zoom), 'appearance.font_size': zoom === 125 ? 'Large' : 'Medium' } })
+    service.AIGhostText.mockResolvedValueOnce(' in December')
+    renderApp()
+    const roomButton = await screen.findByRole('button', { name: /Browser smoke room/ })
+    if (width < 521) await user.click(roomButton)
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.type(composer, 'I arrived')
+    await waitFor(() => expect(document.querySelector('.composer-ghost-suggestion')?.textContent).toBe(' in December'))
+    await user.tab()
+    expect(composer.value).toBe('I arrived in December ')
+    expect(document.activeElement).toBe(composer)
+    await user.type(composer, 'and stayed')
+    expect(composer.value).toBe('I arrived in December and stayed')
+
+    await user.click(screen.getByRole('button', { name: 'AI tools' }))
+    const menu = await screen.findByRole('menu', { name: 'AI tools' })
+    await document.fonts.ready
+    await settleSurfaces()
+    const bounds = menu.getBoundingClientRect()
+    expect(bounds.left).toBeGreaterThanOrEqual(0)
+    expect(bounds.right).toBeLessThanOrEqual(width + 1)
+    expect(bounds.top).toBeGreaterThanOrEqual(0)
+    expect(bounds.bottom).toBeLessThanOrEqual(height + 1)
+    expect(menu.scrollWidth).toBeLessThanOrEqual(menu.clientWidth + 1)
+    expect(menu.querySelectorAll('kbd')).toHaveLength(5)
+    for (const item of within(menu).getAllByRole('menuitem')) {
+      const label = item.querySelector('span')!
+      const shortcut = item.querySelector('kbd')!
+      const itemBounds = item.getBoundingClientRect()
+      const shortcutBounds = shortcut.getBoundingClientRect()
+      expect(shortcutBounds.left).toBeGreaterThanOrEqual(label.getBoundingClientRect().right)
+      expect(shortcutBounds.right).toBeLessThanOrEqual(itemBounds.right)
+      expect(label.scrollWidth).toBeLessThanOrEqual(label.clientWidth + 1)
+      expect(item.getAttribute('aria-keyshortcuts')).toContain('Control+Shift+')
+      expect(item.getAttribute('aria-keyshortcuts')).toContain('Meta+Shift+')
+    }
+    await captureScreenshot({ path: `../.vitest/ui/ai-tools-${width}.png` })
+  })
+
   it('loads the app artwork on the sign-in screen', async () => {
     await page.viewport(1100, 780)
     const snapshot = await service.Snapshot()
@@ -335,8 +383,9 @@ describe('browser smoke', () => {
     })) })
     await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Load older messages' }).disabled).toBe(false))
     await waitFor(() => {
-      expect(container.querySelector('[data-event-id="$anchor-0"]')).toBe(original)
-      expect(Math.abs(original.getBoundingClientRect().top - top)).toBeLessThanOrEqual(4)
+      const current = container.querySelector<HTMLElement>('[data-event-id="$anchor-0"]')
+      expect(current).not.toBeNull()
+      expect(Math.abs(current!.getBoundingClientRect().top - top)).toBeLessThanOrEqual(4)
     })
   })
 

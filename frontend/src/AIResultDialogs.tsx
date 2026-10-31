@@ -85,10 +85,6 @@ export function AIResultDialogs({
             {languageTutorState.error && <p className="settings-error" role="alert">{languageTutorState.error}</p>}
             {languageTutorState.analysis && <LanguageTutorAnalysisDetails analysis={languageTutorState.analysis} originalText={languageTutorState.originalText} />}
           </div>
-          <aside className="ai-result-disclaimer">
-            <ShieldCheck size={16} aria-hidden="true" />
-            <p>Analysis uses the local AI endpoint configured in Settings. No Matrix message is sent.</p>
-          </aside>
           <footer className="room-info-footer ai-result-footer">
             {languageTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" disabled={!languageTutorState.analysis || languageTutorState.busy || hasEditTarget} onClick={onUseLanguageTutorDraft}>Replace draft with {languageName(languageTutorState.analysis?.target_language || languageRoles.learning)}</button>}
             <button className="settings-command" type="button" onClick={onCloseLanguageTutor}>Close</button>
