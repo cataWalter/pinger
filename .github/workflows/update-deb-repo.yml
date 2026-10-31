@@ -39,11 +39,9 @@ jobs:
           token: ${{ secrets.TAP_GITHUB_TOKEN }}
           path: deb-repo
 
-      - name: Setup GPG Key
+      - name: Import GPG Key
         run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --dearmor --batch --yes -o /tmp/signing-key.gpg
-          GPG_KEY_ID=$(gpg --list-packets /tmp/signing-key.gpg | awk '/keyid:/{print $2}' | head -n 1)
-          echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
 
       - name: Install APT Repository Tools
         run: sudo apt-get update && sudo apt-get install -y apt-utils
@@ -53,10 +51,10 @@ jobs:
           cd deb-repo
           mkdir -p pool/main dists/stable/main/binary-amd64
 
-          # Copia il nuovo deb nel pool
+          # Copia il deb scaricato nel pool
           cp ../deb-incoming/*.deb pool/main/
 
-          # Genera il file Packages e comprimi in gz
+          # Genera Packages e Packages.gz
           apt-ftparchive packages pool/main > dists/stable/main/binary-amd64/Packages
           gzip -9fk dists/stable/main/binary-amd64/Packages
 
@@ -64,9 +62,9 @@ jobs:
           cd dists/stable
           apt-ftparchive release . > Release
 
-          # Firma crittograficamente i metadati del repository
-          gpg --default-key "$GPG_KEY_ID" --keyring /tmp/signing-key.gpg --abs --output Release.gpg Release
-          gpg --default-key "$GPG_KEY_ID" --keyring /tmp/signing-key.gpg --clearsign --output InRelease Release
+          # Firma i metadati
+          gpg --batch --yes --armor --detach-sign --output Release.gpg Release
+          gpg --batch --yes --clearsign --output InRelease Release
 
       - name: Commit and Push to deb-repo
         run: |
@@ -75,7 +73,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add pool/ dists/
           if git diff --staged --quiet; then
-            echo "Nessun pacchetto da aggiornare."
+            echo "Nessun cambiamento rilevato."
           else
             git commit -m "Add deb package from ${{ steps.vars.outputs.tag }}"
             git push origin main
