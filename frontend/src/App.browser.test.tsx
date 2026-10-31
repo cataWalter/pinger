@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Profiler, type ProfilerOnRenderCallback } from 'react'
 import { commands, page } from 'vitest/browser'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { AccountSummary, Room } from '../bindings/mychat/desktop/models.js'
 import { accentPaletteFor, contrastRatio } from './accent'
 import { themeCssVariables, themes } from './themes'
 import App from './App'
@@ -36,6 +37,7 @@ const service = vi.hoisted(() => {
     accountId: 'primary',
     bridge: '',
   }
+  const accounts: AccountSummary[] = []
   const snapshot = {
     loggedIn: true,
     needsVerification: false,
@@ -49,7 +51,7 @@ const service = vi.hoisted(() => {
       avatarUri: '',
       verified: true,
     },
-    accounts: [],
+    accounts,
     activeAccountId: 'primary',
     rooms: [room,
       { ...room, id: '!design:example.org', name: 'Design review and accessibility working group', preview: 'The updated conversation layout is ready to review.', unread: 12, mentions: 2, needsReply: true, favorite: true },
@@ -63,7 +65,7 @@ const service = vi.hoisted(() => {
     Snapshot: vi.fn(() => Promise.resolve(snapshot)),
     NativeNotificationsSupported: vi.fn(() => Promise.resolve(false)),
     ScheduledJobs: vi.fn(() => Promise.resolve([])),
-    AccountRooms: vi.fn(() => Promise.resolve([])),
+    AccountRooms: vi.fn((): Promise<Room[]> => Promise.resolve([])),
     History: vi.fn(() => Promise.resolve({ messages: [
       { id: '$hello', transactionId: '', sender: '@morgan:example.org', senderName: 'Morgan Lee', avatar: '', body: 'I have the desktop review ready. The room list and conversation should both stay readable in a smaller window.', formattedBody: '', timestamp: 1793447100000, timelineCursor: 1, own: false, reactions: {}, reacted: {}, mediaType: '', mediaUri: '', replyToEventId: '', edited: false },
       { id: '$detail', transactionId: '', sender: '@morgan:example.org', senderName: 'Morgan Lee', avatar: '', body: 'Could you also check the theme colors and keyboard focus?', formattedBody: '', timestamp: 1793447120000, timelineCursor: 2, own: false, reactions: { '👍': 2 }, reacted: { '👍': true }, mediaType: '', mediaUri: '', replyToEventId: '', edited: true },
@@ -122,6 +124,147 @@ function rgbHex(value: string) {
 }
 
 describe('browser smoke', () => {
+  it.each([
+    [390, 844, 100, 'Light', true],
+    [760, 600, 125, 'Dark', true],
+    [1440, 900, 100, 'Light', false],
+  ] as const)('keeps the refreshed chat view readable at %i x %i and %i percent zoom in %s with formatting %s', async (width, height, zoom, theme, formatting) => {
+    const user = userEvent.setup()
+    await page.viewport(width, height)
+    const snapshot = await service.Snapshot()
+    const history = await service.History()
+    const historyImplementation = service.History.getMockImplementation()!
+    const conversation = [
+      [false, 'Found a lovely place for Saturday.'],
+      [false, 'Small tables, good coffee, and a terrace by the water.'],
+      [true, 'That sounds perfect.'],
+      [true, 'Shall we go after the market?'],
+      [false, 'Yes! I can be there around 11.'],
+      [false, 'I saved the address for us.'],
+      [true, 'See you there.'],
+    ] as const
+    service.Snapshot.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], name: 'Nora Bennett', topic: 'Coffee, markets, and weekend plans' }], preferences: { 'appearance.theme': theme, 'appearance.zoom': String(zoom), 'appearance.font_size': zoom === 125 ? 'Large' : 'Medium', 'composer.formatting_toolbar': formatting } })
+    service.History.mockResolvedValue({ ...history, messages: conversation.map(([own, body], index) => ({
+      ...history.messages[index === 1 ? 1 : 0], id: `$chat-preview-${index}`, own, body,
+      sender: own ? '@me:example.org' : '@nora:example.org', senderName: own ? 'Me' : 'Nora Bennett',
+      timestamp: history.messages[0].timestamp + index * 20000, timelineCursor: index + 1,
+      replyToEventId: index === 6 ? '$chat-preview-4' : '', replyToSender: index === 6 ? 'Nora Bennett' : '', replyToPreview: index === 6 ? conversation[4][1] : '',
+    })) })
+    try {
+      const { container } = renderApp()
+      await screen.findByText('See you there.')
+      await user.click(within(screen.getByRole('navigation', { name: 'Rooms' })).getByRole('button', { name: /Nora Bennett/ }))
+      await document.fonts.ready
+      await settleSurfaces()
+      const draft = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+      await user.type(draft, 'I will bring my camera.')
+      if (formatting) {
+        await user.click(screen.getByRole('button', { name: 'Hide formatting toolbar' }))
+        await waitFor(() => expect(screen.queryByRole('toolbar', { name: 'Formatting' })).toBeNull())
+        await user.click(screen.getByRole('button', { name: 'Formatting' }))
+        await user.click(screen.getByRole('menuitem', { name: 'Show formatting toolbar' }))
+        await waitFor(() => expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeTruthy())
+        const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
+        expect(getComputedStyle(toolbar).overflowY).toBe('visible')
+        const buttons = within(toolbar).getAllByRole('button')
+        for (let index = 1; index < buttons.length; index++) {
+          const previous = buttons[index - 1].getBoundingClientRect()
+          const current = buttons[index].getBoundingClientRect()
+          if (Math.abs(current.top - previous.top) < 1) expect(current.left).toBeGreaterThanOrEqual(previous.right)
+        }
+        const bold = within(toolbar).getByRole('button', { name: 'Bold' })
+        await page.getByRole('button', { name: /^Bold$/ }).hover()
+        await waitFor(() => expect(getComputedStyle(bold.parentElement!, '::after').opacity).toBe('1'))
+        await page.getByRole('textbox', { name: 'Message' }).hover()
+      }
+      expect(draft.value).toBe('I will bring my camera.')
+      const composer = container.querySelector<HTMLElement>('.composer')!
+      const composerBounds = composer.getBoundingClientRect()
+      expect(composerBounds.left).toBeGreaterThanOrEqual(0)
+      expect(composerBounds.right).toBeLessThanOrEqual(width + 1)
+      expect(composerBounds.bottom).toBeLessThanOrEqual(height + 1)
+      expect(composer.scrollWidth).toBeLessThanOrEqual(composer.clientWidth)
+      for (const name of ['Attach file', 'Emoji picker', 'Record voice note', 'Delivery options', 'AI tools', 'Send message']) {
+        const bounds = screen.getByRole('button', { name }).getBoundingClientRect()
+        expect(bounds.width).toBeGreaterThanOrEqual(32)
+        expect(bounds.height).toBeGreaterThanOrEqual(32)
+        expect(bounds.left).toBeGreaterThanOrEqual(composerBounds.left)
+        expect(bounds.right).toBeLessThanOrEqual(composerBounds.right)
+        expect(bounds.top).toBeGreaterThanOrEqual(draft.getBoundingClientRect().bottom)
+      }
+      const bodies = Array.from(container.querySelectorAll<HTMLElement>('.timeline .message-body'))
+      expect(bodies).toHaveLength(conversation.length)
+      for (let index = 0; index < bodies.length; index++) {
+        expect(parseFloat(getComputedStyle(bodies[index]).fontSize)).toBe(zoom === 125 ? 16 : 14)
+        expect(bodies[index].scrollWidth).toBeLessThanOrEqual(bodies[index].clientWidth + 1)
+        if (index > 0) expect(bodies[index].getBoundingClientRect().top).toBeGreaterThanOrEqual(bodies[index - 1].getBoundingClientRect().bottom + 3)
+      }
+      expect(container.querySelector('.reply-preview')?.textContent).toContain(conversation[4][1])
+      await captureScreenshot({ path: `../.vitest/ui/chat-view-${width}.png` })
+    } finally {
+      service.History.mockImplementation(historyImplementation)
+    }
+  })
+
+  it.each([
+    [390, 844, 100, 'Light'],
+    [760, 600, 125, 'Dark'],
+    [1100, 780, 100, 'Light'],
+  ] as const)('keeps exclusive room filters labeled and aligned at %i x %i and %i percent zoom in %s', async (width, height, zoom, theme) => {
+    const user = userEvent.setup()
+    await page.viewport(width, height)
+    const snapshot = await service.Snapshot()
+    service.Snapshot.mockResolvedValueOnce({ ...snapshot, rooms: snapshot.rooms.map((room) => ({ ...room, unanswered: room.needsReply })), preferences: { 'appearance.theme': theme, 'appearance.zoom': String(zoom), 'appearance.font_size': zoom === 125 ? 'Large' : 'Medium' } })
+    renderApp()
+    await screen.findByRole('button', { name: /Browser smoke room/ })
+    await document.fonts.ready
+    await settleSurfaces()
+    const filters = screen.getByRole('group', { name: 'Filter rooms' })
+    const scope = screen.getByRole('group', { name: 'Room visibility' })
+    const categories = screen.getByRole('group', { name: 'Room categories' })
+    const bounds = categories.getBoundingClientRect()
+    const buttons = within(categories).getAllByRole('button')
+    const initialBounds = buttons.map((button) => button.getBoundingClientRect())
+    expect(bounds.left).toBeGreaterThanOrEqual(0)
+    expect(bounds.right).toBeLessThanOrEqual(width + 1)
+    expect(Math.abs(bounds.left - scope.getBoundingClientRect().left)).toBeLessThanOrEqual(1)
+    expect(Math.abs(bounds.right - scope.getBoundingClientRect().right)).toBeLessThanOrEqual(1)
+    expect(categories.scrollWidth).toBeLessThanOrEqual(categories.clientWidth + 1)
+    expect(buttons).toHaveLength(3)
+    expect(categories.querySelector('.filter-count')?.textContent).toBe('1')
+    for (const button of buttons) {
+      const buttonBounds = button.getBoundingClientRect()
+      const label = button.querySelector<HTMLElement>('.filter-label')!
+      const symbol = button.querySelector<HTMLElement>('.filter-symbol')!
+      const labelBounds = label.getBoundingClientRect()
+      expect(getComputedStyle(label).display).not.toBe('none')
+      expect(getComputedStyle(label).whiteSpace).toBe('nowrap')
+      expect(buttonBounds.height).toBeGreaterThanOrEqual(48)
+      expect(Math.abs(buttonBounds.width - initialBounds[0].width)).toBeLessThanOrEqual(1)
+      expect(Math.abs(buttonBounds.top - initialBounds[0].top)).toBeLessThanOrEqual(1)
+      expect(labelBounds.top).toBeGreaterThanOrEqual(symbol.getBoundingClientRect().bottom)
+      expect(labelBounds.left).toBeGreaterThanOrEqual(buttonBounds.left)
+      expect(labelBounds.right).toBeLessThanOrEqual(buttonBounds.right)
+      expect(labelBounds.bottom).toBeLessThanOrEqual(buttonBounds.bottom)
+      expect(label.scrollWidth).toBeLessThanOrEqual(label.clientWidth + 1)
+      const badge = symbol.querySelector('.filter-count')
+      if (badge) expect(badge.getBoundingClientRect().left).toBeGreaterThanOrEqual(symbol.querySelector('svg')!.getBoundingClientRect().right)
+    }
+    for (const name of ['Unanswered rooms', 'Needs reply', 'Favorite rooms', 'Archived rooms', 'Local AI chats', 'All']) {
+      const button = within(filters).getByRole('button', { name })
+      await user.click(button)
+      await user.click(button)
+      expect(filters.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(1)
+      expect(button.getAttribute('aria-pressed')).toBe('true')
+      buttons.forEach((category, index) => {
+        expect(Math.abs(category.getBoundingClientRect().width - initialBounds[index].width)).toBeLessThanOrEqual(1)
+        expect(Math.abs(category.getBoundingClientRect().height - initialBounds[index].height)).toBeLessThanOrEqual(1)
+      })
+    }
+    await user.click(within(categories).getByRole('button', { name: 'Needs reply' }))
+    await captureScreenshot({ path: `../.vitest/ui/room-filters-${width}.png` })
+  })
+
   it.each([
     [390, 844, 100],
     [760, 600, 125],
@@ -284,13 +427,117 @@ describe('browser smoke', () => {
     })
     const formatting = screen.getByRole('toolbar', { name: 'Formatting' }).getBoundingClientRect()
     const tools = screen.getByRole('group', { name: 'Message tools' }).getBoundingClientRect()
+    expect(formatting.bottom).toBeLessThanOrEqual(tools.top)
     if (width > 1000) {
-      expect(Math.max(formatting.top, tools.top)).toBeLessThan(Math.min(formatting.bottom, tools.bottom))
-      expect(container.querySelector('.composer')!.getBoundingClientRect().height).toBeLessThan(130)
+      expect(container.querySelector('.composer')!.getBoundingClientRect().height).toBeLessThan(160)
     }
     expect(container.querySelector('.composer')!.scrollWidth).toBeLessThanOrEqual(container.querySelector('.composer')!.clientWidth)
     await captureScreenshot({ path: `artifacts/ui/timeline-alignment-${width}-${count}.png` })
   })
+
+  it.each([100, 500, 1000].flatMap((count) => [1, 3].map((accountCount) => ({ count, accountCount }))))('measures room lists with $count rooms across $accountCount accounts without disturbing the conversation', async ({ count, accountCount }) => {
+    await page.viewport(1100, 780)
+    const snapshot = await service.Snapshot()
+    const accounts: AccountSummary[] = Array.from({ length: accountCount }, (_, index) => ({
+      id: index === 0 ? 'primary' : `account-${index}`,
+      profile: { ...snapshot.profile, displayName: `Account ${index + 1}` },
+    }))
+    let rooms: Room[] = Array.from({ length: count }, (_, index) => ({
+      ...snapshot.rooms[0],
+      id: `!benchmark-room-${Math.floor(index / accountCount)}:example.org`,
+      accountId: accounts[index % accountCount].id,
+      name: `Room ${index + 1}`,
+      preview: `Preview ${index + 1}`,
+      lastEventAt: 1793447100000 + index * 1000,
+    }))
+    service.Snapshot.mockResolvedValueOnce({ ...snapshot, accounts, rooms: rooms.filter((room) => room.accountId === 'primary') })
+    const accountRoomsImplementation = service.AccountRooms.getMockImplementation()!
+    service.AccountRooms.mockImplementation(async () => rooms.map((room) => ({ ...room })))
+    const intervalSpy = vi.spyOn(window, 'setInterval')
+    try {
+      const paint = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      const commits: number[] = []
+      const started = performance.now()
+      const { container } = renderApp((_id, _phase, actualDuration) => commits.push(actualDuration))
+      const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
+      const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+      await waitFor(() => expect(container.querySelector('.room-section-actions')?.textContent).toBe(String(count).padStart(2, '0')))
+      await document.fonts.ready
+      await paint()
+      const renderMs = performance.now() - started
+      const refresh = intervalSpy.mock.calls.find(([, delay]) => delay === 15000)?.[0]
+      if (accountCount > 1) expect(typeof refresh).toBe('function')
+      const refreshRooms = refresh as (() => void) | undefined
+      const poll = async () => {
+        if (refreshRooms) await act(async () => refreshRooms())
+        await paint()
+      }
+      fireEvent.change(composer, { target: { value: 'Warm draft' } })
+      await poll()
+      const historyCalls = service.History.mock.calls.length
+      const accountRoomCalls = service.AccountRooms.mock.calls.length
+      const trackedRoom = container.querySelector('.room-button')!
+      const trackedMessage = container.querySelector('.message-row')!
+      const roomRows = container.querySelectorAll('.room-button').length
+      const nodes = container.querySelectorAll('*').length
+      expect(roomRows).toBeGreaterThan(0)
+      expect(roomRows).toBeLessThanOrEqual(Math.min(count, 100))
+      const inputMs: number[] = []
+      const pollMs: number[] = []
+      for (let sample = 0; sample < 5; sample++) {
+        const inputStarted = performance.now()
+        fireEvent.change(composer, { target: { value: `Draft ${sample}` } })
+        await paint()
+        inputMs.push(performance.now() - inputStarted)
+        if (refreshRooms) {
+          const pollStarted = performance.now()
+          await poll()
+          pollMs.push(performance.now() - pollStarted)
+        }
+        expect(trackedRoom.isConnected).toBe(true)
+        expect(trackedMessage.isConnected).toBe(true)
+      }
+      expect(service.AccountRooms.mock.calls.length - accountRoomCalls).toBe(accountCount > 1 ? 5 : 0)
+      const search = screen.getByRole('textbox', { name: 'Find a room' })
+      const searchMs: number[] = []
+      for (const query of ['Room 1', 'Room 10', 'Preview 99', 'no matching room', '']) {
+        const searchStarted = performance.now()
+        fireEvent.change(search, { target: { value: query } })
+        await paint()
+        searchMs.push(performance.now() - searchStarted)
+        const expected = rooms.filter((room) => `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query.toLowerCase())).length
+        expect(container.querySelector('.room-section-actions')?.textContent).toBe(String(expected).padStart(2, '0'))
+        expect(composer.value).toBe('Draft 4')
+      }
+      if (accountCount > 1) {
+        const changedRoom = rooms.find((room) => room.accountId === 'account-1')!
+        rooms = rooms.map((room) => room.id === changedRoom.id && room.accountId === changedRoom.accountId ? { ...room, preview: 'Fresh background preview', unread: 4 } : room)
+        fireEvent.change(search, { target: { value: changedRoom.id } })
+        await poll()
+        const preview = within(roomList).getByText('Fresh background preview')
+        expect(preview.closest('button')?.querySelector('.unread-count')?.textContent).toBe('4')
+        expect(within(roomList).getByText('Room 1')).toBeTruthy()
+        expect(within(roomList).getByText('Room 3')).toBeTruthy()
+      }
+      expect(service.History.mock.calls.length).toBe(historyCalls)
+      expect(composer.value).toBe('Draft 4')
+      expect(roomList.scrollWidth).toBeLessThanOrEqual(roomList.clientWidth)
+      console.info('Room-list performance', JSON.stringify({
+        rooms: count,
+        accounts: accountCount,
+        roomRows,
+        nodes,
+        renderMs: Math.round(renderMs),
+        inputMs: inputMs.map((value) => Math.round(value)),
+        searchMs: searchMs.map((value) => Math.round(value)),
+        pollMs: pollMs.map((value) => Math.round(value)),
+        maxCommitMs: Math.round(Math.max(...commits)),
+      }))
+    } finally {
+      intervalSpy.mockRestore()
+      service.AccountRooms.mockImplementation(accountRoomsImplementation)
+    }
+  }, 60000)
 
   it.each([100, 1000, 10000])('measures large history with %i messages without replacing rows while typing', async (count) => {
     await page.viewport(1100, 780)

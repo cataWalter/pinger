@@ -500,7 +500,7 @@ function AppBody() {
     let active = true
     const refreshOtherAccountRooms = () => {
       void AppService.AccountRooms().then((accountRooms) => {
-        if (active) setOtherAccountRooms((accountRooms ?? []).filter((room) => room.accountId !== activeAccountID))
+        if (active) setOtherAccountRooms((current) => reconcileRoomSnapshots(current, (accountRooms ?? []).filter((room) => room.accountId !== activeAccountID)))
       }).catch(() => undefined)
     }
     refreshOtherAccountRooms()
@@ -530,6 +530,7 @@ function AppBody() {
   const filteredRooms = useMemo(() => {
     const query = search.trim().toLowerCase()
     const today = Date.now()
+    const pinFavorites = preferenceString(preferences, 'sidebar.pinned_style', 'Top of list') === 'Top of list'
     return listRooms.filter((room) => {
       const matchesQuery = !query || `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query)
       const localAI = isLocalAIRoomID(room.id)
@@ -541,7 +542,7 @@ function AppBody() {
       const matchesFolder = roomScope !== 'local-ai' || localAIFolderFilter === null || (localAIFolderIDByRoomID.get(room.id) ?? '') === localAIFolderFilter
       return matchesQuery && matchesArchive && matchesRefinements && matchesFolder
     }).sort((left, right) => {
-      const favoriteOrder = preferenceString(preferences, 'sidebar.pinned_style', 'Top of list') === 'Top of list'
+      const favoriteOrder = pinFavorites
         ? Number(right.favorite) - Number(left.favorite)
         : 0
       return favoriteOrder || compareRoomActivity(left, right, today)
@@ -1998,11 +1999,10 @@ function AppBody() {
 
   showRoomRef.current = showRoom
 
-  // Clear the open room when the filter hides every room so the empty state shows.
   useEffect(() => {
-    if (!selectedRoomID || localAIChatOpen || filteredRooms.length > 0) return
+    if (!selectedRoomID || localAIChatOpen || selectedRoom) return
     showRoomRef.current('')
-  }, [selectedRoomID, localAIChatOpen, filteredRooms.length])
+  }, [selectedRoomID, localAIChatOpen, selectedRoom])
 
   function isActiveAccountRoom(room: Room) {
     return !room.accountId || room.accountId === snapshot?.activeAccountId
@@ -4019,16 +4019,16 @@ function AppBody() {
               </select>
             )}
             <div className="room-scope-filters" role="group" aria-label="Room visibility">
-              <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-pressed={roomScope === 'all'} aria-keyshortcuts="Control+Shift+A Meta+Shift+A" title="All rooms (Ctrl / ⌘ + Shift + A)" onClick={() => { setRoomScope('all') }}><MessageCircleMore size={13} /><span className="filter-label">All</span></button>
-              <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => { setRoomScope('archived'); setRoomRefinements({ unanswered: false, needsReply: false, favorite: false }) }}><Archive size={13} /><span className="filter-label">Archive</span></button>
-              <button type="button" className={roomScope === 'local-ai' ? 'is-active' : ''} aria-label="Local AI chats" aria-pressed={roomScope === 'local-ai'} title="Private model chats" onClick={() => setRoomScope((current) => current === 'local-ai' ? 'all' : 'local-ai')}><Sparkles size={14} /><span className="filter-label">Local AI</span></button>
+              <button type="button" className={menuFilter === 'all' ? 'is-active' : ''} aria-pressed={menuFilter === 'all'} aria-keyshortcuts="Control+Shift+A Meta+Shift+A" title="All rooms (Ctrl / ⌘ + Shift + A)" onClick={() => applyMenuFilter('all')}><MessageCircleMore size={13} /><span className="filter-label">All</span></button>
+              <button type="button" className={menuFilter === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={menuFilter === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => applyMenuFilter('archived')}><Archive size={13} /><span className="filter-label">Archive</span></button>
+              <button type="button" className={menuFilter === 'private' ? 'is-active' : ''} aria-label="Local AI chats" aria-pressed={menuFilter === 'private'} title="Private model chats" onClick={() => applyMenuFilter('private')}><Sparkles size={14} /><span className="filter-label">Local AI</span></button>
             </div>
             <div className="room-refinement-filters" role="group" aria-label="Room categories">
-              <button type="button" className={roomRefinements.unanswered ? 'is-active' : ''} aria-label="Unanswered rooms" aria-pressed={roomRefinements.unanswered} aria-keyshortcuts="Control+Shift+R Meta+Shift+R" title="Unanswered rooms (Ctrl / ⌘ + Shift + R)" onClick={() => { setRoomRefinements((current) => ({ ...current, unanswered: !current.unanswered })) }}><Reply size={14} /><span className="filter-label">Unanswered</span></button>
-              <button type="button" className={roomRefinements.needsReply ? 'is-active' : ''} aria-label="Needs reply" aria-pressed={roomRefinements.needsReply} aria-keyshortcuts={`${answeredShortcut} Control+Shift+U Meta+Shift+U`} title={`Needs reply (Ctrl / ⌘ + Shift + U; ${answeredShortcut} marks answered)`} onClick={() => { setRoomRefinements((current) => ({ ...current, needsReply: !current.needsReply })) }} onKeyDown={(event) => handleMarkAnsweredKeyDown(event, selectedRoomID)}>
-                <CircleDot size={14} /><span className="filter-label">Needs reply</span>{needsReplyCount > 0 && <span className="filter-count">{needsReplyCount}</span>}
+              <button type="button" className={menuFilter === 'unanswered' ? 'is-active' : ''} aria-label="Unanswered rooms" aria-pressed={menuFilter === 'unanswered'} aria-keyshortcuts="Control+Shift+R Meta+Shift+R" title="Unanswered rooms (Ctrl / ⌘ + Shift + R)" onClick={() => applyMenuFilter('unanswered')}><span className="filter-symbol"><Reply size={14} /></span><span className="filter-label">Unanswered</span></button>
+              <button type="button" className={menuFilter === 'needs-reply' ? 'is-active' : ''} aria-label="Needs reply" aria-pressed={menuFilter === 'needs-reply'} aria-keyshortcuts={`${answeredShortcut} Control+Shift+U Meta+Shift+U`} title={`Needs reply (Ctrl / ⌘ + Shift + U; ${answeredShortcut} marks answered)`} onClick={() => applyMenuFilter('needs-reply')} onKeyDown={(event) => handleMarkAnsweredKeyDown(event, selectedRoomID)}>
+                <span className="filter-symbol"><CircleDot size={14} />{needsReplyCount > 0 && <span className="filter-count">{needsReplyCount}</span>}</span><span className="filter-label">Needs reply</span>
               </button>
-              <button type="button" className={roomRefinements.favorite ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={roomRefinements.favorite} aria-keyshortcuts="Control+Shift+F Meta+Shift+F" title="Favorites (Ctrl / ⌘ + Shift + F)" onClick={() => { setRoomRefinements((current) => ({ ...current, favorite: !current.favorite })) }}><Star size={14} /><span className="filter-label">Favorites</span></button>
+              <button type="button" className={menuFilter === 'favorites' ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={menuFilter === 'favorites'} aria-keyshortcuts="Control+Shift+F Meta+Shift+F" title="Favorites (Ctrl / ⌘ + Shift + F)" onClick={() => applyMenuFilter('favorites')}><span className="filter-symbol"><Star size={14} /></span><span className="filter-label">Favorites</span></button>
             </div>
           </div>
           {roomScope === 'local-ai' && <div className="local-ai-folder-bar" role="group" aria-label="AI chat folders">
@@ -4248,6 +4248,7 @@ function AppBody() {
               )}
               <div className="conversation-title">
                 <h2>{selectedRoom.name || selectedRoom.id}</h2>
+                {!isDirectLikeRoom(selectedRoom) && selectedRoom.topic && <span title={selectedRoom.topic}>{selectedRoom.topic}</span>}
               </div>
               <span className="conversation-state-icons">
                 {selectedRoom.favorite && <Star size={13} fill="currentColor" aria-label="Favorite room" />}
@@ -4598,26 +4599,27 @@ function AppBody() {
                   />}
                 </div>
                 {videoRecordingActive && <div className="video-capture-preview"><video ref={videoPreviewRef} muted playsInline autoPlay aria-label="Camera preview" /></div>}
+                {preferenceBoolean(preferences, 'composer.formatting_toolbar') && <div className="composer-format-toolbar" role="toolbar" aria-label="Formatting">
+                  <div className="composer-format-group" role="group" aria-label="Inline formatting">
+                    <IconTooltip label="Bold text"><button className="icon-button" type="button" aria-label="Bold" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bold')}><Bold size={15} /></button></IconTooltip>
+                    <IconTooltip label="Italic text"><button className="icon-button" type="button" aria-label="Italic" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('italic')}><Italic size={15} /></button></IconTooltip>
+                    <IconTooltip label="Strikethrough text"><button className="icon-button" type="button" aria-label="Strikethrough" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('strikethrough')}><Strikethrough size={15} /></button></IconTooltip>
+                    <IconTooltip label="Inline code"><button className="icon-button" type="button" aria-label="Inline code" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('inlineCode')}><Code size={15} /></button></IconTooltip>
+                  </div>
+                  <div className="composer-format-group" role="group" aria-label="Link insertion">
+                    <IconTooltip label="Insert link"><button className="icon-button" type="button" aria-label="Insert link" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('link')}><Link size={15} /></button></IconTooltip>
+                  </div>
+                  <div className="composer-format-group" role="group" aria-label="Block formatting">
+                    <IconTooltip label="Format as heading"><button className="icon-button" type="button" aria-label="Heading" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('heading')}><Heading1 size={15} /></button></IconTooltip>
+                    <IconTooltip label="Start a bulleted list"><button className="icon-button" type="button" aria-label="Bulleted list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bulletList')}><List size={15} /></button></IconTooltip>
+                    <IconTooltip label="Start a numbered list"><button className="icon-button" type="button" aria-label="Numbered list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('numberedList')}><ListOrdered size={15} /></button></IconTooltip>
+                    <IconTooltip label="Format as quote"><button className="icon-button" type="button" aria-label="Quote" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('quote')}><Quote size={15} /></button></IconTooltip>
+                    <IconTooltip label="Insert a code block"><button className="icon-button" type="button" aria-label="Code block" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('codeBlock')}><SquareCode size={15} /></button></IconTooltip>
+                  </div>
+                  <IconTooltip label="Hide formatting toolbar" className="composer-format-close"><button className="icon-button" type="button" aria-label="Hide formatting toolbar" onMouseDown={(event) => event.preventDefault()} onClick={() => void setPreference('composer.formatting_toolbar', false)}><X size={14} /></button></IconTooltip>
+                </div>}
                 <div className="composer-footer">
                   <div className="composer-toolbar-row composer-toolbar-row-compose">
-                    {preferenceBoolean(preferences, 'composer.formatting_toolbar') && <div className="composer-format-toolbar" role="toolbar" aria-label="Formatting">
-                      <div className="composer-format-group" role="group" aria-label="Inline formatting">
-                        <IconTooltip label="Bold text"><button className="icon-button" type="button" aria-label="Bold" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bold')}><Bold size={15} /></button></IconTooltip>
-                        <IconTooltip label="Italic text"><button className="icon-button" type="button" aria-label="Italic" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('italic')}><Italic size={15} /></button></IconTooltip>
-                        <IconTooltip label="Strikethrough text"><button className="icon-button" type="button" aria-label="Strikethrough" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('strikethrough')}><Strikethrough size={15} /></button></IconTooltip>
-                        <IconTooltip label="Inline code"><button className="icon-button" type="button" aria-label="Inline code" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('inlineCode')}><Code size={15} /></button></IconTooltip>
-                      </div>
-                      <div className="composer-format-group" role="group" aria-label="Link insertion">
-                        <IconTooltip label="Insert link"><button className="icon-button" type="button" aria-label="Insert link" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('link')}><Link size={15} /></button></IconTooltip>
-                      </div>
-                      <div className="composer-format-group" role="group" aria-label="Block formatting">
-                        <IconTooltip label="Format as heading"><button className="icon-button" type="button" aria-label="Heading" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('heading')}><Heading1 size={15} /></button></IconTooltip>
-                        <IconTooltip label="Start a bulleted list"><button className="icon-button" type="button" aria-label="Bulleted list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bulletList')}><List size={15} /></button></IconTooltip>
-                        <IconTooltip label="Start a numbered list"><button className="icon-button" type="button" aria-label="Numbered list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('numberedList')}><ListOrdered size={15} /></button></IconTooltip>
-                        <IconTooltip label="Format as quote"><button className="icon-button" type="button" aria-label="Quote" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('quote')}><Quote size={15} /></button></IconTooltip>
-                        <IconTooltip label="Insert a code block"><button className="icon-button" type="button" aria-label="Code block" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('codeBlock')}><SquareCode size={15} /></button></IconTooltip>
-                      </div>
-                    </div>}
                     <div className="composer-tool-group composer-tool-group-message" role="group" aria-label="Message tools">
                       {!preferenceBoolean(preferences, 'composer.formatting_toolbar') && <ActionMenu key={`format:${activeAccountID}:${selectedRoomID}`} label="Formatting" icon={<Bold size={16} />} side="top" disabled={!selectedRoom || busy} items={[
                         { label: 'Bold', icon: <Bold size={15} />, onSelect: () => applyFormatting('bold') },
@@ -4630,6 +4632,7 @@ function AppBody() {
                         { label: 'Numbered list', icon: <ListOrdered size={15} />, onSelect: () => applyFormatting('numberedList') },
                         { label: 'Quote', icon: <Quote size={15} />, onSelect: () => applyFormatting('quote') },
                         { label: 'Code block', icon: <SquareCode size={15} />, onSelect: () => applyFormatting('codeBlock') },
+                        { label: 'Show formatting toolbar', icon: <Bold size={15} />, onSelect: () => void setPreference('composer.formatting_toolbar', true) },
                       ]} />}
                       <div className="composer-tool-cluster" role="group" aria-label="Add content">
                         <IconTooltip label="Attach file"><button className="icon-button" type="button" aria-label="Attach file" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onClick={() => attachmentInputRef.current?.click()}><Paperclip size={15} /></button></IconTooltip>
@@ -4656,7 +4659,7 @@ function AppBody() {
                           { label: replyTarget ? 'Schedule reply' : 'Schedule message', icon: <Clock3 size={15} />, onSelect: openScheduleMessage, disabled: !composeText.trim() || Boolean(editTarget) },
                         ]} />
                       </div>
-                      <ActionMenu key={`ai:${activeAccountID}:${selectedRoomID}`} label="AI tools" icon={<Sparkles size={15} />} showLabel side="top" items={composerAIItems()} />
+                      <ActionMenu key={`ai:${activeAccountID}:${selectedRoomID}`} label="AI tools" icon={<Sparkles size={15} />} side="top" items={composerAIItems()} />
                       {imageRunHere && <IconTooltip label="Stop image generation"><button className="icon-button is-recording" type="button" aria-label="Stop image generation" onClick={stopImageGeneration}><Square size={15} /></button></IconTooltip>}
                     </div>
                   </div>

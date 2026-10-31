@@ -10174,6 +10174,8 @@ day-divider::after,
   transform: translateY(0);
 }
 
+.composer-format-close::after,
+.composer-format-group[aria-label='Block formatting']>.icon-tooltip:last-child::after,
 .composer-tool-group-message>.composer-tool-cluster:last-child>.icon-tooltip:last-child::after,
 .composer-footer>.send-tooltip::after {
   right: 0;
@@ -10181,6 +10183,10 @@ day-divider::after,
   transform: translateY(4px);
 }
 
+.composer-format-close:hover::after,
+.composer-format-close:focus-within::after,
+.composer-format-group[aria-label='Block formatting']>.icon-tooltip:last-child:hover::after,
+.composer-format-group[aria-label='Block formatting']>.icon-tooltip:last-child:focus-within::after,
 .composer-tool-group-message>.composer-tool-cluster:last-child>.icon-tooltip:last-child:hover::after,
 .composer-tool-group-message>.composer-tool-cluster:last-child>.icon-tooltip:last-child:focus-within::after,
 .composer-footer>.send-tooltip:hover::after,
@@ -10414,12 +10420,26 @@ day-divider::after,
 .app-shell[data-ui='desktop'] .room-scope-filters > button { min-width: 0; justify-content: center; gap: 4px; padding: 6px 4px; }
 .app-shell[data-ui='desktop'] .room-scope-filters > button > svg { display: none; }
 .app-shell[data-ui='desktop'] .room-scope-filters .filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-shell[data-ui='desktop'] .room-refinement-filters { display: flex; align-items: center; gap: 4px; }
-.app-shell[data-ui='desktop'] .room-refinement-filters > button { flex: 0 0 auto; min-width: 32px; min-height: 30px; padding: 4px 6px; }
-.app-shell[data-ui='desktop'] .room-refinement-filters .filter-label { display: none; }
+.app-shell[data-ui='desktop'] .room-refinement-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.app-shell[data-ui='desktop'] .room-refinement-filters > button {
+  display: grid;
+  grid-template-rows: 18px auto;
+  align-content: center;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 54px;
+  padding: 7px 2px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+}
+.app-shell[data-ui='desktop'] .room-refinement-filters .filter-symbol { display: flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; }
+.app-shell[data-ui='desktop'] .room-refinement-filters .filter-label { display: block; min-width: 0; max-width: 100%; white-space: nowrap; }
+.app-shell[data-ui='desktop'] .room-refinement-filters .filter-count { min-width: 18px; padding: 2px 4px; font-size: 10px; line-height: 12px; font-variant-numeric: tabular-nums; }
 .app-shell[data-ui='desktop'] .conversation-header {
-  min-height: 64px;
-  padding: 12px 20px;
+  min-height: 72px;
+  padding: 14px 24px;
   color: var(--ink);
   background: var(--paper);
   border-bottom: 1px solid var(--line);
@@ -10427,9 +10447,16 @@ day-divider::after,
   backdrop-filter: none;
 }
 
+.app-shell[data-ui='desktop'] .conversation-room-avatar { width: 40px; height: 40px; border-radius: 50%; }
+.app-shell[data-ui='desktop'] .conversation-header .icon-button { width: 36px; height: 36px; }
 .app-shell[data-ui='desktop'] .room-title h2 { font-family: inherit; font-size: 16px; font-weight: 600; }
 .app-shell[data-ui='desktop'] .room-title p { color: var(--muted); }
-.app-shell[data-ui='desktop'] .timeline { padding-right: 28px; padding-left: 28px; }
+.app-shell[data-ui='desktop'] .timeline { gap: 8px; padding: 24px max(24px, calc((100% - 960px) / 2)); }
+.app-shell[data-ui='desktop'] .timeline .message-body { max-width: min(100%, 640px); padding: 10px 14px; font-size: 14px; line-height: 1.6; letter-spacing: 0; }
+.app-shell[data-ui='desktop'] .timeline .message-row.is-grouped { margin-top: 0; }
+.app-shell[data-ui='desktop'][data-font-size='small'] .timeline .message-body { font-size: 12px; }
+.app-shell[data-ui='desktop'][data-font-size='large'] .timeline .message-body { font-size: 16px; }
+.app-shell[data-ui='desktop'] .timeline .message-body::after { display: none; }
 .app-shell[data-ui='desktop'] .message-body {
   color: var(--ink);
   background: var(--paper);
@@ -10468,7 +10495,7 @@ day-divider::after,
   box-shadow: var(--shadow-xs);
 }
 
-.app-shell[data-ui='desktop'] .composer:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 1px var(--focus-ring); }
+.app-shell[data-ui='desktop'] .composer:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 12%, transparent); }
 .app-shell[data-ui='desktop'] .composer textarea { color: var(--ink); background: transparent; }
 .app-shell[data-ui='desktop'] .composer textarea::placeholder { color: var(--muted); }
 .app-shell[data-ui='desktop'] .composer-context { color: var(--ink); background: var(--canvas-warm); border-color: var(--line); }
@@ -10617,15 +10644,24 @@ day-divider::after,
 .composer-operation-status { grid-column: 1 / -1; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .conversation-state-icons { display: flex; flex: 0 0 auto; gap: 6px; color: var(--muted); }
 .conversation-state-icons:empty, .conversation-action-group:empty { display: none; }
-.app-shell[data-ui='desktop'] .conversation-title h2 { font: 600 16px / 1.4 'IBM Plex Sans', sans-serif; }
-.app-shell[data-ui='desktop'] .conversation-title > span { color: var(--muted); font-size: 12px; }
+.app-shell[data-ui='desktop'] .conversation-title h2 { font: 600 17px / 1.4 'IBM Plex Sans', sans-serif; }
+.app-shell[data-ui='desktop'] .conversation-title > span { display: block; overflow: hidden; color: var(--muted); font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
 .app-shell[data-ui='desktop'] .conversation-actions { flex: 0 0 auto; gap: 4px; }
 .app-shell[data-ui='desktop'] .conversation-action-group { padding-left: 0; border: 0; gap: 2px; }
-.app-shell[data-ui='desktop'] .composer { margin: 0 20px 16px; padding: 10px 12px; }
-.app-shell[data-ui='desktop'] .composer-format-toolbar { flex-basis: auto; padding-bottom: 0; border-bottom: 0; }
-.app-shell[data-ui='desktop'] .composer-toolbar-row-compose { align-items: flex-end; }
+.app-shell[data-ui='desktop'] .composer { --composer-text-size: 14px; margin: 0 max(20px, calc((100% - 1008px) / 2)) 20px; padding: 12px 14px; border-color: var(--line); box-shadow: 0 4px 16px color-mix(in srgb, var(--ink) 5%, transparent); }
+.app-shell[data-ui='desktop'][data-font-size='small'] .composer { --composer-text-size: 12px; }
+.app-shell[data-ui='desktop'][data-font-size='large'] .composer { --composer-text-size: 16px; }
+.app-shell[data-ui='desktop'] :is(.composer textarea, .composer-ghost) { font-size: var(--composer-text-size); line-height: 1.6; }
+.app-shell[data-ui='desktop'] .composer textarea { min-height: 36px; }
+.app-shell[data-ui='desktop'] .composer-format-toolbar { flex-wrap: wrap; gap: 2px; max-width: 100%; padding-top: 6px; border-top: 1px solid var(--line-soft); }
+.app-shell[data-ui='desktop'] .composer-format-group { flex-wrap: nowrap; padding: 0; }
+.app-shell[data-ui='desktop'] .composer-format-toolbar .icon-button { width: 26px; height: 26px; min-width: 26px; min-height: 26px; }
+.app-shell[data-ui='desktop'] .composer-format-close { margin-left: auto; }
+.app-shell[data-ui='desktop'] .composer-format-toolbar + .composer-footer { padding-top: 0; border-top: 0; }
+.app-shell[data-ui='desktop'] .composer-toolbar-row-compose { align-items: center; }
 .app-shell[data-ui='desktop'] .composer-tool-group-message { gap: 3px; }
-.app-shell[data-ui='desktop'] .send-button { width: 36px; height: 36px; }
+.app-shell[data-ui='desktop'] .composer-tool-group-message .icon-button:not(.has-label) { width: 34px; height: 34px; }
+.app-shell[data-ui='desktop'] .send-button { width: 40px; height: 40px; border-radius: 8px; }
 
 @keyframes desktop-menu-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
