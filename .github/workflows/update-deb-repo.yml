@@ -1,0 +1,82 @@
+name: Update Debian APT Repository
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release Tag (e.g. v0.1.8)'
+        required: true
+
+jobs:
+  build-and-deploy-apt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Download DEB Package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          mkdir -p deb-incoming
+          gh release download "$TAG" --repo "${{ github.repository }}" --pattern "*.deb" --dir deb-incoming --clobber
+          ls -lh deb-incoming/
+
+      - name: Checkout deb-repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deb-repo
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: deb-repo
+
+      - name: Setup GPG Key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --dearmor --batch --yes -o /tmp/signing-key.gpg
+          GPG_KEY_ID=$(gpg --list-packets /tmp/signing-key.gpg | awk '/keyid:/{print $2}' | head -n 1)
+          echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
+
+      - name: Install APT Repository Tools
+        run: sudo apt-get update && sudo apt-get install -y apt-utils
+
+      - name: Update APT Pool and Packages
+        run: |
+          cd deb-repo
+          mkdir -p pool/main dists/stable/main/binary-amd64
+
+          # Copia il nuovo deb nel pool
+          cp ../deb-incoming/*.deb pool/main/
+
+          # Genera il file Packages e comprimi in gz
+          apt-ftparchive packages pool/main > dists/stable/main/binary-amd64/Packages
+          gzip -9fk dists/stable/main/binary-amd64/Packages
+
+          # Genera il file Release
+          cd dists/stable
+          apt-ftparchive release . > Release
+
+          # Firma crittograficamente i metadati del repository
+          gpg --default-key "$GPG_KEY_ID" --keyring /tmp/signing-key.gpg --abs --output Release.gpg Release
+          gpg --default-key "$GPG_KEY_ID" --keyring /tmp/signing-key.gpg --clearsign --output InRelease Release
+
+      - name: Commit and Push to deb-repo
+        run: |
+          cd deb-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pool/ dists/
+          if git diff --staged --quiet; then
+            echo "Nessun pacchetto da aggiornare."
+          else
+            git commit -m "Add deb package from ${{ steps.vars.outputs.tag }}"
+            git push origin main
+          fi
