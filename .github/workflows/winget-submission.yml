@@ -1,0 +1,149 @@
+name: Submit to Windows Package Manager (Winget)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release Tag (es. v0.1.7)'
+        required: true
+
+jobs:
+  winget-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve Tag & Assets
+        id: info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          VERSION="${TAG#v}"
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          ASSET_NAME=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq '.assets[] | select(.name | test("(\\.exe|windows.*\\.zip)$"; "i")) | .name' | head -n 1)
+
+          if [ -z "$ASSET_NAME" ]; then
+            echo "::error::Nessun file Windows (.exe o .zip) trovato nella release $TAG!"
+            exit 1
+          fi
+
+          echo "asset_name=$ASSET_NAME" >> $GITHUB_OUTPUT
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${ASSET_NAME}"
+          echo "download_url=$DOWNLOAD_URL" >> $GITHUB_OUTPUT
+
+      - name: Download Asset & Compute SHA-256
+        id: hash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ steps.info.outputs.tag }}" --repo "${{ github.repository }}" --pattern "${{ steps.info.outputs.asset_name }}" --clobber
+          SHA256=$(sha256sum "${{ steps.info.outputs.asset_name }}" | awk '{print toupper($1)}')
+          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+          echo "SHA256 calcolato: $SHA256"
+
+      - name: Setup Fork and Create Manifests
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          VERSION: ${{ steps.info.outputs.version }}
+          ASSET_NAME: ${{ steps.info.outputs.asset_name }}
+          URL: ${{ steps.info.outputs.download_url }}
+          SHA256: ${{ steps.hash.outputs.sha256 }}
+        run: |
+          GH_USER="${{ github.repository_owner }}"
+
+          if ! gh repo view "$GH_USER/winget-pkgs" >/dev/null 2>&1; then
+            echo "Forking microsoft/winget-pkgs..."
+            gh repo fork microsoft/winget-pkgs --clone=false
+            sleep 8
+          fi
+
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GH_USER}/winget-pkgs.git" winget-pkgs
+          cd winget-pkgs
+
+          BRANCH="pinger-${VERSION}"
+          git checkout -b "$BRANCH"
+
+          MANIFEST_DIR="manifests/c/cataWalter/Pinger/${VERSION}"
+          mkdir -p "$MANIFEST_DIR"
+
+          # 1. Version Manifest
+          printf "PackageIdentifier: cataWalter.Pinger\nPackageVersion: %s\nDefaultLocale: en-US\nManifestType: version\nManifestVersion: 1.6.0\n" "$VERSION" > "$MANIFEST_DIR/cataWalter.Pinger.yaml"
+
+          # 2. Locale Manifest
+          cat <<LOCALE > "$MANIFEST_DIR/cataWalter.Pinger.locale.en-US.yaml"
+PackageIdentifier: cataWalter.Pinger
+PackageVersion: ${VERSION}
+PackageLocale: en-US
+Publisher: cataWalter
+PublisherUrl: https://github.com/cataWalter
+PackageName: Pinger
+PackageUrl: https://github.com/cataWalter/pinger
+License: GPL-3.0
+LicenseUrl: https://github.com/cataWalter/pinger/blob/main/LICENSE
+ShortDescription: Triage-focused Matrix desktop client with local AI assistance
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
+LOCALE
+
+          # 3. Installer Manifest
+          if [[ "$ASSET_NAME" =~ (setup|installer) ]]; then
+            cat <<INSTALLER > "$MANIFEST_DIR/cataWalter.Pinger.installer.yaml"
+PackageIdentifier: cataWalter.Pinger
+PackageVersion: ${VERSION}
+MinimumOSVersion: 10.0.0.0
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+InstallerSwitches:
+  Silent: /S
+  SilentWithProgress: /S
+UpgradeBehavior: install
+ReleaseDate: $(date +%F)
+Installers:
+  - Architecture: x64
+    InstallerUrl: ${URL}
+    InstallerSha256: ${SHA256}
+ManifestType: installer
+ManifestVersion: 1.6.0
+INSTALLER
+          else
+            cat <<INSTALLER > "$MANIFEST_DIR/cataWalter.Pinger.installer.yaml"
+PackageIdentifier: cataWalter.Pinger
+PackageVersion: ${VERSION}
+Commands:
+  - pinger
+Installers:
+  - Architecture: x64
+    InstallerType: portable
+    InstallerUrl: ${URL}
+    InstallerSha256: ${SHA256}
+ManifestType: installer
+ManifestVersion: 1.6.0
+INSTALLER
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$MANIFEST_DIR"
+          git commit -m "New package: cataWalter.Pinger version ${VERSION}"
+          git push -u origin "$BRANCH" --force
+
+          gh pr create \
+            --repo microsoft/winget-pkgs \
+            --head "${GH_USER}:${BRANCH}" \
+            --base master \
+            --title "New package: cataWalter.Pinger version ${VERSION}" \
+            --body "### Contribution Log
+* Package: **cataWalter.Pinger**
+* Version: **${VERSION}**
+* Repository: https://github.com/${{ github.repository }}"
