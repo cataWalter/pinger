@@ -128,22 +128,39 @@ jobs:
           if ! gh repo view "$gh_user/winget-pkgs" >/dev/null 2>&1; then
             gh repo fork microsoft/winget-pkgs --clone=false
           fi
-          gh repo sync "$gh_user/winget-pkgs" --source microsoft/winget-pkgs
           gh auth setup-git
-          git clone --depth 1 --filter=blob:none --no-checkout "https://github.com/$gh_user/winget-pkgs.git" winget-pkgs
-          git -C winget-pkgs sparse-checkout set "$manifest_dir"
-          git -C winget-pkgs checkout -b "$branch"
-          mkdir -p "winget-pkgs/$manifest_dir"
-          cp "winget-manifests/cataWalter/Pinger/$VERSION/"*.yaml "winget-pkgs/$manifest_dir/"
+          git clone --depth 1 --filter=blob:none --no-checkout --single-branch --branch master \
+            https://github.com/microsoft/winget-pkgs.git winget-pkgs
           cd winget-pkgs
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "$manifest_dir"
-          git commit -m "New package: cataWalter.Pinger version $VERSION"
-          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
-            git fetch origin "$branch:refs/remotes/origin/$branch"
+          base="$(git rev-parse HEAD)"
+          git read-tree "$base"
+          manifest_source="../winget-manifests/cataWalter/Pinger/$VERSION"
+          for file in "$manifest_source"/*.yaml; do
+            path="$manifest_dir/$(basename "$file")"
+            blob="$(git hash-object -w "$file")"
+            git update-index --add --cacheinfo "100644,$blob,$path"
+          done
+          tree="$(git write-tree)"
+          commit="$(printf 'New package: cataWalter.Pinger version %s\n' "$VERSION" | git commit-tree "$tree" -p "$base")"
+          expected_paths="$(printf '%s\n' \
+            "$manifest_dir/cataWalter.Pinger.installer.yaml" \
+            "$manifest_dir/cataWalter.Pinger.locale.en-US.yaml" \
+            "$manifest_dir/cataWalter.Pinger.yaml" | sort)"
+          actual_paths="$(git diff-tree --no-commit-id --name-only -r "$commit" | sort)"
+          if [[ "$actual_paths" != "$expected_paths" ]]; then
+            echo "::error::WinGet commit must add only the three Pinger manifests."
+            printf 'Expected:\n%s\nActual:\n%s\n' "$expected_paths" "$actual_paths"
+            exit 1
           fi
-          git push --force-with-lease origin "HEAD:$branch"
+          git remote add fork "https://github.com/$gh_user/winget-pkgs.git"
+          existing="$(git ls-remote fork "refs/heads/$branch" | cut -f1)"
+          if [[ -n "$existing" ]]; then
+            git push --force-with-lease="refs/heads/$branch:$existing" fork "$commit:refs/heads/$branch"
+          else
+            git push fork "$commit:refs/heads/$branch"
+          fi
           count="$(gh pr list --repo microsoft/winget-pkgs --head "$gh_user:$branch" --base master --state open --json number --jq 'length')"
           if [[ "$count" == "0" ]]; then
             gh pr create --repo microsoft/winget-pkgs --head "$gh_user:$branch" --base master \
