@@ -128,44 +128,63 @@ jobs:
           if ! gh repo view "$gh_user/winget-pkgs" >/dev/null 2>&1; then
             gh repo fork microsoft/winget-pkgs --clone=false
           fi
-          gh auth setup-git
-          git clone --depth 1 --filter=blob:none --no-checkout --single-branch --branch master \
-            https://github.com/microsoft/winget-pkgs.git winget-pkgs
-          cd winget-pkgs
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          base="$(git rev-parse HEAD)"
-          git read-tree "$base"
+          gh repo sync "$gh_user/winget-pkgs" --source microsoft/winget-pkgs
+          base="$(gh api "repos/$gh_user/winget-pkgs/git/ref/heads/master" --jq '.object.sha')"
+          base_tree="$(gh api "repos/$gh_user/winget-pkgs/git/commits/$base" --jq '.tree.sha')"
           manifest_source="../winget-manifests/cataWalter/Pinger/$VERSION"
+          version_blob=''
+          locale_blob=''
+          installer_blob=''
           for file in "$manifest_source"/*.yaml; do
-            path="$manifest_dir/$(basename "$file")"
-            blob="$(git hash-object -w "$file")"
-            git update-index --add --cacheinfo "100644,$blob,$path"
+            name="$(basename "$file")"
+            blob="$(jq -n --rawfile content "$file" '{content:$content,encoding:"utf-8"}' \
+              | gh api --method POST "repos/$gh_user/winget-pkgs/git/blobs" --input - --jq '.sha')"
+            case "$name" in
+              cataWalter.Pinger.yaml) version_blob="$blob" ;;
+              cataWalter.Pinger.locale.en-US.yaml) locale_blob="$blob" ;;
+              cataWalter.Pinger.installer.yaml) installer_blob="$blob" ;;
+              *) echo "::error::Unexpected WinGet manifest: $name"; exit 1 ;;
+            esac
           done
-          tree="$(git write-tree)"
-          commit="$(printf 'New package: cataWalter.Pinger version %s\n' "$VERSION" | git commit-tree "$tree" -p "$base")"
-          expected_paths="$(printf '%s\n' \
-            "$manifest_dir/cataWalter.Pinger.installer.yaml" \
-            "$manifest_dir/cataWalter.Pinger.locale.en-US.yaml" \
-            "$manifest_dir/cataWalter.Pinger.yaml" | sort)"
-          actual_paths="$(git diff-tree --no-commit-id --name-only -r "$commit" | sort)"
-          if [[ "$actual_paths" != "$expected_paths" ]]; then
-            echo "::error::WinGet commit must add only the three Pinger manifests."
-            printf 'Expected:\n%s\nActual:\n%s\n' "$expected_paths" "$actual_paths"
+          if [[ -z "$version_blob" || -z "$locale_blob" || -z "$installer_blob" ]]; then
+            echo "::error::Expected all three WinGet manifests."
             exit 1
           fi
-          git remote add fork "https://github.com/$gh_user/winget-pkgs.git"
-          existing="$(git ls-remote fork "refs/heads/$branch" | cut -f1)"
-          if [[ -n "$existing" ]]; then
-            git push --force-with-lease="refs/heads/$branch:$existing" fork "$commit:refs/heads/$branch"
+
+          tree_data="$(jq -n \
+            --arg base_tree "$base_tree" \
+            --arg version_path "$manifest_dir/cataWalter.Pinger.yaml" --arg version_sha "$version_blob" \
+            --arg locale_path "$manifest_dir/cataWalter.Pinger.locale.en-US.yaml" --arg locale_sha "$locale_blob" \
+            --arg installer_path "$manifest_dir/cataWalter.Pinger.installer.yaml" --arg installer_sha "$installer_blob" \
+            '{base_tree:$base_tree,tree:[
+              {path:$version_path,mode:"100644",type:"blob",sha:$version_sha},
+              {path:$locale_path,mode:"100644",type:"blob",sha:$locale_sha},
+              {path:$installer_path,mode:"100644",type:"blob",sha:$installer_sha}
+            ]}')"
+          tree="$(printf '%s' "$tree_data" | gh api --method POST "repos/$gh_user/winget-pkgs/git/trees" --input - --jq '.sha')"
+          commit_data="$(jq -n --arg message "New package: cataWalter.Pinger version $VERSION" --arg tree "$tree" --arg parent "$base" \
+            '{message:$message,tree:$tree,parents:[$parent]}')"
+          commit="$(printf '%s' "$commit_data" | gh api --method POST "repos/$gh_user/winget-pkgs/git/commits" --input - --jq '.sha')"
+
+          ref="repos/$gh_user/winget-pkgs/git/refs/heads/$branch"
+          if gh api "repos/$gh_user/winget-pkgs/git/ref/heads/$branch" >/dev/null 2>&1; then
+            jq -n --arg sha "$commit" '{sha:$sha,force:true}' | gh api --method PATCH "$ref" --input - >/dev/null
           else
-            git push fork "$commit:refs/heads/$branch"
+            jq -n --arg ref "refs/heads/$branch" --arg sha "$commit" '{ref:$ref,sha:$sha}' \
+              | gh api --method POST "repos/$gh_user/winget-pkgs/git/refs" --input - >/dev/null
           fi
-          count="$(gh pr list --repo microsoft/winget-pkgs --head "$gh_user:$branch" --base master --state open --json number --jq 'length')"
-          if [[ "$count" == "0" ]]; then
-            gh pr create --repo microsoft/winget-pkgs --head "$gh_user:$branch" --base master \
-              --title "New package: cataWalter.Pinger version $VERSION" \
-              --body "Verified release $TAG from https://github.com/$GITHUB_REPOSITORY. Includes validated nested-portable ZIP manifests."
+          published="$(gh api "repos/$gh_user/winget-pkgs/git/ref/heads/$branch" --jq '.object.sha')"
+          test "$published" = "$commit"
+
+          pull_url="$(gh api "repos/microsoft/winget-pkgs/pulls?state=open&head=$gh_user%3A$branch&base=master" --jq '.[0].html_url // ""')"
+          if [[ -z "$pull_url" ]]; then
+            pull_url="$(gh api --method POST repos/microsoft/winget-pkgs/pulls \
+              -f title="New package: cataWalter.Pinger version $VERSION" \
+              -f head="$gh_user:$branch" \
+              -f base=master \
+              -f body="Verified release $TAG from https://github.com/$GITHUB_REPOSITORY. Includes validated nested-portable ZIP manifests." \
+              --jq '.html_url')"
           else
-            echo "A WinGet PR already exists for $VERSION; its branch has been updated."
+            echo "Updated existing WinGet PR for $VERSION: $pull_url"
           fi
+          echo "WinGet PR: $pull_url" >> "$GITHUB_STEP_SUMMARY"
