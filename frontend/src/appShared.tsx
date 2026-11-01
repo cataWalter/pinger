@@ -3,13 +3,14 @@ import { createPortal } from 'react-dom'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { ArrowUpRight, Bot, Check, Copy, FileText, MessageSquare, MessagesSquare, Sparkles, Star, X, Download, ZoomIn, ZoomOut } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
-import { type AIMessage, type ChatExportResult, type Invite, type Member, type Message, type Room, type Snapshot, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
+import { type AIMessage, type ChatExportResult, type Invite, type Member, type Message, type Room, type Snapshot, type TutorAnalysis, type Verification } from '../bindings/mychat/desktop/models.js'
 import { fuzzyScore } from './fuzzy'
 import { AI_ACTION_SHORTCUTS, languageName, type AIFeatureID } from './aiSettings'
 import { matrixMediaURL, matrixMXCMediaURL } from './ChatMediaRenderer'
 import { firstPreviewableURL, LinkPreviewCard } from './LinkPreview'
 import { VoiceMessagePlayer } from './VoiceMessagePlayer'
 import { DialogSurface } from './DialogSurface'
+import { activeLocale, i18n } from './i18n'
 import { isLocalAIRoomID, type LocalAIChatIcon } from './localAIChats'
 import type { ThreadSummary } from './threads'
 
@@ -26,6 +27,7 @@ export type MatrixUpdate = {
   notifications?: MatrixNotification[] | null
   initialSyncComplete: boolean
   needsVerification: boolean
+  verification?: Verification | null
   connectionState: string
   error: string
 }
@@ -347,9 +349,9 @@ export function formatDayLabel(timestamp: number) {
   const yesterday = new Date()
   yesterday.setDate(today.getDate() - 1)
   const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-  if (sameDay(date, today)) return 'Today'
-  if (sameDay(date, yesterday)) return 'Yesterday'
-  return new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(date)
+  if (sameDay(date, today)) return i18n.t('time.today')
+  if (sameDay(date, yesterday)) return i18n.t('time.yesterday')
+  return new Intl.DateTimeFormat(activeLocale(), { weekday: 'long', month: 'long', day: 'numeric' }).format(date)
 }
 
 export function localDateTimeInputValue(timestamp: number) {
@@ -358,7 +360,7 @@ export function localDateTimeInputValue(timestamp: number) {
 }
 
 export function formatScheduledTime(timestamp: number) {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(timestamp))
+  return new Intl.DateTimeFormat(activeLocale(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(timestamp))
 }
 
 export function preferenceBoolean(preferences: PreferenceValues, key: string, fallback = false) {
@@ -818,7 +820,7 @@ export const chatWallpapers = [
 ] as const
 
 export function formatTime(timestamp: number, use24Hour = false) {
-  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: !use24Hour }).format(new Date(timestamp))
+  return new Intl.DateTimeFormat(activeLocale(), { hour: 'numeric', minute: '2-digit', hour12: !use24Hour }).format(new Date(timestamp))
 }
 
 export function isWithinDay(timestamp: number) {
@@ -827,7 +829,7 @@ export function isWithinDay(timestamp: number) {
 
 export function formatTimeOrDate(timestamp: number, use24Hour = false) {
   if (isSameDay(timestamp, Date.now())) return formatTime(timestamp, use24Hour)
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'short' }).format(new Date(timestamp))
+  return new Intl.DateTimeFormat(activeLocale(), { dateStyle: 'short' }).format(new Date(timestamp))
 }
 
 export function roomActivityAt(room: Room) {
@@ -859,17 +861,17 @@ export function createTimelineTimeFormatter(preferences: PreferenceValues): (tim
   return (timestamp) => {
     if (useRelativeTime && isWithinDay(timestamp)) {
       const minutes = Math.round((timestamp - Date.now()) / 60_000)
-      relative ??= new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+      relative ??= new Intl.RelativeTimeFormat(activeLocale(), { numeric: 'auto' })
       if (Math.abs(minutes) < 60) return relative.format(minutes, 'minute')
       return relative.format(Math.round(minutes / 60), 'hour')
     }
-    clock ??= new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: !use24Hour })
+    clock ??= new Intl.DateTimeFormat(activeLocale(), { hour: 'numeric', minute: '2-digit', hour12: !use24Hour })
     return clock.format(new Date(timestamp))
   }
 }
 
 export function formatMediaGalleryDateTime(timestamp: number, preferences: PreferenceValues) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(activeLocale(), {
     dateStyle: 'short',
     timeStyle: 'short',
     hour12: !preferenceBoolean(preferences, 'appearance.time_24_hour'),

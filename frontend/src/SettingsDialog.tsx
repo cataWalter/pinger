@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Archive, Bell, Check, FileText, RotateCcw, Search, Trash2, X, Download, HardDrive, LogOut, Plus, Upload } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { Archive, Bell, Check, FileText, RotateCcw, Search, Trash2, X, Download, HardDrive, LogOut, Plus, ShieldCheck, Upload } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type AppBuildInfo, type Device, type MediaCacheUsage, type MediaCleanupResult, type Room, type RoomStorage, type Snapshot, type StorageUsage, type UpdateStatus } from '../bindings/mychat/desktop/models.js'
 import { parseCustomEmoticonReplacements, type EmoticonReplacement } from './composerText'
 import { DEFAULT_ACCENT_NAME, accentPaletteFor, accentPresets, isAccentHex } from './accent'
 import { SYSTEM_THEME_NAME, findThemeByName, themePaletteFor, themes as appearanceThemes } from './themes'
 import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
+import { activeLocale, languageOptions } from './i18n'
 import { type Snippet } from './snippets'
 import { EMPTY_CHAT_AGENTS, parseChatAgents, serializeChatAgents, type ChatAgentCollection } from './aiPrompts'
 import { AI_ACTION_SHORTCUTS, resolveLanguageRoles } from './aiSettings'
@@ -185,7 +187,7 @@ function AboutPinger() {
       {update && (
         <div className="update-status" role="status">
           <p>{update.message}</p>
-          {update.latestVersion && <p className="settings-note">{`Latest release ${update.latestVersion}${Number.isNaN(published) ? '' : ` · published ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(published))}`}`}</p>}
+          {update.latestVersion && <p className="settings-note">{`Latest release ${update.latestVersion}${Number.isNaN(published) ? '' : ` · published ${new Intl.DateTimeFormat(activeLocale(), { dateStyle: 'medium' }).format(new Date(published))}`}`}</p>}
           {update.updateAvailable && <p className="settings-note">Pinger does not install updates itself. Download the new version from the release page.</p>}
           {update.releaseNotes && <details><summary>Release notes</summary><pre className="release-notes">{update.releaseNotes}</pre></details>}
           <a className="settings-link" href={update.releaseUrl} target="_blank" rel="noreferrer">View release</a>
@@ -396,6 +398,7 @@ export function SettingsDialog({
   onPreferenceChange: (key: string, value: boolean | string) => Promise<boolean>
   onSnippetsChange: (snippets: Snippet[]) => void
 }) {
+  const { t } = useTranslation()
   const tabs = SETTINGS_TABS
   const theme = preferenceString(preferences, 'appearance.theme', SYSTEM_THEME_NAME)
   const activeTheme = findThemeByName(theme)
@@ -426,6 +429,7 @@ export function SettingsDialog({
   const [devices, setDevices] = useState<Device[]>([])
   const [devicesLoading, setDevicesLoading] = useState(false)
   const [devicesError, setDevicesError] = useState('')
+  const [verificationStarting, setVerificationStarting] = useState(false)
   const [deviceRevokeID, setDeviceRevokeID] = useState('')
   const [deviceRevokePassword, setDeviceRevokePassword] = useState('')
   const [deviceRevokeBusy, setDeviceRevokeBusy] = useState(false)
@@ -683,6 +687,21 @@ export function SettingsDialog({
     setDevicesError('')
   }
 
+  async function startSessionVerification() {
+    setVerificationStarting(true)
+    setDevicesError('')
+    let started = false
+    try {
+      await AppService.StartSessionVerification()
+      started = true
+    } catch (startError) {
+      setDevicesError(describeError(startError))
+    } finally {
+      setVerificationStarting(false)
+    }
+    if (started) onClose()
+  }
+
   async function refreshStorage() {
     setStorageLoading(true)
     setStorageError('')
@@ -789,7 +808,7 @@ export function SettingsDialog({
       <div className="settings-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
         <DialogSurface className="settings-dialog" labelledBy="settings-title" onClose={onClose}>
           <header className="settings-header">
-            <div><span className="eyebrow">PINGER</span><h2 id="settings-title">Settings</h2></div>
+            <div><span className="eyebrow">PINGER</span><h2 id="settings-title">{t('settings.title')}</h2></div>
             <button className="icon-button" type="button" aria-label="Close settings" title="Close settings" onClick={onClose}><X size={17} /></button>
           </header>
           <div className="settings-search">
@@ -849,7 +868,7 @@ export function SettingsDialog({
                     onTabChange(tabs[nextIndex])
                     event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus()
                   }}
-                >{item}{searchActive && matches > 0 && <span className="settings-tab-count" aria-hidden="true">{matches}</span>}</button>
+                >{t(`settings.tabs.${item.toLowerCase()}`)}{searchActive && matches > 0 && <span className="settings-tab-count" aria-hidden="true">{matches}</span>}</button>
               )
             })}
           </nav>
@@ -878,7 +897,13 @@ export function SettingsDialog({
             )}
             {tab === 'General' && (
               <div className="settings-section">
-                <h3>General</h3>
+                <h3>{t('settings.general')}</h3>
+                <label className="setting-row"><span><strong>{t('settings.language')}</strong><small>{t('settings.languageHint')}</small></span>
+                  <select aria-label={t('settings.language')} value={preferenceString(preferences, 'general.language', 'system')} onChange={(event) => onPreferenceChange('general.language', event.target.value)}>
+                    {languageOptions.map((option) => <option key={option.value} value={option.value}>{t(option.labelKey)}</option>)}
+                  </select>
+                </label>
+                <p className="settings-note" role="note">{t('settings.translationNotice')}</p>
                 <PreferenceToggle label="Launch Pinger at login" checked={preferenceBoolean(preferences, 'system.launch_at_startup')} onChange={(value) => onPreferenceChange('system.launch_at_startup', value)} />
                 <PreferenceToggle label="Minimize to tray when closing the window" checked={preferenceBoolean(preferences, 'window.minimize_to_tray')} onChange={(value) => onPreferenceChange('window.minimize_to_tray', value)} />
                 <PreferenceToggle label="Start minimized" checked={preferenceBoolean(preferences, 'window.start_minimized')} onChange={(value) => onPreferenceChange('window.start_minimized', value)} />
@@ -1202,12 +1227,13 @@ export function SettingsDialog({
             {tab === 'Devices' && (
               <div className="settings-section">
                 <h3>Active devices</h3>
+                {profile.verified && <button className="settings-command" type="button" disabled={verificationStarting} onClick={() => void startSessionVerification()}><ShieldCheck size={15} />{verificationStarting ? 'Starting verification…' : 'Verify another session'}</button>}
                 {devicesLoading && <p className="settings-note">Loading devices…</p>}
                 {devicesError && <p className="settings-error" role="alert">{devicesError}</p>}
                 {!devicesLoading && !devicesError && devices.length === 0 && <p className="settings-note">No devices were returned by the homeserver.</p>}
                 {devices.map((device) => (
                   <article className="device-row" key={device.id}>
-                    <div><strong>{device.displayName || '(unnamed device)'}</strong><span>{device.id}{device.current ? ' · this device' : ''}</span><small>{device.lastSeenAt > 0 ? `Last active ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(device.lastSeenAt))}` : device.lastSeenIp || 'Last active time unavailable'}</small></div>
+                    <div><strong>{device.displayName || '(unnamed device)'}</strong><span>{device.id}{device.current ? ' · this device' : ''}</span><small>{device.lastSeenAt > 0 ? `Last active ${new Intl.DateTimeFormat(activeLocale(), { dateStyle: 'medium' }).format(new Date(device.lastSeenAt))}` : device.lastSeenIp || 'Last active time unavailable'}</small></div>
                     {!device.current && (deviceRevokeID === device.id ? (
                       <form className="logout-confirm device-revoke-confirm" aria-label={`Confirm revoking ${device.displayName || device.id}`} onSubmit={(event) => { event.preventDefault(); void revokeDevice(device) }}>
                         <span>Enter your Matrix account password to revoke this device.</span>

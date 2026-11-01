@@ -142,6 +142,10 @@ const harness = vi.hoisted(() => ({
     CheckForUpdates: vi.fn(),
     Devices: vi.fn(),
     RevokeDevice: vi.fn(),
+    StartSessionVerification: vi.fn(),
+    AcceptSessionVerification: vi.fn(),
+    ConfirmSessionVerification: vi.fn(),
+    CancelSessionVerification: vi.fn(),
     SetMenuState: vi.fn(),
   },
   tutorService: {
@@ -266,6 +270,7 @@ const suggestedReplyFixture = [
 const snapshot: Snapshot = {
   loggedIn: true,
   needsVerification: false,
+  verification: null,
   syncReady: true,
   connectionState: 'connected',
   profile: {
@@ -358,6 +363,20 @@ describe('settings storage, integrations, help, and about', () => {
     await user.click(await screen.findByRole('tab', { name }))
     return user
   }
+
+  it('changes the interface language from the General settings tab', async () => {
+    const user = await openSettingsTab('General')
+    const language = screen.getByRole('combobox', { name: 'Language' })
+
+    await user.selectOptions(language, 'it')
+
+    expect(await screen.findByRole('heading', { name: 'Generale' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Impostazioni' })).toBeTruthy()
+    expect(harness.service.SetStringPreference).toHaveBeenCalledWith('general.language', 'it')
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Lingua' }), 'system')
+    expect(await screen.findByRole('heading', { name: 'General' })).toBeTruthy()
+  })
 
   it('revokes a device after password confirmation', async () => {
     const device = {
@@ -5821,6 +5840,49 @@ describe('room history updates', () => {
 
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Invitations' })).toBeNull())
     expect(harness.service.DeclineInvite).toHaveBeenCalledWith(teamRoom.id)
+  })
+
+  it('shows incoming session verification from sync updates', async () => {
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    act(() => harness.eventHandlers.get('matrix:update')?.({ data: {
+      accountId: 'primary',
+      rooms: [room],
+      invites: [],
+      timelineChangedRoomId: [],
+      initialSyncComplete: true,
+      needsVerification: false,
+      verification: {
+        transactionId: 'txn-incoming',
+        userId: '@alice:example.org',
+        deviceId: 'ALICEPHONE',
+        incoming: true,
+        phase: 'requested',
+        emojis: [],
+        decimals: [],
+        reason: '',
+      },
+      connectionState: 'connected',
+      error: '',
+    } }))
+
+    expect(await screen.findByRole('dialog', { name: 'Verify another session' })).toBeTruthy()
+    expect(screen.getByText('@alice:example.org wants to verify this session.')).toBeTruthy()
+  })
+
+  it('starts session verification from the Devices settings tab', async () => {
+    const user = userEvent.setup()
+    harness.service.Devices.mockResolvedValue([])
+    harness.service.StartSessionVerification.mockResolvedValue(undefined)
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.click(await screen.findByRole('tab', { name: 'Devices' }))
+
+    await user.click(screen.getByRole('button', { name: 'Verify another session' }))
+
+    await waitFor(() => expect(harness.service.StartSessionVerification).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull())
   })
 
   it('joins a room by address from the new room dialog', async () => {

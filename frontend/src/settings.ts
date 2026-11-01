@@ -14,6 +14,7 @@ export type SettingsEntry = {
 }
 
 export const settingsEntries: SettingsEntry[] = [
+  { id: 'general.language', tab: 'General', title: 'Language', description: 'Choose the language used for Pinger menus and screens.', keywords: 'language locale translation system english italian spanish german french' },
   { id: 'general.launch-at-login', tab: 'General', title: 'Launch Pinger at login', description: 'Start Pinger automatically when you sign in.', keywords: 'startup autostart sign in' },
   { id: 'general.minimize-to-tray', tab: 'General', title: 'Minimize to tray when closing the window', description: 'Keep Pinger in the menu bar instead of quitting.', keywords: 'tray close window quit' },
   { id: 'general.start-minimized', tab: 'General', title: 'Start minimized', description: 'Open Pinger in the menu bar when it launches.', keywords: 'startup tray hidden launch' },

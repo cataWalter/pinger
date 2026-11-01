@@ -6,17 +6,19 @@ import { ProfilePhotoViewer } from './ProfilePhotoViewer'
 import { RoomInfoDialog } from './RoomInfoDialog'
 import { InviteList, NewRoomDialog, sameInviteList, type NewRoomMode } from './RoomMembership'
 import { ThreadPanel } from './ThreadPanel'
+import { VerificationDialog } from './VerificationDialog'
 import { mainTimelineMessages, summarizeThreads } from './threads'
 import { SettingsProvider, useSettings } from './SettingsContext'
 import EmojiPicker from 'emoji-picker-react'
 import { AppService, LanguageTutorService } from '../bindings/mychat/desktop'
-import { type AIMessage, type GroupRoomRequest, type Invite, type Member, type MenuState, type Message, type MessageSearchRequest, type MessageSearchResult, type Room, type ScheduledJob, type Snapshot, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
+import { type AIMessage, type GroupRoomRequest, type Invite, type Member, type MenuState, type Message, type MessageSearchRequest, type MessageSearchResult, type Room, type ScheduledJob, type Snapshot, type TutorAnalysis, type Verification } from '../bindings/mychat/desktop/models.js'
 import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, type ComposerFormat, type EmojiQuery } from './composerText'
 import { useComposerGhostText } from './useComposerGhostText'
 import { hasOpenDialog } from './DialogSurface'
 import { DEFAULT_ACCENT_NAME, accentCssVariables, accentPaletteFor } from './accent'
 import { SYSTEM_THEME_NAME, themeCssVariables, themeIdForPreference, themeModeForPreference } from './themes'
 import { SETTINGS_TABS } from './settings'
+import { activeLocale, applyLanguage } from './i18n'
 import { SnippetPopover } from './SnippetPopover'
 import { loadSnippets, saveSnippets, type Snippet } from './snippets'
 import { useRoomDrafts } from './roomDrafts'
@@ -44,6 +46,25 @@ const LeaveRoomDialog = lazy(() => import('./ConfirmDialogs').then((module) => (
 const RedactDialog = lazy(() => import('./ConfirmDialogs').then((module) => ({ default: module.RedactDialog })))
 const ForwardMessageDialog = lazy(() => import('./RoomDialogs').then((module) => ({ default: module.ForwardMessageDialog })))
 const MediaGalleryDialog = lazy(() => import('./RoomDialogs').then((module) => ({ default: module.MediaGalleryDialog })))
+
+function sameVerificationState(current: Verification | null, next: Verification | null) {
+  if (current === next) return true
+  if (!current || !next) return false
+  const currentEmojis = current.emojis ?? []
+  const nextEmojis = next.emojis ?? []
+  const currentDecimals = current.decimals ?? []
+  const nextDecimals = next.decimals ?? []
+  return current.transactionId === next.transactionId
+    && current.userId === next.userId
+    && current.deviceId === next.deviceId
+    && current.incoming === next.incoming
+    && current.phase === next.phase
+    && current.reason === next.reason
+    && currentEmojis.length === nextEmojis.length
+    && currentEmojis.every((emoji, index) => emoji.emoji === nextEmojis[index].emoji && emoji.description === nextEmojis[index].description)
+    && currentDecimals.length === nextDecimals.length
+    && currentDecimals.every((value, index) => value === nextDecimals[index])
+}
 
 function AppBody() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
@@ -307,6 +328,10 @@ function AppBody() {
   }, [])
 
   const preferences = useMemo(() => snapshot?.preferences ?? {}, [snapshot?.preferences])
+  const languagePreference = preferenceString(preferences, 'general.language', 'system')
+  useEffect(() => {
+    void applyLanguage(languagePreference)
+  }, [languagePreference])
   const roomDrafts = useRoomDrafts(activeAccountID, preferenceBoolean(preferences, 'composer.keep_drafts', true))
   const languageRoles = resolveLanguageRoles(preferences)
   const translateRecentLabel = `Translate messages received since your last message to ${languageName(languageRoles.defaultLanguage)}`
@@ -1034,6 +1059,9 @@ function AppBody() {
           || Object.entries(nextListCounts).some(([listKey, count]) => currentListCounts[listKey] !== count)
         const syncReady = current.syncReady || update.initialSyncComplete
         const needsVerification = update.needsVerification
+        const verification = update.verification === undefined || sameVerificationState(current.verification, update.verification)
+          ? current.verification
+          : update.verification
         const connectionState = update.connectionState || current.connectionState
         const profile = current.profile.verified === !needsVerification
           ? current.profile
@@ -1044,10 +1072,11 @@ function AppBody() {
           && !listCountsChanged
           && syncReady === current.syncReady
           && needsVerification === current.needsVerification
+          && verification === current.verification
           && profile === current.profile
           && connectionState === current.connectionState
         ) return current
-        return { ...current, rooms, invites, slidingSyncListCounts, syncReady, needsVerification, profile, connectionState }
+        return { ...current, rooms, invites, slidingSyncListCounts, syncReady, needsVerification, verification, profile, connectionState }
       })
       setTypingUsers((current) => current.length === nextTypingUsers.length && current.every((user, index) => user === nextTypingUsers[index])
         ? current
@@ -1790,7 +1819,7 @@ function AppBody() {
     const canMarkUnread = Boolean(room && room.unread === 0 && !room.markedUnread)
     const canForward = rooms.some((candidate) => candidate.id !== selectedRoomID && isActiveAccountRoom(candidate))
     const receivedAt = message.timestamp > 0
-      ? new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(message.timestamp))
+      ? new Intl.DateTimeFormat(activeLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(message.timestamp))
       : 'unknown time'
     const items: MessageMenuItem[] = [
       { key: 'reply', label: 'Reply', ariaLabel: `Reply to ${message.senderName || message.sender}`, icon: <Reply size={14} />, disabled: unsent, run: () => { setEditTarget(null); setReplyTarget(message) } },
@@ -1821,7 +1850,7 @@ function AppBody() {
   async function copyMessage(message: Message, includeTimestamp = preferenceBoolean(preferences, 'clipboard.copy_timestamp')) {
     const body = displayMessageBody(message)
     const timestamp = includeTimestamp
-      ? `[${new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(message.timestamp))}] ${message.senderName || message.sender}: `
+      ? `[${new Intl.DateTimeFormat(activeLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(message.timestamp))}] ${message.senderName || message.sender}: `
       : ''
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.')
@@ -4545,7 +4574,7 @@ function AppBody() {
                         <span className="message-search-room">{room?.name || result.roomID}{room?.bridge && <small>{room.bridge}</small>}</span>
                         <div className="message-search-meta">
                           <strong>{message.senderName || message.sender}</strong>
-                          {message.timestamp > 0 && <time>{new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(message.timestamp))}</time>}
+                          {message.timestamp > 0 && <time>{new Intl.DateTimeFormat(activeLocale(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(message.timestamp))}</time>}
                         </div>
                         <p>{message.body}</p>
                       </button>
@@ -5017,6 +5046,7 @@ function AppBody() {
         onClose={() => setQuickSwitcherOpen(false)}
       />}
       {profilePhotoPreview && <ProfilePhotoViewer source={profilePhotoPreview.source} label={profilePhotoPreview.label} onClose={() => setProfilePhotoPreview(null)} />}
+      {snapshot.verification && <VerificationDialog key={snapshot.verification.transactionId} verification={snapshot.verification} />}
       {isDraggingFiles && <div className="drop-overlay" role="status"><div><Upload size={21} /><span>{selectedRoom ? `Add files to ${selectedRoom.name || selectedRoom.id}` : 'Select a room to upload files'}</span></div></div>}
     </main>
   )

@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { MessagesSquare, Send, X } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
 import type { Message } from '../bindings/mychat/desktop/models.js'
@@ -36,6 +37,7 @@ export function ThreadPanel({ roomID, rootID, rootMessage, revision, currentUser
   preferences: PreferenceValues
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   const [messages, setMessages] = useState<Message[] | null>(null)
   const [loadError, setLoadError] = useState('')
   const [reload, setReload] = useState(0)
@@ -99,7 +101,7 @@ export function ThreadPanel({ roomID, rootID, rootMessage, revision, currentUser
     <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <DialogSurface className="room-info-dialog thread-panel" labelledBy="thread-title" onClose={onClose} onClick={(event) => event.stopPropagation()}>
         <header className="room-info-header">
-          <div><span className="eyebrow">THREAD</span><h2 id="thread-title">{replyCount === 1 ? '1 reply' : `${replyCount} replies`}</h2></div>
+          <div><span className="eyebrow">THREAD</span><h2 id="thread-title">{t('thread.replyCount', { count: replyCount })}</h2></div>
           <button className="icon-button" type="button" aria-label="Close thread" title="Close thread" onClick={onClose}><X size={16} /></button>
         </header>
         <div className="thread-panel-messages" ref={listRef} role="log" aria-label="Thread messages" aria-busy={messages === null && !loadError}>

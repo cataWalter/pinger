@@ -42,6 +42,7 @@ const service = vi.hoisted(() => {
   const snapshot = {
     loggedIn: true,
     needsVerification: false,
+    verification: null,
     syncReady: true,
     connectionState: 'connected',
     profile: {

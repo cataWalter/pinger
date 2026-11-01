@@ -100,7 +100,7 @@ A searchable dialog with twelve tabs:
 - **Notifications** — permission, enable/focus, sound and volume, content privacy, per-category alerts and tones, batching, repeat reminder, one-time-code handling, sound effects, and a button that opens the OS notification settings for Pinger.
 - **Keyboard** — Ctrl+Enter send, undo send window, spellcheck, formatting toolbar, emoji suggestions, emoticon replacement, copy timestamps, Up-arrow focus, single-key shortcuts (R, J, K, and the answered key), mark-answered key, full shortcut list.
 - **History** — messages loaded when a room opens (25–1000).
-- **Devices** — list active devices with last-seen details and revoke them.
+- **Devices** — list active devices with last-seen details, revoke them, and start an emoji comparison with another verified session.
 - **Storage** — database, WAL, and media-cache sizes; clear media cache; optimize the database (VACUUM); storage per chat; cleanup filtered by media type and age.
 - **Security** — device verification status; export/import room keys protected with a passphrase.
 - **Help** — shortcuts, storage, local AI, bridged networks, encryption FAQ, and a report-an-issue link.
@@ -178,7 +178,7 @@ Pinger connects directly to Beeper's Matrix homeserver at `https://matrix.beeper
 2. **Set a Matrix password for your existing Beeper account.** Email sign-in codes and Google or Apple sign-in are not a Matrix password. Use the password option in Beeper account settings or the account's supported password-reset flow. [Element Web](https://app.element.io/), configured with `https://matrix.beeper.com/`, may offer a **Forgot password** flow for your account. If no password or reset option is available, contact Beeper support rather than creating a separate Matrix account. If you already set a Matrix password, use that password or reset it if forgotten.
 3. **Sign in to Pinger.** Choose **Use Beeper Homeserver** on the sign-in screen, or enter `https://matrix.beeper.com/` manually. Use your full Matrix user ID, for example `@your_user:beeper.com`, and your Matrix password. The **Using Beeper with Pinger?** guide repeats these steps and links to the official app.
 
-**Verify the new device:** approve the Pinger session from an existing signed-in Beeper client when supported, or enter your account's Recovery Key or recovery passphrase when Pinger prompts for it. Keep your existing Beeper session and recovery information available; signing in does not replace account verification or bridge setup. Never share your password or Recovery Key.
+**Verify the new device:** approve the Pinger session from an existing signed-in Beeper client when supported, or enter your account's Recovery Key or recovery passphrase when Pinger prompts for it. After a session is verified, use **Devices → Verify another session** to compare emoji with another session or respond to an incoming request. A new unverified session may still require the Recovery Key or passphrase because it cannot sync the to-device verification request before encryption setup. Keep your existing Beeper session and recovery information available; signing in does not replace account verification or bridge setup. Never share your password or Recovery Key.
 
 ### Prerequisites
 
