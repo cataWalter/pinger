@@ -25,7 +25,7 @@ export function DialogSurface({ children, className, role = 'dialog', labelledBy
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const focusableSelector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     const firstFocusable = dialog.querySelector<HTMLElement>(focusableSelector)
-    ;(firstFocusable ?? dialog).focus()
+      ; (firstFocusable ?? dialog).focus()
 
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       const openDialogs = document.querySelectorAll<HTMLElement>('[aria-modal="true"]')

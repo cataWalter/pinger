@@ -7,12 +7,23 @@ on:
         description: Release tag to publish in the cask (e.g. v0.1.8)
         required: true
         type: string
+      dry_run:
+        description: Validate the cask without pushing to the tap.
+        type: boolean
+        default: true
+    secrets:
+      TAP_GITHUB_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       tag:
         description: Release tag to publish in the cask (e.g. v0.1.8)
         required: true
         type: string
+      dry_run:
+        description: Validate the cask without pushing to the tap.
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -25,37 +36,43 @@ jobs:
   update-cask:
     name: Update pinger cask
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       REPO: ${{ github.repository }}
       TAG: ${{ inputs.tag }}
     steps:
-      - name: Download DMG and compute SHA-256
+      - name: Check publication credentials
+        if: '!inputs.dry_run'
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          test -n "$TAP_TOKEN" || { echo "::error::TAP_GITHUB_TOKEN is required for publication."; exit 1; }
+
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+
+      - name: Download and verify release DMG
         id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          assets="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
-          asset="$(printf '%s\n' "$assets" | grep '\.dmg$' | head -n 1 || true)"
-          if [ -z "$asset" ]; then
-            echo "No DMG asset on release $TAG" >&2
-            exit 1
-          fi
-          mkdir -p "$RUNNER_TEMP/dmg"
-          gh release download "$TAG" --repo "$REPO" --pattern "$asset" --dir "$RUNNER_TEMP/dmg" --clobber
-          sha="$(sha256sum "$RUNNER_TEMP/dmg/$asset" | awk '{print $1}')"
-          {
-            echo "version=${TAG#v}"
-            echo "asset=$asset"
-            echo "sha256=$sha"
-          } >> "$GITHUB_OUTPUT"
+          node scripts/release-assets.mjs download macos "$RUNNER_TEMP/dmg"
 
       - name: Check out homebrew-tap
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ${{ github.repository_owner }}/homebrew-tap
-          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          token: ${{ inputs.dry_run && github.token || secrets.TAP_GITHUB_TOKEN }}
           path: tap
+          ref: main
+          fetch-depth: 0
 
       - name: Write cask
         env:
@@ -64,6 +81,7 @@ jobs:
           ASSET: ${{ steps.release.outputs.asset }}
         run: |
           set -euo pipefail
+          ruby -r rubygems -e 'file = "tap/Casks/pinger.rb"; current = File.exist?(file) && File.read(file)[/version "([^"]+)"/, 1]; abort "Refusing to downgrade the tap" if current && Gem::Version.new(current) > Gem::Version.new(ENV.fetch("VERSION"))'
           mkdir -p tap/Casks
           cat > tap/Casks/pinger.rb <<CASK
           cask "pinger" do
@@ -92,8 +110,21 @@ jobs:
           end
           CASK
           ruby -c tap/Casks/pinger.rb
+          {
+            echo "### Homebrew validation"
+            echo "Verified Pinger $VERSION ($SHA256) and generated a valid cask."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload validated cask
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: homebrew-cask-${{ github.run_id }}
+          path: tap/Casks/pinger.rb
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Commit and push to homebrew-tap
+        if: '!inputs.dry_run'
         working-directory: tap
         env:
           VERSION: ${{ steps.release.outputs.version }}

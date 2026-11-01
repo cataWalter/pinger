@@ -1028,6 +1028,8 @@ export function SettingsDialog({
                 <PreferenceToggle label="Animate new messages" checked={preferenceBoolean(preferences, 'appearance.message_animations', true)} onChange={(value) => onPreferenceChange('appearance.message_animations', value)} />
                 <PreferenceToggle label="Show message timestamps" checked={preferenceBoolean(preferences, 'appearance.show_timestamps', true)} onChange={(value) => onPreferenceChange('appearance.show_timestamps', value)} />
                 <PreferenceToggle label="Hide images and videos" checked={preferenceBoolean(preferences, 'appearance.hide_images_and_videos')} onChange={(value) => onPreferenceChange('appearance.hide_images_and_videos', value)} />
+                <PreferenceToggle label="Show link previews" checked={preferenceBoolean(preferences, 'messages.url_previews', true)} onChange={(value) => onPreferenceChange('messages.url_previews', value)} />
+                <PreferenceToggle label="Show link previews in encrypted rooms" checked={preferenceBoolean(preferences, 'messages.url_previews_encrypted')} onChange={(value) => onPreferenceChange('messages.url_previews_encrypted', value)} />
                 <PreferenceToggle label="Hide deleted messages" checked={preferenceBoolean(preferences, 'appearance.hide_deleted_messages')} onChange={(value) => onPreferenceChange('appearance.hide_deleted_messages', value)} />
                 <PreferenceToggle label="Balance message line wrapping" checked={preferenceBoolean(preferences, 'appearance.balanced_text')} onChange={(value) => onPreferenceChange('appearance.balanced_text', value)} />
                 <PreferenceToggle label="Use a 24-hour clock" checked={preferenceBoolean(preferences, 'appearance.time_24_hour')} onChange={(value) => onPreferenceChange('appearance.time_24_hour', value)} />
@@ -1101,6 +1103,7 @@ export function SettingsDialog({
                 <PreferenceToggle label="Use Ctrl + Enter to send" checked={preferenceBoolean(preferences, 'composer.ctrl_enter')} onChange={(value) => onPreferenceChange('composer.ctrl_enter', value)} />
                 <PreferenceToggle label="Show formatting toolbar" checked={preferenceBoolean(preferences, 'composer.formatting_toolbar')} onChange={(value) => onPreferenceChange('composer.formatting_toolbar', value)} />
                 <PreferenceToggle label="Suggest text while typing (Tab to accept)" checked={preferenceBoolean(preferences, 'composer.ghost_text', true)} onChange={(value) => onPreferenceChange('composer.ghost_text', value)} />
+                <PreferenceToggle label="Keep unsent drafts after restarting" checked={preferenceBoolean(preferences, 'composer.keep_drafts', true)} onChange={(value) => onPreferenceChange('composer.keep_drafts', value)} />
                 <PreferenceToggle label="Suggest emoji for :shortcodes:" checked={preferenceBoolean(preferences, 'emoji.autocomplete')} onChange={(value) => onPreferenceChange('emoji.autocomplete', value)} />
                 <PreferenceToggle label="Replace emoticons as you type" checked={preferenceBoolean(preferences, 'emoji.replace_emoticons', true)} onChange={(value) => onPreferenceChange('emoji.replace_emoticons', value)} />
                 <div className="emoticon-replacement-editor" id="emoticon-replacement-editor">
@@ -1278,7 +1281,7 @@ export function SettingsDialog({
             {tab === 'Integrations' && (
               <div className="settings-section">
                 <h3>Integrations</h3>
-                <p className="settings-note">Chat networks are detected from the active account's chats, using room names and DM users. This is a best-effort view. Connecting a network requires a bridge set up on your homeserver; Pinger cannot create bridge logins.</p>
+                <p className="settings-note">Chat networks are detected from the active account's chats, using room names and DM users. This is a best-effort view. Connecting a network requires a bridge set up on your homeserver; Pinger cannot create bridge logins. Beeper users must connect new networks in the official Beeper app first.</p>
                 <div className="integration-status" aria-label="Detected chat networks">
                   {chatNetworks.map(({ code, name }) => {
                     const count = rooms.filter((room) => room.bridge === code).length
@@ -1296,7 +1299,7 @@ export function SettingsDialog({
                 <article className="help-item"><h4>Keyboard shortcuts</h4><p>The Keyboard tab lists every shortcut. Single-key shortcuts can be turned off there.</p><button className="settings-command" type="button" onClick={() => onTabChange('Keyboard')}>Open keyboard shortcuts</button></article>
                 <article className="help-item"><h4>Storage and media</h4><p>Clearing media removes cached files only. Messages and encryption keys stay, and media downloads again when you open it.</p><button className="settings-command" type="button" onClick={() => onTabChange('Storage')}>Open storage</button></article>
                 <article className="help-item"><h4>Local AI</h4><p>Pinger connects to a llama-server you run yourself. Set its address in AI settings. AI replies are drafts and are never sent automatically.</p></article>
-                <article className="help-item"><h4>Chat networks</h4><p>WhatsApp, Telegram and other networks appear when your homeserver has bridges set up. Pinger cannot create bridge logins.</p></article>
+                <article className="help-item"><h4>Chat networks</h4><p>WhatsApp, Telegram, Signal and iMessage chats are managed through bridges on your homeserver. For Beeper, create your account and connect new networks in the official Beeper app first. Pinger cannot register Beeper accounts or create bridge logins.</p></article>
                 <article className="help-item"><h4>Encryption and room keys</h4><p>Export room keys from Security and protect the file with a passphrase. Keep the backup somewhere safe.</p></article>
                 <a className="settings-link" href="https://github.com/cataWalter/pinger/issues" target="_blank" rel="noreferrer">Report an issue</a>
               </div>

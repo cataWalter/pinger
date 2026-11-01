@@ -1,15 +1,17 @@
 import { Fragment, lazy, memo, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
-import { ArrowUpRight, Bot, Check, Copy, FileText, MessageSquare, Sparkles, Star, X, Download, ZoomIn, ZoomOut } from 'lucide-react'
+import { ArrowUpRight, Bot, Check, Copy, FileText, MessageSquare, MessagesSquare, Sparkles, Star, X, Download, ZoomIn, ZoomOut } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
-import { type AIMessage, type ChatExportResult, type Member, type Message, type Room, type Snapshot, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
+import { type AIMessage, type ChatExportResult, type Invite, type Member, type Message, type Room, type Snapshot, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
 import { fuzzyScore } from './fuzzy'
 import { AI_ACTION_SHORTCUTS, languageName, type AIFeatureID } from './aiSettings'
 import { matrixMediaURL, matrixMXCMediaURL } from './ChatMediaRenderer'
+import { firstPreviewableURL, LinkPreviewCard } from './LinkPreview'
 import { VoiceMessagePlayer } from './VoiceMessagePlayer'
 import { DialogSurface } from './DialogSurface'
 import { isLocalAIRoomID, type LocalAIChatIcon } from './localAIChats'
+import type { ThreadSummary } from './threads'
 
 export const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
 
@@ -17,6 +19,7 @@ export type MatrixUpdate = {
   accountId?: string
   notificationPreferences?: PreferenceValues
   rooms: Room[]
+  invites?: Invite[] | null
   slidingSyncListCounts?: Record<string, number> | null
   timelineChangedRoomId: string[] | null
   typingUsers?: Record<string, string[]> | null
@@ -107,6 +110,7 @@ export type TimelineMessageActions = {
   onSendReaction: (message: Message, emoji: string) => void
   onRemoveReaction: (message: Message, emoji: string) => void
   onStartDirectChat: (message: Message) => void
+  onOpenThread: (rootID: string) => void
 }
 export type RoomButtonActions = {
   onSelect: (room: Room, index: number, event: React.MouseEvent<HTMLButtonElement>) => void
@@ -373,6 +377,13 @@ export function preferenceNumber(preferences: PreferenceValues, key: string, fal
   return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback
 }
 
+// Previews ask the homeserver to fetch the link, so encrypted rooms need a separate opt-in.
+export function linkPreviewsEnabled(preferences: PreferenceValues, message: Message) {
+  if (message.mediaUri || message.redacted || message.decryptionError || message.sending || message.sendError) return false
+  if (!preferenceBoolean(preferences, 'messages.url_previews', true)) return false
+  return !message.encrypted || preferenceBoolean(preferences, 'messages.url_previews_encrypted')
+}
+
 export function parseTimeSuggestionMinutes(value: string) {
   const parts = value.split(',').map((part) => part.trim())
   if (parts.length < 1 || parts.length > 6 || parts.some((part) => !/^\d+$/.test(part))) return []
@@ -455,6 +466,20 @@ export function timelineMessageID(message: Message) {
 
 export function isOwnMessage(message: Message, currentUserID: string) {
   return message.own || Boolean(message.sender && message.sender === currentUserID)
+}
+
+// firstUnreadMessageID returns the oldest of the newest `unread` messages from others,
+// or the oldest loaded one when more messages are unread than loaded.
+export function firstUnreadMessageID(timeline: Message[], unread: number, currentUserID: string) {
+  let remaining = unread
+  let firstID = ''
+  for (let index = timeline.length - 1; index >= 0 && remaining > 0; index--) {
+    const message = timeline[index]
+    if (!message.id || isOwnMessage(message, currentUserID)) continue
+    firstID = message.id
+    remaining--
+  }
+  return firstID
 }
 
 // incomingSinceOwnMessage returns the text messages from others that follow the user's latest loaded message.
@@ -544,6 +569,9 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   actionsRef,
   scrollParentRef,
   listHandleRef,
+  unreadMarkerID = '',
+  unreadDividerRef,
+  threadSummaries,
 }: {
   messages: Message[]
   header?: ReactNode
@@ -561,6 +589,9 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   actionsRef: { current: TimelineMessageActions }
   scrollParentRef?: RefObject<HTMLDivElement | null>
   listHandleRef?: RefObject<TimelineListHandle | null>
+  unreadMarkerID?: string
+  unreadDividerRef?: (element: HTMLDivElement | null) => void
+  threadSummaries?: Map<string, ThreadSummary>
 }) {
   const visibleMessages = hideDeleted ? messages.filter((message) => !message.redacted) : messages
   const scope = `${accountID}:${selectedRoomID}`
@@ -660,88 +691,101 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   }, [messages, accountID, selectedRoomID, animateMessages, scrollParentRef])
 
   function renderMessage(index: number, message: Message) {
-      const ownMessage = isOwnMessage(message, currentUserID)
-      const messageID = timelineMessageID(message)
-      const translatedAnalysis = !ownMessage ? chatTranslation?.analyses[messageID] : undefined
-      const translationPending = Boolean(!ownMessage && chatTranslation?.busy && chatTranslation.targetMessageIDs.includes(messageID))
-      const showTranslation = Boolean(translatedAnalysis || translationPending)
-      const isAudioAttachment = Boolean(message.mediaUri && (message.mediaMime.startsWith('audio/') || message.mediaType === 'm.audio'))
-      const isFileAttachment = Boolean(message.mediaUri && message.mediaType === 'm.file' && !message.redacted && !message.decryptionError)
-      const isImageOrVideoAttachment = !isAudioAttachment && (
-        message.mediaMime.startsWith('image/') || message.mediaMime.startsWith('video/') || message.mediaType === 'm.image' || message.mediaType === 'm.video'
-      )
-      const hideImagesAndVideos = preferenceBoolean(preferences, 'appearance.hide_images_and_videos')
-      const previous = index > 0 ? visibleMessages[index - 1] : null
-      const grouped = Boolean(previous && !previous.redacted && previous.sender === message.sender && message.timestamp - previous.timestamp < 5 * 60_000 && isSameDay(previous.timestamp, message.timestamp))
-      const next = index + 1 < visibleMessages.length ? visibleMessages[index + 1] : null
-      const nextIsGrouped = Boolean(next && !message.redacted && !next.redacted && next.sender === message.sender && next.timestamp - message.timestamp < 5 * 60_000 && isSameDay(message.timestamp, next.timestamp))
-      const lastInGroup = !nextIsGrouped
-      const showDayDivider = !previous || !isSameDay(previous.timestamp, message.timestamp)
-      const displayBody = displayMessageBody(message)
-      const showsImagePreview = Boolean(message.mediaUri && !message.redacted && !message.decryptionError && !hideImagesAndVideos && (message.mediaMime.startsWith('image/') || message.mediaType === 'm.image'))
-      const hideFileNameBody = showsImagePreview && imageFileNameBodyPattern.test(displayBody.trim())
-      const isContextTarget = (message.id || message.transactionId) === contextMessageID
-      const showSender = groupChat && !ownMessage && !grouped
-      const senderName = message.senderName || message.sender
-      return (
-        <Fragment key={message.id || message.transactionId}>
-          {showDayDivider && message.timestamp > 0 && <div className="day-divider" aria-label={formatDayLabel(message.timestamp)}><span>{formatDayLabel(message.timestamp)}</span></div>}
-          <article ref={index === 0 ? firstRowRef : undefined} className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''} ${showTranslation ? 'has-translation' : ''} ${isContextTarget ? 'is-context-target' : ''} ${groupChat && !ownMessage ? 'is-group-incoming' : ''}`} data-event-id={messageID} tabIndex={messageID ? -1 : undefined} onAnimationEnd={(event) => { if (event.target === event.currentTarget) delete event.currentTarget.dataset.liveMessage }} onDoubleClick={() => actionsRef.current.onDoubleClick(message)} onContextMenu={(event) => {
-            if (!selectedRoomID) return
-            event.preventDefault()
-            actionsRef.current.onOpenContextMenu(message, event.clientX, event.clientY)
-          }} onKeyDown={(event) => {
-            if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
-            event.preventDefault()
-            const bounds = event.currentTarget.getBoundingClientRect()
-            actionsRef.current.onOpenContextMenu(message, bounds.left + 8, bounds.bottom)
-          }}>
-            {showSender && <Avatar uri={message.avatar} label={senderName} className="message-sender-avatar" deferLoad />}
-            <div className="message-body-wrap">
-              {!grouped && <div className="message-meta">
-                {showSender && <button className="message-sender-name" type="button" title={`Start a direct chat with ${senderName}`} aria-label={`Start a direct chat with ${senderName}`} onClick={() => actionsRef.current.onStartDirectChat(message)}>{senderName}</button>}
-                {message.timestamp > 0 && preferenceBoolean(preferences, 'appearance.show_timestamps', true) && <time>{formatTimestamp(message.timestamp)}</time>}
-                {message.edited && <span className="edited-mark" title={message.editHistory?.length ? message.editHistory.join('\n') : 'Edited message'}>edited{(message.editHistory?.length ?? 0) > 0 && ` (${message.editHistory?.length} prior)`}</span>}
-              </div>}
-              {message.replyToEventId && <button className="reply-preview" type="button" title="Jump to quoted message" onClick={() => actionsRef.current.onFocusMessage(message.replyToEventId)}>
-                <span className="reply-preview-sender">{message.replyToSender || 'Reply'}</span>
-                <span className="reply-preview-text">{message.replyToPreview || 'Original message unavailable'}</span>
-              </button>}
-              {!isAudioAttachment && !isFileAttachment && !hideFileNameBody && <Suspense fallback={<div className="message-body">{displayBody}</div>}>
-                <MarkdownMessage body={displayBody} />
-              </Suspense>}
-              {message.mediaUri && !message.redacted && !message.decryptionError && !(hideImagesAndVideos && isImageOrVideoAttachment) && (
-                <MessageMedia
-                  roomID={selectedRoomID}
-                  message={message}
-                  autoPlayNext={autoPlayNextMessageId === message.id}
-                  aiEnabled={Boolean(preferenceString(preferences, 'ai.endpoint', '').trim())}
-                  canUseDraft={canUseTranscriptAsDraft}
-                  onUseDraft={(text) => actionsRef.current.onUseTranscript(text)}
-                  onAudioEnded={() => actionsRef.current.onAudioEnded(message.id)}
-                />
-              )}
-              {ownMessage && message.seenAt > 0 && <time className="message-seen-status" dateTime={new Date(message.seenAt).toISOString()}>
-                Seen at {formatTime(message.seenAt, preferenceBoolean(preferences, 'appearance.time_24_hour'))}
-              </time>}
-              {Object.keys(message.reactions ?? {}).length > 0 && <div className="message-reactions">
-                {Object.entries(message.reactions ?? {}).map(([emoji, count]) => (
-                  <button key={emoji} type="button" className={`reaction-chip ${message.reacted?.[emoji] ? 'is-reacted' : ''}`} aria-label={`${message.reacted?.[emoji] ? 'Remove' : 'Add'} ${emoji} reaction`} title={`${message.reacted?.[emoji] ? 'Remove' : 'Add'} ${emoji} reaction`} aria-pressed={message.reacted?.[emoji] ?? false} onClick={() => message.reacted?.[emoji] ? actionsRef.current.onRemoveReaction(message, emoji) : actionsRef.current.onSendReaction(message, emoji)}>{emoji} {typeof count === 'number' ? count : 0}</button>
-                ))}
-              </div>}
-              {message.sendError && message.sendError !== 'not sent' && <span className="message-error">{message.sendError}</span>}
-              {message.sending && !message.sendError && <span className="message-pending">Sending…</span>}
-              {reactingMessageID === message.id && <div className="reaction-picker" aria-label="Quick reactions">
-                {quickReactionOptions(preferences).map((emoji) => <button key={emoji} type="button" aria-label={`React with ${emoji}`} title={`React with ${emoji}`} onClick={() => actionsRef.current.onSendReaction(message, emoji)}>{emoji}</button>)}
-              </div>}
-            </div>
-            {showTranslation && <aside className="message-translation" role="note" aria-label={`${chatTranslation?.targetLanguage || 'Translation'} translation`} aria-live="polite">
-              <span className="message-translation-label">{chatTranslation?.targetLanguage || 'Translation'}</span>
-              {translatedAnalysis ? <LanguageTutorAnalysisDetails analysis={translatedAnalysis} originalText={message.body} /> : <p>Translating…</p>}
-            </aside>}
-          </article>
-        </Fragment>
-      )
+    const ownMessage = isOwnMessage(message, currentUserID)
+    const messageID = timelineMessageID(message)
+    const translatedAnalysis = !ownMessage ? chatTranslation?.analyses[messageID] : undefined
+    const translationPending = Boolean(!ownMessage && chatTranslation?.busy && chatTranslation.targetMessageIDs.includes(messageID))
+    const showTranslation = Boolean(translatedAnalysis || translationPending)
+    const isAudioAttachment = Boolean(message.mediaUri && (message.mediaMime.startsWith('audio/') || message.mediaType === 'm.audio'))
+    const isFileAttachment = Boolean(message.mediaUri && message.mediaType === 'm.file' && !message.redacted && !message.decryptionError)
+    const isImageOrVideoAttachment = !isAudioAttachment && (
+      message.mediaMime.startsWith('image/') || message.mediaMime.startsWith('video/') || message.mediaType === 'm.image' || message.mediaType === 'm.video'
+    )
+    const hideImagesAndVideos = preferenceBoolean(preferences, 'appearance.hide_images_and_videos')
+    const previous = index > 0 ? visibleMessages[index - 1] : null
+    const grouped = Boolean(previous && !previous.redacted && previous.sender === message.sender && message.timestamp - previous.timestamp < 5 * 60_000 && isSameDay(previous.timestamp, message.timestamp))
+    const next = index + 1 < visibleMessages.length ? visibleMessages[index + 1] : null
+    const nextIsGrouped = Boolean(next && !message.redacted && !next.redacted && next.sender === message.sender && next.timestamp - message.timestamp < 5 * 60_000 && isSameDay(message.timestamp, next.timestamp))
+    const lastInGroup = !nextIsGrouped
+    const showDayDivider = !previous || !isSameDay(previous.timestamp, message.timestamp)
+    const displayBody = displayMessageBody(message)
+    const showsImagePreview = Boolean(message.mediaUri && !message.redacted && !message.decryptionError && !hideImagesAndVideos && (message.mediaMime.startsWith('image/') || message.mediaType === 'm.image'))
+    const hideFileNameBody = showsImagePreview && imageFileNameBodyPattern.test(displayBody.trim())
+    const isContextTarget = (message.id || message.transactionId) === contextMessageID
+    const showSender = groupChat && !ownMessage && !grouped
+    const senderName = message.senderName || message.sender
+    const previewURL = linkPreviewsEnabled(preferences, message) ? firstPreviewableURL(displayBody) : ''
+    const thread = message.id ? threadSummaries?.get(message.id) : undefined
+    return (
+      <Fragment key={message.id || message.transactionId}>
+        {showDayDivider && message.timestamp > 0 && <div className="day-divider" aria-label={formatDayLabel(message.timestamp)}><span>{formatDayLabel(message.timestamp)}</span></div>}
+        {unreadMarkerID && messageID === unreadMarkerID && <div ref={unreadDividerRef} className="unread-divider" role="separator" aria-label="New messages"><span>New messages</span></div>}
+        <article ref={index === 0 ? firstRowRef : undefined} className={`message-row ${ownMessage ? 'is-own' : ''} ${grouped ? 'is-grouped' : 'is-first'} ${lastInGroup ? 'is-last' : ''} ${ownMessage && lastInGroup ? 'is-tail' : ''} ${showTranslation ? 'has-translation' : ''} ${isContextTarget ? 'is-context-target' : ''} ${groupChat && !ownMessage ? 'is-group-incoming' : ''}`} data-event-id={messageID} tabIndex={messageID ? -1 : undefined} onAnimationEnd={(event) => { if (event.target === event.currentTarget) delete event.currentTarget.dataset.liveMessage }} onDoubleClick={() => actionsRef.current.onDoubleClick(message)} onContextMenu={(event) => {
+          if (!selectedRoomID) return
+          event.preventDefault()
+          actionsRef.current.onOpenContextMenu(message, event.clientX, event.clientY)
+        }} onKeyDown={(event) => {
+          if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
+          event.preventDefault()
+          const bounds = event.currentTarget.getBoundingClientRect()
+          actionsRef.current.onOpenContextMenu(message, bounds.left + 8, bounds.bottom)
+        }}>
+          {showSender && <Avatar uri={message.avatar} label={senderName} className="message-sender-avatar" deferLoad />}
+          <div className="message-body-wrap">
+            {!grouped && <div className="message-meta">
+              {showSender && <button className="message-sender-name" type="button" title={`Start a direct chat with ${senderName}`} aria-label={`Start a direct chat with ${senderName}`} onClick={() => actionsRef.current.onStartDirectChat(message)}>{senderName}</button>}
+              {message.timestamp > 0 && preferenceBoolean(preferences, 'appearance.show_timestamps', true) && <time>{formatTimestamp(message.timestamp)}</time>}
+              {message.edited && <span className="edited-mark" title={message.editHistory?.length ? message.editHistory.join('\n') : 'Edited message'}>edited{(message.editHistory?.length ?? 0) > 0 && ` (${message.editHistory?.length} prior)`}</span>}
+            </div>}
+            {message.replyToEventId && <button className="reply-preview" type="button" title="Jump to quoted message" onClick={() => actionsRef.current.onFocusMessage(message.replyToEventId)}>
+              <span className="reply-preview-sender">{message.replyToSender || 'Reply'}</span>
+              <span className="reply-preview-text">{message.replyToPreview || 'Original message unavailable'}</span>
+            </button>}
+            {!isAudioAttachment && !isFileAttachment && !hideFileNameBody && <Suspense fallback={<div className="message-body">{displayBody}</div>}>
+              <MarkdownMessage body={displayBody} />
+            </Suspense>}
+            {previewURL && <LinkPreviewCard url={previewURL} showImage={!hideImagesAndVideos} />}
+            {message.mediaUri && !message.redacted && !message.decryptionError && !(hideImagesAndVideos && isImageOrVideoAttachment) && (
+              <MessageMedia
+                roomID={selectedRoomID}
+                message={message}
+                autoPlayNext={autoPlayNextMessageId === message.id}
+                aiEnabled={Boolean(preferenceString(preferences, 'ai.endpoint', '').trim())}
+                canUseDraft={canUseTranscriptAsDraft}
+                onUseDraft={(text) => actionsRef.current.onUseTranscript(text)}
+                onAudioEnded={() => actionsRef.current.onAudioEnded(message.id)}
+              />
+            )}
+            {ownMessage && message.seenAt > 0 && <time className="message-seen-status" dateTime={new Date(message.seenAt).toISOString()}>
+              Seen at {formatTime(message.seenAt, preferenceBoolean(preferences, 'appearance.time_24_hour'))}
+            </time>}
+            {Object.keys(message.reactions ?? {}).length > 0 && <div className="message-reactions">
+              {Object.entries(message.reactions ?? {}).map(([emoji, count]) => (
+                <button key={emoji} type="button" className={`reaction-chip ${message.reacted?.[emoji] ? 'is-reacted' : ''}`} aria-label={`${message.reacted?.[emoji] ? 'Remove' : 'Add'} ${emoji} reaction`} title={`${message.reacted?.[emoji] ? 'Remove' : 'Add'} ${emoji} reaction`} aria-pressed={message.reacted?.[emoji] ?? false} onClick={() => message.reacted?.[emoji] ? actionsRef.current.onRemoveReaction(message, emoji) : actionsRef.current.onSendReaction(message, emoji)}>{emoji} {typeof count === 'number' ? count : 0}</button>
+              ))}
+            </div>}
+            {thread && <button className="thread-summary" type="button" aria-label={`Open thread, ${thread.count === 1 ? '1 reply' : `${thread.count} replies`}`} onClick={() => actionsRef.current.onOpenThread(message.id)}>
+              <MessagesSquare size={13} aria-hidden="true" />
+              <span className="thread-summary-count">{thread.count === 1 ? '1 reply' : `${thread.count} replies`}</span>
+              <span className="thread-summary-latest">{thread.latest.senderName || thread.latest.sender}: {displayMessageBody(thread.latest)}</span>
+            </button>}
+            {message.threadRootId && <button className="thread-summary is-reply" type="button" onClick={() => actionsRef.current.onOpenThread(message.threadRootId)}>
+              <MessagesSquare size={13} aria-hidden="true" />
+              <span className="thread-summary-count">View thread</span>
+            </button>}
+            {message.sendError && message.sendError !== 'not sent' && <span className="message-error">{message.sendError}</span>}
+            {message.sending && !message.sendError && <span className="message-pending">Sending…</span>}
+            {reactingMessageID === message.id && <div className="reaction-picker" aria-label="Quick reactions">
+              {quickReactionOptions(preferences).map((emoji) => <button key={emoji} type="button" aria-label={`React with ${emoji}`} title={`React with ${emoji}`} onClick={() => actionsRef.current.onSendReaction(message, emoji)}>{emoji}</button>)}
+            </div>}
+          </div>
+          {showTranslation && <aside className="message-translation" role="note" aria-label={`${chatTranslation?.targetLanguage || 'Translation'} translation`} aria-live="polite">
+            <span className="message-translation-label">{chatTranslation?.targetLanguage || 'Translation'}</span>
+            {translatedAnalysis ? <LanguageTutorAnalysisDetails analysis={translatedAnalysis} originalText={message.body} /> : <p>Translating…</p>}
+          </aside>}
+        </article>
+      </Fragment>
+    )
   }
 
   if (virtualized) {

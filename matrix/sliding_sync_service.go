@@ -16,11 +16,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/id"
 )
 
-const slidingSyncResponseLimit = 32 << 20
+const (
+	slidingSyncResponseLimit = 32 << 20
+	slidingSyncLogBodyLimit  = 4 << 10
+)
 
 var errSlidingSyncRequestChanged = errors.New("Sliding Sync request superseded by viewport change")
 
@@ -51,6 +55,7 @@ type SlidingSyncManager struct {
 	endpoint string
 	connID   string
 	config   SlidingSyncConfig
+	log      zerolog.Logger
 
 	attachMu sync.Mutex
 	attached bool
@@ -100,6 +105,7 @@ func NewSlidingSyncManager(homeserverURL *url.URL, config SlidingSyncConfig) (*S
 		endpoint:            endpoint.String(),
 		connID:              newSlidingSyncConnID(),
 		config:              config,
+		log:                 zerolog.Nop(),
 		activeSubscriptions: make(map[id.RoomID]SlidingSyncRoomSubscription),
 		priorityRooms:       make(map[id.RoomID]struct{}),
 	}, nil
@@ -129,6 +135,7 @@ func (m *SlidingSyncManager) Attach(client *mautrix.Client) error {
 	if base == nil {
 		base = http.DefaultTransport
 	}
+	m.log = client.Log.With().Str("sync_transport", "sliding").Logger()
 	client.Client.Transport = &slidingSyncTransport{manager: m, base: base}
 	client.Store = slidingSyncStore{inner: client.Store}
 	client.Syncer = slidingSyncSyncer{inner: client.Syncer, manager: m}
@@ -312,16 +319,31 @@ func (m *SlidingSyncManager) roundTrip(request *http.Request, base http.RoundTri
 			if context.Cause(requestContext) == errSlidingSyncRequestChanged {
 				return m.emptySyncResponse(request, pos), nil
 			}
+			if !errors.Is(err, context.Canceled) {
+				m.log.Error().Err(err).Str("endpoint", slidingRequest.URL.Path).Msg("Sliding Sync transport failed")
+			}
 			return nil, err
-		}
-		if response.StatusCode == http.StatusNotFound {
-			_ = response.Body.Close()
-			m.slidingUnsupported.Store(true)
-			return m.legacySync(request, base)
 		}
 		if response.StatusCode >= http.StatusBadRequest {
 			body, readErr := readSlidingSyncBody(response.Body)
 			_ = response.Body.Close()
+			unsupported := unsupportedSlidingSyncEndpoint(response.StatusCode, body)
+			logLevel := zerolog.ErrorLevel
+			if unsupported {
+				logLevel = zerolog.WarnLevel
+			}
+			m.log.WithLevel(logLevel).
+				Int("status_code", response.StatusCode).
+				Str("endpoint", slidingRequest.URL.Path).
+				Str("response_body", string(body[:min(len(body), slidingSyncLogBodyLimit)])).
+				Bool("response_body_truncated", len(body) > slidingSyncLogBodyLimit).
+				Bool("legacy_fallback", unsupported).
+				Err(readErr).
+				Msg("Sliding Sync endpoint rejected sync request")
+			if unsupported {
+				m.slidingUnsupported.Store(true)
+				return m.legacySync(request, base)
+			}
 			if readErr != nil {
 				return slidingSyncErrorResponse(request, http.StatusBadGateway, readErr.Error()), nil
 			}
@@ -417,6 +439,23 @@ func readSlidingSyncBody(body io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("Sliding Sync response exceeds %d bytes", slidingSyncResponseLimit)
 	}
 	return data, nil
+}
+
+func unsupportedSlidingSyncEndpoint(statusCode int, body []byte) bool {
+	if statusCode == http.StatusNotFound || statusCode == http.StatusMethodNotAllowed || statusCode == http.StatusNotImplemented {
+		return true
+	}
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	var apiError struct {
+		ErrCode string `json:"errcode"`
+	}
+	if json.Unmarshal(body, &apiError) != nil {
+		return false
+	}
+	code := strings.ToUpper(apiError.ErrCode)
+	return code == "M_UNRECOGNIZED" || code == "M_NOT_FOUND"
 }
 
 func invalidSlidingSyncPosition(statusCode int, body []byte) bool {

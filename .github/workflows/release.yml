@@ -6,9 +6,14 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish release and update distribution repositories.
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -27,6 +32,7 @@ jobs:
   build:
     name: Build macOS universal DMGs
     runs-on: macos-latest
+    timeout-minutes: 30
     needs: [test]
     env:
       # Matches the deployment target in build/darwin/Taskfile.yml and the
@@ -38,33 +44,16 @@ jobs:
       CGO_LDFLAGS: "-mmacosx-version-min=12.0 -Wl,-no_warn_duplicate_libraries"
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          go-version-file: go.mod
-          cache: true
+          persist-credentials: false
 
-      - name: Generate Wails bindings
-        shell: bash
-        run: |
-          GOBIN="${RUNNER_TEMP}/wails-bin" go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
-          "${RUNNER_TEMP}/wails-bin/wails3" generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
 
       - name: Build frontend
         working-directory: frontend
-        env:
-          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3
         run: |
-          npm ci
           npm run icons
           npm run icons:check
           npm run build
@@ -114,9 +103,16 @@ jobs:
         run: |
           set -euo pipefail
           dmg="dist/Pinger-${VERSION}-macos-universal.dmg"
-          work="$(mktemp -d)"
-          rw_dmg="$(mktemp -d)/rw.dmg"
-          mount_point="$(mktemp -d)"
+          workspace="$(mktemp -d)"
+          work="$workspace/source"
+          rw_dmg="$workspace/rw.dmg"
+          mount_point="$workspace/mount"
+          mkdir -p "$work" "$mount_point"
+          cleanup() {
+            hdiutil detach "$mount_point" -quiet >/dev/null 2>&1 || true
+            rm -rf "$workspace"
+          }
+          trap cleanup EXIT
 
           # Signed app, /Applications symlink for drag-install, and the hidden volume icon.
           cp -R "dist/Pinger.app" "$work/"
@@ -129,7 +125,6 @@ jobs:
           SetFile -a C "$mount_point"
           hdiutil detach "$mount_point" -quiet
           hdiutil convert "$rw_dmg" -format UDZO -imagekey zlib-level=9 -o "$dmg"
-          rm -rf "$work" "$rw_dmg"
 
           hdiutil verify "$dmg"
           hdiutil attach "$dmg" -readonly -noautoopen -nobrowse -mountpoint "$mount_point" >/dev/null
@@ -139,7 +134,7 @@ jobs:
           ls -lh dist/*.dmg
 
       - name: Upload platform artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: macos-dmgs
           path: dist/*.dmg
@@ -149,45 +144,20 @@ jobs:
   build-windows:
     name: Build Windows x64 ZIPs
     runs-on: windows-latest
+    timeout-minutes: 25
     needs: [test]
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          go-version-file: go.mod
-          cache: true
+          persist-credentials: false
 
-      - name: Set up MinGW-w64
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: mingw-w64-ucrt-x86_64-gcc
-          path-type: inherit
-
-      - name: Generate Wails bindings
-        shell: pwsh
-        run: |
-          $env:GOBIN = Join-Path $env:RUNNER_TEMP "wails-bin"
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
-          & (Join-Path $env:GOBIN "wails3.exe") generate bindings -f "-tags sqlite_fts5,goolm" -clean=true -ts -i
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
 
       - name: Build frontend
         working-directory: frontend
-        env:
-          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3.exe
         run: |
-          npm ci
           npm run icons
           npm run icons:check
           npm run build
@@ -224,8 +194,16 @@ jobs:
         run: |
           $ldflags = "-s -w -H windowsgui -X main.Version=$env:VERSION -X main.Commit=$env:GITHUB_SHA -X main.BuildDate=$env:BUILD_DATE"
           go build -tags "sqlite_fts5 goolm" -trimpath -buildvcs=false "-ldflags=$ldflags" -o dist/pinger.exe .
+          if ($LASTEXITCODE -ne 0) { throw "Windows build failed" }
           Remove-Item rsrc_windows_amd64.syso
           Compress-Archive -LiteralPath dist/pinger.exe -DestinationPath "dist/Pinger-$($env:VERSION)-windows-amd64.zip"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Get-ChildItem dist/*.zip).FullName)
+          try {
+            if ($zip.Entries.Count -ne 1 -or $zip.Entries[0].FullName -ne "pinger.exe") {
+              throw "Windows package must contain exactly pinger.exe"
+            }
+          } finally { $zip.Dispose() }
 
       - name: Verify Windows icon is embedded
         shell: pwsh
@@ -236,7 +214,7 @@ jobs:
           Write-Host "Embedded icon size: $($icon.Width)x$($icon.Height)"
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: windows-zips
           path: dist/*.zip
@@ -246,42 +224,26 @@ jobs:
   build-linux:
     name: Build Linux x64 deb and AppImage
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     needs: [test]
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \
+          sudo -n apt-get update -y
+          sudo -n apt-get install -y --no-install-recommends \
             libgtk-4-dev libwebkitgtk-6.0-dev libsqlite3-dev imagemagick libfuse2
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Generate Wails bindings
-        shell: bash
-        run: |
-          GOBIN="${RUNNER_TEMP}/wails-bin" go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
-          "${RUNNER_TEMP}/wails-bin/wails3" generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
 
       - name: Build frontend
         working-directory: frontend
-        env:
-          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3
         run: |
-          npm ci
           npm run icons
           npm run icons:check
           npm run build
@@ -377,7 +339,7 @@ jobs:
             "dist/Pinger-${VERSION}-linux-amd64.deb"
           # Fail the build if the package does not carry the application icon.
           dpkg-deb -c "dist/Pinger-${VERSION}-linux-amd64.deb" \
-            | grep -q 'usr/share/icons/hicolor/256x256/apps/pinger.png'
+            | grep 'usr/share/icons/hicolor/256x256/apps/pinger.png'
           ls -lh dist/*.deb
 
       - name: Build AppImage
@@ -445,10 +407,11 @@ jobs:
           chmod +x dist/appimagetool
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 dist/appimagetool "$appdir" \
             "dist/Pinger-${VERSION}-linux-amd64.AppImage"
+          APPIMAGE_EXTRACT_AND_RUN=1 "dist/Pinger-${VERSION}-linux-amd64.AppImage" --appimage-version
           ls -lh dist/*.AppImage
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: linux-packages
           path: |
@@ -460,12 +423,27 @@ jobs:
   publish:
     name: Publish GitHub release
     needs: [build, build-windows, build-linux]
-    runs-on: macos-latest
+    if: github.event_name != 'workflow_dispatch' || inputs.publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      prerelease: ${{ github.ref_type != 'tag' }}
     steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+
       - name: Download platform artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           path: dist
           merge-multiple: true
@@ -482,17 +460,19 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Generate SHA-256 checksums
-        working-directory: dist
-        run: shasum -a 256 ./*.dmg ./*.zip ./*.deb ./*.AppImage > checksums.txt
+        run: |
+          node scripts/release-assets.mjs checksums dist
+          node scripts/release-assets.mjs verify dist
 
       - name: Publish release assets
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           target_commitish: ${{ github.sha }}
           prerelease: ${{ github.ref_type != 'tag' }}
           make_latest: ${{ github.ref_type == 'tag' }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             dist/*.dmg
             dist/*.zip
@@ -506,4 +486,25 @@ jobs:
     uses: ./.github/workflows/update-tap.yml
     with:
       tag: ${{ needs.publish.outputs.tag }}
+      dry_run: false
+    secrets: inherit
+
+  update-apt:
+    name: Update stable APT repository
+    needs: [publish]
+    if: needs.publish.outputs.prerelease == 'false'
+    uses: ./.github/workflows/update-deb-repo.yml
+    with:
+      tag: ${{ needs.publish.outputs.tag }}
+      dry_run: false
+    secrets: inherit
+
+  update-winget:
+    name: Submit stable WinGet package
+    needs: [publish]
+    if: needs.publish.outputs.prerelease == 'false'
+    uses: ./.github/workflows/winget-submission.yml
+    with:
+      tag: ${{ needs.publish.outputs.tag }}
+      dry_run: false
     secrets: inherit

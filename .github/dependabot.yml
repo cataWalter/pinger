@@ -4,25 +4,58 @@ updates:
     directory: /
     schedule:
       interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
     ignore:
       - dependency-name: github.com/wailsapp/wails/v3
     groups:
-      go-patches:
+      go-compatible:
         patterns: ["*"]
-        update-types: [patch]
+        update-types: [minor, patch]
+      go-security:
+        applies-to: security-updates
+        patterns: ["*"]
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
     ignore:
       - dependency-name: "@wailsio/runtime"
     groups:
       react:
         patterns: [react, react-dom, "@types/react", "@types/react-dom"]
-      frontend-patches:
+        update-types: [minor, patch]
+      frontend-compatible:
         patterns: ["*"]
-        update-types: [patch]
+        exclude-patterns: [react, react-dom, "@types/react", "@types/react-dom"]
+        update-types: [minor, patch]
+      frontend-security:
+        applies-to: security-updates
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+    groups:
+      actions-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]

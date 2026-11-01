@@ -3,71 +3,164 @@ name: Update Debian APT Repository
 on:
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to index.
+        required: true
+        type: string
+      dry_run:
+        description: Validate packages and signatures without publishing.
+        type: boolean
+        default: true
+    secrets:
+      TAP_GITHUB_TOKEN:
+        required: false
+      GPG_PRIVATE_KEY:
+        required: false
+      GPG_PASSPHRASE:
+        required: false
   workflow_dispatch:
     inputs:
       tag:
         description: 'Release Tag (e.g. v0.1.8)'
         required: true
+        type: string
+      dry_run:
+        description: Validate packages and signatures without publishing.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: debian-apt-repository
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   build-and-deploy-apt:
+    if: github.event_name != 'release' || (!github.event.release.draft && !github.event.release.prerelease)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      DRY_RUN: ${{ inputs.dry_run }}
     steps:
-      - name: Resolve Tag
-        id: vars
+      - name: Check publication credentials
+        if: '!inputs.dry_run'
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          else
-            TAG="${{ github.event.release.tag_name }}"
-          fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          test -n "$TAP_TOKEN" && test -n "$GPG_PRIVATE_KEY" || { echo "::error::TAP_GITHUB_TOKEN and GPG_PRIVATE_KEY are required for publication."; exit 1; }
 
-      - name: Download DEB Package
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+
+      - name: Download and verify DEB package
+        id: package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.vars.outputs.tag }}"
-          mkdir -p deb-incoming
-          gh release download "$TAG" --repo "${{ github.repository }}" --pattern "*.deb" --dir deb-incoming --clobber
-          ls -lh deb-incoming/
+          node scripts/release-assets.mjs download debian "$RUNNER_TEMP/debian"
 
       - name: Checkout deb-repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ${{ github.repository_owner }}/deb-repo
-          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          token: ${{ inputs.dry_run && github.token || secrets.TAP_GITHUB_TOKEN }}
           path: deb-repo
+          ref: main
+          fetch-depth: 0
 
-      - name: Import GPG Key
+      - name: Prepare signing key
+        id: signing
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          set -euo pipefail
+          export GNUPGHOME="$RUNNER_TEMP/apt-gnupg"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
+          if [[ "$DRY_RUN" == "true" ]]; then
+            gpg --batch --pinentry-mode loopback --passphrase '' --quick-generate-key 'Pinger validation <validation@localhost>' ed25519 sign 0
+            fingerprint="$(gpg --list-secret-keys --with-colons | awk -F: '$1 == "fpr" { print $10; exit }')"
+          else
+            printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+            fingerprint="$(gpg --show-keys --with-colons deb-repo/public.gpg | awk -F: '$1 == "fpr" { print $10; exit }')"
+            gpg --list-secret-keys "$fingerprint"
+          fi
+          test -n "$fingerprint"
+          gpg --batch --armor --export "$fingerprint" > "$RUNNER_TEMP/apt-public.gpg"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
 
       - name: Install APT Repository Tools
-        run: sudo apt-get update && sudo apt-get install -y apt-utils
+        run: sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends apt-utils
 
       - name: Update APT Pool and Packages
+        env:
+          DEB_VERSION: ${{ steps.package.outputs.version }}
+          SIGNING_KEY: ${{ steps.signing.outputs.fingerprint }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
+          set -euo pipefail
           cd deb-repo
           mkdir -p pool/main dists/stable/main/binary-amd64
 
-          # Copia il deb scaricato nel pool
-          cp ../deb-incoming/*.deb pool/main/
+          for package in "$RUNNER_TEMP/debian/"*.deb; do
+            test "$(dpkg-deb -f "$package" Package)" = pinger
+            test "$(dpkg-deb -f "$package" Architecture)" = amd64
+            test "$(dpkg-deb -f "$package" Version)" = "$DEB_VERSION"
+            cp "$package" pool/main/
+          done
 
           # Genera Packages e Packages.gz
           apt-ftparchive packages pool/main > dists/stable/main/binary-amd64/Packages
           gzip -9fk dists/stable/main/binary-amd64/Packages
+          grep -Fx "Version: $DEB_VERSION" dists/stable/main/binary-amd64/Packages
+          cmp dists/stable/main/binary-amd64/Packages <(gzip -dc dists/stable/main/binary-amd64/Packages.gz)
 
           # Genera il file Release
           cd dists/stable
+          rm -f Release Release.gpg InRelease
           apt-ftparchive release . > Release
 
           # Firma i metadati
-          gpg --batch --yes --armor --detach-sign --output Release.gpg Release
-          gpg --batch --yes --clearsign --output InRelease Release
+          printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --local-user "$SIGNING_KEY" --armor --detach-sign --output Release.gpg Release
+          printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --local-user "$SIGNING_KEY" --clearsign --output InRelease Release
+          gpg --batch --yes --dearmor --output "$RUNNER_TEMP/apt-keyring.gpg" "$RUNNER_TEMP/apt-public.gpg"
+          gpgv --keyring "$RUNNER_TEMP/apt-keyring.gpg" Release.gpg Release
+          gpgv --keyring "$RUNNER_TEMP/apt-keyring.gpg" InRelease
+          echo "Verified package metadata, compressed index, and both APT signatures for $TAG." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload validated APT metadata
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: apt-validation-${{ github.run_id }}
+          path: |
+            deb-repo/dists/
+            ${{ runner.temp }}/apt-public.gpg
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Commit and Push to deb-repo
+        if: '!inputs.dry_run'
         run: |
+          set -euo pipefail
           cd deb-repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -75,6 +168,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "Nessun cambiamento rilevato."
           else
-            git commit -m "Add deb package from ${{ steps.vars.outputs.tag }}"
-            git push origin main
+            git commit -m "Add deb package from $TAG"
+            git pull --rebase origin main
+            git push origin HEAD:main
           fi

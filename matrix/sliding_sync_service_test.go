@@ -1,6 +1,7 @@
 package matrix
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -92,64 +94,132 @@ func TestSlidingSyncTransportPostsRequestAndTranslatesResponse(t *testing.T) {
 }
 
 func TestSlidingSyncTransportFallsBackToStandardSync(t *testing.T) {
-	homeserver, err := url.Parse("https://matrix.example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	manager, err := NewSlidingSyncManager(homeserver, SlidingSyncConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var requestedPaths []string
-	base := slidingSyncRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		requestedPaths = append(requestedPaths, request.URL.Path)
-		if request.URL.Path == "/_matrix/client/unstable/org.matrix.msc3575/sync" {
-			return &http.Response{
-				StatusCode: http.StatusNotFound,
-				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader(`{"errcode":"M_UNRECOGNIZED","error":"Unrecognized request"}`)),
-				Request:    request,
-			}, nil
-		}
-		if request.URL.Path != "/_matrix/client/v3/sync" {
-			t.Fatalf("unexpected standard sync request path: %s", request.URL.Path)
-		}
-		if got := request.URL.Query().Get("since"); got != "stored-token" {
-			t.Fatalf("standard sync since = %q", got)
-		}
-		if got := request.URL.Query().Get("filter"); got != "real-filter" {
-			t.Fatalf("standard sync filter = %q", got)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(`{"next_batch":"legacy-token","rooms":{}}`)),
-			Request:    request,
-		}, nil
-	})
-	legacyRequest, err := http.NewRequest(http.MethodGet, "https://matrix.example/_matrix/client/v3/sync?since=stored-token&filter=real-filter", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	transport := &slidingSyncTransport{manager: manager, base: base}
-	for range 2 {
-		response, err := transport.RoundTrip(legacyRequest)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var syncResponse mautrix.RespSync
-		err = json.NewDecoder(response.Body).Decode(&syncResponse)
-		_ = response.Body.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if syncResponse.NextBatch != "legacy-token" {
-			t.Fatalf("standard sync next batch = %q", syncResponse.NextBatch)
-		}
-	}
-	want := []string{"/_matrix/client/unstable/org.matrix.msc3575/sync", "/_matrix/client/v3/sync", "/_matrix/client/v3/sync"}
-	if !slices.Equal(requestedPaths, want) {
-		t.Fatalf("requested paths = %#v, want %#v", requestedPaths, want)
+	for _, testCase := range []struct {
+		name       string
+		statusCode int
+		body       string
+		fallback   bool
+	}{
+		{"not found", http.StatusNotFound, `{"errcode":"M_UNRECOGNIZED","error":"Unrecognized request"}`, true},
+		{"method not allowed", http.StatusMethodNotAllowed, "Method Not Allowed", true},
+		{"not implemented", http.StatusNotImplemented, "", true},
+		{"unrecognized endpoint", http.StatusBadRequest, `{"errcode":"M_UNRECOGNIZED","error":"Unrecognized request"}`, true},
+		{"missing endpoint", http.StatusBadRequest, `{"errcode":"M_NOT_FOUND","error":"Unknown endpoint"}`, true},
+		{"invalid request", http.StatusBadRequest, `{"errcode":"M_INVALID_PARAM","error":"Invalid list"}`, false},
+		{"malformed error", http.StatusBadRequest, "not JSON", false},
+		{"invalid token", http.StatusUnauthorized, `{"errcode":"M_UNKNOWN_TOKEN","error":"Invalid token"}`, false},
+		{"forbidden", http.StatusForbidden, `{"errcode":"M_FORBIDDEN","error":"Forbidden"}`, false},
+		{"rate limited", http.StatusTooManyRequests, `{"errcode":"M_LIMIT_EXCEEDED","retry_after_ms":1000}`, false},
+		{"server failure", http.StatusInternalServerError, `{"errcode":"M_UNKNOWN","error":"Server error"}`, false},
+		{"large diagnostic", http.StatusInternalServerError, strings.Repeat("x", slidingSyncLogBodyLimit+100), false},
+	} {
+		t.Run(testCase.name, func(test *testing.T) {
+			homeserver, err := url.Parse("https://matrix.example")
+			if err != nil {
+				test.Fatal(err)
+			}
+			manager, err := NewSlidingSyncManager(homeserver, SlidingSyncConfig{})
+			if err != nil {
+				test.Fatal(err)
+			}
+			var requestedPaths []string
+			base := slidingSyncRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+				requestedPaths = append(requestedPaths, request.URL.Path)
+				if request.Header.Get("Authorization") != "Bearer test-token" {
+					test.Fatal("sync authorization was not preserved")
+				}
+				if request.URL.Path == "/_matrix/client/unstable/org.matrix.msc3575/sync" {
+					return &http.Response{
+						StatusCode: testCase.statusCode,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader(testCase.body)),
+						Request:    request,
+					}, nil
+				}
+				if request.URL.Path != "/_matrix/client/v3/sync" {
+					test.Fatalf("unexpected standard sync request path: %s", request.URL.Path)
+				}
+				if got := request.URL.Query().Get("since"); got != "stored-token" {
+					test.Fatalf("standard sync since = %q", got)
+				}
+				if got := request.URL.Query().Get("filter"); got != "real-filter" {
+					test.Fatalf("standard sync filter = %q", got)
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(`{"next_batch":"legacy-token","rooms":{}}`)),
+					Request:    request,
+				}, nil
+			})
+			legacyRequest, err := http.NewRequest(http.MethodGet, "https://matrix.example/_matrix/client/v3/sync?since=stored-token&filter=real-filter", nil)
+			if err != nil {
+				test.Fatal(err)
+			}
+			legacyRequest.Header.Set("Authorization", "Bearer test-token")
+			var logOutput bytes.Buffer
+			matrixClient := &mautrix.Client{Client: &http.Client{Transport: base}, Log: zerolog.New(&logOutput)}
+			if err = manager.Attach(matrixClient); err != nil {
+				test.Fatal(err)
+			}
+			transport := matrixClient.Client.Transport
+			for range 2 {
+				response, err := transport.RoundTrip(legacyRequest)
+				if err != nil {
+					test.Fatal(err)
+				}
+				body, err := io.ReadAll(response.Body)
+				_ = response.Body.Close()
+				if err != nil {
+					test.Fatal(err)
+				}
+				if testCase.fallback {
+					var syncResponse mautrix.RespSync
+					if err = json.Unmarshal(body, &syncResponse); err != nil {
+						test.Fatal(err)
+					}
+					if response.StatusCode != http.StatusOK || syncResponse.NextBatch != "legacy-token" {
+						test.Fatalf("standard sync status/batch = %d / %q", response.StatusCode, syncResponse.NextBatch)
+					}
+				} else if response.StatusCode != testCase.statusCode || string(body) != testCase.body {
+					test.Fatalf("sync error changed: %d %s", response.StatusCode, body)
+				}
+			}
+			want := []string{"/_matrix/client/unstable/org.matrix.msc3575/sync", "/_matrix/client/v3/sync", "/_matrix/client/v3/sync"}
+			if !testCase.fallback {
+				want = []string{"/_matrix/client/unstable/org.matrix.msc3575/sync", "/_matrix/client/unstable/org.matrix.msc3575/sync"}
+			}
+			if !slices.Equal(requestedPaths, want) || manager.slidingUnsupported.Load() != testCase.fallback {
+				test.Fatalf("requested paths = %#v, want %#v; unsupported = %v", requestedPaths, want, manager.slidingUnsupported.Load())
+			}
+			if strings.Contains(logOutput.String(), "test-token") {
+				test.Fatal("sync logs contain the authorization token")
+			}
+			logCount := 2
+			if testCase.fallback {
+				logCount = 1
+			}
+			decoder := json.NewDecoder(&logOutput)
+			for range logCount {
+				var entry struct {
+					StatusCode            int    `json:"status_code"`
+					Endpoint              string `json:"endpoint"`
+					ResponseBody          string `json:"response_body"`
+					ResponseBodyTruncated bool   `json:"response_body_truncated"`
+					LegacyFallback        bool   `json:"legacy_fallback"`
+				}
+				if err = decoder.Decode(&entry); err != nil {
+					test.Fatal(err)
+				}
+				expectedBody := testCase.body[:min(len(testCase.body), slidingSyncLogBodyLimit)]
+				if entry.StatusCode != testCase.statusCode || entry.Endpoint != "/_matrix/client/unstable/org.matrix.msc3575/sync" || entry.ResponseBody != expectedBody || entry.ResponseBodyTruncated != (len(testCase.body) > slidingSyncLogBodyLimit) || entry.LegacyFallback != testCase.fallback {
+					test.Fatalf("unexpected sync diagnostic: %#v", entry)
+				}
+			}
+			if err = decoder.Decode(&struct{}{}); err != io.EOF {
+				test.Fatalf("unexpected extra sync log: %v", err)
+			}
+		})
 	}
 }
 

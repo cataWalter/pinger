@@ -70,6 +70,22 @@ type LocalAIAgentDraft = {
   instructions: string
 }
 
+type LocalAIComposerDraft = {
+  draft: string
+  attachments: LocalAIChatAttachment[]
+}
+
+type LocalAIComposerSlot = {
+  key: string
+  initialDraft: string
+  version: number
+}
+
+type LocalAIComposerTicket = {
+  key: string
+  generation: number
+}
+
 export type LocalAIChatProps = {
   chatId: string | null
   chatTitle: string
@@ -202,6 +218,13 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
   const transcriptRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Unsent drafts by chat ID; the empty key is the new-chat composer.
+  const composerDraftsRef = useRef(new Map<string, LocalAIComposerDraft>())
+  const composerSlotRef = useRef<LocalAIComposerSlot | null>(null)
+  const latestComposerRef = useRef<LocalAIComposerDraft>({ draft: '', attachments: [] })
+  // Changes whenever the visible composer starts belonging to a different chat.
+  const composerGenerationRef = useRef(0)
+  const createdChatIdRef = useRef<string | null>(null)
   const busy = submitting || loading || runView !== null || imageRun !== null
   const runHere = runView !== null && runView.chatId === chatId
   const runElsewhere = runView !== null && !runHere
@@ -211,13 +234,26 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
   const canSend = !busy && (draft.trim() !== '' || attachments.length > 0)
   const trimmed = messages.length > LOCAL_AI_HISTORY_TURN_LIMIT
 
-  useEffect(() => Events.On('local-ai:stream', (event: { data: unknown }) => {
-    const chunk = event.data as LocalAIChatStreamChunk | undefined
-    const run = runRef.current
-    if (!run || !chunk || chunk.requestId !== run.requestId || !chunk.text) return
-    run.text += chunk.text
-    setRunView({ ...run })
-  }), [])
+  useEffect(() => {
+    let frame: number | null = null
+    const off = Events.On('local-ai:stream', (event: { data: unknown }) => {
+      const chunk = event.data as LocalAIChatStreamChunk | undefined
+      const run = runRef.current
+      if (!run || !chunk || chunk.requestId !== run.requestId || !chunk.text) return
+      run.text += chunk.text
+      // Chunks can arrive faster than the screen refreshes, so render at most once per frame.
+      if (frame !== null) return
+      frame = requestAnimationFrame(() => {
+        frame = null
+        const current = runRef.current
+        if (current) setRunView({ ...current })
+      })
+    })
+    return () => {
+      off()
+      if (frame !== null) cancelAnimationFrame(frame)
+    }
+  }, [])
 
   useEffect(() => Events.On('local-ai:image-progress', (event: { data: unknown }) => {
     const update = event.data as LocalAIImageProgress | undefined
@@ -231,10 +267,38 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
   }), [])
 
   useEffect(() => {
-    setDraft(initialDraft)
-    setAttachments([])
-    setComposerError('')
-  }, [initialDraft, initialDraftVersion])
+    latestComposerRef.current = { draft, attachments }
+  }, [draft, attachments])
+
+  // Saves the composer of the chat being left and restores the next one. A new initial draft always wins.
+  useEffect(() => {
+    const key = chatId ?? ''
+    const previous = composerSlotRef.current
+    composerSlotRef.current = { key, initialDraft, version: initialDraftVersion }
+    const initialChanged = !previous || previous.version !== initialDraftVersion || previous.initialDraft !== initialDraft
+    const switched = previous !== null && previous.key !== key
+    if (switched && previous.key === '' && key === createdChatIdRef.current) {
+      // The first message created this chat, so the composer already belongs to it.
+      createdChatIdRef.current = null
+      if (!initialChanged) return
+    } else if (switched) {
+      const latest = latestComposerRef.current
+      if (latest.draft || latest.attachments.length > 0) composerDraftsRef.current.set(previous.key, latest)
+      else composerDraftsRef.current.delete(previous.key)
+    }
+    if (initialChanged || switched) composerGenerationRef.current++
+    if (initialChanged) {
+      composerDraftsRef.current.delete(key)
+      setDraft(initialDraft)
+      setAttachments([])
+      setComposerError('')
+    } else if (switched) {
+      const saved = composerDraftsRef.current.get(key)
+      composerDraftsRef.current.delete(key)
+      setDraft(saved?.draft ?? '')
+      setAttachments(saved?.attachments ?? [])
+    }
+  }, [chatId, initialDraft, initialDraftVersion])
 
   useEffect(() => {
     const textarea = composerRef.current
@@ -290,6 +354,25 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     shouldFollowRef.current = true
     setShowJump(false)
     if (transcript) transcript.scrollTop = transcript.scrollHeight
+  }
+
+  function composerTicket(): LocalAIComposerTicket {
+    return { key: composerSlotRef.current?.key ?? '', generation: composerGenerationRef.current }
+  }
+
+  // Puts unsent text and files back in the chat that sent them, even after the user switched chats.
+  function restoreUnsentComposer(ticket: LocalAIComposerTicket, content: string, pending: LocalAIChatAttachment[], message: string) {
+    if (ticket.generation === composerGenerationRef.current) {
+      setDraft((current) => (current === '' ? content : current))
+      setAttachments((current) => (current.length === 0 ? pending : current))
+      setComposerError(message)
+      return
+    }
+    const saved = composerDraftsRef.current.get(ticket.key)
+    composerDraftsRef.current.set(ticket.key, {
+      draft: saved?.draft || content,
+      attachments: saved && saved.attachments.length > 0 ? saved.attachments : pending,
+    })
   }
 
   async function saveAssistantTurn(chatID: string, content: string, status: string) {
@@ -355,6 +438,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     const chat = await AppService.CreateLocalAIChat(agentId, newChatKind)
     chatIdRef.current = chat.id
     loadedChatIdRef.current = chat.id
+    createdChatIdRef.current = chat.id
     setMessages([])
     onChatCreated(chat)
     return chat.id
@@ -375,8 +459,10 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     setDraft('')
     setSubmitting(true)
     let run: LocalAIImageRun | null = null
+    let ticket = composerTicket()
     try {
       const chatID = await ensureChatID()
+      ticket = { ...ticket, key: chatID }
       run = { chatId: chatID, requestId: createLocalAIRequestID(), stage: 'starting', step: 0, totalSteps: 0, preview: '', stopping: false }
       imageRunRef.current = run
       setImageRun({ ...run })
@@ -385,8 +471,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
         setMessages((current) => [...current, ...(saved ?? []).filter((item) => !current.some((existing) => existing.seq === item.seq))])
       }
     } catch (imageError) {
-      setDraft((current) => (current === '' ? prompt : current))
-      setComposerError(run?.stopping ? 'Image generation stopped.' : localAIErrorMessage(imageError, 'The image could not be generated.'))
+      restoreUnsentComposer(ticket, prompt, [], run?.stopping ? 'Image generation stopped.' : localAIErrorMessage(imageError, 'The image could not be generated.'))
     } finally {
       if (run && imageRunRef.current === run) imageRunRef.current = null
       setImageRun(null)
@@ -414,17 +499,17 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     setDraft('')
     setAttachments([])
     setSubmitting(true)
+    let ticket = composerTicket()
     try {
       const activeChatID = await ensureChatID()
+      ticket = { ...ticket, key: activeChatID }
       const userTurn = await AppService.AppendLocalAIChatMessage(activeChatID, newLocalAIMessage('user', content, 'complete', pending))
       const history = [...messages, userTurn]
       setMessages(history)
       onChatsChanged()
       void runModel(activeChatID, history, agentId)
     } catch (sendError) {
-      setDraft((current) => (current === '' ? content : current))
-      setAttachments((current) => (current.length === 0 ? pending : current))
-      setComposerError(localAIErrorMessage(sendError, 'The message could not be saved.'))
+      restoreUnsentComposer(ticket, content, pending, localAIErrorMessage(sendError, 'The message could not be saved.'))
     } finally {
       setSubmitting(false)
     }
@@ -498,6 +583,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
   }
 
   async function attachFiles(files: File[]) {
+    const ticket = composerTicket()
     const next: LocalAIChatAttachment[] = []
     let problem = ''
     for (const file of files) {
@@ -517,6 +603,14 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
         problem = localAIErrorMessage(readError, `${file.name} could not be attached.`)
         break
       }
+    }
+    if (ticket.generation !== composerGenerationRef.current) {
+      // The chat changed while files were read, so they go to the chat that picked them.
+      if (next.length > 0) {
+        const saved = composerDraftsRef.current.get(ticket.key)
+        composerDraftsRef.current.set(ticket.key, { draft: saved?.draft ?? '', attachments: [...(saved?.attachments ?? []), ...next] })
+      }
+      return
     }
     if (next.length > 0) setAttachments((current) => [...current, ...next])
     setComposerError(problem)

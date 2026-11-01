@@ -4,8 +4,9 @@ import type { Member, Room } from '../bindings/mychat/desktop/models.js'
 import { DialogSurface } from './DialogSurface'
 import { MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, type ChatAgentCollection, type ChatAgentProfile } from './aiPrompts'
 import { initials } from './appShared'
+import { InvitePeopleForm } from './RoomMembership'
 
-export function RoomInfoDialog({ room, agents, agentEditor, agentSettingsError, members, membersLoading, membersError, onClose, onAgentEditorChange, onDefaultAgentChange, onEditAgent, onDeleteAgent, onSaveAgent, onCreateAgent, onLeave }: {
+export function RoomInfoDialog({ room, agents, agentEditor, agentSettingsError, members, membersLoading, membersError, onClose, onAgentEditorChange, onDefaultAgentChange, onEditAgent, onDeleteAgent, onSaveAgent, onCreateAgent, onInvite, onLeave }: {
   room: Room
   agents: ChatAgentCollection
   agentEditor: ChatAgentProfile | null
@@ -20,6 +21,7 @@ export function RoomInfoDialog({ room, agents, agentEditor, agentSettingsError, 
   onDeleteAgent: (agent: ChatAgentProfile) => void
   onSaveAgent: (event: FormEvent<HTMLFormElement>) => void
   onCreateAgent: () => void
+  onInvite: (userIDs: string[]) => Promise<void>
   onLeave: () => void
 }) {
   return (
@@ -54,6 +56,7 @@ export function RoomInfoDialog({ room, agents, agentEditor, agentSettingsError, 
             {!agentEditor && <button className="settings-command room-agent-add" type="button" disabled={agents.agents.length >= MAX_CHAT_AGENTS} onClick={onCreateAgent}><Plus size={14} />Add agent</button>}
           </section>
           <div className="room-members-heading"><h3>Members</h3><span>{membersLoading ? 'Loading' : members.length}</span></div>
+          <InvitePeopleForm key={room.id} onInvite={onInvite} />
           {membersLoading ? <div className="room-info-state"><span className="loading-mark" />Loading members</div>
             : membersError ? <p className="room-info-state is-error" role="alert">{membersError}</p>
               : members.length === 0 ? <p className="room-info-state">No room members found.</p>

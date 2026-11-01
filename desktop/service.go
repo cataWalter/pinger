@@ -86,6 +86,7 @@ func (s *AppService) OpenExternalURL(rawURL string) error {
 type Snapshot struct {
 	LoggedIn              bool             `json:"loggedIn"`
 	NeedsVerification     bool             `json:"needsVerification"`
+	Verification          *Verification    `json:"verification"`
 	SyncReady             bool             `json:"syncReady"`
 	ConnectionState       string           `json:"connectionState"`
 	SlidingSyncListCounts map[string]int   `json:"slidingSyncListCounts"`
@@ -93,6 +94,7 @@ type Snapshot struct {
 	Accounts              []AccountSummary `json:"accounts"`
 	ActiveAccountID       string           `json:"activeAccountId"`
 	Rooms                 []Room           `json:"rooms"`
+	Invites               []Invite         `json:"invites"`
 	Preferences           map[string]any   `json:"preferences"`
 }
 
@@ -118,6 +120,34 @@ type Room struct {
 	AccountID       string `json:"accountId"`
 }
 
+type Invite struct {
+	RoomID      string `json:"roomId"`
+	Name        string `json:"name"`
+	Topic       string `json:"topic"`
+	Avatar      string `json:"avatar"`
+	Inviter     string `json:"inviter"`
+	InviterName string `json:"inviterName"`
+	Direct      bool   `json:"direct"`
+	InvitedAt   int64  `json:"invitedAt"`
+}
+
+type GroupRoomRequest struct {
+	Name      string   `json:"name"`
+	Topic     string   `json:"topic"`
+	Invitees  []string `json:"invitees"`
+	Encrypted bool     `json:"encrypted"`
+}
+
+type LinkPreview struct {
+	URL         string `json:"url"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	SiteName    string `json:"siteName"`
+	Image       string `json:"image"`
+	ImageWidth  int    `json:"imageWidth"`
+	ImageHeight int    `json:"imageHeight"`
+}
+
 type AccountProfile struct {
 	UserID      string `json:"userId"`
 	DisplayName string `json:"displayName"`
@@ -138,6 +168,7 @@ type Message struct {
 	ReplyToEventID  string          `json:"replyToEventId"`
 	ReplyToSender   string          `json:"replyToSender"`
 	ReplyToPreview  string          `json:"replyToPreview"`
+	ThreadRootID    string          `json:"threadRootId"`
 	Timestamp       int64           `json:"timestamp"`
 	SeenAt          int64           `json:"seenAt"`
 	TimelineCursor  int64           `json:"timelineCursor"`
@@ -231,6 +262,7 @@ type Update struct {
 	AccountID               string              `json:"accountId"`
 	NotificationPreferences map[string]any      `json:"notificationPreferences"`
 	Rooms                   []Room              `json:"rooms"`
+	Invites                 []Invite            `json:"invites"`
 	SlidingSyncListCounts   map[string]int      `json:"slidingSyncListCounts"`
 	ChangedRoomID           []string            `json:"changedRoomId"`
 	TimelineChangedRoomID   []string            `json:"timelineChangedRoomId"`
@@ -239,7 +271,45 @@ type Update struct {
 	Error                   string              `json:"error"`
 	InitialSyncComplete     bool                `json:"initialSyncComplete"`
 	NeedsVerification       bool                `json:"needsVerification"`
+	Verification            *Verification       `json:"verification"`
 	ConnectionState         string              `json:"connectionState"`
+}
+
+type SASEmoji struct {
+	Emoji       string `json:"emoji"`
+	Description string `json:"description"`
+}
+
+// Verification is an interactive emoji comparison with another Matrix session.
+type Verification struct {
+	TransactionID string     `json:"transactionId"`
+	UserID        string     `json:"userId"`
+	DeviceID      string     `json:"deviceId"`
+	Incoming      bool       `json:"incoming"`
+	Phase         string     `json:"phase"`
+	Emojis        []SASEmoji `json:"emojis"`
+	Decimals      []int      `json:"decimals"`
+	Reason        string     `json:"reason"`
+}
+
+func mapVerification(verification *matrix.Verification) *Verification {
+	if verification == nil {
+		return nil
+	}
+	emojis := make([]SASEmoji, 0, len(verification.Emojis))
+	for _, emoji := range verification.Emojis {
+		emojis = append(emojis, SASEmoji{Emoji: emoji.Emoji, Description: emoji.Description})
+	}
+	return &Verification{
+		TransactionID: verification.TransactionID,
+		UserID:        verification.UserID,
+		DeviceID:      verification.DeviceID,
+		Incoming:      verification.Incoming,
+		Phase:         string(verification.Phase),
+		Emojis:        emojis,
+		Decimals:      append([]int{}, verification.Decimals...),
+		Reason:        verification.Reason,
+	}
 }
 
 func (s *AppService) Snapshot() (Snapshot, error) {
@@ -254,6 +324,7 @@ func (s *AppService) Snapshot() (Snapshot, error) {
 	return Snapshot{
 		LoggedIn:              client.IsLoggedIn(),
 		NeedsVerification:     client.NeedsVerification(),
+		Verification:          mapVerification(client.Verification()),
 		SyncReady:             client.SyncReady(),
 		ConnectionState:       string(client.ConnectionState()),
 		SlidingSyncListCounts: client.SlidingSyncListCounts(),
@@ -268,6 +339,7 @@ func (s *AppService) Snapshot() (Snapshot, error) {
 		Accounts:        s.Accounts(),
 		ActiveAccountID: s.currentAccountID(),
 		Rooms:           rooms,
+		Invites:         mapInvites(client.Invites()),
 		Preferences:     preferences,
 	}, nil
 }
@@ -358,6 +430,40 @@ func (s *AppService) Verify(recoveryKey string) error {
 	return nil
 }
 
+// StartSessionVerification asks the account's other sessions to compare emoji with this one.
+func (s *AppService) StartSessionVerification() error {
+	client := s.currentClient()
+	if client == nil {
+		return errNoActiveAccount
+	}
+	return client.StartSelfVerification(s.ctx)
+}
+
+func (s *AppService) AcceptSessionVerification() error {
+	client := s.currentClient()
+	if client == nil {
+		return errNoActiveAccount
+	}
+	return client.AcceptVerification(s.ctx)
+}
+
+func (s *AppService) ConfirmSessionVerification() error {
+	client := s.currentClient()
+	if client == nil {
+		return errNoActiveAccount
+	}
+	return client.ConfirmVerification(s.ctx)
+}
+
+// CancelSessionVerification stops the current verification, or dismisses it once finished.
+func (s *AppService) CancelSessionVerification(mismatch bool) error {
+	client := s.currentClient()
+	if client == nil {
+		return errNoActiveAccount
+	}
+	return client.CancelVerification(s.ctx, mismatch)
+}
+
 func (s *AppService) History(roomID string, before int64) (HistoryPage, error) {
 	initialLimit := 100
 	if before == 0 {
@@ -388,6 +494,27 @@ func (s *AppService) SendMessageWithMentions(roomID, text string, userIDs []stri
 
 func (s *AppService) SendReply(roomID, text, replyTo string) error {
 	return s.currentClient().SendReply(s.ctx, roomID, text, replyTo)
+}
+
+// ThreadMessages returns a thread's root and replies, oldest first.
+func (s *AppService) ThreadMessages(roomID, rootID string) ([]Message, error) {
+	client := s.currentClient()
+	if client == nil {
+		return nil, errNoActiveAccount
+	}
+	messages, err := client.ThreadMessages(s.ctx, roomID, rootID)
+	if err != nil {
+		return nil, err
+	}
+	return mapMessages(messages), nil
+}
+
+func (s *AppService) SendThreadReply(roomID, text, rootID string) error {
+	client := s.currentClient()
+	if client == nil {
+		return errNoActiveAccount
+	}
+	return client.SendThreadReply(s.ctx, roomID, text, rootID)
 }
 
 func (s *AppService) EditMessage(roomID, text, eventID string) error {
@@ -558,6 +685,75 @@ func (s *AppService) StartDirectChat(userID string) (string, error) {
 		return "", errors.New("no Matrix account is active")
 	}
 	return client.StartDirectChat(s.ctx, userID)
+}
+
+var errNoActiveAccount = errors.New("no Matrix account is active")
+
+func (s *AppService) AcceptInvite(roomID string) (string, error) {
+	client := s.currentClient()
+	if client == nil {
+		return "", errNoActiveAccount
+	}
+	return client.AcceptInvite(s.ctx, roomID)
+}
+
+func (s *AppService) DeclineInvite(roomID string) error {
+	client := s.currentClient()
+	if client == nil {
+		return errNoActiveAccount
+	}
+	return client.DeclineInvite(s.ctx, roomID)
+}
+
+// JoinRoom accepts a room ID, an alias, a matrix.to link or a matrix: URI.
+func (s *AppService) JoinRoom(target string) (string, error) {
+	client := s.currentClient()
+	if client == nil {
+		return "", errNoActiveAccount
+	}
+	return client.JoinRoom(s.ctx, target)
+}
+
+func (s *AppService) CreateGroupRoom(request GroupRoomRequest) (string, error) {
+	client := s.currentClient()
+	if client == nil {
+		return "", errNoActiveAccount
+	}
+	return client.CreateGroupRoom(s.ctx, matrix.GroupRoomRequest{
+		Name:      request.Name,
+		Topic:     request.Topic,
+		Invitees:  request.Invitees,
+		Encrypted: request.Encrypted,
+	})
+}
+
+func (s *AppService) InviteToRoom(roomID string, userIDs []string) error {
+	client := s.currentClient()
+	if client == nil {
+		return errNoActiveAccount
+	}
+	return client.InviteUsers(s.ctx, roomID, userIDs)
+}
+
+// URLPreview returns the homeserver's preview of an http(s) link, or nil when there is none.
+func (s *AppService) URLPreview(link string) (*LinkPreview, error) {
+	client := s.currentClient()
+	if client == nil {
+		return nil, errNoActiveAccount
+	}
+	preview, err := client.URLPreview(s.ctx, link)
+	if err != nil || preview == nil {
+		return nil, err
+	}
+	return &LinkPreview{
+		URL:         preview.URL,
+		Title:       preview.Title,
+		Description: preview.Description,
+		SiteName:    preview.SiteName,
+		Image:       preview.Image,
+		ImageWidth:  preview.ImageWidth,
+		ImageHeight: preview.ImageHeight,
+	}, nil
 }
 
 func (s *AppService) Devices() ([]Device, error) {
@@ -1240,6 +1436,27 @@ func mapRooms(rooms []matrix.Room) []Room {
 	return mapped
 }
 
+func mapInvites(invites []matrix.Invite) []Invite {
+	mapped := make([]Invite, 0, len(invites))
+	for _, invite := range invites {
+		invitedAt := int64(0)
+		if !invite.InvitedAt.IsZero() {
+			invitedAt = invite.InvitedAt.UnixMilli()
+		}
+		mapped = append(mapped, Invite{
+			RoomID:      invite.RoomID,
+			Name:        invite.Name,
+			Topic:       invite.Topic,
+			Avatar:      invite.Avatar,
+			Inviter:     invite.Inviter,
+			InviterName: invite.InviterName,
+			Direct:      invite.Direct,
+			InvitedAt:   invitedAt,
+		})
+	}
+	return mapped
+}
+
 // tagRooms sets the owning account on each room in place.
 func tagRooms(rooms []Room, accountID string) {
 	for i := range rooms {
@@ -1280,6 +1497,7 @@ func mapMessages(messages []matrix.Message) []Message {
 			ReplyToEventID:  message.ReplyToEventID,
 			ReplyToSender:   message.ReplyToSender,
 			ReplyToPreview:  message.ReplyToPreview,
+			ThreadRootID:    message.ThreadRootID,
 			Timestamp:       message.Timestamp.UnixMilli(),
 			SeenAt:          seenAt,
 			TimelineCursor:  message.TimelineCursor,
@@ -1323,6 +1541,7 @@ func mapUpdate(update matrix.Update, preferences map[string]any) Update {
 	}
 	return Update{
 		Rooms:                 mapRoomsWithPreferences(update.Rooms, preferences),
+		Invites:               mapInvites(update.Invites),
 		SlidingSyncListCounts: update.SlidingSyncListCounts,
 		ChangedRoomID:         update.ChangedRoomID,
 		TimelineChangedRoomID: update.TimelineChangedRoomID,
@@ -1331,6 +1550,7 @@ func mapUpdate(update matrix.Update, preferences map[string]any) Update {
 		Error:                 update.Error,
 		InitialSyncComplete:   update.InitialSyncComplete,
 		NeedsVerification:     update.NeedsVerification,
+		Verification:          mapVerification(update.Verification),
 		ConnectionState:       string(update.ConnectionState),
 	}
 }

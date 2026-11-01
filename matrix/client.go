@@ -116,6 +116,7 @@ type Message struct {
 	ReplyToEventID  string
 	ReplyToSender   string
 	ReplyToPreview  string
+	ThreadRootID    string
 	Timestamp       time.Time
 	SeenAt          time.Time
 	TimelineCursor  int64
@@ -187,6 +188,7 @@ const (
 // Update is emitted when gomuks has persisted sync data to its local database.
 type Update struct {
 	Rooms                 []Room
+	Invites               []Invite
 	SlidingSyncListCounts map[string]int
 	ChangedRoomID         []string
 	TimelineChangedRoomID []string
@@ -195,6 +197,7 @@ type Update struct {
 	Error                 string
 	InitialSyncComplete   bool
 	NeedsVerification     bool
+	Verification          *Verification
 	ConnectionState       ConnectionState
 }
 
@@ -235,6 +238,8 @@ type Client struct {
 
 	mu                   sync.RWMutex
 	rooms                map[string]Room
+	invites              map[string]Invite
+	urlPreviews          urlPreviewCache
 	local                map[string]map[string]Message
 	mediaEncrypted       map[string]*event.EncryptedFileInfo
 	typing               map[string][]string
@@ -255,6 +260,7 @@ type Client struct {
 	directChatMu    sync.Mutex
 	slidingSyncMu   sync.RWMutex
 	slidingSync     *SlidingSyncManager
+	verification    verificationState
 	started         bool
 	lifecycleMu     sync.Mutex
 	lifecycleCtx    context.Context
@@ -309,6 +315,7 @@ func NewWithLogOutput(databasePath string, logOutput io.Writer) (*Client, error)
 		done:                 make(chan struct{}),
 		cacheReady:           make(chan struct{}),
 		rooms:                make(map[string]Room),
+		invites:              make(map[string]Invite),
 		local:                make(map[string]map[string]Message),
 		mediaEncrypted:       make(map[string]*event.EncryptedFileInfo),
 		typing:               make(map[string][]string),
@@ -1234,13 +1241,18 @@ func (c *Client) startEngine(ctx context.Context) error {
 	c.connectionState = StateConnecting
 	c.mu.Unlock()
 	if err := c.attachSlidingSync(); err != nil {
+		c.engine.Client.Log.Error().Err(err).Msg("Failed to configure Matrix Sliding Sync")
 		c.mu.Lock()
 		c.connectionState = StateOffline
 		c.mu.Unlock()
 		return fmt.Errorf("configure Sliding Sync: %w", err)
 	}
+	if err := c.attachVerification(); err != nil {
+		c.engine.Client.Log.Warn().Err(err).Msg("Emoji session verification is unavailable")
+	}
 	// Start initializes the gomuks client and launches its Matrix sync loop.
 	if err := c.engine.Start(ctx); err != nil {
+		c.engine.Client.Log.Error().Err(err).Msg("Failed to start Matrix sync engine")
 		c.mu.Lock()
 		c.connectionState = StateOffline
 		c.mu.Unlock()
@@ -2295,6 +2307,7 @@ func (c *Client) beginOperation(parent context.Context) (context.Context, func()
 func (c *Client) handleBackendEvent(raw any) {
 	switch evt := raw.(type) {
 	case *jsoncmd.SyncComplete:
+		c.queueVerificationEvents(evt.ToDevice)
 		c.applySync(evt, true)
 	case *jsoncmd.EventsDecrypted:
 		c.refreshRoomFromTimeline(evt.RoomID.String())
@@ -2386,6 +2399,9 @@ func (c *Client) handleBackendEvent(raw any) {
 			}
 		}
 		c.mu.Unlock()
+		if message != "" && c.engine != nil && c.engine.Client != nil {
+			c.engine.Client.Log.Error().Interface("sync_status", evt.Type).Str("error", message).Msg("Matrix sync failed")
+		}
 		c.publish(nil, message)
 		if evt.Type == jsoncmd.SyncStatusOK {
 			c.startPreviewBackfill()
@@ -2402,13 +2418,26 @@ func (c *Client) handleBackendEvent(raw any) {
 
 func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 	roomAvatars := c.directRoomAvatars(syncEvent)
-	changed := make([]string, 0, len(syncEvent.Rooms)+len(syncEvent.LeftRooms))
+	changed := make([]string, 0, len(syncEvent.Rooms)+len(syncEvent.LeftRooms)+len(syncEvent.InvitedRooms))
+	self := id.UserID(c.currentUserID())
 	c.mu.Lock()
+	if c.invites == nil {
+		c.invites = make(map[string]Invite)
+	}
+	for _, invited := range syncEvent.InvitedRooms {
+		if invited == nil {
+			continue
+		}
+		key := invited.ID.String()
+		c.invites[key] = inviteFromInvitedRoom(invited, self)
+		changed = append(changed, key)
+	}
 	for roomID, syncRoom := range syncEvent.Rooms {
 		if syncRoom == nil {
 			continue
 		}
 		key := roomID.String()
+		delete(c.invites, key)
 		room, exists := c.rooms[key]
 		if !exists {
 			room = Room{ID: key, Name: key}
@@ -2531,6 +2560,7 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 	for _, roomID := range syncEvent.LeftRooms {
 		key := roomID.String()
 		delete(c.rooms, key)
+		delete(c.invites, key)
 		changed = append(changed, key)
 	}
 	c.mu.Unlock()
@@ -2730,19 +2760,22 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 	if evtType != event.EventMessage.Type && evtType != event.EventSticker.Type && evtType != event.EventEncrypted.Type {
 		return Message{}, false
 	}
+	threadRoot := threadRootID(evt)
 	if evt.RedactedBy != "" {
 		return Message{
-			ID:        evt.ID.String(),
-			Sender:    evt.Sender.String(),
-			Timestamp: evt.Timestamp.Time,
-			Edited:    evt.LastEditRowID != nil,
-			Redacted:  true,
+			ID:           evt.ID.String(),
+			Sender:       evt.Sender.String(),
+			ThreadRootID: threadRoot,
+			Timestamp:    evt.Timestamp.Time,
+			Edited:       evt.LastEditRowID != nil,
+			Redacted:     true,
 		}, true
 	}
 	if evt.DecryptionError != "" {
 		return Message{
 			ID:              evt.ID.String(),
 			Sender:          evt.Sender.String(),
+			ThreadRootID:    threadRoot,
 			Timestamp:       evt.Timestamp.Time,
 			Encrypted:       true,
 			DecryptionError: evt.DecryptionError,
@@ -2766,8 +2799,9 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 		BeeperGalleryImages  []*event.MessageEventContent `json:"com.beeper.gallery.images"`
 		BeeperGalleryCaption string                       `json:"com.beeper.gallery.caption"`
 		RelatesTo            struct {
-			EventID   string `json:"event_id"`
-			InReplyTo struct {
+			EventID       string `json:"event_id"`
+			IsFallingBack bool   `json:"is_falling_back"`
+			InReplyTo     struct {
 				EventID string `json:"event_id"`
 			} `json:"m.in_reply_to"`
 		} `json:"m.relates_to"`
@@ -2885,10 +2919,15 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 			mediaURI != "" && strings.HasPrefix(mediaMIMEType, "image/"), mediaWidth(mediaInfo), mediaHeight(mediaInfo))
 	}
 	replyTo := content.RelatesTo.InReplyTo.EventID
-	if replyTo == "" {
+	if threadRoot != "" {
+		// Thread messages only quote when the reply is real, not the thread fallback.
+		if content.RelatesTo.IsFallingBack {
+			replyTo = ""
+		}
+	} else if replyTo == "" {
 		replyTo = content.RelatesTo.EventID
 	}
-	if replyTo == "" {
+	if replyTo == "" && threadRoot == "" {
 		replyTo = evt.RelatesTo.String()
 		switch evt.RelationType {
 		case "", event.RelThread, event.RelReference:
@@ -2909,6 +2948,7 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 		Body:            body,
 		FormattedBody:   content.FormattedBody,
 		ReplyToEventID:  replyTo,
+		ThreadRootID:    threadRoot,
 		Timestamp:       evt.Timestamp.Time,
 		TimelineCursor:  int64(evt.TimelineRowID),
 		Sending:         isPendingEvent(evt),
@@ -3544,11 +3584,13 @@ func (c *Client) publish(changed []string, errMessage string) {
 	c.refreshSlidingSyncPriorityRooms()
 	update := Update{
 		Rooms:                 c.Rooms(),
+		Invites:               c.Invites(),
 		SlidingSyncListCounts: c.SlidingSyncListCounts(),
 		ChangedRoomID:         append([]string(nil), changed...),
 		Error:                 errMessage,
 		InitialSyncComplete:   c.SyncReady(),
 		NeedsVerification:     c.engine != nil && c.NeedsVerification(),
+		Verification:          c.Verification(),
 		ConnectionState:       c.ConnectionState(),
 	}
 	c.mu.Lock()

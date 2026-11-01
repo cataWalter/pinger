@@ -1,13 +1,16 @@
 import { lazy, Fragment, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Events } from '@wailsio/runtime'
-import { ArrowDown, ArrowLeft, ArrowUpRight, Archive, ArchiveRestore, Bold, ChevronDown, Bell, BellOff, BellRing, Check, Clock3, Code, CircleAlert, CircleDot, Copy, LockKeyhole, MessageCircleMore, MoreHorizontal, Paperclip, Pencil, Reply, RotateCcw, ScrollText, Search, Settings, Send, ShieldCheck, Languages, Smile, Sparkles, Star, Trash2, UsersRound, X, Download, EyeOff, Folder, FolderPlus, GraduationCap, Heading1, Images, ImagePlus, Italic, Link, List, ListChecks, ListOrdered, Mic, Plus, Quote, Upload, Square, SquareCode, Strikethrough, Video } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Archive, ArchiveRestore, Bold, ChevronDown, Bell, BellOff, BellRing, Check, Clock3, Code, CircleAlert, CircleDot, Copy, LockKeyhole, MessageCircleMore, MessagesSquare, MoreHorizontal, Paperclip, Pencil, Reply, RotateCcw, ScrollText, Search, Settings, Send, ShieldCheck, Languages, Smile, Sparkles, Star, Trash2, UsersRound, X, Download, EyeOff, Folder, FolderPlus, GraduationCap, Heading1, Images, ImagePlus, Italic, Link, List, ListChecks, ListOrdered, Mic, Plus, Quote, Upload, Square, SquareCode, Strikethrough, Video } from 'lucide-react'
 import { QuickSwitcher } from './QuickSwitcher'
 import { ProfilePhotoViewer } from './ProfilePhotoViewer'
 import { RoomInfoDialog } from './RoomInfoDialog'
+import { InviteList, NewRoomDialog, sameInviteList, type NewRoomMode } from './RoomMembership'
+import { ThreadPanel } from './ThreadPanel'
+import { mainTimelineMessages, summarizeThreads } from './threads'
 import { SettingsProvider, useSettings } from './SettingsContext'
 import EmojiPicker from 'emoji-picker-react'
 import { AppService, LanguageTutorService } from '../bindings/mychat/desktop'
-import { type AIMessage, type Member, type MenuState, type Message, type MessageSearchRequest, type MessageSearchResult, type Room, type ScheduledJob, type Snapshot, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
+import { type AIMessage, type GroupRoomRequest, type Invite, type Member, type MenuState, type Message, type MessageSearchRequest, type MessageSearchResult, type Room, type ScheduledJob, type Snapshot, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
 import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, type ComposerFormat, type EmojiQuery } from './composerText'
 import { useComposerGhostText } from './useComposerGhostText'
 import { hasOpenDialog } from './DialogSurface'
@@ -16,6 +19,7 @@ import { SYSTEM_THEME_NAME, themeCssVariables, themeIdForPreference, themeModeFo
 import { SETTINGS_TABS } from './settings'
 import { SnippetPopover } from './SnippetPopover'
 import { loadSnippets, saveSnippets, type Snippet } from './snippets'
+import { useRoomDrafts } from './roomDrafts'
 import { useSnippetExpander } from './useSnippetExpander'
 import { ConnectionStatusBanner } from './ConnectionStatusBanner'
 import { useConnectionProblem } from './useConnectionProblem'
@@ -28,7 +32,7 @@ import { ActionMenu, preferredScrollBehavior, primaryShiftShortcutKey, primarySh
 import LocalAIChat from './LocalAIChat'
 import { SuggestedRepliesPicker, type SuggestedRepliesState } from './SuggestedRepliesPicker'
 import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID, LOCAL_AI_FOLDER_NAME_CHARACTERS, LOCAL_AI_TITLE_CHARACTERS, type LocalAIChatKind, useLocalAIChatList } from './localAIChats'
-import { type MatrixUpdate, type MatrixNotification, type PreferenceValues, type RoomScope, type RoomRefinements, type OutgoingMessage, type MessageMenuItem, type AIAcceptAction, type AIPanel, type AIStreamChunk, type AIStreamHandler, type LanguageTutorState, type ChatTranslationState, type ChatExportState, type ChatExportProgressEvent, type ScheduledDraft, type MediaGalleryFilter, hasGalleryMedia, mediaGalleryMessageKey, type TimelineMessageActions, type RoomButtonActions, IN_APP_NOTICE_TIMEOUT_MS, EMPTY_ROOMS, newestPersistentMessage, formatTypingStatus, newestOtherAvatar, describeError, chatExportStatusText, isTextEntryTarget, displayMessageBody, initials, Avatar, localDateTimeInputValue, preferenceBoolean, preferenceString, preferenceNumber, parseTimeSuggestionMinutes, reconcileRoomSnapshots, mergeTimelineMessages, timelineMessageID, incomingSinceOwnMessage, isDirectLikeRoom, isUnansweredRoom, isNeedsReplyRoom, isUnreadRoom, primaryModifierLabel, TimelineMessageList, roomActivityAt, compareRoomActivity, rankQuickSwitcherRooms, playNotificationSound, notificationAllowed, notificationTone, notificationText, detectOneTimeCode, type NotificationText, type CaptureKind, type RecordedUpload, type StagedAttachment, type MediaApprovalRequest, mediaKindForFile, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, requestLocalAsset, encodeVoiceNoteWav, RoomButton, reportRoomListVisibleRange, VirtualRoomList, IconTooltip } from './appShared'
+import { type MatrixUpdate, type MatrixNotification, type PreferenceValues, type RoomScope, type RoomRefinements, type OutgoingMessage, type MessageMenuItem, type AIAcceptAction, type AIPanel, type AIStreamChunk, type AIStreamHandler, type LanguageTutorState, type ChatTranslationState, type ChatExportState, type ChatExportProgressEvent, type ScheduledDraft, type MediaGalleryFilter, hasGalleryMedia, mediaGalleryMessageKey, type TimelineMessageActions, type RoomButtonActions, IN_APP_NOTICE_TIMEOUT_MS, EMPTY_ROOMS, newestPersistentMessage, firstUnreadMessageID, formatTypingStatus, newestOtherAvatar, describeError, chatExportStatusText, isTextEntryTarget, displayMessageBody, initials, Avatar, localDateTimeInputValue, preferenceBoolean, preferenceString, preferenceNumber, parseTimeSuggestionMinutes, reconcileRoomSnapshots, mergeTimelineMessages, timelineMessageID, incomingSinceOwnMessage, isDirectLikeRoom, isUnansweredRoom, isNeedsReplyRoom, isUnreadRoom, primaryModifierLabel, TimelineMessageList, roomActivityAt, compareRoomActivity, rankQuickSwitcherRooms, playNotificationSound, notificationAllowed, notificationTone, notificationText, detectOneTimeCode, type NotificationText, type CaptureKind, type RecordedUpload, type StagedAttachment, type MediaApprovalRequest, mediaKindForFile, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, requestLocalAsset, encodeVoiceNoteWav, RoomButton, reportRoomListVisibleRange, VirtualRoomList, IconTooltip } from './appShared'
 
 const SettingsDialog = lazy(() => import('./SettingsDialog').then((module) => ({ default: module.SettingsDialog })))
 const AIResultDialogs = lazy(() => import('./AIResultDialogs').then((module) => ({ default: module.AIResultDialogs })))
@@ -102,6 +106,9 @@ function AppBody() {
   const [reactingMessageID, setReactingMessageID] = useState('')
   const [redactTarget, setRedactTarget] = useState<Message | null>(null)
   const [roomInfoOpen, setRoomInfoOpen] = useState(false)
+  const [openThread, setOpenThread] = useState<{ roomID: string; rootID: string } | null>(null)
+  const [newRoomMode, setNewRoomMode] = useState<NewRoomMode | null>(null)
+  const [inviteBusyRoomID, setInviteBusyRoomID] = useState('')
   const [profilePhotoPreview, setProfilePhotoPreview] = useState<{ source: string; label: string } | null>(null)
   const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false)
   const [mediaGalleryFilter, setMediaGalleryFilter] = useState<MediaGalleryFilter>('all')
@@ -178,6 +185,12 @@ function AppBody() {
   const [historyRevision, setHistoryRevision] = useState(0)
   const [historyPageRevision, setHistoryPageRevision] = useState(0)
   const lastObservedHistoryRevisionRef = useRef(0)
+  // The unread count is captured when a room opens, so the divider stays put after the room is marked read.
+  const [unreadMarker, setUnreadMarker] = useState<{ scope: string; count: number; messageID: string; seen: boolean; offscreen: boolean } | null>(null)
+  const unreadObserverRef = useRef<IntersectionObserver | null>(null)
+  const observeUnreadDivider = useCallback((element: HTMLDivElement | null) => {
+    if (element) unreadObserverRef.current?.observe(element)
+  }, [])
   const [error, setError] = useState('')
   const selectedRoomRef = useRef('')
   const roomListRef = useRef<HTMLElement | null>(null)
@@ -201,8 +214,6 @@ function AppBody() {
   const lastReadEventByRoom = useRef(new Map<string, string>())
   const currentUserIDRef = useRef('')
   const currentDisplayNameRef = useRef('')
-  const draftsRef = useRef(new Map<string, string>())
-  const accountDraftsRef = useRef(new Map<string, Map<string, string>>())
   const triageBusyRef = useRef(false)
   const dragDepthRef = useRef(0)
   const timelineRef = useRef<HTMLDivElement>(null)
@@ -215,6 +226,8 @@ function AppBody() {
   const pinnedScrollTopRef = useRef<number | null>(null)
   const timelineResizeObserverRef = useRef<ResizeObserver | null>(null)
   const startingDirectChatRef = useRef(false)
+  const pendingReactionsRef = useRef(new Set<string>())
+  const reactionErrorRef = useRef('')
   const timelineMessageActionsRef = useRef<TimelineMessageActions>({
     onDoubleClick: () => { },
     onOpenContextMenu: () => { },
@@ -224,6 +237,7 @@ function AppBody() {
     onSendReaction: () => { },
     onRemoveReaction: () => { },
     onStartDirectChat: () => { },
+    onOpenThread: () => { },
   })
   const roomButtonActionsRef = useRef<RoomButtonActions>({
     onSelect: () => { },
@@ -293,6 +307,7 @@ function AppBody() {
   }, [])
 
   const preferences = useMemo(() => snapshot?.preferences ?? {}, [snapshot?.preferences])
+  const roomDrafts = useRoomDrafts(activeAccountID, preferenceBoolean(preferences, 'composer.keep_drafts', true))
   const languageRoles = resolveLanguageRoles(preferences)
   const translateRecentLabel = `Translate messages received since your last message to ${languageName(languageRoles.defaultLanguage)}`
   const rooms = snapshot?.rooms ?? EMPTY_ROOMS
@@ -414,7 +429,13 @@ function AppBody() {
   const singleKeyShortcuts = preferenceBoolean(preferences, 'shortcuts.single_keys', true)
   const hideDeletedMessages = preferenceBoolean(preferences, 'appearance.hide_deleted_messages')
   const automaticArchiveEnabled = preferenceBoolean(preferences, 'archive.automatic')
-  const visibleMessages = useMemo(() => hideDeletedMessages ? messages.filter((message) => !message.redacted) : messages, [messages, hideDeletedMessages])
+  const timelineMessages = useMemo(() => mainTimelineMessages(messages), [messages])
+  const threadSummaries = useMemo(() => summarizeThreads(messages), [messages])
+  const visibleMessages = useMemo(() => hideDeletedMessages ? timelineMessages.filter((message) => !message.redacted) : timelineMessages, [timelineMessages, hideDeletedMessages])
+  const activeThread = openThread?.roomID === selectedRoomID ? openThread : null
+  const activeUnreadMarker = unreadMarker?.scope === `${activeAccountID}:${selectedRoomID}` ? unreadMarker : null
+  const unreadMarkerID = activeUnreadMarker?.messageID ?? ''
+  const unreadMarkerSeen = activeUnreadMarker?.seen ?? false
   preferencesRef.current = preferences
   roomsRef.current = rooms
   messagesRef.current = messages
@@ -464,6 +485,7 @@ function AppBody() {
     onSendReaction: sendReaction,
     onRemoveReaction: removeReaction,
     onStartDirectChat: startDirectChat,
+    onOpenThread: openThreadPanel,
   }
 
   const audioInputDevicePreference = preferenceString(preferences, 'audio.input_device', '')
@@ -705,7 +727,7 @@ function AppBody() {
       if (!singleKeyShortcuts || event.repeat || event.altKey || event.metaKey || event.ctrlKey || event.key.toUpperCase() !== answeredShortcut) return
       const target = event.target
       if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [contenteditable="true"]'))) return
-      if (settingsOpen || roomInfoOpen || leaveConfirmOpen || redactTarget || quickSwitcherOpen) return
+      if (settingsOpen || roomInfoOpen || activeThread || newRoomMode || leaveConfirmOpen || redactTarget || quickSwitcherOpen) return
       const roomID = roomContextMenu?.roomID ?? selectedRoomID
       const room = roomsRef.current.find((candidate) => candidate.id === roomID)
       if (!room || !isNeedsReplyRoom(room)) return
@@ -714,7 +736,7 @@ function AppBody() {
     }
     window.addEventListener('keydown', handleGlobalAnsweredShortcut)
     return () => window.removeEventListener('keydown', handleGlobalAnsweredShortcut)
-  }, [answeredShortcut, singleKeyShortcuts, leaveConfirmOpen, quickSwitcherOpen, roomContextMenu, roomInfoOpen, redactTarget, selectedRoomID, settingsOpen])
+  }, [activeThread, answeredShortcut, singleKeyShortcuts, leaveConfirmOpen, newRoomMode, quickSwitcherOpen, roomContextMenu, roomInfoOpen, redactTarget, selectedRoomID, settingsOpen])
 
   useEffect(() => {
     if (!roomContextMenu && !messageContextMenu) return
@@ -786,9 +808,21 @@ function AppBody() {
     scrollTimelineToBottom('smooth')
   }
 
+  function openThreadPanel(rootID: string) {
+    const roomID = selectedRoomRef.current
+    if (roomID && rootID.startsWith('$')) setOpenThread({ roomID, rootID })
+  }
+
   function focusTimelineMessage(eventID: string) {
     const timeline = timelineRef.current
     if (!timeline || !eventID) return
+    // Replies shown under a loaded thread root open their thread instead.
+    const loaded = messagesRef.current
+    const threadReply = loaded.find((message) => message.id === eventID && message.threadRootId)
+    if (threadReply && loaded.some((message) => message.id === threadReply.threadRootId)) {
+      if (selectedRoomRef.current) setOpenThread({ roomID: selectedRoomRef.current, rootID: threadReply.threadRootId })
+      return
+    }
     const target = Array.from(timeline.querySelectorAll<HTMLElement>('[data-event-id]'))
       .find((element) => element.dataset.eventId === eventID)
     stickToBottomRef.current = false
@@ -869,7 +903,7 @@ function AppBody() {
       pinTimelineToBottom(timeline)
       if (!roomSwitchRef.current || historyRoomIDRef.current === selectedRoomID) roomSwitchRef.current = false
     }
-  }, [messages, selectedRoomID])
+  }, [messages, selectedRoomID, unreadMarkerID])
 
   // Media, fonts, and composer or banner changes resize the timeline without changing `messages`.
   // Re-pin to the newest message after each resize while the reader is following the conversation.
@@ -908,12 +942,16 @@ function AppBody() {
     setMentionStart(-1)
     setEmojiPickerOpen(false)
     setTypingUsers([])
-    setComposeText(draftsRef.current.get(selectedRoomID) ?? '')
+    setComposeText(roomDrafts.get(selectedRoomID) ?? '')
+    const openedRoom = roomsRef.current.find((room) => room.id === selectedRoomID)
+    setUnreadMarker(openedRoom && openedRoom.unread > 0
+      ? { scope: `${activeAccountID}:${selectedRoomID}`, count: openedRoom.unread, messageID: '', seen: false, offscreen: false }
+      : null)
     stickToBottomRef.current = true
     pinnedScrollTopRef.current = null
     setReplyTarget(null)
     setEditTarget(null)
-  }, [selectedRoomID, activeAccountID])
+  }, [selectedRoomID, activeAccountID, roomDrafts])
 
   useEffect(() => {
     if (!emojiPickerOpen) return
@@ -987,6 +1025,8 @@ function AppBody() {
       setSnapshot((current) => {
         if (!current) return current
         const rooms = reconcileRoomSnapshots(current.rooms, update.rooms ?? [])
+        const currentInvites = current.invites ?? []
+        const invites = update.invites === undefined || sameInviteList(currentInvites, update.invites ?? []) ? current.invites : update.invites ?? []
         const slidingSyncListCounts = update.slidingSyncListCounts ?? current.slidingSyncListCounts
         const currentListCounts = current.slidingSyncListCounts ?? {}
         const nextListCounts = slidingSyncListCounts ?? {}
@@ -1000,13 +1040,14 @@ function AppBody() {
           : { ...current.profile, verified: !needsVerification }
         if (
           rooms === current.rooms
+          && invites === current.invites
           && !listCountsChanged
           && syncReady === current.syncReady
           && needsVerification === current.needsVerification
           && profile === current.profile
           && connectionState === current.connectionState
         ) return current
-        return { ...current, rooms, slidingSyncListCounts, syncReady, needsVerification, profile, connectionState }
+        return { ...current, rooms, invites, slidingSyncListCounts, syncReady, needsVerification, profile, connectionState }
       })
       setTypingUsers((current) => current.length === nextTypingUsers.length && current.every((user, index) => user === nextTypingUsers[index])
         ? current
@@ -1283,6 +1324,33 @@ function AppBody() {
         setError(describeError(readError))
       })
   }, [loadingHistory, messages, selectedRoom?.lastEventId, selectedRoom?.unread, selectedRoom?.mentions, selectedRoomID, activeAccountID])
+
+  useEffect(() => {
+    if (!activeUnreadMarker || activeUnreadMarker.messageID) return
+    if (loadingHistory || historyRoomIDRef.current !== selectedRoomID || visibleMessages.length === 0) return
+    const messageID = firstUnreadMessageID(visibleMessages, activeUnreadMarker.count, currentUserIDRef.current)
+    setUnreadMarker(messageID ? { ...activeUnreadMarker, messageID } : null)
+  }, [activeUnreadMarker, loadingHistory, visibleMessages, selectedRoomID])
+
+  // The jump pill shows only while the divider is out of view; seeing it once hides the pill for good.
+  useEffect(() => {
+    if (!unreadMarkerID || unreadMarkerSeen || typeof IntersectionObserver === 'undefined') return
+    const update = (visible: boolean) => setUnreadMarker((current) => current?.messageID === unreadMarkerID
+      ? { ...current, seen: current.seen || visible, offscreen: !visible }
+      : current)
+    const observer = new IntersectionObserver((entries) => {
+      const latest = entries[entries.length - 1]
+      if (latest) update(latest.isIntersecting)
+    }, { root: timelineRef.current })
+    unreadObserverRef.current = observer
+    const divider = timelineRef.current?.querySelector('.unread-divider')
+    if (divider) observer.observe(divider)
+    else update(false)
+    return () => {
+      observer.disconnect()
+      unreadObserverRef.current = null
+    }
+  }, [unreadMarkerID, unreadMarkerSeen])
 
   async function loadOlderMessages() {
     if (!selectedRoomID || !hasOlder || loadingOlder || loadingOlderRef.current) return
@@ -1726,6 +1794,7 @@ function AppBody() {
       : 'unknown time'
     const items: MessageMenuItem[] = [
       { key: 'reply', label: 'Reply', ariaLabel: `Reply to ${message.senderName || message.sender}`, icon: <Reply size={14} />, disabled: unsent, run: () => { setEditTarget(null); setReplyTarget(message) } },
+      { key: 'thread', label: 'Reply in thread', ariaLabel: 'Reply in thread', icon: <MessagesSquare size={14} />, disabled: !manageable, run: () => openThreadPanel(message.threadRootId || message.id) },
       { key: 'react', label: 'React', ariaLabel: 'Add reaction', icon: <Smile size={14} />, disabled: unsent, run: () => startReaction(message) },
       { key: 'bookmark', label: bookmarked ? 'Remove bookmark' : 'Bookmark', ariaLabel: bookmarked ? 'Remove message bookmark' : 'Bookmark message', icon: <Star size={14} fill={bookmarked ? 'currentColor' : 'none'} />, disabled: !manageable, run: () => void setPreference(bookmarkKey, !bookmarked) },
       { key: 'mark-unread', label: 'Mark as unread', ariaLabel: 'Mark room as unread', icon: <CircleDot size={14} />, disabled: !canMarkUnread, run: () => void markRoomUnread(selectedRoomID) },
@@ -2266,8 +2335,6 @@ function AppBody() {
     setLoadingOlder(false)
     summaryLoadingRef.current = false
     setSummaryStatus('')
-    accountDraftsRef.current.set(activeAccountID, draftsRef.current)
-    draftsRef.current = accountDraftsRef.current.get(state.activeAccountId) ?? new Map<string, string>()
     setSnapshot(state)
     setSelectedRoomID((state.rooms ?? [])[0]?.id ?? '')
     setMobilePane('rooms')
@@ -2352,7 +2419,7 @@ function AppBody() {
     setScheduledSaving(true)
     setScheduledDialogError('')
     const generation = workspaceGenerationRef.current
-    const sourceDraft = draftsRef.current.get(scheduledDraft.roomID) ?? scheduledDraft.text
+    const sourceDraft = roomDrafts.get(scheduledDraft.roomID) ?? scheduledDraft.text
     try {
       if (scheduledDraft.kind === 'message') {
         if (scheduledDraft.replyToEventID) {
@@ -2361,7 +2428,7 @@ function AppBody() {
           await AppService.ScheduleMessage(scheduledDraft.roomID, scheduledDraft.text, dueAt)
         }
         if (workspaceGenerationRef.current !== generation) return
-        if (draftsRef.current.get(scheduledDraft.roomID) === sourceDraft) draftsRef.current.delete(scheduledDraft.roomID)
+        if (roomDrafts.get(scheduledDraft.roomID) === sourceDraft) roomDrafts.delete(scheduledDraft.roomID)
         if (selectedRoomRef.current === scheduledDraft.roomID && composeTextRef.current === sourceDraft) {
           setComposeText('')
           setMentionBindings([])
@@ -2645,8 +2712,8 @@ function AppBody() {
         await dispatchMessage({ roomID, text, replyTo: replyTarget, mentionUserIDs })
         await refreshRoomSnapshotAfterSend()
       }
-      const nextDraft = editTarget ? draftsRef.current.get(roomID) ?? '' : ''
-      if (!editTarget) draftsRef.current.delete(roomID)
+      const nextDraft = editTarget ? roomDrafts.get(roomID) ?? '' : ''
+      if (!editTarget) roomDrafts.delete(roomID)
       if (selectedRoomRef.current === roomID) setComposeText(nextDraft)
       setMentionBindings([])
       setMentionStart(-1)
@@ -2889,15 +2956,33 @@ function AppBody() {
     stageAttachmentFiles(files)
   }
 
-  async function sendReaction(message: Message, emoji: string) {
+  async function changeReaction(message: Message, emoji: string, remove: boolean) {
     if (!selectedRoomID || !message.id || message.id.startsWith('~')) return
-    setReactingMessageID('')
+    // Both directions share a key so a double click cannot send duplicate annotations.
+    const key = `${selectedRoomID}\n${message.id}\n${emoji}`
+    if (pendingReactionsRef.current.has(key)) return
+    pendingReactionsRef.current.add(key)
     try {
-      await AppService.React(selectedRoomID, message.id, emoji)
+      if (remove) await AppService.RemoveReaction(selectedRoomID, message.id, emoji)
+      else await AppService.React(selectedRoomID, message.id, emoji)
       setHistoryRevision((revision) => revision + 1)
+      const previous = reactionErrorRef.current
+      if (previous) {
+        reactionErrorRef.current = ''
+        setError((current) => current === previous ? '' : current)
+      }
     } catch (reactionError) {
-      setError(describeError(reactionError))
+      const description = describeError(reactionError)
+      reactionErrorRef.current = description
+      setError(description)
+    } finally {
+      pendingReactionsRef.current.delete(key)
     }
+  }
+
+  async function sendReaction(message: Message, emoji: string) {
+    setReactingMessageID('')
+    await changeReaction(message, emoji, false)
   }
 
   async function startDirectChat(message: Message) {
@@ -2915,13 +3000,7 @@ function AppBody() {
   }
 
   async function removeReaction(message: Message, emoji: string) {
-    if (!selectedRoomID || !message.id || message.id.startsWith('~')) return
-    try {
-      await AppService.RemoveReaction(selectedRoomID, message.id, emoji)
-      setHistoryRevision((revision) => revision + 1)
-    } catch (reactionError) {
-      setError(describeError(reactionError))
-    }
+    await changeReaction(message, emoji, true)
   }
 
   async function redactMessage() {
@@ -3258,7 +3337,7 @@ function AppBody() {
     setError('')
     try {
       await AppService.SendRoomImage(review.roomID, review.encoded)
-      if (draftsRef.current.get(review.roomID) === review.sourceDraft) draftsRef.current.delete(review.roomID)
+      if (roomDrafts.get(review.roomID) === review.sourceDraft) roomDrafts.delete(review.roomID)
       if (selectedRoomRef.current === review.roomID && composeTextRef.current === review.sourceDraft) {
         setComposeText('')
         setMentionBindings([])
@@ -3630,8 +3709,8 @@ function AppBody() {
     composeTextRef.current = text
     setComposeText(text)
     if (!editTarget && selectedRoomID) {
-      if (text) draftsRef.current.set(selectedRoomID, text)
-      else draftsRef.current.delete(selectedRoomID)
+      if (text) roomDrafts.set(selectedRoomID, text)
+      else roomDrafts.delete(selectedRoomID)
     }
   }
 
@@ -3693,6 +3772,52 @@ function AppBody() {
     })
   }
 
+  async function acceptInvite(invite: Invite) {
+    if (inviteBusyRoomID) return
+    setInviteBusyRoomID(invite.roomId)
+    try {
+      const roomID = await AppService.AcceptInvite(invite.roomId)
+      setSnapshot(await AppService.Snapshot())
+      showRoom(roomID)
+    } catch (inviteError) {
+      setError(describeError(inviteError))
+    } finally {
+      setInviteBusyRoomID('')
+    }
+  }
+
+  async function declineInvite(invite: Invite) {
+    if (inviteBusyRoomID) return
+    setInviteBusyRoomID(invite.roomId)
+    try {
+      await AppService.DeclineInvite(invite.roomId)
+      setSnapshot((current) => current ? { ...current, invites: (current.invites ?? []).filter((candidate) => candidate.roomId !== invite.roomId) } : current)
+    } catch (inviteError) {
+      setError(describeError(inviteError))
+    } finally {
+      setInviteBusyRoomID('')
+    }
+  }
+
+  async function openNewRoom(roomID: string) {
+    setSnapshot(await AppService.Snapshot())
+    setNewRoomMode(null)
+    showRoom(roomID)
+  }
+
+  async function joinRoomByAddress(target: string) {
+    await openNewRoom(await AppService.JoinRoom(target))
+  }
+
+  async function createGroupRoom(request: GroupRoomRequest) {
+    await openNewRoom(await AppService.CreateGroupRoom(request))
+  }
+
+  async function inviteToSelectedRoom(userIDs: string[]) {
+    if (!selectedRoomID) return
+    await AppService.InviteToRoom(selectedRoomID, userIDs)
+  }
+
   async function leaveSelectedRoom() {
     if (!selectedRoomID || leavingRoom) return
     const roomID = selectedRoomID
@@ -3701,6 +3826,7 @@ function AppBody() {
     setLeavingRoom(true)
     try {
       await AppService.LeaveRoom(roomID)
+      roomDrafts.delete(roomID)
       setSnapshot((current) => current ? { ...current, rooms: (current.rooms ?? []).filter((room) => room.id !== roomID) } : current)
       setSelectedRoomID((current) => current === roomID ? remainingRooms[0]?.id ?? '' : current)
       setRoomInfoOpen(false)
@@ -3890,7 +4016,7 @@ function AppBody() {
 
   if (!snapshot.loggedIn) {
     return (
-      <main className="auth-screen">
+      <main className="auth-screen auth-screen-signin">
         <section className="auth-panel" aria-labelledby="auth-title">
           <div className="auth-brand">
             <img className="brand-glyph" src="/pinger.svg" alt="" />
@@ -3902,10 +4028,11 @@ function AppBody() {
             <p>Use your homeserver credentials to continue.</p>
           </div>
           <form className="auth-form" onSubmit={submitLogin}>
-            <label>
-              <span>Homeserver</span>
-              <input value={homeserver} onChange={(event) => setHomeserver(event.target.value)} type="url" autoComplete="url" spellCheck={false} autoCorrect="off" autoCapitalize="off" required />
-            </label>
+            <div className="auth-homeserver">
+              <label htmlFor="login-homeserver"><span>Homeserver</span></label>
+              <button className="auth-helper-button auth-homeserver-shortcut" type="button" disabled={busy} onClick={() => setHomeserver('https://matrix.beeper.com/')}><Check size={13} />Use Beeper Homeserver</button>
+              <input id="login-homeserver" value={homeserver} onChange={(event) => setHomeserver(event.target.value)} type="url" autoComplete="url" spellCheck={false} autoCorrect="off" autoCapitalize="off" required />
+            </div>
             <label>
               <span>Username</span>
               <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} autoCorrect="off" required />
@@ -3920,6 +4047,18 @@ function AppBody() {
               {!busy && <ArrowDown className="button-arrow" size={17} />}
             </button>
           </form>
+          <details className="beeper-onboarding">
+            <summary><span>Using Beeper with Pinger?</span><ChevronDown size={16} /></summary>
+            <ol>
+              <li><strong>Register on Beeper</strong><p>Create your account in the official Beeper app, then link your chats, such as WhatsApp, Telegram or Signal.</p></li>
+              <li><strong>Set a Matrix password</strong><p>Set a password in Beeper account settings or use the password-reset flow for your Beeper account. Email sign-in codes are not a Matrix password.</p></li>
+              <li><strong>Sign in here</strong><p>Use <code>https://matrix.beeper.com/</code>, your full user ID such as <code>@your_user:beeper.com</code>, and your Matrix password.</p></li>
+            </ol>
+            <button className="auth-helper-button" type="button" disabled={busy} onClick={() => {
+              setError('')
+              void AppService.OpenExternalURL('https://www.beeper.com/download').catch((openError) => setError(describeError(openError)))
+            }}><Download size={15} />Download official Beeper app</button>
+          </details>
           <div className="auth-footnote"><LockKeyhole size={14} /><span>Session and encryption keys stay on this device.</span></div>
         </section>
         <div className="auth-side" aria-hidden="true">
@@ -3927,15 +4066,6 @@ function AppBody() {
           <div className="auth-side-grid" />
           <div className="auth-side-bottom"><span>PINGER</span><span>01 / 01</span></div>
         </div>
-      </main>
-    )
-  }
-
-  if (snapshot.needsVerification && !snapshot.syncReady && snapshot.connectionState !== 'offline') {
-    return (
-      <main className="boot-screen">
-        <div className="boot-mark"><ShieldCheck size={20} /></div>
-        <span>Checking device verification…</span>
       </main>
     )
   }
@@ -4064,7 +4194,8 @@ function AppBody() {
               }
             }} />}
           </div>}
-          <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : roomScope === 'local-ai' ? 'AI CHATS' : 'ROOMS'}</span><span className="room-section-actions">{roomScope === 'all' && <button className="room-archive-all" type="button" aria-label="Archive all read rooms" title="Archive all read rooms" disabled={readRoomCount === 0} onClick={() => void archiveAllReadRooms()}><Archive size={13} /></button>}{roomScope === 'local-ai' && <button className="room-archive-all" type="button" aria-label="New private chat" title="New private chat (Ctrl / ⌘ + Shift + M)" onClick={() => startLocalAIChat()}><Plus size={13} /></button>}{filteredRooms.length.toString().padStart(2, '0')}</span></div>
+          {menuFilter === 'all' && <InviteList invites={snapshot.invites ?? []} busyRoomID={inviteBusyRoomID} onAccept={(invite) => void acceptInvite(invite)} onDecline={(invite) => void declineInvite(invite)} />}
+          <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : roomScope === 'local-ai' ? 'AI CHATS' : 'ROOMS'}</span><span className="room-section-actions">{roomScope === 'all' && <button className="room-archive-all" type="button" aria-label="Join or create a room" title="Join or create a room" onClick={() => setNewRoomMode('join')}><Plus size={13} /></button>}{roomScope === 'all' && <button className="room-archive-all" type="button" aria-label="Archive all read rooms" title="Archive all read rooms" disabled={readRoomCount === 0} onClick={() => void archiveAllReadRooms()}><Archive size={13} /></button>}{roomScope === 'local-ai' && <button className="room-archive-all" type="button" aria-label="New private chat" title="New private chat (Ctrl / ⌘ + Shift + M)" onClick={() => startLocalAIChat()}><Plus size={13} /></button>}{filteredRooms.length.toString().padStart(2, '0')}</span></div>
           <VirtualRoomList
             listRef={roomListRef}
             rooms={filteredRooms}
@@ -4426,6 +4557,12 @@ function AppBody() {
 
               {error && <div className="inline-error" role="alert"><CircleAlert size={15} />{error}<button aria-label="Dismiss error" title="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}
 
+              {activeUnreadMarker?.messageID && !activeUnreadMarker.seen && activeUnreadMarker.offscreen && <div className="unread-jump-anchor">
+                <button className="unread-jump-pill" type="button" onClick={() => {
+                  setUnreadMarker((current) => current ? { ...current, seen: true } : current)
+                  focusTimelineMessage(activeUnreadMarker.messageID)
+                }}><ArrowUp size={14} aria-hidden="true" />{activeUnreadMarker.count === 1 ? '1 new message' : `${activeUnreadMarker.count} new messages`}</button>
+              </div>}
               <div className="timeline" key={selectedRoomID} ref={timelineRef} role="region" aria-label="Message timeline" data-virtualized={visibleMessages.length > VIRTUAL_TIMELINE_THRESHOLD} style={visibleMessages.length > VIRTUAL_TIMELINE_THRESHOLD ? { zoom: 100 / appZoom } : undefined} tabIndex={0} onKeyDown={handleTimelineKeyDown} onScroll={(event) => {
                 const element = event.currentTarget
                 const atPinnedPosition = pinnedScrollTopRef.current !== null && Math.abs(element.scrollTop - pinnedScrollTopRef.current) < 1
@@ -4443,7 +4580,8 @@ function AppBody() {
                 {selectedRoom && loadingHistory && messages.length === 0 && <div className="timeline-empty"><span className="loading-mark" />Loading messages</div>}
                 {selectedRoom && !loadingHistory && visibleMessages.length === 0 && <div className="timeline-empty"><MessageCircleMore size={25} /><span>{messages.length > 0 ? 'Deleted messages are hidden' : hasOlder ? 'No messages in the past 24 hours' : 'No messages yet'}</span></div>}
                 <TimelineMessageList
-                  messages={messages}
+                  messages={timelineMessages}
+                  threadSummaries={threadSummaries}
                   header={selectedRoom && hasOlder ? (
                     <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={loadOlderMessages} disabled={loadingOlder}>
                       {loadingOlder ? <><span className="loading-mark" />Loading older messages</> : 'Load older messages'}
@@ -4463,6 +4601,8 @@ function AppBody() {
                   actionsRef={timelineMessageActionsRef}
                   scrollParentRef={timelineRef}
                   listHandleRef={timelineListRef}
+                  unreadMarkerID={unreadMarkerID}
+                  unreadDividerRef={observeUnreadDivider}
                 />
                 {chatTranslation?.roomID === selectedRoomID && <div className="chat-translation-status">
                   {chatTranslation.busy && <p role="status">{chatTranslation.status}</p>}
@@ -4515,8 +4655,8 @@ function AppBody() {
                   </div>
                   <button className="composer-context-link" type="button" title="View message in the timeline" onClick={() => focusTimelineMessage(composerContextMessage.id)}>View message</button>
                   <button type="button" className="icon-button" aria-label="Cancel reply or edit" title="Cancel" onClick={() => {
-                    const nextDraft = editTarget ? draftsRef.current.get(selectedRoomID) ?? '' : ''
-                    if (!editTarget) draftsRef.current.delete(selectedRoomID)
+                    const nextDraft = editTarget ? roomDrafts.get(selectedRoomID) ?? '' : ''
+                    if (!editTarget) roomDrafts.delete(selectedRoomID)
                     setReplyTarget(null)
                     setEditTarget(null)
                     setComposeText(nextDraft)
@@ -4765,8 +4905,7 @@ function AppBody() {
             onClose={() => setSettingsOpen(false)}
             onLogout={async () => {
               await AppService.Logout()
-              draftsRef.current.clear()
-              accountDraftsRef.current.delete(activeAccountID)
+              roomDrafts.clearAccount()
               setStagedAttachments((current) => current.filter((item) => {
                 if (item.accountID !== activeAccountID) return true
                 if (item.previewURL) URL.revokeObjectURL(item.previewURL)
@@ -4826,8 +4965,20 @@ function AppBody() {
         onDeleteAgent={(agent) => void deleteAgentProfile(agent)}
         onSaveAgent={(event) => void saveAgentProfile(event)}
         onCreateAgent={createAgentProfile}
+        onInvite={inviteToSelectedRoom}
         onLeave={() => { setLeaveRoomError(''); setLeaveConfirmOpen(true) }}
       />}
+      {activeThread && <ThreadPanel
+        key={activeThread.rootID}
+        roomID={activeThread.roomID}
+        rootID={activeThread.rootID}
+        rootMessage={messages.find((message) => message.id === activeThread.rootID)}
+        revision={historyRevision}
+        currentUserID={snapshot?.profile.userId ?? ''}
+        preferences={preferences}
+        onClose={() => setOpenThread(null)}
+      />}
+      {newRoomMode && <NewRoomDialog initialMode={newRoomMode} onClose={() => setNewRoomMode(null)} onJoin={joinRoomByAddress} onCreate={createGroupRoom} />}
       {mediaGalleryOpen && selectedRoom && <Suspense fallback={null}>
         <MediaGalleryDialog
           roomID={selectedRoom.id}

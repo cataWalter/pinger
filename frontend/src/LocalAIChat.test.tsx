@@ -112,14 +112,18 @@ describe('LocalAIChat', () => {
     expect(container.querySelector('.local-ai-message.is-assistant')?.textContent).toContain('Waiting for the local model')
 
     emitChunk(requestID, 'The reply is arriving')
-    expect(container.querySelector('.local-ai-message.is-assistant')?.textContent).toContain('The reply is arriving')
+    await waitFor(() => expect(container.querySelector('.local-ai-message.is-assistant')?.textContent).toContain('The reply is arriving'))
     expect(screen.getByRole('log').getAttribute('aria-busy')).toBe('true')
 
-    emitChunk(requestID, ' in chunks.')
-    expect(container.querySelector('.local-ai-message.is-assistant')?.textContent).toContain('The reply is arriving in chunks.')
+    act(() => {
+      for (const text of [' in', ' small', ' chunks.']) eventHandlers.get('local-ai:stream')?.({ data: { requestId: requestID, text } })
+    })
+    await waitFor(() => expect(container.querySelector('.local-ai-message.is-assistant')?.textContent).toContain('The reply is arriving in small chunks.'))
 
-    await act(async () => resolveReply('The reply is arriving in chunks.'))
-    expect(container.querySelector('.local-ai-message.is-assistant')?.textContent).toContain('The reply is arriving in chunks.')
+    emitChunk(requestID, ' Done.')
+    await act(async () => resolveReply('The reply is arriving in small chunks. Done.'))
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)))
+    expect(container.querySelector('.local-ai-message.is-assistant')?.textContent).toContain('The reply is arriving in small chunks. Done.')
     expect(screen.getByRole('log').getAttribute('aria-busy')).toBe('false')
   })
 
@@ -270,6 +274,59 @@ describe('LocalAIChat', () => {
 
     expect(notPrevented).toBe(true)
     expect(screen.queryByRole('list', { name: 'Pending attachments' })).toBeNull()
+  })
+
+  it('keeps each chat draft and attachments separate when switching chats', async () => {
+    const { props, rerender } = renderChat({ chatId: 'chat-1' })
+    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    await waitFor(() => expect(composer.disabled).toBe(false))
+    fireEvent.change(composer, { target: { value: 'Draft for the first chat' } })
+    const screenshot = new File(['png-bytes'], 'first.png', { type: 'image/png' })
+    fireEvent.paste(composer, { clipboardData: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => screenshot }], files: [] } })
+    expect(await screen.findByRole('list', { name: 'Pending attachments' })).toBeTruthy()
+
+    rerender(<LocalAIChat {...props} chatId="chat-2" />)
+    await waitFor(() => expect(composer.value).toBe(''))
+    expect(screen.queryByRole('list', { name: 'Pending attachments' })).toBeNull()
+    fireEvent.change(composer, { target: { value: 'Second chat draft' } })
+
+    rerender(<LocalAIChat {...props} chatId="chat-1" />)
+    await waitFor(() => expect(composer.value).toBe('Draft for the first chat'))
+    expect((await screen.findByRole('list', { name: 'Pending attachments' })).textContent).toContain('first.png')
+
+    rerender(<LocalAIChat {...props} chatId="chat-2" />)
+    await waitFor(() => expect(composer.value).toBe('Second chat draft'))
+  })
+
+  it('returns a failed send to the chat that sent it after switching chats', async () => {
+    let failAppend!: (error: Error) => void
+    service.AppendLocalAIChatMessage.mockImplementationOnce(() => new Promise((_resolve, reject) => { failAppend = reject }))
+    const { props, rerender } = renderChat({ chatId: 'chat-1' })
+    await sendDraft('Message that will fail')
+    await waitFor(() => expect(service.AppendLocalAIChatMessage).toHaveBeenCalledTimes(1))
+    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+
+    rerender(<LocalAIChat {...props} chatId="chat-2" />)
+    await waitFor(() => expect(service.LoadLocalAIChatMessages).toHaveBeenCalledWith('chat-2'))
+    await act(async () => failAppend(new Error('disk full')))
+    expect(composer.value).toBe('')
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    rerender(<LocalAIChat {...props} chatId="chat-1" />)
+    await waitFor(() => expect(composer.value).toBe('Message that will fail'))
+  })
+
+  it('keeps a starting draft when a new chat opens with one', async () => {
+    const { props, rerender } = renderChat({ chatId: 'chat-1' })
+    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    await waitFor(() => expect(composer.disabled).toBe(false))
+    fireEvent.change(composer, { target: { value: 'Unsent text in chat one' } })
+
+    rerender(<LocalAIChat {...props} chatId={null} initialDraft="Summarize this message" initialDraftVersion={1} />)
+    await waitFor(() => expect(composer.value).toBe('Summarize this message'))
+
+    rerender(<LocalAIChat {...props} chatId="chat-1" initialDraft="Summarize this message" initialDraftVersion={1} />)
+    await waitFor(() => expect(composer.value).toBe('Unsent text in chat one'))
   })
 
   it('creates an agent from the chat and selects it for that chat', async () => {

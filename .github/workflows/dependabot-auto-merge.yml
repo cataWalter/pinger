@@ -1,0 +1,79 @@
+name: Dependabot auto-merge
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate-policy:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out trusted source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+
+      - name: Validate workflow and merge policies without writing
+        run: |
+          ruby scripts/check-workflows.rb
+          node --test scripts/release-assets.test.mjs
+
+  auto-merge:
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.DEPENDABOT_AUTO_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Read Dependabot update metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge after required checks
+        if: >-
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr merge "$PR_URL" --auto --squash --match-head-commit "$PR_HEAD_SHA"
+
+      - name: Keep major or unclassified updates manual
+        if: >-
+          !cancelled() && (
+            failure() || (
+              steps.metadata.outputs.update-type != 'version-update:semver-patch' &&
+              steps.metadata.outputs.update-type != 'version-update:semver-minor'
+            )
+          )
+        run: |
+          state="$(gh pr view "$PR_URL" --json autoMergeRequest,headRefOid --jq '.headRefOid + ":" + (.autoMergeRequest != null | tostring)')"
+          if [[ "$state" == "$PR_HEAD_SHA:true" ]]; then
+            gh pr merge "$PR_URL" --disable-auto
+          fi

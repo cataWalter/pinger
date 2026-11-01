@@ -21,6 +21,14 @@ describe('settings search', () => {
     expect(searchSettings('DARK MODE').map((entry) => entry.id)).toContain(searchSettings('dark mode')[0].id)
   })
 
+  it('finds Beeper onboarding and bridge pairing guidance in Help', () => {
+    for (const query of ['Beeper', 'beeper account', 'bridge pairing']) {
+      const result = searchSettings(query).find((entry) => entry.id === 'help.networks')
+      expect(result?.tab).toBe('Help')
+      expect(result?.description).toContain('official Beeper app')
+    }
+  })
+
   it('requires every term to match', () => {
     expect(searchSettings('theme zzzzz')).toEqual([])
   })

@@ -17,6 +17,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Data storage & privacy](#data-storage--privacy)
 - [Run locally](#run-locally)
+- [Using with Beeper](#using-with-beeper)
 - [Project structure](#project-structure)
 - [Development & checks](#development--checks)
 - [Releases](#releases)
@@ -31,21 +32,24 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - **Quick switcher** (`Ctrl+K` / `⌘K`) fuzzy-jumps to any room by name; **message search** (`Ctrl+F` / `⌘F`) searches local history across all rooms with optional filters (chat, sender, from/to dates); `/` focuses room search.
 - **Room navigation**: `Ctrl+1`–`Ctrl+9` jump to a room by list position; `Alt+↑`/`Alt+↓` cycle rooms; `Ctrl+Shift+↑`/`Ctrl+Shift+↓` cycle needs-reply rooms; `Ctrl+Shift+L` jumps to the latest message.
 - **Room actions**: right-click a room (or `Shift+F10`) to remove it from Needs reply, mark it read/unread, archive/restore it, or favorite/unfavorite it; multi-selecting rooms applies the same actions in bulk. The tray menu and the macOS **Messages** menu can mark everything read.
+- **Invitations** appear at the top of the All view with Accept and Decline buttons; invite avatars are not loaded until you join. The **+** button beside the room list joins a room by alias, room ID, or matrix.to link, or creates a private group with an optional topic, invitees, and end-to-end encryption (on by default).
 
 **Accounts**
 
 - Sign in to several Matrix accounts from the avatar menu at the bottom of the sidebar. The inbox can show every account or scope to one, and `Ctrl+Alt+1`–`Ctrl+Alt+9` switches the active account.
 - Every account keeps its own database, preferences, and AI profiles under the data directory.
-- Unsent composer drafts and staged attachments stay separate for each account and room while the app is running. Switching accounts preserves them; logging out discards that account's drafts and staged files. Pending confirmations and AI suggestions close when switching accounts.
+- Unsent composer drafts stay separate for each account and room and, by default, are saved on this device so they return after a restart (Settings → Keyboard → **Keep unsent drafts after restarting**; turning it off deletes saved drafts). Staged attachments stay only while the app is running. Switching accounts preserves both; logging out or leaving a room discards its drafts. Pending confirmations and AI suggestions close when switching accounts.
 
 **Messaging**
 
-- Reply and quick-reaction controls stay visible; replying opens a quoted reply composer; reactions show as chips. The message **context menu** offers Reply, React, Bookmark, Mark as unread, Copy (plain or with timestamp), Forward…, a "Received at" timestamp, Set reminder, and — when an AI endpoint is configured — Translate, Draft reply with AI, and Explain message; your own messages add Edit and Delete, and failed sends add Retry sending.
+- Reply and quick-reaction controls stay visible; replying opens a quoted reply composer; reactions show as chips. The message **context menu** offers Reply, Reply in thread, React, Bookmark, Mark as unread, Copy (plain or with timestamp), Forward…, a "Received at" timestamp, Set reminder, and — when an AI endpoint is configured — Translate, Draft reply with AI, and Explain message; your own messages add Edit and Delete, and failed sends add Retry sending.
 - **Forward** text messages to any other room of the same account; bookmarks and read-state changes are stored locally.
 - In direct chats, your own messages show a **Seen at** timestamp derived from the other person's read receipt.
 - The composer accepts pasted images and files dropped onto the window (50 MiB per attachment), completes `@` mentions from the room member list, suggests emoji for `:shortcodes:`, and optionally replaces emoticons as you type. The **Formatting** menu preserves the selected draft text; Settings can keep the full formatting toolbar expanded.
 - **Voice notes** record straight from the composer with a selectable microphone (up to 4 minutes / 50 MiB); the next voice note can auto-play. Any audio message can be **transcribed with AI** and the transcript inserted into the composer as a draft.
 - An optional **undo send** window (5–30 seconds) holds outgoing messages briefly so they can be recalled.
+- **Link previews** show a title, summary, and thumbnail under the first web link in a text message. Your homeserver fetches the page; previews are off in encrypted rooms unless enabled in Settings → Appearance.
+- **Threads**: replies in a thread are grouped under their first message with a reply count and the latest reply. Click it, or choose **Reply in thread**, to read and answer the thread in a side panel.
 
 **Scheduled messages & reminders**
 
@@ -68,7 +72,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 
 **Room details & media**
 
-- **Room details** opens a panel with the room ID and topic, chat-agent profiles, the member list, and a Leave room button. Search and details stay visible in the header; **Room actions** contains the media gallery, export, scheduled queue, favorite, and mute commands. Favorite and muted indicators remain visible beside the room title.
+- **Room details** opens a panel with the room ID and topic, chat-agent profiles, the member list, an **Invite people** field, and a Leave room button. Search and details stay visible in the header; **Room actions** contains the media gallery, export, scheduled queue, favorite, and mute commands. Favorite and muted indicators remain visible beside the room title.
 - Room/member avatars and attachments are downloaded from Matrix content URIs and stored in the on-disk media cache; avatars are also cached in memory for the session and resized for display. Missing images use a generated initials icon.
 - Images embedded in Markdown are displayed as links and only open in the system browser when clicked. Automatic downloads reserve unique filenames without overwriting existing files.
 
@@ -92,7 +96,7 @@ A searchable dialog with twelve tabs:
 
 - **General** — launch at login, tray behavior (minimize to tray, start minimized, quit on close, menu bar icon), download folder and "ask where to save", double-click action, quick-reaction options, navigation after read/archive, inactive-room age and Archive inactive rooms, voice-note microphone and autoplay, schedule defaults and suggestions.
 - **Account** — profile details, typing indicators, content blur (read receipts are still sent when you open a room), log out.
-- **Appearance** — theme, accent, wallpaper, font size, app zoom, message and sidebar layout, timestamps.
+- **Appearance** — theme, accent, wallpaper, font size, app zoom, message and sidebar layout, link previews, timestamps.
 - **Notifications** — permission, enable/focus, sound and volume, content privacy, per-category alerts and tones, batching, repeat reminder, one-time-code handling, sound effects, and a button that opens the OS notification settings for Pinger.
 - **Keyboard** — Ctrl+Enter send, undo send window, spellcheck, formatting toolbar, emoji suggestions, emoticon replacement, copy timestamps, Up-arrow focus, single-key shortcuts (R, J, K, and the answered key), mark-answered key, full shortcut list.
 - **History** — messages loaded when a room opens (25–1000).
@@ -156,13 +160,25 @@ Single-key shortcuts (`R`, `J`, `K`, and the answered key) can be turned off in 
 
 - The data directory holds the primary account's SQLite database (`matrix.db`; additional accounts live under `accounts/<account-id>/matrix.db`), the preferences database (`preferences.db`), the account registry (`accounts.json`), scheduled messages and reminders (`scheduled-jobs.json`), the Olm pickle key (`crypto.key`), and the legacy `preferences.json` file that is imported into `preferences.db` on first launch.
 - The local SQLite cache stores message data, including decrypted event contents. Downloaded media is cached under the user's cache directory; encrypted payloads are decrypted before caching, and cache files are owner-only. Clearing the media cache (Settings → Storage) removes only downloaded media — use OS disk encryption for protection at rest.
+- Saved composer drafts (the 100 most recent, up to 8,000 characters each) are kept as plain text in the app's web storage on this device. Logging out removes that account's drafts; turning off **Keep unsent drafts after restarting** removes all of them.
 - Tone Guard sends only the draft and up to two recent incoming messages to a configured loopback HTTP model. It never sends this context to a remote endpoint; when the configured endpoint is not local or the check fails, the message can still be sent.
+- Link previews send the link to your homeserver's preview endpoint, which fetches the page. They are on by default for unencrypted rooms and off for encrypted rooms; both can be turned off in Settings → Appearance. Previews are cached in memory only.
 - On first launch, data from the legacy Fyne build (`fyne-matrix` data directory and `fi.mau.fyne-matrix` preferences) is migrated into the current data directory; the legacy database is copied with SQLite's online backup API.
 - On each launch, removed features' stored data is deleted: the `relationship-health.db*` files for each account and their retired preference keys. The step is idempotent and ignores missing files.
 
 ## Run locally
 
 Targets macOS 12+, Windows x64 (WebView2 Runtime), and Linux x64.
+
+### Using with Beeper
+
+Pinger connects directly to Beeper's Matrix homeserver at `https://matrix.beeper.com/`. It does not create Beeper accounts or pair chat networks.
+
+1. **Register and connect your chats in Beeper first.** [Download the official Beeper app](https://www.beeper.com/download) on mobile or desktop, create your account, and link your supported networks, such as WhatsApp, Telegram, Signal or iMessage. New network logins, QR-code pairing and account linking must be completed in Beeper, not Pinger.
+2. **Set a Matrix password for your existing Beeper account.** Email sign-in codes and Google or Apple sign-in are not a Matrix password. Use the password option in Beeper account settings or the account's supported password-reset flow. [Element Web](https://app.element.io/), configured with `https://matrix.beeper.com/`, may offer a **Forgot password** flow for your account. If no password or reset option is available, contact Beeper support rather than creating a separate Matrix account. If you already set a Matrix password, use that password or reset it if forgotten.
+3. **Sign in to Pinger.** Choose **Use Beeper Homeserver** on the sign-in screen, or enter `https://matrix.beeper.com/` manually. Use your full Matrix user ID, for example `@your_user:beeper.com`, and your Matrix password. The **Using Beeper with Pinger?** guide repeats these steps and links to the official app.
+
+**Verify the new device:** approve the Pinger session from an existing signed-in Beeper client when supported, or enter your account's Recovery Key or recovery passphrase when Pinger prompts for it. Keep your existing Beeper session and recovery information available; signing in does not replace account verification or bridge setup. Never share your password or Recovery Key.
 
 ### Prerequisites
 
@@ -247,17 +263,44 @@ go build -tags "sqlite_fts5 goolm" .
 
 CI also runs 30-second, two-worker fuzz campaigns for local AI endpoint validation, media path parsing, and Matrix message content. To run one locally, use `go test -tags sqlite_fts5,goolm ./matrix -run '^$' -fuzz '^FuzzMessageFromEvent$' -fuzztime=30s -parallel=2`; the other targets are `FuzzValidateLocalHTTPEndpoint` in `./preferences` and `FuzzParseMediaAssetPath` in `./desktop`.
 
+Workflow definitions and external actions are checked by pinned `actionlint`; the build setup is shared in [.github/actions/setup-build/action.yml](.github/actions/setup-build/action.yml). Required job IDs stay `checks`, `windows-checks`, and `linux-checks`. Run the workflow policy and release-asset regressions locally with:
+
+```bash
+actionlint
+ruby scripts/check-workflows.rb
+node --test scripts/release-assets.test.mjs
+```
+
 Windows and Linux PR jobs compile the package tests and native application using the release pipeline's CGO setup. They do not exercise native windows, notifications, or operating-system permissions. Production JavaScript and CSS explicitly target Safari 15 for macOS 12; current Playwright WebKit is not a substitute for testing that minimum operating system.
 
 Frontend performance regressions cover render counts, including that composer typing does not rerender timeline Markdown, and per-render clock/relative formatter reuse. A local formatting microbenchmark measured roughly 311 ms versus 5 ms for 10,000 timestamps; this is not a whole-application frame-rate or memory benchmark. Large-history virtualization remains a separate measured change.
 
-Dependabot proposes weekly dependency and action updates. Wails Go, CLI, and JavaScript runtime upgrades remain coordinated manually so their versions stay aligned. Vulnerability scans gate reachable Go findings and moderate-or-higher npm advisories; module-only advisories must still be reviewed separately.
+### Dependency maintenance
+
+[Dependabot](.github/dependabot.yml) checks Go, frontend, and GitHub Actions dependencies every Monday at 06:00 UTC, with at most three open version-update PRs per ecosystem. Patch/minor updates are grouped to reduce CI churn; React and its types stay together. Go and npm security updates have separate groups and do not wait for the weekly version-update schedule. Wails Go, CLI, and JavaScript runtime upgrades remain coordinated manually so their versions stay aligned. Vulnerability scans gate reachable Go findings and moderate-or-higher npm advisories; module-only advisories must still be reviewed separately.
+
+The [auto-merge workflow](.github/workflows/dependabot-auto-merge.yml) queues squash merges only for verified, same-repository Dependabot PRs whose highest update is patch or minor. Major and unclassified updates remain manual. It never checks out or executes PR code. Repository auto-merge must be enabled, and `main` must require the GitHub Actions `checks`, `windows-checks`, and `linux-checks` jobs, an up-to-date branch, and resolved review conversations. These settings are enabled on this repository; administrator bypass is retained for maintainer operations. Keep the required check names aligned if CI jobs are renamed.
+
+By default, the workflow uses `GITHUB_TOKEN`, whose merges do not trigger normal push-triggered CI or release workflows. To preserve those downstream workflows, add a repository Actions secret named `DEPENDABOT_AUTO_MERGE_TOKEN` containing a repository-scoped fine-grained personal access token with **Contents: Read and write** and **Pull requests: Read and write** permissions. For GitHub Actions updates, also grant **Workflows: Read and write**. Store it directly in GitHub, never in the repository. The workflow uses that token when present; no automatic PR approval or review-permission setting is needed.
 
 ## Releases
 
-The release workflow builds universal (arm64 + amd64) macOS binaries on `macos-latest`, x64 Windows binaries on `windows-latest`, and x64 Linux binaries on `ubuntu-24.04`, then publishes a GitHub Release. Pushing `main` or manually dispatching a branch build publishes a numbered prerelease; pushing a `v*` tag publishes a stable release. Every release must pass the complete CI workflow first.
+The release workflow builds universal (arm64 + amd64) macOS binaries on `macos-latest`, x64 Windows binaries on `windows-latest`, and x64 Linux binaries on `ubuntu-24.04`, then publishes a GitHub Release. Pushing `main` publishes a numbered prerelease; pushing a `v*` tag publishes a stable release. Manual dispatch builds packages without publication by default; set `publish=true` explicitly to publish. Every release must pass the complete CI workflow first, and publication requires one checksummed artifact for each of the four formats, all with the same version.
 
 After publication, the workflow updates the [Homebrew tap](https://github.com/cataWalter/homebrew-tap) with the macOS DMG URL and SHA-256 checksum. Install with `brew install --cask catawalter/tap/pinger`, or update an existing installation with `brew update && brew upgrade --cask pinger`.
+
+Stable releases explicitly call the APT and WinGet workflows; they do not rely on `release: published` events generated by `GITHUB_TOKEN`. Automatic APT/WinGet publication ignores prereleases, while manual validation can inspect any published version. Publication requires `TAP_GITHUB_TOKEN` for the distribution repositories, `GPG_PRIVATE_KEY` matching the APT repository's public key, and `WINGET_TOKEN` for the WinGet fork/PR. An encrypted signing key can use the optional `GPG_PASSPHRASE` secret. Private signing material is never uploaded.
+
+Manual Homebrew, APT, and WinGet runs default to `dry_run=true`: they download an exact platform asset, verify its release checksum and available GitHub digest, then validate and upload metadata without pushing. APT dry runs sign with an ephemeral validation key and verify both signatures; production uses the configured repository key. WinGet validates all three manifests against pinned Microsoft schemas and uses the actual ZIP's nested `pinger.exe`; rerunning submission updates the existing branch/PR instead of opening a duplicate. Schema checks do not prove Microsoft acceptance or installation on a native Windows device.
+
+```bash
+gh workflow run ci.yml --ref main
+gh workflow run release.yml --ref main -f publish=false
+gh workflow run update-tap.yml --ref main -f tag=v0.13 -f dry_run=true
+gh workflow run update-deb-repo.yml --ref main -f tag=v0.13 -f dry_run=true
+gh workflow run winget-submission.yml --ref main -f tag=v0.13 -f dry_run=true
+gh workflow run dependabot-auto-merge.yml --ref main
+```
 
 The committed `package-lock.json` makes npm the canonical package manager for CI and release builds. The root Taskfile also has optional Bun, pnpm, and Yarn adapters for local use, but those paths are not covered by CI and have no committed lockfiles.
 

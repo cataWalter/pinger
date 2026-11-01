@@ -1,13 +1,17 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
+  # Main pushes run CI through release.yml, so there is no separate push trigger.
   pull_request:
   workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   GOTOOLCHAIN: go1.26.10
@@ -15,39 +19,29 @@ env:
 jobs:
   checks:
     runs-on: macos-latest
+    timeout-minutes: 35
     env:
       MACOSX_DEPLOYMENT_TARGET: "12.0"
       CGO_CFLAGS: "-mmacosx-version-min=12.0"
       CGO_LDFLAGS: "-mmacosx-version-min=12.0 -Wl,-no_warn_duplicate_libraries"
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          go-version-file: go.mod
-          cache: true
+          persist-credentials: false
 
-      - name: Generate Wails bindings
-        shell: bash
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
+
+      - name: Validate workflow definitions
         run: |
-          GOBIN="${RUNNER_TEMP}/wails-bin" go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
-          "${RUNNER_TEMP}/wails-bin/wails3" generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          ruby scripts/check-workflows.rb
+          node --test scripts/release-assets.test.mjs
 
       - name: Build frontend
         working-directory: frontend
-        env:
-          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3
         run: |
-          npm ci
           npm run icons
           npm run icons:check
           npm run test
@@ -94,7 +88,7 @@ jobs:
 
       - name: Upload browser failure screenshots
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: browser-failure-screenshots
           path: frontend/.vitest/
@@ -103,47 +97,25 @@ jobs:
 
   windows-checks:
     runs-on: windows-latest
+    timeout-minutes: 25
     env:
       CGO_ENABLED: "1"
       CC: gcc
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          go-version-file: go.mod
-          cache: true
+          persist-credentials: false
 
-      - name: Set up MinGW-w64
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: mingw-w64-ucrt-x86_64-gcc
-          path-type: inherit
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
 
-      - name: Generate Wails bindings
-        shell: pwsh
-        run: |
-          $env:GOBIN = Join-Path $env:RUNNER_TEMP "wails-bin"
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
-          & (Join-Path $env:GOBIN "wails3.exe") generate bindings -f "-tags sqlite_fts5,goolm" -clean=true -ts -i
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+      - name: Test release asset helpers
+        run: node --test scripts/release-assets.test.mjs
 
       - name: Build frontend
         working-directory: frontend
-        env:
-          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3.exe
         run: |
-          npm ci
           npm run icons
           npm run icons:check
           npm run build
@@ -168,41 +140,29 @@ jobs:
 
   linux-checks:
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     env:
       CGO_ENABLED: "1"
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Install native build dependencies
         run: |
           sudo -n apt-get update
           sudo -n apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsqlite3-dev
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
 
-      - name: Generate Wails bindings
-        run: |
-          GOBIN="${RUNNER_TEMP}/wails-bin" go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
-          "${RUNNER_TEMP}/wails-bin/wails3" generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+      - name: Test release asset helpers
+        run: node --test scripts/release-assets.test.mjs
 
       - name: Build frontend
         working-directory: frontend
-        env:
-          WAILS_COMMAND: ${{ runner.temp }}/wails-bin/wails3
         run: |
-          npm ci
           npm run icons
           npm run icons:check
           npm run build

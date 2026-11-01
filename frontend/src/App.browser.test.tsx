@@ -7,6 +7,7 @@ import type { AccountSummary, Room } from '../bindings/mychat/desktop/models.js'
 import { accentPaletteFor, contrastRatio } from './accent'
 import { themeCssVariables, themes } from './themes'
 import App from './App'
+import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
 import './style.css'
 
 declare module 'vitest/browser' {
@@ -63,15 +64,18 @@ const service = vi.hoisted(() => {
   }
   const methods = {
     Snapshot: vi.fn(() => Promise.resolve(snapshot)),
+    OpenExternalURL: vi.fn(() => Promise.resolve()),
     NativeNotificationsSupported: vi.fn(() => Promise.resolve(false)),
     ScheduledJobs: vi.fn(() => Promise.resolve([])),
     AccountRooms: vi.fn((): Promise<Room[]> => Promise.resolve([])),
-    History: vi.fn(() => Promise.resolve({ messages: [
-      { id: '$hello', transactionId: '', sender: '@morgan:example.org', senderName: 'Morgan Lee', avatar: '', body: 'I have the desktop review ready. The room list and conversation should both stay readable in a smaller window.', formattedBody: '', timestamp: 1793447100000, timelineCursor: 1, own: false, reactions: {}, reacted: {}, mediaType: '', mediaUri: '', replyToEventId: '', edited: false },
-      { id: '$detail', transactionId: '', sender: '@morgan:example.org', senderName: 'Morgan Lee', avatar: '', body: 'Could you also check the theme colors and keyboard focus?', formattedBody: '', timestamp: 1793447120000, timelineCursor: 2, own: false, reactions: { '👍': 2 }, reacted: { '👍': true }, mediaType: '', mediaUri: '', replyToEventId: '', edited: true },
-      { id: '$answer', transactionId: '', sender: '@me:example.org', senderName: 'Me', avatar: '', body: 'Yes. I will check the small window first, then the light and dark themes.', formattedBody: '', timestamp: 1793447160000, timelineCursor: 3, own: true, reactions: {}, reacted: {}, mediaType: '', mediaUri: '', replyToEventId: '$detail', replyToSender: 'Morgan Lee', replyToPreview: 'Could you also check the theme colors and keyboard focus?', edited: false },
-      { id: '$next', transactionId: '', sender: '@morgan:example.org', senderName: 'Morgan Lee', avatar: '', body: 'Perfect. Here is the checklist:\n\n- Minimum desktop window\n- Long room names\n- Custom accent colors\n- Reduced motion', formattedBody: '', timestamp: 1793447200000, timelineCursor: 4, own: false, reactions: {}, reacted: {}, mediaType: '', mediaUri: '', replyToEventId: '', edited: false },
-    ].map((message) => ({ seenAt: 0, sending: false, sendError: '', mediaMime: '', mediaSize: 0, mediaWidth: 0, mediaHeight: 0, mediaDurationMs: 0, encrypted: false, decryptionError: '', editHistory: [], redacted: false, replyToSender: '', replyToPreview: '', ...message })), before: 0, hasMore: false })),
+    History: vi.fn(() => Promise.resolve({
+      messages: [
+        { id: '$hello', transactionId: '', sender: '@morgan:example.org', senderName: 'Morgan Lee', avatar: '', body: 'I have the desktop review ready. The room list and conversation should both stay readable in a smaller window.', formattedBody: '', timestamp: 1793447100000, timelineCursor: 1, own: false, reactions: {}, reacted: {}, mediaType: '', mediaUri: '', replyToEventId: '', edited: false },
+        { id: '$detail', transactionId: '', sender: '@morgan:example.org', senderName: 'Morgan Lee', avatar: '', body: 'Could you also check the theme colors and keyboard focus?', formattedBody: '', timestamp: 1793447120000, timelineCursor: 2, own: false, reactions: { '👍': 2 }, reacted: { '👍': true }, mediaType: '', mediaUri: '', replyToEventId: '', edited: true },
+        { id: '$answer', transactionId: '', sender: '@me:example.org', senderName: 'Me', avatar: '', body: 'Yes. I will check the small window first, then the light and dark themes.', formattedBody: '', timestamp: 1793447160000, timelineCursor: 3, own: true, reactions: {}, reacted: {}, mediaType: '', mediaUri: '', replyToEventId: '$detail', replyToSender: 'Morgan Lee', replyToPreview: 'Could you also check the theme colors and keyboard focus?', edited: false },
+        { id: '$next', transactionId: '', sender: '@morgan:example.org', senderName: 'Morgan Lee', avatar: '', body: 'Perfect. Here is the checklist:\n\n- Minimum desktop window\n- Long room names\n- Custom accent colors\n- Reduced motion', formattedBody: '', timestamp: 1793447200000, timelineCursor: 4, own: false, reactions: {}, reacted: {}, mediaType: '', mediaUri: '', replyToEventId: '', edited: false },
+      ].map((message) => ({ seenAt: 0, sending: false, sendError: '', mediaMime: '', mediaSize: 0, mediaWidth: 0, mediaHeight: 0, mediaDurationMs: 0, encrypted: false, decryptionError: '', editHistory: [], redacted: false, replyToSender: '', replyToPreview: '', threadRootId: '', ...message })), before: 0, hasMore: false
+    })),
     RoomMembers: vi.fn(() => Promise.resolve([])),
     ListLocalAIChats: vi.fn(() => Promise.resolve([])),
     ListLocalAIChatFolders: vi.fn(() => Promise.resolve([])),
@@ -100,6 +104,7 @@ vi.mock('../bindings/mychat/desktop', () => ({
 afterEach(() => {
   cleanup()
   document.querySelectorAll('#root').forEach((root) => root.remove())
+  window.localStorage.removeItem(ROOM_DRAFTS_STORAGE_KEY)
 })
 
 function renderApp(onRender?: ProfilerOnRenderCallback) {
@@ -110,7 +115,7 @@ function renderApp(onRender?: ProfilerOnRenderCallback) {
 }
 
 async function settleSurfaces() {
-  await Promise.all(document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => {})))
+  await Promise.all(document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => { })))
 }
 
 async function captureScreenshot(options: { path: string }) {
@@ -124,6 +129,72 @@ function rgbHex(value: string) {
 }
 
 describe('browser smoke', () => {
+  it.each([
+    [390, 844],
+    [760, 600],
+    [1100, 780],
+  ] as const)('keeps Beeper onboarding usable at %i x %i', async (width, height) => {
+    await page.viewport(width, height)
+    const snapshot = await service.Snapshot()
+    service.Snapshot.mockResolvedValueOnce({ ...snapshot, loggedIn: false })
+    const { container } = renderApp()
+    await screen.findByRole('heading', { name: 'Sign in' })
+    await document.fonts.ready
+    await settleSurfaces()
+    const main = container.querySelector<HTMLElement>('.auth-screen-signin')!
+    const guide = container.querySelector<HTMLDetailsElement>('.beeper-onboarding')!
+    const logo = container.querySelector<HTMLImageElement>('.auth-brand img')!
+    await logo.decode()
+    expect(logo.naturalWidth).toBeGreaterThan(0)
+    expect(logo.getBoundingClientRect().width).toBeLessThanOrEqual(48)
+    const homeserver = screen.getByLabelText('Homeserver') as HTMLInputElement
+    const username = screen.getByLabelText('Username') as HTMLInputElement
+    const password = screen.getByLabelText('Password') as HTMLInputElement
+    fireEvent.change(homeserver, { target: { value: 'https://other.example.org/' } })
+    fireEvent.change(username, { target: { value: '@test_user:beeper.com' } })
+    fireEvent.change(password, { target: { value: 'test matrix password' } })
+    await page.getByRole('button', { name: 'Use Beeper Homeserver' }).click()
+    expect(homeserver.value).toBe('https://matrix.beeper.com/')
+    expect(username.value).toBe('@test_user:beeper.com')
+    expect(password.value).toBe('test matrix password')
+    expect(guide.open).toBe(false)
+    await expect.element(guide.querySelector('button')!).not.toBeVisible()
+    expect(main.scrollWidth).toBeLessThanOrEqual(main.clientWidth)
+    const shortcut = screen.getByRole('button', { name: 'Use Beeper Homeserver' }).getBoundingClientRect()
+    const label = screen.getByText('Homeserver').getBoundingClientRect()
+    expect(shortcut.left).toBeGreaterThanOrEqual(label.right)
+    expect(shortcut.bottom).toBeLessThanOrEqual(homeserver.getBoundingClientRect().top)
+    await captureScreenshot({ path: `../.vitest/ui/beeper-signin-${width}.png` })
+    await page.getByText('Using Beeper with Pinger?').click()
+    expect(guide.open).toBe(true)
+    expect(within(guide).getAllByRole('listitem')).toHaveLength(3)
+    await expect.element(page.getByRole('button', { name: 'Download official Beeper app' })).toBeVisible()
+    for (const element of main.querySelectorAll<HTMLElement>('.auth-form input, .auth-helper-button, .beeper-onboarding summary, .beeper-onboarding li')) {
+      const bounds = element.getBoundingClientRect()
+      expect(bounds.left).toBeGreaterThanOrEqual(-1)
+      expect(bounds.right).toBeLessThanOrEqual(width + 1)
+    }
+    expect(main.scrollWidth).toBeLessThanOrEqual(main.clientWidth)
+    for (const button of main.querySelectorAll<HTMLElement>('.auth-helper-button')) {
+      expect(button.getBoundingClientRect().height).toBeGreaterThanOrEqual(32)
+      expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth + 1)
+    }
+    const calls = service.OpenExternalURL.mock.calls.length
+    await page.getByRole('button', { name: 'Download official Beeper app' }).click()
+    expect(service.OpenExternalURL.mock.calls.length).toBe(calls + 1)
+    expect(service.OpenExternalURL).toHaveBeenLastCalledWith('https://www.beeper.com/download')
+    expect(username.value).toBe('@test_user:beeper.com')
+    expect(password.value).toBe('test matrix password')
+    const downloadBounds = screen.getByRole('button', { name: 'Download official Beeper app' }).getBoundingClientRect()
+    expect(downloadBounds.top).toBeGreaterThanOrEqual(0)
+    expect(downloadBounds.bottom).toBeLessThanOrEqual(height + 1)
+    await captureScreenshot({ path: `../.vitest/ui/beeper-onboarding-${width}.png` })
+    await page.getByText('Using Beeper with Pinger?').click()
+    expect(guide.open).toBe(false)
+    expect(username.value).toBe('@test_user:beeper.com')
+    expect(password.value).toBe('test matrix password')
+  })
+
   it.each([
     [390, 844, 100, 'Light', true],
     [760, 600, 125, 'Dark', true],
@@ -144,12 +215,14 @@ describe('browser smoke', () => {
       [true, 'See you there.'],
     ] as const
     service.Snapshot.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], name: 'Nora Bennett', topic: 'Coffee, markets, and weekend plans' }], preferences: { 'appearance.theme': theme, 'appearance.zoom': String(zoom), 'appearance.font_size': zoom === 125 ? 'Large' : 'Medium', 'composer.formatting_toolbar': formatting } })
-    service.History.mockResolvedValue({ ...history, messages: conversation.map(([own, body], index) => ({
-      ...history.messages[index === 1 ? 1 : 0], id: `$chat-preview-${index}`, own, body,
-      sender: own ? '@me:example.org' : '@nora:example.org', senderName: own ? 'Me' : 'Nora Bennett',
-      timestamp: history.messages[0].timestamp + index * 20000, timelineCursor: index + 1,
-      replyToEventId: index === 6 ? '$chat-preview-4' : '', replyToSender: index === 6 ? 'Nora Bennett' : '', replyToPreview: index === 6 ? conversation[4][1] : '',
-    })) })
+    service.History.mockResolvedValue({
+      ...history, messages: conversation.map(([own, body], index) => ({
+        ...history.messages[index === 1 ? 1 : 0], id: `$chat-preview-${index}`, own, body,
+        sender: own ? '@me:example.org' : '@nora:example.org', senderName: own ? 'Me' : 'Nora Bennett',
+        timestamp: history.messages[0].timestamp + index * 20000, timelineCursor: index + 1,
+        replyToEventId: index === 6 ? '$chat-preview-4' : '', replyToSender: index === 6 ? 'Nora Bennett' : '', replyToPreview: index === 6 ? conversation[4][1] : '',
+      }))
+    })
     try {
       const { container } = renderApp()
       const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
@@ -401,15 +474,17 @@ describe('browser smoke', () => {
     service.Snapshot.mockResolvedValueOnce({ ...snapshot, preferences: { ...snapshot.preferences, 'composer.formatting_toolbar': true } })
     const history = await service.History()
     const template = history.messages[0]
-    service.History.mockResolvedValueOnce({ ...history, messages: Array.from({ length: count }, (_, index) => ({
-      ...template,
-      id: `$alignment-${index}`,
-      own: index % 2 === 1,
-      sender: index % 2 === 1 ? '@me:example.org' : template.sender,
-      body: 'A conversation should use both sides of the available timeline.',
-      timestamp: template.timestamp + index * 1000,
-      timelineCursor: index + 1,
-    })) })
+    service.History.mockResolvedValueOnce({
+      ...history, messages: Array.from({ length: count }, (_, index) => ({
+        ...template,
+        id: `$alignment-${index}`,
+        own: index % 2 === 1,
+        sender: index % 2 === 1 ? '@me:example.org' : template.sender,
+        body: 'A conversation should use both sides of the available timeline.',
+        timestamp: template.timestamp + index * 1000,
+        timelineCursor: index + 1,
+      }))
+    })
     const { container } = renderApp()
     const timeline = await screen.findByRole('region', { name: 'Message timeline' })
     await waitFor(() => {
@@ -591,9 +666,11 @@ describe('browser smoke', () => {
     await page.viewport(1100, 780)
     const history = await service.History()
     const template = history.messages[0]
-    service.History.mockResolvedValueOnce({ ...history, messages: Array.from({ length: 1000 }, (_, index) => ({
-      ...template, id: `$keyboard-${index}`, body: `Virtual keyboard message ${index}`, timestamp: template.timestamp + index * 1000,
-    })) })
+    service.History.mockResolvedValueOnce({
+      ...history, messages: Array.from({ length: 1000 }, (_, index) => ({
+        ...template, id: `$keyboard-${index}`, body: `Virtual keyboard message ${index}`, timestamp: template.timestamp + index * 1000,
+      }))
+    })
     const { container } = renderApp()
     await waitFor(() => expect(container.querySelector('[data-event-id="$keyboard-999"]')).not.toBeNull())
     const timeline = screen.getByRole('region', { name: 'Message timeline' })
@@ -611,9 +688,11 @@ describe('browser smoke', () => {
     await page.viewport(1100, 780)
     const history = await service.History()
     const template = history.messages[0]
-    service.History.mockResolvedValueOnce({ ...history, before: -1000, hasMore: true, messages: Array.from({ length: 1000 }, (_, index) => ({
-      ...template, id: `$anchor-${index}`, body: `Anchor message ${index}`, timestamp: template.timestamp + index * 1000,
-    })) })
+    service.History.mockResolvedValueOnce({
+      ...history, before: -1000, hasMore: true, messages: Array.from({ length: 1000 }, (_, index) => ({
+        ...template, id: `$anchor-${index}`, body: `Anchor message ${index}`, timestamp: template.timestamp + index * 1000,
+      }))
+    })
     let resolveOlder!: (page: typeof history) => void
     service.History.mockReturnValueOnce(new Promise<typeof history>((resolve) => { resolveOlder = resolve }))
     const { container } = renderApp()
@@ -626,9 +705,11 @@ describe('browser smoke', () => {
     await waitFor(() => expect(service.History).toHaveBeenCalledWith('!browser-smoke:example.org', -1000))
     const original = container.querySelector<HTMLElement>('[data-event-id="$anchor-0"]')!
     const top = original.getBoundingClientRect().top
-    resolveOlder({ ...history, before: -1050, hasMore: true, messages: Array.from({ length: 50 }, (_, index) => ({
-      ...template, id: `$older-${index}`, body: `Older message ${index}`, timestamp: template.timestamp - (50 - index) * 1000,
-    })) })
+    resolveOlder({
+      ...history, before: -1050, hasMore: true, messages: Array.from({ length: 50 }, (_, index) => ({
+        ...template, id: `$older-${index}`, body: `Older message ${index}`, timestamp: template.timestamp - (50 - index) * 1000,
+      }))
+    })
     await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Load older messages' }).disabled).toBe(false))
     await waitFor(() => {
       const current = container.querySelector<HTMLElement>('[data-event-id="$anchor-0"]')
