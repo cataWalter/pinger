@@ -131,7 +131,8 @@ jobs:
           gh repo sync "$gh_user/winget-pkgs" --source microsoft/winget-pkgs
           base="$(gh api "repos/$gh_user/winget-pkgs/git/ref/heads/master" --jq '.object.sha')"
           base_tree="$(gh api "repos/$gh_user/winget-pkgs/git/commits/$base" --jq '.tree.sha')"
-          manifest_source="../winget-manifests/cataWalter/Pinger/$VERSION"
+          manifest_source="winget-manifests/cataWalter/Pinger/$VERSION"
+          test -d "$manifest_source" || { echo "::error::WinGet manifest directory not found: $manifest_source"; exit 1; }
           version_blob=''
           locale_blob=''
           installer_blob=''
