@@ -1418,6 +1418,8 @@ describe('room history updates', () => {
     harness.service.SetRoomUnanswered.mockResolvedValue(undefined)
     harness.service.SetTyping.mockResolvedValue(undefined)
     harness.service.MarkRead.mockResolvedValue(undefined)
+    harness.service.SaveMedia.mockReset()
+    harness.service.SaveMedia.mockResolvedValue('')
     harness.service.SetBooleanPreference.mockResolvedValue(undefined)
     harness.service.SetStringPreference.mockResolvedValue(undefined)
     harness.service.SendMessage.mockResolvedValue(undefined)
@@ -3947,9 +3949,12 @@ describe('room history updates', () => {
       }
     })
     return {
-      setIntersecting(target: Element, isIntersecting: boolean) {
+      async setIntersecting(target: Element, isIntersecting: boolean) {
+        await waitFor(() => {
+          if (!callbacks.has(target)) throw new Error('Element is not observed')
+        })
         const callback = callbacks.get(target)
-        if (!callback) throw new Error('Element is not observed')
+        if (!callback) throw new Error('Observed element lost its callback')
         const entry = {
           target,
           isIntersecting,
@@ -3999,7 +4004,7 @@ describe('room history updates', () => {
       expect(element).toBeTruthy()
       return element
     })
-    intersection.setIntersecting(attachment!, true)
+    await intersection.setIntersecting(attachment!, true)
 
     const preview = await waitFor(() => {
       const image = container.querySelector<HTMLImageElement>('[data-event-id="$photo"] .media-preview')
@@ -4009,7 +4014,7 @@ describe('room history updates', () => {
     expect(preview?.getAttribute('src')).toBe(`/media/matrix/${encodeURIComponent(room.id)}/${encodeURIComponent('$photo')}`)
     expect(container.querySelector('[data-event-id="$photo"] .media-load')).toBeNull()
 
-    intersection.setIntersecting(attachment!, false)
+    await intersection.setIntersecting(attachment!, false)
     await waitFor(() => expect(container.querySelector('[data-event-id="$photo"] .media-preview')).toBeNull())
     expect(container.querySelector('[data-event-id="$photo"] .media-preview')).toBeNull()
   })
@@ -4029,7 +4034,7 @@ describe('room history updates', () => {
       expect(element).toBeTruthy()
       return element
     })
-    intersection.setIntersecting(attachment!, true)
+    await intersection.setIntersecting(attachment!, true)
     const toolbar = await waitFor(() => {
       const element = container.querySelector<HTMLElement>('[data-event-id="$photo-save"] .media-toolbar')
       expect(element).toBeTruthy()
@@ -4057,7 +4062,7 @@ describe('room history updates', () => {
       expect(elements).toHaveLength(2)
       return elements
     })
-    attachments.forEach((attachment) => intersection.setIntersecting(attachment, true))
+    await Promise.all(Array.from(attachments, (attachment) => intersection.setIntersecting(attachment, true)))
     await waitFor(() => expect(container.querySelectorAll('.media-preview')).toHaveLength(2))
 
     const photoRow = container.querySelector<HTMLElement>('[data-event-id="$photo"]')!
