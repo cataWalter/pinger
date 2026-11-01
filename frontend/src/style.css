@@ -7677,29 +7677,6 @@ day-divider::after,
   min-width: 0;
 }
 
-/* Ghost text mirrors the draft so the AI suggestion sits exactly after the caret. The typed text stays transparent. */
-.composer-ghost {
-  position: absolute;
-  inset: 0;
-  padding: 4px 2px;
-  overflow: hidden;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  color: transparent;
-  pointer-events: none;
-}
-
-.composer-ghost-typed {
-  color: transparent;
-}
-
-.composer-ghost-suggestion {
-  color: var(--faint);
-}
-
 .composer-context {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto auto;
@@ -11551,7 +11528,7 @@ day-divider::after,
   --composer-text-size: 16px;
 }
 
-.app-shell[data-ui='desktop'] :is(.composer textarea, .composer-ghost) {
+.app-shell[data-ui='desktop'] .composer textarea {
   font-size: var(--composer-text-size);
   line-height: 1.6;
 }

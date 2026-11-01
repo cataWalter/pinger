@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { Profiler, type ProfilerOnRenderCallback } from 'react'
 import { commands, page } from 'vitest/browser'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AccountSummary, Room } from '../bindings/mychat/desktop/models.js'
+import type { AccountSummary, Invite, Room } from '../bindings/mychat/desktop/models.js'
 import { accentPaletteFor, contrastRatio } from './accent'
 import { themeCssVariables, themes } from './themes'
 import App from './App'
@@ -55,6 +55,7 @@ const service = vi.hoisted(() => {
     },
     accounts,
     activeAccountId: 'primary',
+    invites: [] as Invite[],
     rooms: [room,
       { ...room, id: '!design:example.org', name: 'Design review and accessibility working group', preview: 'The updated conversation layout is ready to review.', unread: 12, mentions: 2, needsReply: true, favorite: true },
       { ...room, id: '!release:example.org', name: 'Release planning', preview: 'Can we ship the desktop improvements on Friday?', unread: 3 },
@@ -69,6 +70,8 @@ const service = vi.hoisted(() => {
     NativeNotificationsSupported: vi.fn(() => Promise.resolve(false)),
     ScheduledJobs: vi.fn(() => Promise.resolve([])),
     AccountRooms: vi.fn((): Promise<Room[]> => Promise.resolve([])),
+    ThreadMessages: vi.fn((): Promise<object[]> => Promise.resolve([])),
+    DeclineInvite: vi.fn(() => Promise.resolve()),
     History: vi.fn(() => Promise.resolve({
       messages: [
         { id: '$hello', transactionId: '', sender: '@morgan:example.org', senderName: 'Morgan Lee', avatar: '', body: 'I have the desktop review ready. The room list and conversation should both stay readable in a smaller window.', formattedBody: '', timestamp: 1793447100000, timelineCursor: 1, own: false, reactions: {}, reacted: {}, mediaType: '', mediaUri: '', replyToEventId: '', edited: false },
@@ -80,7 +83,7 @@ const service = vi.hoisted(() => {
     RoomMembers: vi.fn(() => Promise.resolve([])),
     ListLocalAIChats: vi.fn(() => Promise.resolve([])),
     ListLocalAIChatFolders: vi.fn(() => Promise.resolve([])),
-    AIGhostText: vi.fn(() => Promise.resolve('')),
+    AIComplete: vi.fn(() => Promise.resolve('')),
     SetActiveRoom: vi.fn(() => Promise.resolve()),
     UpdateVisibleRange: vi.fn(() => Promise.resolve()),
   }
@@ -344,23 +347,20 @@ describe('browser smoke', () => {
     [390, 844, 100],
     [760, 600, 125],
     [1100, 780, 100],
-  ])('keeps AI shortcuts bounded and expands ghost text with Tab at %i x %i and %i percent zoom', async (width, height, zoom) => {
+  ])('keeps AI shortcuts bounded without automatic text suggestions at %i x %i and %i percent zoom', async (width, height, zoom) => {
     const user = userEvent.setup()
     await page.viewport(width, height)
     const snapshot = await service.Snapshot()
     service.Snapshot.mockResolvedValueOnce({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080', 'appearance.zoom': String(zoom), 'appearance.font_size': zoom === 125 ? 'Large' : 'Medium' } })
-    service.AIGhostText.mockResolvedValueOnce(' in December')
     renderApp()
     const roomButton = await screen.findByRole('button', { name: /Browser smoke room/ })
     if (width < 521) await user.click(roomButton)
     const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
     await user.type(composer, 'I arrived')
-    await waitFor(() => expect(document.querySelector('.composer-ghost-suggestion')?.textContent).toBe(' in December'))
-    await user.tab()
-    expect(composer.value).toBe('I arrived in December ')
-    expect(document.activeElement).toBe(composer)
-    await user.type(composer, 'and stayed')
-    expect(composer.value).toBe('I arrived in December and stayed')
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 500))
+    expect(document.querySelector('.composer-ghost')).toBeNull()
+    expect(service.AIComplete).not.toHaveBeenCalled()
+    expect(composer.value).toBe('I arrived')
 
     await user.click(screen.getByRole('button', { name: 'AI tools' }))
     const menu = await screen.findByRole('menu', { name: 'AI tools' })
@@ -461,7 +461,7 @@ describe('browser smoke', () => {
       })
       previousFirstIndex = settledFirstIndex
     }
-    await captureScreenshot({ path: `artifacts/ui/timeline-scroll-coverage-${zoom}.png` })
+    await captureScreenshot({ path: `../.vitest/ui/timeline-scroll-coverage-${zoom}.png` })
   })
 
   it.each([
@@ -509,7 +509,7 @@ describe('browser smoke', () => {
       expect(container.querySelector('.composer')!.getBoundingClientRect().height).toBeLessThan(160)
     }
     expect(container.querySelector('.composer')!.scrollWidth).toBeLessThanOrEqual(container.querySelector('.composer')!.clientWidth)
-    await captureScreenshot({ path: `artifacts/ui/timeline-alignment-${width}-${count}.png` })
+    await captureScreenshot({ path: `../.vitest/ui/timeline-alignment-${width}-${count}.png` })
   })
 
   it.each([100, 500, 1000].flatMap((count) => [1, 3].map((accountCount) => ({ count, accountCount }))))('measures room lists with $count rooms across $accountCount accounts without disturbing the conversation', async ({ count, accountCount }) => {
@@ -963,5 +963,125 @@ describe('browser smoke', () => {
     const snippets = await screen.findByRole('dialog', { name: 'Text snippets' })
     expect(within(snippets).getByText('Say thanks')).toBeTruthy()
     expect(within(snippets).queryByText('Imported 1 snippet.')).toBeNull()
+  })
+
+  it.each([
+    [390, 844],
+    [760, 600],
+    [1100, 780],
+  ] as const)('keeps the thread panel inside %i x %i', async (width, height) => {
+    const user = userEvent.setup()
+    await page.viewport(width, height)
+    const history = await service.History()
+    const root = { ...history.messages[0], id: '$thread-root', body: 'Thread starter', threadRootId: '' }
+    const replies = [
+      { ...root, id: '$thread-one', body: 'First thread reply', timestamp: root.timestamp + 1_000, threadRootId: root.id },
+      { ...root, id: '$thread-two', body: 'Second thread reply', timestamp: root.timestamp + 2_000, threadRootId: root.id },
+    ]
+    const threadPage = {
+      ...history,
+      messages: [root, ...replies, { ...root, id: '$thread-after', body: 'Main conversation continues', timestamp: root.timestamp + 3_000, threadRootId: '' }],
+    }
+    service.History.mockResolvedValueOnce(threadPage).mockResolvedValueOnce(threadPage)
+    service.ThreadMessages.mockResolvedValueOnce([root, ...replies])
+    const { container } = renderApp()
+
+    await waitFor(() => expect(container.querySelector('[data-event-id="$thread-after"]')).not.toBeNull())
+    const rooms = await screen.findByRole('navigation', { name: 'Rooms' })
+    await user.click(within(rooms).getByRole('button', { name: /Browser smoke room/ }))
+    await user.click(await screen.findByRole('button', { name: 'Open thread, 2 replies' }))
+    const panel = await screen.findByRole('dialog', { name: '2 replies' })
+    await within(panel).findByText('First thread reply')
+    await settleSurfaces()
+    const bounds = panel.getBoundingClientRect()
+    expect(bounds.width).toBeGreaterThan(0)
+    expect(bounds.left).toBeGreaterThanOrEqual(0)
+    expect(bounds.right).toBeLessThanOrEqual(width + 1)
+    expect(bounds.top).toBeGreaterThanOrEqual(0)
+    expect(bounds.bottom).toBeLessThanOrEqual(height + 1)
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
+    await user.click(within(panel).getByRole('button', { name: 'Close thread' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '2 replies' })).toBeNull())
+  })
+
+  it.each([
+    [390, 844],
+    [760, 600],
+    [1100, 780],
+  ] as const)('keeps invitation actions visible at %i x %i', async (width, height) => {
+    const user = userEvent.setup()
+    await page.viewport(width, height)
+    const snapshot = await service.Snapshot()
+    const invite: Invite = {
+      roomId: '!design-invite:example.org',
+      name: 'Design review and accessibility working group',
+      topic: '',
+      avatar: '',
+      inviter: '@morgan:example.org',
+      inviterName: 'Morgan Lee',
+      direct: false,
+      invitedAt: 1,
+    }
+    service.Snapshot.mockResolvedValueOnce({ ...snapshot, invites: [invite] })
+    const { container } = renderApp()
+
+    const invites = await screen.findByRole('region', { name: 'Invitations' })
+    await settleSurfaces()
+    const accept = within(invites).getByRole('button', { name: `Accept invitation to ${invite.name}` })
+    const decline = within(invites).getByRole('button', { name: `Decline invitation to ${invite.name}` })
+    for (const button of [accept, decline]) {
+      const bounds = button.getBoundingClientRect()
+      expect(bounds.width).toBeGreaterThan(0)
+      expect(bounds.left).toBeGreaterThanOrEqual(0)
+      expect(bounds.right).toBeLessThanOrEqual(width + 1)
+    }
+    expect(container.querySelector('.invite-row')?.scrollWidth).toBeLessThanOrEqual(container.querySelector('.invite-row')?.clientWidth ?? 0)
+    await user.click(decline)
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Invitations' })).toBeNull())
+    expect(service.DeclineInvite).toHaveBeenCalledWith(invite.roomId)
+  })
+
+  it.each([
+    [390, 844],
+    [760, 600],
+    [1100, 780],
+  ] as const)('keeps the unread jump usable at %i x %i', async (width, height) => {
+    const user = userEvent.setup()
+    await page.viewport(width, height)
+    const snapshot = await service.Snapshot()
+    const history = await service.History()
+    const room = snapshot.rooms[0]
+    const unreadHistory = {
+      ...history,
+      messages: Array.from({ length: 30 }, (_, index) => ({
+        ...history.messages[0],
+        id: `$unread-${index}`,
+        transactionId: '',
+        body: `Unread timeline message ${index}`,
+        timestamp: history.messages[0].timestamp + index * 1_000,
+        timelineCursor: index + 1,
+        own: false,
+      })),
+    }
+    service.Snapshot.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...room, unread: 30 }] })
+    service.History.mockResolvedValueOnce(unreadHistory).mockResolvedValueOnce(unreadHistory)
+    const { container } = renderApp()
+
+    await waitFor(() => expect(container.querySelector('[data-event-id="$unread-29"]')).not.toBeNull())
+    const rooms = await screen.findByRole('navigation', { name: 'Rooms' })
+    expect(rooms.querySelector('.unread-count')?.textContent).toBe('30')
+    await user.click(within(rooms).getByRole('button', { name: /Browser smoke room/ }))
+    await screen.findByRole('region', { name: 'Message timeline' })
+    await screen.findByRole('separator', { name: 'New messages' })
+    const jump = await screen.findByRole('button', { name: '30 new messages' })
+    const bounds = jump.getBoundingClientRect()
+    expect(bounds.width).toBeGreaterThan(0)
+    expect(bounds.left).toBeGreaterThanOrEqual(0)
+    expect(bounds.right).toBeLessThanOrEqual(width + 1)
+    expect(bounds.top).toBeGreaterThanOrEqual(0)
+    expect(bounds.bottom).toBeLessThanOrEqual(height + 1)
+    await user.click(jump)
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-event-id')).toBe('$unread-0'))
+    expect(screen.queryByRole('button', { name: '30 new messages' })).toBeNull()
   })
 })

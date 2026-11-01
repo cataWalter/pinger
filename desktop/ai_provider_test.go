@@ -81,7 +81,8 @@ func TestAILocalCompletionRejectsRedirects(t *testing.T) {
 				http.Redirect(w, r, remote.URL, statusCode)
 			}))
 			defer local.Close()
-			_, err := aiProviderCompletion(context.Background(), aiLocalHTTPClient, AIProviderOpenAICompatible, local.URL, "test", ghostTextMessages("private history", "private draft"), aiCompletionOptions{}, nil)
+			messages := []AIMessage{{Role: "user", Content: "private draft"}}
+			_, err := aiProviderCompletion(context.Background(), aiLocalHTTPClient, AIProviderOpenAICompatible, local.URL, "test", messages, aiCompletionOptions{}, nil)
 			if err == nil {
 				t.Fatal("local completion accepted a redirect")
 			}
@@ -98,7 +99,8 @@ func TestAILocalCompletionAcceptsLoopbackResponse(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":" world"}}]}`))
 	}))
 	defer local.Close()
-	completion, err := aiProviderCompletion(context.Background(), aiLocalHTTPClient, AIProviderOpenAICompatible, local.URL, "test", ghostTextMessages("", "hello"), aiCompletionOptions{}, nil)
+	messages := []AIMessage{{Role: "user", Content: "hello"}}
+	completion, err := aiProviderCompletion(context.Background(), aiLocalHTTPClient, AIProviderOpenAICompatible, local.URL, "test", messages, aiCompletionOptions{}, nil)
 	if err != nil || completion != "world" {
 		t.Fatalf("local completion = %q, %v; want world", completion, err)
 	}

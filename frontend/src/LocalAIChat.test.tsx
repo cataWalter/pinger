@@ -1,9 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import LocalAIChat, { type LocalAIChatProps } from './LocalAIChat'
 
-const { eventHandlers, service } = vi.hoisted(() => ({
+const { eventHandlers, service, markdownRender } = vi.hoisted(() => ({
   eventHandlers: new Map<string, (event: { data: unknown }) => void>(),
+  markdownRender: vi.fn(),
   service: {
     AICancel: vi.fn(),
     AppendLocalAIChatMessage: vi.fn(),
@@ -32,11 +34,23 @@ vi.mock('@wailsio/runtime', () => ({
   },
 }))
 
+vi.mock('./MarkdownMessage', async () => {
+  const actual = await vi.importActual<typeof import('./MarkdownMessage')>('./MarkdownMessage')
+  return {
+    ...actual,
+    default: (props: { body: string; className?: string }) => {
+      markdownRender(props.body)
+      return createElement(actual.default, props)
+    },
+  }
+})
+
 describe('LocalAIChat', () => {
   afterEach(cleanup)
 
   beforeEach(() => {
     Object.values(service).forEach((mock) => mock.mockReset())
+    markdownRender.mockClear()
     eventHandlers.clear()
     // Start above the fixture seqs (1, 2, ...) so appended messages never share a React key.
     let seq = 100
@@ -125,6 +139,43 @@ describe('LocalAIChat', () => {
     await act(() => new Promise((resolve) => requestAnimationFrame(resolve)))
     expect(container.querySelector('.local-ai-message.is-assistant')?.textContent).toContain('The reply is arriving in small chunks. Done.')
     expect(screen.getByRole('log').getAttribute('aria-busy')).toBe('false')
+  })
+
+  it('does not re-render finished messages for each streaming frame', async () => {
+    service.LoadLocalAIChatMessages.mockResolvedValueOnce([{
+      seq: 1,
+      role: 'assistant',
+      content: 'Finished answer',
+      status: 'complete',
+      attachments: [],
+      createdAt: 1,
+    }])
+    let resolveReply!: (reply: string) => void
+    service.LocalAIChat.mockImplementationOnce(() => new Promise((resolve) => { resolveReply = resolve }))
+    const { container } = renderChat({ chatId: 'chat-1' })
+
+    await screen.findByText('Finished answer')
+    await sendDraft('Ask another question')
+    await waitFor(() => expect(service.LocalAIChat).toHaveBeenCalledTimes(1))
+
+    const requestID = (service.LocalAIChat.mock.calls[0][0] as { requestId: string }).requestId
+    const emitChunk = (text: string) => act(() => eventHandlers.get('local-ai:stream')?.({
+      data: { requestId: requestID, text },
+    }))
+    emitChunk('A new answer')
+    await waitFor(() => expect(container.textContent).toContain('A new answer'))
+    await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+    const finishedMessageRenders = markdownRender.mock.calls.filter(([body]) => body === 'Finished answer').length
+
+    act(() => {
+      for (const text of [' keeps', ' streaming', ' smoothly']) {
+        eventHandlers.get('local-ai:stream')?.({ data: { requestId: requestID, text } })
+      }
+    })
+    await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+
+    expect(markdownRender.mock.calls.filter(([body]) => body === 'Finished answer')).toHaveLength(finishedMessageRenders)
+    await act(async () => resolveReply('A new answer keeps streaming smoothly'))
   })
 
   it('keeps the draft editable while a reply runs but blocks sending', async () => {

@@ -106,7 +106,6 @@ const harness = vi.hoisted(() => ({
     AIComplete: vi.fn(),
     AICancel: vi.fn(),
     AISuggestReplies: vi.fn(),
-    AIGhostText: vi.fn(),
     GenerateRoomImage: vi.fn(),
     SendRoomImage: vi.fn(),
     AIFeatureDefaults: vi.fn(),
@@ -2140,52 +2139,16 @@ describe('room history updates', () => {
     expect(harness.service.SendReply).not.toHaveBeenCalled()
   })
 
-  it.each([' there', ' there '])('accepts an AI ghost suggestion with Tab and a single trailing space: %j', async (suggestion) => {
-    const user = userEvent.setup()
-    harness.service.AIGhostText.mockResolvedValue(suggestion)
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080', 'composer.ghost_text': true } })
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
-
-    await user.click(composer)
-    fireEvent.change(composer, { target: { value: 'hello', selectionStart: 5, selectionEnd: 5 } })
-
-    await waitFor(() => expect(document.querySelector('.composer-ghost-suggestion')?.textContent).toBe(suggestion))
-    expect(harness.service.AIGhostText).toHaveBeenCalledWith(expect.any(String), 'hello', expect.any(String))
-    await user.tab()
-
-    await waitFor(() => expect(composer.value).toBe('hello there '))
-    expect(document.activeElement).toBe(composer)
-    await user.type(composer, 'friend')
-    expect(composer.value).toBe('hello there friend')
-    expect(harness.service.SendMessage).not.toHaveBeenCalled()
-  })
-
-  it('offers AI ghost text by default once an AI endpoint is set', async () => {
-    harness.service.AIGhostText.mockResolvedValue(' there')
+  it('does not request automatic AI text suggestions while typing', async () => {
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
     const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
 
     fireEvent.change(composer, { target: { value: 'hello', selectionStart: 5, selectionEnd: 5 } })
-
-    await waitFor(() => expect(document.querySelector('.composer-ghost-suggestion')?.textContent).toBe(' there'))
-  })
-
-  it('dismisses an AI ghost suggestion with Escape', async () => {
-    harness.service.AIGhostText.mockResolvedValue(' there')
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080', 'composer.ghost_text': true } })
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
-
-    fireEvent.change(composer, { target: { value: 'hello', selectionStart: 5, selectionEnd: 5 } })
-    await waitFor(() => expect(document.querySelector('.composer-ghost-suggestion')?.textContent).toBe(' there'))
-    fireEvent.keyDown(composer, { key: 'Escape' })
-
-    expect(document.querySelector('.composer-ghost-suggestion')?.textContent).toBe('')
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 500))
+    expect(harness.service.AIComplete).not.toHaveBeenCalled()
+    expect(document.querySelector('.composer-ghost')).toBeNull()
     expect(composer.value).toBe('hello')
   })
 

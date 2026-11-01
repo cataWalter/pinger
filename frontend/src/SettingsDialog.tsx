@@ -483,8 +483,6 @@ export function SettingsDialog({
     ['Ctrl / ⌘ + Shift + P', 'Toggle content blur'],
     ['Ctrl / ⌘ + Shift + I', 'Toggle hiding images and videos'],
     ...Object.values(AI_ACTION_SHORTCUTS).map<[string, string]>(({ key, description }) => [`Ctrl / ⌘ + Shift + ${key}`, description]),
-    ['Tab', 'Expand AI text suggestion'],
-    ['Escape', 'Dismiss AI text suggestion'],
     ['Ctrl / ⌘ + Shift + A', 'Show all rooms'],
     ['Ctrl / ⌘ + Shift + U', 'Show needs-reply rooms'],
     ['Ctrl / ⌘ + Shift + M', 'Start a private model chat'],
@@ -1127,7 +1125,6 @@ export function SettingsDialog({
                 <h3>Keyboard</h3>
                 <PreferenceToggle label="Use Ctrl + Enter to send" checked={preferenceBoolean(preferences, 'composer.ctrl_enter')} onChange={(value) => onPreferenceChange('composer.ctrl_enter', value)} />
                 <PreferenceToggle label="Show formatting toolbar" checked={preferenceBoolean(preferences, 'composer.formatting_toolbar')} onChange={(value) => onPreferenceChange('composer.formatting_toolbar', value)} />
-                <PreferenceToggle label="Suggest text while typing (Tab to accept)" checked={preferenceBoolean(preferences, 'composer.ghost_text', true)} onChange={(value) => onPreferenceChange('composer.ghost_text', value)} />
                 <PreferenceToggle label="Keep unsent drafts after restarting" checked={preferenceBoolean(preferences, 'composer.keep_drafts', true)} onChange={(value) => onPreferenceChange('composer.keep_drafts', value)} />
                 <PreferenceToggle label="Suggest emoji for :shortcodes:" checked={preferenceBoolean(preferences, 'emoji.autocomplete')} onChange={(value) => onPreferenceChange('emoji.autocomplete', value)} />
                 <PreferenceToggle label="Replace emoticons as you type" checked={preferenceBoolean(preferences, 'emoji.replace_emoticons', true)} onChange={(value) => onPreferenceChange('emoji.replace_emoticons', value)} />

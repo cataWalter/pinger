@@ -16,6 +16,10 @@
 
 # Logs & environment
 *.log
+# Vitest artifacts
+/frontend/.vitest/
+/frontend/src/artifacts/
+
 .env*
 
 # Go workspace & test artifacts

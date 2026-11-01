@@ -490,9 +490,8 @@ jobs:
     secrets: inherit
 
   update-apt:
-    name: Update stable APT repository
+    name: Update APT repository
     needs: [publish]
-    if: needs.publish.outputs.prerelease == 'false'
     uses: ./.github/workflows/update-deb-repo.yml
     with:
       tag: ${{ needs.publish.outputs.tag }}
@@ -500,9 +499,8 @@ jobs:
     secrets: inherit
 
   update-winget:
-    name: Submit stable WinGet package
+    name: Submit WinGet package
     needs: [publish]
-    if: needs.publish.outputs.prerelease == 'false'
     uses: ./.github/workflows/winget-submission.yml
     with:
       tag: ${{ needs.publish.outputs.tag }}

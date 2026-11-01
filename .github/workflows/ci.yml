@@ -45,8 +45,10 @@ jobs:
           npm run icons
           npm run icons:check
           npm run test
+          npm run bench
           npm run lint
           npm run build
+          npm run check:bundle
 
       - name: Install desktop browser engines
         working-directory: frontend

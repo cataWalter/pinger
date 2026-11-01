@@ -9,9 +9,11 @@
     "icons:check": "node ../scripts/generate-icons.mjs --check",
     "build:dev": "tsc && vite build --minify false --mode development",
     "build": "tsc && vite build --mode production",
+    "bench": "vitest bench src/appShared.bench.ts",
     "test": "vitest run",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "lint": "eslint src",
+    "check:bundle": "node ../scripts/check-frontend-bundle.mjs",
     "preview": "vite preview"
   },
   "overrides": {

@@ -13,7 +13,6 @@ import EmojiPicker from 'emoji-picker-react'
 import { AppService, LanguageTutorService } from '../bindings/mychat/desktop'
 import { type AIMessage, type GroupRoomRequest, type Invite, type Member, type MenuState, type Message, type MessageSearchRequest, type MessageSearchResult, type Room, type ScheduledJob, type Snapshot, type TutorAnalysis, type Verification } from '../bindings/mychat/desktop/models.js'
 import { emojiQueryAt, formatComposerText, insertEmoji, parseCustomEmoticonReplacements, replaceEmoticons, replaceEmoticonsAtCursor, suggestEmoji, type ComposerFormat, type EmojiQuery } from './composerText'
-import { useComposerGhostText } from './useComposerGhostText'
 import { hasOpenDialog } from './DialogSurface'
 import { DEFAULT_ACCENT_NAME, accentCssVariables, accentPaletteFor } from './accent'
 import { SYSTEM_THEME_NAME, themeCssVariables, themeIdForPreference, themeModeForPreference } from './themes'
@@ -22,6 +21,10 @@ import { activeLocale, applyLanguage } from './i18n'
 import { SnippetPopover } from './SnippetPopover'
 import { loadSnippets, saveSnippets, type Snippet } from './snippets'
 import { useRoomDrafts } from './roomDrafts'
+import { useScheduledJobs } from './hooks/useScheduledJobs'
+import { useMediaGallery } from './hooks/useMediaGallery'
+import { useRoomHistory } from './hooks/useRoomHistory'
+import { useAccountSwitching } from './hooks/useAccountSwitching'
 import { useSnippetExpander } from './useSnippetExpander'
 import { ConnectionStatusBanner } from './ConnectionStatusBanner'
 import { useConnectionProblem } from './useConnectionProblem'
@@ -34,7 +37,7 @@ import { ActionMenu, preferredScrollBehavior, primaryShiftShortcutKey, primarySh
 import LocalAIChat from './LocalAIChat'
 import { SuggestedRepliesPicker, type SuggestedRepliesState } from './SuggestedRepliesPicker'
 import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID, LOCAL_AI_FOLDER_NAME_CHARACTERS, LOCAL_AI_TITLE_CHARACTERS, type LocalAIChatKind, useLocalAIChatList } from './localAIChats'
-import { type MatrixUpdate, type MatrixNotification, type PreferenceValues, type RoomScope, type RoomRefinements, type OutgoingMessage, type MessageMenuItem, type AIAcceptAction, type AIPanel, type AIStreamChunk, type AIStreamHandler, type LanguageTutorState, type ChatTranslationState, type ChatExportState, type ChatExportProgressEvent, type ScheduledDraft, type MediaGalleryFilter, hasGalleryMedia, mediaGalleryMessageKey, type TimelineMessageActions, type RoomButtonActions, IN_APP_NOTICE_TIMEOUT_MS, EMPTY_ROOMS, newestPersistentMessage, firstUnreadMessageID, formatTypingStatus, newestOtherAvatar, describeError, chatExportStatusText, isTextEntryTarget, displayMessageBody, initials, Avatar, localDateTimeInputValue, preferenceBoolean, preferenceString, preferenceNumber, parseTimeSuggestionMinutes, reconcileRoomSnapshots, mergeTimelineMessages, timelineMessageID, incomingSinceOwnMessage, isDirectLikeRoom, isUnansweredRoom, isNeedsReplyRoom, isUnreadRoom, primaryModifierLabel, TimelineMessageList, roomActivityAt, compareRoomActivity, rankQuickSwitcherRooms, playNotificationSound, notificationAllowed, notificationTone, notificationText, detectOneTimeCode, type NotificationText, type CaptureKind, type RecordedUpload, type StagedAttachment, type MediaApprovalRequest, mediaKindForFile, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, requestLocalAsset, encodeVoiceNoteWav, RoomButton, reportRoomListVisibleRange, VirtualRoomList, IconTooltip } from './appShared'
+import { type MatrixUpdate, type MatrixNotification, type PreferenceValues, type RoomScope, type RoomRefinements, type OutgoingMessage, type MessageMenuItem, type AIAcceptAction, type AIPanel, type AIStreamChunk, type AIStreamHandler, type LanguageTutorState, type ChatTranslationState, type ChatExportState, type ChatExportProgressEvent, type ScheduledDraft, type TimelineMessageActions, type RoomButtonActions, IN_APP_NOTICE_TIMEOUT_MS, EMPTY_ROOMS, newestPersistentMessage, firstUnreadMessageID, formatTypingStatus, newestOtherAvatar, describeError, chatExportStatusText, isTextEntryTarget, displayMessageBody, initials, Avatar, localDateTimeInputValue, preferenceBoolean, preferenceString, preferenceNumber, parseTimeSuggestionMinutes, reconcileRoomSnapshots, mergeTimelineMessages, timelineMessageID, incomingSinceOwnMessage, isDirectLikeRoom, isUnansweredRoom, isNeedsReplyRoom, isUnreadRoom, primaryModifierLabel, TimelineMessageList, roomActivityAt, compareRoomActivity, rankQuickSwitcherRooms, playNotificationSound, notificationAllowed, notificationTone, notificationText, detectOneTimeCode, type NotificationText, type CaptureKind, type RecordedUpload, type StagedAttachment, type MediaApprovalRequest, mediaKindForFile, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, requestLocalAsset, encodeVoiceNoteWav, RoomButton, reportRoomListVisibleRange, VirtualRoomList, IconTooltip } from './appShared'
 
 const SettingsDialog = lazy(() => import('./SettingsDialog').then((module) => ({ default: module.SettingsDialog })))
 const AIResultDialogs = lazy(() => import('./AIResultDialogs').then((module) => ({ default: module.AIResultDialogs })))
@@ -97,20 +100,10 @@ function AppBody() {
   const otherAccountRoomsRef = useRef(otherAccountRooms)
   otherAccountRoomsRef.current = otherAccountRooms
   const [messages, setMessages] = useState<Message[]>([])
-  const [olderCursor, setOlderCursor] = useState(0)
-  const [hasOlder, setHasOlder] = useState(false)
-  const hasOlderRef = useRef(false)
-  const [loadingOlder, setLoadingOlder] = useState(false)
-  // Scroll events fire far faster than state updates commit, so a scroll
-  // handler calling loadOlderMessages() could start several fetches before
-  // `loadingOlder` re-renders. This ref closes that window.
-  const loadingOlderRef = useRef(false)
   // Loading older room history before a Local AI summary chat opens.
   const [summaryStatus, setSummaryStatus] = useState('')
   const summaryLoadingRef = useRef(false)
   const [composeText, setComposeText] = useState('')
-  const [composeCaretAtEnd, setComposeCaretAtEnd] = useState(true)
-  const ghostLayerRef = useRef<HTMLDivElement>(null)
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([])
   const [mediaApproval, setMediaApproval] = useState<MediaApprovalRequest | null>(null)
   const [snippets, setSnippets] = useState<Snippet[]>(() => loadSnippets())
@@ -131,13 +124,6 @@ function AppBody() {
   const [newRoomMode, setNewRoomMode] = useState<NewRoomMode | null>(null)
   const [inviteBusyRoomID, setInviteBusyRoomID] = useState('')
   const [profilePhotoPreview, setProfilePhotoPreview] = useState<{ source: string; label: string } | null>(null)
-  const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false)
-  const [mediaGalleryFilter, setMediaGalleryFilter] = useState<MediaGalleryFilter>('all')
-  const [mediaGalleryItems, setMediaGalleryItems] = useState<Message[]>([])
-  const [mediaGalleryLoading, setMediaGalleryLoading] = useState(false)
-  const [mediaGalleryScanned, setMediaGalleryScanned] = useState(0)
-  const [mediaGalleryError, setMediaGalleryError] = useState('')
-  const mediaGalleryRequestRef = useRef(0)
   const [agentEditor, setAgentEditor] = useState<ChatAgentProfile | null>(null)
   const [agentSettingsError, setAgentSettingsError] = useState('')
   const [roomMembers, setRoomMembers] = useState<Member[]>([])
@@ -158,15 +144,23 @@ function AppBody() {
   const [searchNextBatch, setSearchNextBatch] = useState('')
   const [searchStatus, setSearchStatus] = useState('')
   const [searching, setSearching] = useState(false)
-  const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([])
-  const [scheduledJobsOpen, setScheduledJobsOpen] = useState(false)
+  const {
+    jobs: scheduledJobs,
+    setJobs: setScheduledJobs,
+    open: scheduledJobsOpen,
+    setOpen: setScheduledJobsOpen,
+    times: scheduledTimes,
+    setTimes: setScheduledTimes,
+    loading: scheduledLoading,
+    error: scheduledJobsError,
+    setError: setScheduledJobsError,
+    refresh: refreshScheduledJobs,
+    openDialog: openScheduledJobs,
+  } = useScheduledJobs(workspaceGenerationRef)
   const [scheduledDraft, setScheduledDraft] = useState<ScheduledDraft | null>(null)
   const [scheduledDueAt, setScheduledDueAt] = useState('')
-  const [scheduledTimes, setScheduledTimes] = useState<Record<string, string>>({})
-  const [scheduledLoading, setScheduledLoading] = useState(false)
   const [scheduledSaving, setScheduledSaving] = useState(false)
   const [scheduledBusyID, setScheduledBusyID] = useState('')
-  const [scheduledJobsError, setScheduledJobsError] = useState('')
   const [scheduledDialogError, setScheduledDialogError] = useState('')
   const [scheduledNotice, setScheduledNotice] = useState('')
   const { settingsOpen, setSettingsOpen, settingsTab, setSettingsTab } = useSettings()
@@ -202,10 +196,6 @@ function AppBody() {
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([])
   const [selectedAudioInputDeviceId, setSelectedAudioInputDeviceId] = useState<string>(preferenceString(snapshot?.preferences ?? {}, 'audio.input_device', ''))
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
-  const [loadingHistory, setLoadingHistory] = useState(false)
-  const [historyRevision, setHistoryRevision] = useState(0)
-  const [historyPageRevision, setHistoryPageRevision] = useState(0)
-  const lastObservedHistoryRevisionRef = useRef(0)
   // The unread count is captured when a room opens, so the divider stays put after the room is marked read.
   const [unreadMarker, setUnreadMarker] = useState<{ scope: string; count: number; messageID: string; seen: boolean; offscreen: boolean } | null>(null)
   const unreadObserverRef = useRef<IntersectionObserver | null>(null)
@@ -215,8 +205,6 @@ function AppBody() {
   const [error, setError] = useState('')
   const selectedRoomRef = useRef('')
   const roomListRef = useRef<HTMLElement | null>(null)
-  const historyRoomIDRef = useRef('')
-  const pendingHistoryRefreshRoomIDRef = useRef('')
   const editTargetRef = useRef<Message | null>(null)
   const markRoomAnsweredRef = useRef<(roomID: string) => Promise<void>>(async () => { })
   const showRoomRef = useRef<(roomID: string) => void>(() => { })
@@ -309,6 +297,38 @@ function AppBody() {
   const chatTranslationRequestRef = useRef(0)
   const quickSwitcherInputRef = useRef<HTMLInputElement>(null)
   const pendingSearchJumpRef = useRef<{ roomID: string; eventID: string; timelineCursor: number } | null>(null)
+  const {
+    loadingHistory,
+    setLoadingHistory,
+    historyRevision,
+    setHistoryRevision,
+    setHistoryPageRevision,
+    historyRoomIDRef,
+    pendingHistoryRefreshRoomIDRef,
+    olderCursor,
+    setOlderCursor,
+    hasOlder,
+    setHasOlder,
+    hasOlderRef,
+    loadingOlder,
+    setLoadingOlder,
+    loadingOlderRef,
+    loadOlderMessages,
+  } = useRoomHistory({
+    selectedRoomID,
+    activeAccountID,
+    selectedRoomRef,
+    workspaceGenerationRef,
+    messages,
+    setMessages,
+    setError,
+    pendingSearchJumpRef,
+    timelineRef,
+    timelineListRef,
+    timelineHeightBeforePrepend,
+    roomSwitchRef,
+    stickToBottomRef,
+  })
 
   useEffect(() => {
     chatTranslationRequestRef.current++
@@ -341,7 +361,7 @@ function AppBody() {
     historyRoomIDRef.current === selectedRoomID
       ? newestOtherAvatar(messages)
       : ''
-  ), [messages, selectedRoom?.avatar, selectedRoomID])
+  ), [historyRoomIDRef, messages, selectedRoom?.avatar, selectedRoomID])
   const selectedRoomAvatarSource = useMemo(() => matrixMXCMediaURL(selectedRoomAvatar), [selectedRoomAvatar])
   const typingStatus = formatTypingStatus(typingUsers, roomMembers, messages, selectedRoom?.direct ? selectedRoom.name : '')
   const imageEngineReady = preferenceString(preferences, 'ai.image.binary_path', '') !== '' && preferenceString(preferences, 'ai.image.model_path', '') !== ''
@@ -535,7 +555,6 @@ function AppBody() {
       mediaDevices.removeEventListener?.('devicechange', refreshAudioInputDevices)
     }
   }, [])
-  hasOlderRef.current = hasOlder
   editTargetRef.current = editTarget
   const inboxAccountCount = snapshot?.accounts?.length ?? 0
   const archivedPreferenceKey = useCallback((roomID: string, accountID = '') => `room.archived.${accountID || activeAccountID || 'primary'}.${roomID}`, [activeAccountID])
@@ -668,29 +687,6 @@ function AppBody() {
     mediaQuery.addEventListener('change', updateSystemTheme)
     return () => mediaQuery.removeEventListener('change', updateSystemTheme)
   }, [])
-
-  async function refreshScheduledJobs() {
-    const generation = workspaceGenerationRef.current
-    setScheduledLoading(true)
-    try {
-      const jobs = await AppService.ScheduledJobs()
-      if (workspaceGenerationRef.current !== generation) return
-      const nextJobs = jobs ?? []
-      setScheduledJobs(nextJobs)
-      setScheduledTimes(Object.fromEntries(nextJobs.map((job) => [job.id, localDateTimeInputValue(job.dueAt)])))
-      setScheduledJobsError('')
-    } catch (jobsError) {
-      if (workspaceGenerationRef.current === generation) setScheduledJobsError(describeError(jobsError))
-    } finally {
-      if (workspaceGenerationRef.current === generation) setScheduledLoading(false)
-    }
-  }
-
-  function openScheduledJobs() {
-    setScheduledJobsOpen(true)
-    setScheduledJobsError('')
-    void refreshScheduledJobs()
-  }
 
   function openScheduleMessage() {
     if (!selectedRoomID || !composeText.trim() || editTarget) return
@@ -928,7 +924,7 @@ function AppBody() {
       pinTimelineToBottom(timeline)
       if (!roomSwitchRef.current || historyRoomIDRef.current === selectedRoomID) roomSwitchRef.current = false
     }
-  }, [messages, selectedRoomID, unreadMarkerID])
+  }, [historyRoomIDRef, messages, selectedRoomID, unreadMarkerID])
 
   // Media, fonts, and composer or banner changes resize the timeline without changing `messages`.
   // Re-pin to the newest message after each resize while the reader is following the conversation.
@@ -1201,7 +1197,7 @@ function AppBody() {
       unsubscribeAttachmentSent()
       unsubscribeScheduledReminder()
     }
-  }, [setSettingsOpen, setSettingsTab])
+  }, [historyRoomIDRef, refreshScheduledJobs, setHistoryRevision, setScheduledJobsError, setScheduledJobsOpen, setSettingsOpen, setSettingsTab])
 
   useMatrixBatch<MatrixUpdate>((batch) => {
     for (const delta of batch.room_deltas ?? []) {
@@ -1219,81 +1215,17 @@ function AppBody() {
     }
   })
 
-  useEffect(() => {
-    mediaGalleryRequestRef.current++
-    setMediaGalleryOpen(false)
-    setMediaGalleryLoading(false)
-    setMediaGalleryItems([])
-  }, [selectedRoomID, activeAccountID])
-
-  useEffect(() => {
-    if (!selectedRoomID) {
-      historyRoomIDRef.current = ''
-      setMessages([])
-      setOlderCursor(0)
-      setHasOlder(false)
-      return
-    }
-
-    let active = true
-    const generation = workspaceGenerationRef.current
-    const searchJump = pendingSearchJumpRef.current?.roomID === selectedRoomID ? pendingSearchJumpRef.current : null
-    if (pendingSearchJumpRef.current && !searchJump) pendingSearchJumpRef.current = null
-    historyRoomIDRef.current = ''
-    setLoadingHistory(true)
-    setOlderCursor(0)
-    setHasOlder(false)
-    setLoadingOlder(false)
-    timelineHeightBeforePrepend.current = null
-    roomSwitchRef.current = true
-    stickToBottomRef.current = true
-    void (async () => {
-      try {
-        let page = await AppService.History(selectedRoomID, 0)
-        if (!active || workspaceGenerationRef.current !== generation) return
-        let loadedMessages = page.messages ?? []
-        let nextBefore = page.before
-        let hasMore = page.hasMore
-        let jumpPages = 0
-        while (
-          searchJump && searchJump.timelineCursor > 0 &&
-          !loadedMessages.some((message) => message.id === searchJump.eventID) &&
-          hasMore && nextBefore > searchJump.timelineCursor && jumpPages < 500
-        ) {
-          page = await AppService.History(selectedRoomID, nextBefore)
-          if (!active || workspaceGenerationRef.current !== generation) return
-          const olderMessages = page.messages ?? []
-          if (olderMessages.length === 0 || page.before === nextBefore) {
-            hasMore = false
-            break
-          }
-          const loadedKeys = new Set(loadedMessages.map((message) => message.id || message.transactionId))
-          loadedMessages = [...olderMessages.filter((message) => !loadedKeys.has(message.id || message.transactionId)), ...loadedMessages]
-          nextBefore = page.before
-          hasMore = page.hasMore
-          jumpPages++
-        }
-        historyRoomIDRef.current = selectedRoomID
-        setMessages(loadedMessages)
-        setOlderCursor(nextBefore)
-        setHasOlder(hasMore)
-        if (searchJump && !loadedMessages.some((message) => message.id === searchJump.eventID)) {
-          pendingSearchJumpRef.current = null
-          setError('Could not load that message from local history.')
-        }
-        if (pendingHistoryRefreshRoomIDRef.current === selectedRoomID) {
-          pendingHistoryRefreshRoomIDRef.current = ''
-          setHistoryRevision((revision) => revision + 1)
-        }
-      } catch (historyError) {
-        if (active && workspaceGenerationRef.current === generation) setError(describeError(historyError))
-      } finally {
-        if (active && workspaceGenerationRef.current === generation) setLoadingHistory(false)
-      }
-    })()
-
-    return () => { active = false }
-  }, [selectedRoomID, activeAccountID, historyPageRevision])
+  const {
+    open: mediaGalleryOpen,
+    filter: mediaGalleryFilter,
+    setFilter: setMediaGalleryFilter,
+    items: mediaGalleryItems,
+    loading: mediaGalleryLoading,
+    scanned: mediaGalleryScanned,
+    error: mediaGalleryError,
+    close: closeMediaGallery,
+    openGallery: openMediaGallery,
+  } = useMediaGallery({ selectedRoomID, activeAccountID, loadingHistory, historyRoomIDRef, messages, selectedRoomRef })
 
   useEffect(() => {
     const searchJump = pendingSearchJumpRef.current
@@ -1301,33 +1233,7 @@ function AppBody() {
     if (!messages.some((message) => message.id === searchJump.eventID)) return
     pendingSearchJumpRef.current = null
     requestAnimationFrame(() => focusTimelineMessage(searchJump.eventID))
-  }, [loadingHistory, messages, selectedRoomID])
-
-  useEffect(() => {
-    const revisionChanged = historyRevision !== lastObservedHistoryRevisionRef.current
-    lastObservedHistoryRevisionRef.current = historyRevision
-    if (!selectedRoomID || historyRevision === 0) return
-    const roomID = selectedRoomID
-    if (historyRoomIDRef.current !== roomID) {
-      if (revisionChanged) pendingHistoryRefreshRoomIDRef.current = roomID
-      return
-    }
-
-    let active = true
-    const generation = workspaceGenerationRef.current
-    AppService.History(roomID, 0)
-      .then((page) => {
-        if (!active || selectedRoomRef.current !== roomID || workspaceGenerationRef.current !== generation) return
-        setMessages((current) => mergeTimelineMessages(current, page.messages ?? []))
-        if (!hasOlderRef.current) setOlderCursor(page.before)
-        if (page.hasMore) setHasOlder(true)
-      })
-      .catch((historyError: unknown) => {
-        if (active) setError(describeError(historyError))
-      })
-
-    return () => { active = false }
-  }, [historyRevision, selectedRoomID, activeAccountID])
+  }, [historyRoomIDRef, loadingHistory, messages, selectedRoomID])
 
   useEffect(() => {
     if (!selectedRoomID || loadingHistory || historyRoomIDRef.current !== selectedRoomID) return
@@ -1352,14 +1258,14 @@ function AppBody() {
         if (lastReadEventByRoom.current.get(selectedRoomID) === eventID) lastReadEventByRoom.current.delete(selectedRoomID)
         setError(describeError(readError))
       })
-  }, [loadingHistory, messages, selectedRoom?.lastEventId, selectedRoom?.unread, selectedRoom?.mentions, selectedRoomID, activeAccountID])
+  }, [activeAccountID, historyRoomIDRef, loadingHistory, messages, selectedRoom?.lastEventId, selectedRoom?.mentions, selectedRoom?.unread, selectedRoomID])
 
   useEffect(() => {
     if (!activeUnreadMarker || activeUnreadMarker.messageID) return
     if (loadingHistory || historyRoomIDRef.current !== selectedRoomID || visibleMessages.length === 0) return
     const messageID = firstUnreadMessageID(visibleMessages, activeUnreadMarker.count, currentUserIDRef.current)
     setUnreadMarker(messageID ? { ...activeUnreadMarker, messageID } : null)
-  }, [activeUnreadMarker, loadingHistory, visibleMessages, selectedRoomID])
+  }, [activeUnreadMarker, historyRoomIDRef, loadingHistory, selectedRoomID, visibleMessages])
 
   // The jump pill shows only while the divider is out of view; seeing it once hides the pill for good.
   useEffect(() => {
@@ -1380,116 +1286,6 @@ function AppBody() {
       unreadObserverRef.current = null
     }
   }, [unreadMarkerID, unreadMarkerSeen])
-
-  async function loadOlderMessages() {
-    if (!selectedRoomID || !hasOlder || loadingOlder || loadingOlderRef.current) return
-    const roomID = selectedRoomID
-    const generation = workspaceGenerationRef.current
-    timelineHeightBeforePrepend.current = timelineRef.current?.scrollHeight ?? null
-    loadingOlderRef.current = true
-    setLoadingOlder(true)
-    try {
-      const page = await AppService.History(roomID, olderCursor)
-      if (selectedRoomRef.current !== roomID || workspaceGenerationRef.current !== generation) return
-      setMessages((current) => {
-        const currentKeys = new Set(current.map((message) => message.id || message.transactionId))
-        const olderMessages = (page.messages ?? []).filter((message) => !currentKeys.has(message.id || message.transactionId))
-        // Nothing new arrived, so drop the saved height: the prepend-detecting
-        // layout effect only runs on a `messages` change and would otherwise
-        // apply this stale delta to the next unrelated update.
-        if (olderMessages.length === 0) timelineHeightBeforePrepend.current = null
-        return [...olderMessages, ...current]
-      })
-      setOlderCursor(page.before)
-      setHasOlder(page.hasMore && page.before !== olderCursor)
-    } catch (historyError) {
-      if (workspaceGenerationRef.current !== generation) return
-      setError(describeError(historyError))
-      timelineHeightBeforePrepend.current = null
-    } finally {
-      if (workspaceGenerationRef.current === generation) {
-        setLoadingOlder(false)
-        if (timelineListRef.current?.virtualized) {
-          requestAnimationFrame(() => requestAnimationFrame(() => {
-            if (workspaceGenerationRef.current === generation) loadingOlderRef.current = false
-          }))
-        } else {
-          loadingOlderRef.current = false
-        }
-      }
-    }
-  }
-
-  function closeMediaGallery() {
-    mediaGalleryRequestRef.current++
-    setMediaGalleryOpen(false)
-    setMediaGalleryLoading(false)
-  }
-
-  async function openMediaGallery() {
-    if (!selectedRoomID || loadingHistory || historyRoomIDRef.current !== selectedRoomID) return
-    const roomID = selectedRoomID
-    const requestID = ++mediaGalleryRequestRef.current
-    const initialItems = messages.filter(hasGalleryMedia)
-    const seenMessageKeys = new Set(initialItems.map(mediaGalleryMessageKey))
-    const collectedItems = [...initialItems]
-    let cursor = 0
-    let hasMore = true
-
-    setMediaGalleryFilter('all')
-    setMediaGalleryOpen(true)
-    setMediaGalleryLoading(true)
-    setMediaGalleryScanned(0)
-    setMediaGalleryError('')
-    setMediaGalleryItems([...collectedItems].sort((left, right) => right.timestamp - left.timestamp))
-
-    try {
-      while (hasMore) {
-        const page = await AppService.History(roomID, cursor)
-        if (mediaGalleryRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
-        const pageMessages = page.messages ?? []
-        for (const message of pageMessages) {
-          if (!hasGalleryMedia(message)) continue
-          const messageKey = mediaGalleryMessageKey(message)
-          if (seenMessageKeys.has(messageKey)) continue
-          seenMessageKeys.add(messageKey)
-          collectedItems.push(message)
-        }
-        setMediaGalleryItems([...collectedItems].sort((left, right) => right.timestamp - left.timestamp))
-        setMediaGalleryScanned((count) => count + pageMessages.length)
-        if (page.before === cursor) {
-          if (page.hasMore) throw new Error('Room history pagination did not advance.')
-          break
-        }
-        cursor = page.before
-        hasMore = page.hasMore
-      }
-    } catch (galleryError) {
-      if (mediaGalleryRequestRef.current === requestID && selectedRoomRef.current === roomID) {
-        setMediaGalleryError(describeError(galleryError))
-      }
-    } finally {
-      if (mediaGalleryRequestRef.current === requestID && selectedRoomRef.current === roomID) {
-        setMediaGalleryLoading(false)
-      }
-    }
-  }
-
-  const loadOlderMessagesRef = useRef(loadOlderMessages)
-  loadOlderMessagesRef.current = loadOlderMessages
-
-  // Keep the viewport filled. A room whose newest page is shorter than the
-  // timeline box can't be scrolled at all, so the scroll handler below would
-  // never fire and older history would stay stuck behind the button. This
-  // terminates: a page either grows the content (stopping the fill) or stops
-  // advancing the cursor, which makes loadOlderMessages clear `hasOlder`.
-  useEffect(() => {
-    const timeline = timelineRef.current
-    if (!selectedRoomID || loadingHistory || loadingOlder || !hasOlder) return
-    if (!timeline || timeline.clientHeight <= 0) return
-    if (timeline.scrollHeight > timeline.clientHeight) return
-    void loadOlderMessagesRef.current()
-  }, [selectedRoomID, loadingHistory, loadingOlder, hasOlder, messages])
 
   function messageSearchRequest(nextBatch = ''): MessageSearchRequest | null {
     const query = messageSearch.trim()
@@ -2383,26 +2179,15 @@ function AppBody() {
     void refreshScheduledJobs()
   }
 
-  async function switchAccount(accountID: string, roomID = '') {
-    if (busy || voiceCaptureStatus || scheduledSaving || scheduledBusyID || forwardBusy || leavingRoom) return
-    if (accountID === snapshot?.activeAccountId) {
-      setAccountManagerOpen(false)
-      if (roomID) showRoom(roomID)
-      return
-    }
-    setBusy(true)
-    setAccountError('')
-    try {
-      const state = await AppService.SwitchAccount(accountID)
-      resetAccountWorkspace(state)
-      if (roomID) showRoom(roomID)
-      setAccountManagerOpen(false)
-    } catch (switchError) {
-      setAccountError(describeError(switchError))
-    } finally {
-      setBusy(false)
-    }
-  }
+  const switchAccount = useAccountSwitching({
+    activeAccountID,
+    blocked: busy || Boolean(voiceCaptureStatus) || scheduledSaving || Boolean(scheduledBusyID) || forwardBusy || leavingRoom,
+    resetAccountWorkspace,
+    showRoom,
+    setBusy,
+    setAccountError,
+    setAccountManagerOpen,
+  })
 
   async function submitAddAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -3489,15 +3274,6 @@ function AppBody() {
     cancelAIRequest(requestID)
   }, [selectedRoomID, activeAccountID])
 
-  // Ghost text is a faint continuation of the draft from the local AI. It is on unless composer.ghost_text is disabled.
-  const ghostText = useComposerGhostText({
-    enabled: aiEnabled && !editTarget && preferenceBoolean(preferences, 'composer.ghost_text', true),
-    accountID: activeAccountID,
-    roomID: selectedRoomID,
-    text: composeText,
-    caretAtEnd: composeCaretAtEnd,
-  })
-
   function closeAIResult() {
     cancelAIRequest(activeAIRequestRef.current)
     activeAIRequestRef.current = ''
@@ -3907,15 +3683,6 @@ function AppBody() {
     setChatExport((current) => current?.phase === 'running' ? { ...current, error: '' } : null)
   }
 
-  // Ghost text is hidden while a mention or emoji picker owns Tab and Enter.
-  const ghostSuffix = (mentionStart >= 0 && mentionOptions.length > 0) || emojiOptions.length > 0 ? '' : ghostText.suffix
-  // acceptGhostText appends the suggestion to the draft. The next pause asks for a suggestion for the longer draft.
-  function acceptGhostText() {
-    const completed = composeText + ghostSuffix
-    setComposeDraft(/\s$/.test(completed) ? completed : `${completed} `)
-    setComposeCaretAtEnd(true)
-  }
-
   function composerAIItems(): ActionMenuEntry[] {
     return [
       { label: 'Analyze draft with Language Tutor', primaryShiftKey: AI_ACTION_SHORTCUTS.analyzeDraft.key, icon: <GraduationCap size={15} />, onSelect: () => void analyzeWithLanguageTutor(composeText, 'draft'), disabled: !selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget) },
@@ -4011,18 +3778,6 @@ function AppBody() {
       if (event.key === 'Escape') {
         event.preventDefault()
         setEmojiMatch(null)
-        return
-      }
-    }
-    if (ghostSuffix) {
-      if (event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
-        event.preventDefault()
-        acceptGhostText()
-        return
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        ghostText.dismiss()
         return
       }
     }
@@ -4729,21 +4484,15 @@ function AppBody() {
                       updateMentionQuery(value, converted.cursor)
                       updateEmojiQuery(value, converted.cursor)
                       snippetExpander.handleChange(value, converted.cursor)
-                      setComposeCaretAtEnd(converted.cursor === value.length)
                     }}
                     onKeyDown={handleComposerKeyDown}
                     onClick={(event) => {
-                      setComposeCaretAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length)
                       snippetExpander.handleClick(event.currentTarget.value, event.currentTarget.selectionStart)
                     }}
                     onKeyUp={(event) => {
-                      setComposeCaretAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length)
                       if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
                         snippetExpander.handleKeyUp(event.currentTarget.value, event.currentTarget.selectionStart)
                       }
-                    }}
-                    onScroll={(event) => {
-                      if (ghostLayerRef.current) ghostLayerRef.current.scrollTop = event.currentTarget.scrollTop
                     }}
                     onPaste={handleComposerPaste}
                     placeholder={selectedRoom ? `Message ${selectedRoom.name || selectedRoom.id}` : 'Select a room to start'}
@@ -4753,10 +4502,6 @@ function AppBody() {
                     disabled={!selectedRoom || busy || voiceCaptureStatus !== null}
                     rows={1}
                   />
-                  <div className="composer-ghost" ref={ghostLayerRef} aria-hidden="true">
-                    <span className="composer-ghost-typed">{composeText}</span>
-                    <span className="composer-ghost-suggestion">{ghostSuffix}</span>
-                  </div>
                   {snippetMenuVisible && snippetMatch && <SnippetPopover
                     inputRef={composerInputRef}
                     value={composeText}

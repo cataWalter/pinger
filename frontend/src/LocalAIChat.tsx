@@ -1,5 +1,5 @@
 import { Events } from '@wailsio/runtime'
-import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { lazy, memo, Suspense, useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { ArrowDown, CircleAlert, Copy, Download, FileText, ImagePlus, Paperclip, Pencil, Plus, RotateCcw, RotateCw, Send, Sparkles, Square, X } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
 import type { LocalAIChatAttachment, LocalAIChatMessage, LocalAIChatSummary } from '../bindings/mychat/desktop/models.js'
@@ -135,18 +135,23 @@ function imageRunStatus(run: LocalAIImageRun) {
 
 type LocalAIMessageViewProps = {
   message: LocalAIChatMessage
+  chatID: string | null
   idle: boolean
   imagePrompt: boolean
   editContent: string | null
-  onStartEdit: () => void
-  onEditChange: (content: string) => void
-  onCancelEdit: () => void
-  onSaveEdit: () => void
-  onCopy: () => void
-  onRegenerate: () => void
+  actionsRef: { current: LocalAIMessageActions }
 }
 
-function LocalAIMessageView({ message, idle, imagePrompt, editContent, onStartEdit, onEditChange, onCancelEdit, onSaveEdit, onCopy, onRegenerate }: LocalAIMessageViewProps) {
+type LocalAIMessageActions = {
+  startEdit: (message: LocalAIChatMessage) => void
+  editChange: (content: string) => void
+  cancelEdit: () => void
+  saveEdit: () => void
+  copy: (message: LocalAIChatMessage) => void
+  regenerate: (message: LocalAIChatMessage) => void
+}
+
+const LocalAIMessageView = memo(function LocalAIMessageView({ message, idle, imagePrompt, editContent, actionsRef }: LocalAIMessageViewProps) {
   const isUser = message.role === 'user'
   const imageTurn = isLocalAIImageTurn(message)
   const attachments = message.attachments ?? []
@@ -154,10 +159,10 @@ function LocalAIMessageView({ message, idle, imagePrompt, editContent, onStartEd
     return (
       <article className="local-ai-message is-user is-editing">
         <span className="local-ai-message-label">You</span>
-        <textarea className="local-ai-edit-input" aria-label="Edit message" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={editContent} onChange={(event) => onEditChange(event.currentTarget.value)} rows={3} />
+        <textarea className="local-ai-edit-input" aria-label="Edit message" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={editContent} onChange={(event) => actionsRef.current.editChange(event.currentTarget.value)} rows={3} />
         <div className="local-ai-edit-actions">
-          <button type="button" onClick={onCancelEdit}>Cancel</button>
-          <button type="button" onClick={onSaveEdit} disabled={editContent.trim() === '' && attachments.length === 0}>Save and send</button>
+          <button type="button" onClick={() => actionsRef.current.cancelEdit()}>Cancel</button>
+          <button type="button" onClick={() => actionsRef.current.saveEdit()} disabled={editContent.trim() === '' && attachments.length === 0}>Save and send</button>
         </div>
       </article>
     )
@@ -187,13 +192,13 @@ function LocalAIMessageView({ message, idle, imagePrompt, editContent, onStartEd
         </Suspense>
       ))}
       <div className="local-ai-message-actions">
-        {message.content && <button className="icon-button" type="button" aria-label="Copy message" title="Copy" onClick={onCopy}><Copy size={13} /></button>}
-        {idle && !isUser && !imageTurn && <button className="icon-button" type="button" aria-label="Regenerate response" title="Regenerate" onClick={onRegenerate}><RotateCw size={13} /></button>}
-        {idle && isUser && !imagePrompt && <button className="icon-button" type="button" aria-label="Edit message" title="Edit" onClick={onStartEdit}><Pencil size={13} /></button>}
+        {message.content && <button className="icon-button" type="button" aria-label="Copy message" title="Copy" onClick={() => actionsRef.current.copy(message)}><Copy size={13} /></button>}
+        {idle && !isUser && !imageTurn && <button className="icon-button" type="button" aria-label="Regenerate response" title="Regenerate" onClick={() => actionsRef.current.regenerate(message)}><RotateCw size={13} /></button>}
+        {idle && isUser && !imagePrompt && <button className="icon-button" type="button" aria-label="Edit message" title="Edit" onClick={() => actionsRef.current.startEdit(message)}><Pencil size={13} /></button>}
       </div>
     </article>
   )
-}
+})
 
 export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden, initialDraft = '', initialDraftVersion = 0, onAgentChange, onCreateAgent, onChatCreated, onChatsChanged, newChatKind = 'chat' }: LocalAIChatProps) {
   const [messages, setMessages] = useState<LocalAIChatMessage[]>([])
@@ -225,6 +230,14 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
   // Changes whenever the visible composer starts belonging to a different chat.
   const composerGenerationRef = useRef(0)
   const createdChatIdRef = useRef<string | null>(null)
+  const messageActionsRef = useRef<LocalAIMessageActions>({
+    startEdit: () => undefined,
+    editChange: () => undefined,
+    cancelEdit: () => undefined,
+    saveEdit: () => undefined,
+    copy: () => undefined,
+    regenerate: () => undefined,
+  })
   const busy = submitting || loading || runView !== null || imageRun !== null
   const runHere = runView !== null && runView.chatId === chatId
   const runElsewhere = runView !== null && !runHere
@@ -233,6 +246,14 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
   const imagePromptSeqs = localAIImagePromptSeqs(messages)
   const canSend = !busy && (draft.trim() !== '' || attachments.length > 0)
   const trimmed = messages.length > LOCAL_AI_HISTORY_TURN_LIMIT
+  messageActionsRef.current = {
+    startEdit: (message) => setEdit({ seq: message.seq, content: message.content }),
+    editChange: (content) => setEdit((current) => (current ? { ...current, content } : current)),
+    cancelEdit: () => setEdit(null),
+    saveEdit: () => void saveEdit(),
+    copy: (message) => copyMessage(message.content),
+    regenerate: (message) => void regenerate(message),
+  }
 
   useEffect(() => {
     let frame: number | null = null
@@ -782,15 +803,11 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
           <LocalAIMessageView
             key={message.seq}
             message={message}
+            chatID={chatId}
             idle={!busy}
             imagePrompt={imagePromptSeqs.has(message.seq)}
             editContent={edit && edit.seq === message.seq ? edit.content : null}
-            onStartEdit={() => setEdit({ seq: message.seq, content: message.content })}
-            onEditChange={(content) => setEdit((current) => (current ? { ...current, content } : current))}
-            onCancelEdit={() => setEdit(null)}
-            onSaveEdit={() => void saveEdit()}
-            onCopy={() => copyMessage(message.content)}
-            onRegenerate={() => void regenerate(message)}
+            actionsRef={messageActionsRef}
           />
         ))}
         {runHere && runView && (
