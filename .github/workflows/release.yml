@@ -20,8 +20,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Last run number released as v0.<run>; later branch builds count from 0.1.
-  RELEASE_VERSION_OFFSET: "24"
+  # Run 47 continues at v0.25 after the existing v0.24 release.
+  RELEASE_VERSION_OFFSET: "22"
   GOTOOLCHAIN: go1.26.10
 
 jobs:
@@ -430,7 +430,6 @@ jobs:
       contents: write
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
-      prerelease: ${{ github.ref_type != 'tag' }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -469,8 +468,8 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          prerelease: ${{ github.ref_type != 'tag' }}
-          make_latest: ${{ github.ref_type == 'tag' }}
+          prerelease: false
+          make_latest: true
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
