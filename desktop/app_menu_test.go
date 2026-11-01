@@ -64,6 +64,48 @@ func menuItemsUnder(menu *application.Menu) []*application.MenuItem {
 	}
 }
 
+func TestDesktopCatalogsHaveMatchingKeys(t *testing.T) {
+	var reference map[string]struct{}
+	for language, catalog := range desktopCatalogs {
+		keys := make(map[string]struct{}, len(catalog))
+		for key := range catalog {
+			keys[key] = struct{}{}
+		}
+		if reference == nil {
+			reference = keys
+			continue
+		}
+		if len(keys) != len(reference) {
+			t.Errorf("%s catalog has %d keys, want %d", language, len(keys), len(reference))
+			continue
+		}
+		for key := range reference {
+			if _, ok := keys[key]; !ok {
+				t.Errorf("%s catalog is missing %q", language, key)
+			}
+		}
+	}
+}
+
+func TestLocalizedUIString(t *testing.T) {
+	tests := []struct {
+		language string
+		english  string
+		want     string
+	}{
+		{language: "it-IT", english: "Open Pinger", want: "Apri Pinger"},
+		{language: "es", english: "New message", want: "Mensaje nuevo"},
+		{language: "de-DE", english: "Settings...", want: "Einstellungen..."},
+		{language: "fr_FR.UTF-8", english: "Quit Pinger", want: "Quitter Pinger"},
+		{language: "pt-BR", english: "Open Pinger", want: "Open Pinger"},
+	}
+	for _, test := range tests {
+		if got := localizedUIString(test.language, test.english); got != test.want {
+			t.Errorf("localizedUIString(%q, %q) = %q, want %q", test.language, test.english, got, test.want)
+		}
+	}
+}
+
 func TestApplicationMenuAcceleratorsAreUniqueAndModified(t *testing.T) {
 	menus := newApplicationMenus(&AppService{}, nil, nil, nil)
 	menu := menus.applicationMenu()
@@ -263,6 +305,30 @@ func TestPopulateAccountsWithoutAccountsIsDisabled(t *testing.T) {
 	item := accountMenu.ItemAt(0)
 	if item == nil || item.Label() != "No Accounts" || item.Enabled() {
 		t.Errorf("empty account menu should show a disabled %q item", "No Accounts")
+	}
+}
+
+func TestApplicationMenusApplyLanguageToStaticAndDynamicLabels(t *testing.T) {
+	menus := newApplicationMenus(&AppService{}, nil, nil, nil)
+	menus.applicationMenu()
+
+	menus.syncPreferences(map[string]any{"general.language": "it"})
+	for item, english := range menus.originalLabels {
+		if english == "Settings..." && item.Label() != "Impostazioni..." {
+			t.Fatalf("settings label = %q, want %q", item.Label(), "Impostazioni...")
+		}
+		if english == "All Rooms" && item.Label() != "Tutte le stanze" {
+			t.Fatalf("room filter label = %q, want %q", item.Label(), "Tutte le stanze")
+		}
+	}
+	menus.applyState(MenuState{RoomSelected: true, RoomUnread: true, Filter: "all"})
+	if got := menus.items[menuActionRoomRead].Label(); got != "Segna la stanza come letta" {
+		t.Fatalf("dynamic room label = %q", got)
+	}
+
+	menus.syncPreferences(map[string]any{"general.language": "es"})
+	if got := menus.items[menuActionRoomRead].Label(); got != "Marcar sala como leída" {
+		t.Fatalf("updated dynamic room label = %q", got)
 	}
 }
 

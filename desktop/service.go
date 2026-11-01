@@ -1152,10 +1152,19 @@ func (s *AppService) SendNotification(alert NotificationAlert) (bool, error) {
 			return false, err
 		}
 	}
+	language := stringPreference(s.preferenceValues(), "general.language", "system")
+	title := alert.Title
+	if title == "" {
+		title = localizedUIString(language, "Pinger")
+	}
+	body := alert.Body
+	if body == "" {
+		body = localizedUIString(language, "New message")
+	}
 	message := notifications.Message{
-		Title:     alert.Title,
+		Title:     title,
 		Subtitle:  alert.Subtitle,
-		Body:      alert.Body,
+		Body:      body,
 		RoomID:    alert.RoomID,
 		AccountID: alert.AccountID,
 	}

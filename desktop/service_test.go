@@ -228,6 +228,25 @@ func TestAppServiceNotificationMethodsUseInjectedNotifier(t *testing.T) {
 	}
 }
 
+func TestAppServiceNotificationFallbackUsesSelectedLanguage(t *testing.T) {
+	notifier := &recordingNotifier{permission: "granted"}
+	service := &AppService{
+		notifier:    notifier,
+		preferences: &PreferenceStore{values: map[string]any{"general.language": "it"}},
+	}
+	delivered, err := service.SendNotification(NotificationAlert{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !delivered || len(notifier.sent) != 1 {
+		t.Fatalf("delivered = %v, sent = %+v; want one alert", delivered, notifier.sent)
+	}
+	want := recordedNotification{title: "Pinger", body: "Nuovo messaggio"}
+	if notifier.sent[0] != want {
+		t.Fatalf("sent = %+v, want %+v", notifier.sent[0], want)
+	}
+}
+
 func TestAppServiceSendNotificationSkipsDeniedPermission(t *testing.T) {
 	notifier := &recordingNotifier{denyRequests: true}
 	service := &AppService{notifier: notifier}

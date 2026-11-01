@@ -84,23 +84,29 @@ type MenuState struct {
 
 // applicationMenus owns the native menu bar and tray menu, and the items that follow app state.
 type applicationMenus struct {
-	service     *AppService
-	app         *application.App
-	showWindow  func()
-	markAllRead func()
-	root        *application.Menu
-	accounts    *application.Menu
-	items       map[string]*application.MenuItem
+	service        *AppService
+	app            *application.App
+	showWindow     func()
+	markAllRead    func()
+	root           *application.Menu
+	tray           *application.Menu
+	accounts       *application.Menu
+	items          map[string]*application.MenuItem
+	originalLabels map[*application.MenuItem]string
+	language       string
+	state          MenuState
 }
 
 // newApplicationMenus prepares the menu builder; the menus are built by trayMenu and applicationMenu.
 func newApplicationMenus(service *AppService, app *application.App, showWindow, markAllRead func()) *applicationMenus {
 	return &applicationMenus{
-		service:     service,
-		app:         app,
-		showWindow:  showWindow,
-		markAllRead: markAllRead,
-		items:       make(map[string]*application.MenuItem),
+		service:        service,
+		app:            app,
+		showWindow:     showWindow,
+		markAllRead:    markAllRead,
+		items:          make(map[string]*application.MenuItem),
+		originalLabels: make(map[*application.MenuItem]string),
+		language:       "en",
 	}
 }
 
@@ -150,6 +156,9 @@ func (m *applicationMenus) trayMenu() *application.Menu {
 	menu.Add("Check for Updates...").OnClick(m.checkForUpdates)
 	menu.AddSeparator()
 	menu.Add("Quit Pinger").OnClick(m.quit)
+	m.tray = menu
+	m.rememberMenuLabels(menu)
+	m.applyLanguage(m.language)
 	return menu
 }
 
@@ -254,6 +263,8 @@ func (m *applicationMenus) applicationMenu() *application.Menu {
 	help.Add("Release Notes...").OnClick(m.openURL(releasesPageURL))
 	help.Add("Project License...").OnClick(m.openURL(pingerLicenseURL))
 
+	m.rememberMenuLabels(menu)
+	m.applyLanguage(m.language)
 	m.applyState(MenuState{Filter: "all"})
 	return menu
 }
@@ -287,6 +298,7 @@ func (m *applicationMenus) populateAccounts(menu *application.Menu, accounts []A
 
 // applyState enables, labels, and checks the items that depend on the frontend state.
 func (m *applicationMenus) applyState(state MenuState) {
+	m.state = state
 	for _, key := range []string{menuActionRoomRead, menuActionRoomArchive, menuActionRoomFavorite, menuActionRoomNeedsReply, menuActionRoomAnswered} {
 		m.setEnabled(key, state.RoomSelected)
 	}
@@ -312,6 +324,35 @@ func (m *applicationMenus) syncPreferences(values map[string]any) {
 	zoom := zoomLevel(values)
 	m.setEnabled(menuItemZoomIn, zoom < zoomMaximum)
 	m.setEnabled(menuItemZoomOut, zoom > zoomMinimum)
+	language, ok := values["general.language"].(string)
+	if !ok {
+		language = "system"
+	}
+	m.applyLanguage(language)
+}
+
+func (m *applicationMenus) rememberMenuLabels(menu *application.Menu) {
+	if menu == nil {
+		return
+	}
+	for index := 0; ; index++ {
+		item := menu.ItemAt(index)
+		if item == nil {
+			return
+		}
+		if _, exists := m.originalLabels[item]; !exists {
+			m.originalLabels[item] = item.Label()
+		}
+		m.rememberMenuLabels(item.GetSubmenu())
+	}
+}
+
+func (m *applicationMenus) applyLanguage(language string) {
+	m.language = normalizeUILanguage(language)
+	for item, english := range m.originalLabels {
+		item.SetLabel(localizedUIString(m.language, english))
+	}
+	m.applyState(m.state)
 }
 
 // track stores item under key so its label, enabled, and checked state can change later.
@@ -333,7 +374,7 @@ func (m *applicationMenus) setChecked(key string, checked bool) {
 
 func (m *applicationMenus) setLabel(key, label string) {
 	if item := m.items[key]; item != nil {
-		item.SetLabel(label)
+		item.SetLabel(localizedUIString(m.language, label))
 	}
 }
 
@@ -396,7 +437,7 @@ func (m *applicationMenus) checkForUpdates(_ *application.Context) {
 		if err != nil {
 			message = err.Error()
 		}
-		m.app.Dialog.Info().SetTitle("Check for Updates").SetMessage(message).Show()
+		m.app.Dialog.Info().SetTitle(localizedUIString(m.language, "Check for Updates")).SetMessage(message).Show()
 	}()
 }
 
