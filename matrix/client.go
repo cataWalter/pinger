@@ -2420,6 +2420,20 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 	roomAvatars := c.directRoomAvatars(syncEvent)
 	changed := make([]string, 0, len(syncEvent.Rooms)+len(syncEvent.LeftRooms)+len(syncEvent.InvitedRooms))
 	self := id.UserID(c.currentUserID())
+	reactionUnreadCounts := make(map[id.RoomID]database.UnreadCounts)
+	if c.engine != nil && self != "" {
+		for roomID, syncRoom := range syncEvent.Rooms {
+			if syncRoom == nil || syncRoom.Meta == nil || syncRoom.Meta.UnreadCounts.IsZero() {
+				continue
+			}
+			counts, err := c.unreadReactionCounts(context.Background(), roomID, self)
+			if err != nil {
+				log.Printf("count unread reactions in room %s: %v", roomID, err)
+				continue
+			}
+			reactionUnreadCounts[roomID] = counts
+		}
+	}
 	c.mu.Lock()
 	if c.invites == nil {
 		c.invites = make(map[string]Invite)
@@ -2443,6 +2457,7 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 			room = Room{ID: key, Name: key}
 		}
 		if meta := syncRoom.Meta; meta != nil {
+			unreadCounts := unreadCountsWithoutReactions(meta.UnreadCounts, reactionUnreadCounts[roomID])
 			room.Name = roomDisplayName(meta)
 			if meta.Topic != nil {
 				room.Topic = *meta.Topic
@@ -2454,9 +2469,9 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 				room.Avatar = avatar
 			}
 			room.Direct = isDirectRoom(meta)
-			room.Unread = unreadMessageCount(meta.UnreadCounts)
+			room.Unread = unreadMessageCount(unreadCounts)
 			room.MarkedUnread = meta.MarkedUnread != nil && *meta.MarkedUnread
-			room.Mentions = meta.UnreadHighlights
+			room.Mentions = unreadCounts.UnreadHighlights
 			room.Bridge = bridgeLabel(meta)
 			if !meta.SortingTimestamp.Time.IsZero() {
 				room.LastSeen = meta.SortingTimestamp.Time
@@ -2571,6 +2586,41 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 
 func unreadMessageCount(counts database.UnreadCounts) int {
 	return max(counts.UnreadMessages, counts.UnreadNotifications)
+}
+
+const unreadReactionCountsQuery = `
+	SELECT
+		COALESCE(SUM(CASE WHEN event.unread_type & 4 != 0 THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN event.unread_type & 2 != 0 THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN event.unread_type & 1 != 0 THEN 1 ELSE 0 END), 0)
+	FROM timeline
+	JOIN event ON event.rowid = timeline.event_rowid
+	WHERE timeline.room_id = $1 AND timeline.rowid > (
+		SELECT MAX(rowid)
+		FROM timeline
+		WHERE room_id = $1 AND event_rowid IN (
+			SELECT event.rowid
+			FROM receipt
+			JOIN event ON receipt.event_id = event.event_id
+			WHERE receipt.room_id = $1 AND receipt.user_id = $2
+		)
+	) AND event.unread_type > 0 AND event.redacted_by IS NULL
+	AND event.relation_type = 'm.annotation'
+	AND (event.type = 'm.reaction' OR (event.type = 'm.room.encrypted' AND event.decrypted_type = 'm.reaction'))
+`
+
+func (c *Client) unreadReactionCounts(ctx context.Context, roomID id.RoomID, userID id.UserID) (counts database.UnreadCounts, err error) {
+	err = c.engine.DB.Timeline.GetDB().QueryRow(ctx, unreadReactionCountsQuery, roomID, userID).
+		Scan(&counts.UnreadHighlights, &counts.UnreadNotifications, &counts.UnreadMessages)
+	return
+}
+
+func unreadCountsWithoutReactions(counts, reactions database.UnreadCounts) database.UnreadCounts {
+	return database.UnreadCounts{
+		UnreadHighlights:    max(0, counts.UnreadHighlights-reactions.UnreadHighlights),
+		UnreadNotifications: max(0, counts.UnreadNotifications-reactions.UnreadNotifications),
+		UnreadMessages:      max(0, counts.UnreadMessages-reactions.UnreadMessages),
+	}
 }
 
 func (c *Client) directRoomAvatars(syncEvent *jsoncmd.SyncComplete) map[string]string {

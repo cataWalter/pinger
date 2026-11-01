@@ -1413,6 +1413,66 @@ func TestUnreadMessageCountUsesNotificationFallbackWithoutDoubleCounting(t *test
 	}
 }
 
+func TestUnreadReactionCountsExcludeReadAndRedactedEvents(t *testing.T) {
+	client, err := New(filepath.Join(t.TempDir(), "profile", "matrix.db"))
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	roomID := id.RoomID("!unread:example.org")
+	userID := id.UserID("@me:example.org")
+	if err = client.engine.DB.Room.CreateRow(ctx, roomID); err != nil {
+		t.Fatalf("create room row: %v", err)
+	}
+
+	events := []*database.Event{
+		{ID: "$read-reaction", Type: event.EventReaction.Type, RelationType: event.RelAnnotation, UnreadType: database.UnreadTypeNotify},
+		{ID: "$read", Type: event.EventMessage.Type},
+		{ID: "$unread-reaction", Type: event.EventReaction.Type, RelationType: event.RelAnnotation, UnreadType: database.UnreadTypeNotify | database.UnreadTypeHighlight},
+		{ID: "$unread-message", Type: event.EventMessage.Type, UnreadType: database.UnreadTypeNotify | database.UnreadTypeNormal},
+		{ID: "$redacted-reaction", Type: event.EventReaction.Type, RelationType: event.RelAnnotation, RedactedBy: "$redaction", UnreadType: database.UnreadTypeNotify},
+		{ID: "$encrypted-reaction", Type: event.EventEncrypted.Type, DecryptedType: event.EventReaction.Type, RelationType: event.RelAnnotation, UnreadType: database.UnreadTypeNotify | database.UnreadTypeNormal},
+	}
+	rowIDs := make([]database.EventRowID, 0, len(events))
+	for _, dbEvent := range events {
+		dbEvent.RoomID = roomID
+		dbEvent.Sender = "@alice:example.org"
+		dbEvent.Content = json.RawMessage(`{}`)
+		dbEvent.Unsigned = json.RawMessage(`{}`)
+		rowID, insertErr := client.engine.DB.Event.Insert(ctx, dbEvent)
+		if insertErr != nil {
+			t.Fatalf("insert event %s: %v", dbEvent.ID, insertErr)
+		}
+		rowIDs = append(rowIDs, rowID)
+	}
+	if _, err = client.engine.DB.Timeline.Append(ctx, roomID, rowIDs); err != nil {
+		t.Fatalf("append timeline: %v", err)
+	}
+	if err = client.engine.DB.Receipt.Put(ctx, &database.Receipt{
+		RoomID: roomID, UserID: userID, ReceiptType: event.ReceiptType("m.read"), EventID: "$read",
+	}); err != nil {
+		t.Fatalf("insert read receipt: %v", err)
+	}
+
+	reactions, err := client.unreadReactionCounts(ctx, roomID, userID)
+	if err != nil {
+		t.Fatalf("count unread reactions: %v", err)
+	}
+	wantReactions := database.UnreadCounts{UnreadHighlights: 1, UnreadNotifications: 2, UnreadMessages: 1}
+	if reactions != wantReactions {
+		t.Fatalf("unread reaction counts = %+v, want %+v", reactions, wantReactions)
+	}
+
+	counts := unreadCountsWithoutReactions(database.UnreadCounts{
+		UnreadHighlights: 1, UnreadNotifications: 4, UnreadMessages: 2,
+	}, reactions)
+	if got := unreadMessageCount(counts); got != 2 || counts.UnreadHighlights != 0 {
+		t.Fatalf("unread counts after excluding reactions = %+v, badge = %d", counts, got)
+	}
+}
+
 func TestApplySyncUsesDirectRoomMemberAvatar(t *testing.T) {
 	client, err := New(filepath.Join(t.TempDir(), "profile", "matrix.db"))
 	if err != nil {
