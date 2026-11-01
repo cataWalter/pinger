@@ -2682,6 +2682,9 @@ func isDirectRoom(room *database.Room) bool {
 	if room.DMUserID != nil {
 		return true
 	}
+	if room.Topic != nil && strings.Contains(strings.ToLower(*room.Topic), "private chat") {
+		return true
+	}
 	if room.LazyLoadSummary == nil || room.LazyLoadSummary.JoinedMemberCount == nil {
 		return false
 	}

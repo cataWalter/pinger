@@ -1594,6 +1594,32 @@ func TestApplySyncClassifiesUnmarkedDirectRoomsByMemberCount(t *testing.T) {
 	}
 }
 
+func TestApplySyncClassifiesExplicitBridgedPrivateChatAsDirect(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		topic      string
+		wantDirect bool
+	}{
+		{name: "private chat", topic: "WhatsApp private chat", wantDirect: true},
+		{name: "group chat", topic: "WhatsApp group chat", wantDirect: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			roomID := id.RoomID("!" + strings.ReplaceAll(test.name, " ", "-") + ":example.org")
+			client := &Client{rooms: make(map[string]Room)}
+			client.applySync(&jsoncmd.SyncComplete{
+				Rooms: map[id.RoomID]*jsoncmd.SyncRoom{
+					roomID: {Meta: &database.Room{ID: roomID, Topic: &test.topic}},
+				},
+			}, false)
+
+			rooms := client.Rooms()
+			if len(rooms) != 1 || rooms[0].Direct != test.wantDirect {
+				t.Fatalf("direct = %v, want %v; rooms = %+v", len(rooms) == 1 && rooms[0].Direct, test.wantDirect, rooms)
+			}
+		})
+	}
+}
+
 func TestNotificationCategoryClassifiesDirectMentionAndGroup(t *testing.T) {
 	tests := []struct {
 		name      string
