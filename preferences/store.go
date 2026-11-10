@@ -735,7 +735,7 @@ func Validate(key string, value any) error {
 			return errors.New("messages.double_click has an unsupported value")
 		}
 	case "sounds.effects":
-		if !oneOf(value, "Off", "Sent messages") {
+		if !oneOf(value, "Off", "Sent messages", "Incoming and sent messages") {
 			return errors.New("sounds.effects has an unsupported value")
 		}
 	case "appearance.theme":

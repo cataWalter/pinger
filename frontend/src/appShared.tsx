@@ -25,6 +25,7 @@ export type MatrixUpdate = {
   timelineChangedRoomId: string[] | null
   typingUsers?: Record<string, string[]> | null
   notifications?: MatrixNotification[] | null
+  newIncomingMessage?: boolean
   initialSyncComplete: boolean
   needsVerification: boolean
   verification?: Verification | null

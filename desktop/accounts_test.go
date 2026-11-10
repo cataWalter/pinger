@@ -84,12 +84,15 @@ func TestAccountRegistryRejectsUnknownActiveAccount(t *testing.T) {
 func TestMapAccountUpdatePreservesBackgroundNotificationOwnership(t *testing.T) {
 	update := mapAccountUpdate(matrix.Update{
 		Notifications: []matrix.Notification{{RoomID: "!room:example.org", Body: "hello", Category: "direct"}},
-	}, "second", map[string]any{"notifications.privacy": "Hidden content", "ai.endpoint": "private"})
+	}, "second", map[string]any{"notifications.privacy": "Hidden content", "sounds.effects": "Incoming and sent messages", "ai.endpoint": "private"})
 	if update.AccountID != "second" || len(update.Notifications) != 1 || update.Notifications[0].AccountID != "second" {
 		t.Fatalf("background account ownership lost: %+v", update)
 	}
 	if update.NotificationPreferences["notifications.privacy"] != "Hidden content" {
 		t.Fatal("notification privacy preference lost")
+	}
+	if update.NotificationPreferences["sounds.effects"] != "Incoming and sent messages" {
+		t.Fatal("sound effects preference lost")
 	}
 	if _, exists := update.NotificationPreferences["ai.endpoint"]; exists {
 		t.Fatal("unrelated preferences included in notification update")

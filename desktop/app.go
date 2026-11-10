@@ -24,7 +24,7 @@ import (
 
 const (
 	hostErrorEventName          = "matrix:host-error"
-	attachmentSentEventName     = "matrix:attachment-sent"
+	droppedFilesEventName       = "matrix:files-dropped"
 	preferencesUpdateEventName  = "preferences:update"
 	scheduledReminderEventName  = "scheduler:reminder"
 	notificationOpenRoomName    = "notification:open-room"
@@ -372,11 +372,11 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 			return
 		}
 		go func() {
-			roomID, sent, dropErr := service.sendDroppedFiles(paths)
-			if sent {
-				app.Event.Emit(attachmentSentEventName, roomID)
+			files, readErr := readDroppedFiles(paths)
+			if len(files) > 0 {
+				app.Event.Emit(droppedFilesEventName, map[string]any{"files": files})
 			}
-			emitHostError(dropErr)
+			emitHostError(readErr)
 		}()
 	})
 

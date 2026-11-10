@@ -43,6 +43,17 @@ func TestValidateHideImagesAndVideosPreference(t *testing.T) {
 	}
 }
 
+func TestValidateSoundEffectsPreference(t *testing.T) {
+	for _, value := range []string{"Off", "Sent messages", "Incoming and sent messages"} {
+		if err := Validate("sounds.effects", value); err != nil {
+			t.Errorf("Validate(sounds.effects, %q) error = %v", value, err)
+		}
+	}
+	if err := Validate("sounds.effects", "Incoming only"); err == nil {
+		t.Fatal("Validate() accepted an unsupported sound effect preference")
+	}
+}
+
 func TestValidateIncognitoPreference(t *testing.T) {
 	const key = "privacy.incognito"
 	for _, value := range []bool{true, false} {

@@ -70,7 +70,12 @@ export function AIResultDialogs({
           </footer>
         </DialogSurface>
       </div>}
-      {languageTutorState && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCloseLanguageTutor() }}>
+      {languageTutorState && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCloseLanguageTutor() }} onKeyDown={(event) => {
+          if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
+          if (languageTutorState.mode !== 'draft' || languageTutorState.busy || hasEditTarget || !languageTutorState.analysis?.text_to_insert.trim()) return
+          event.preventDefault()
+          onUseLanguageTutorDraft()
+        }}>
         <DialogSurface className="room-info-dialog ai-result-dialog language-tutor-dialog" labelledBy="language-tutor-title" onClose={onCloseLanguageTutor} onClick={(event) => event.stopPropagation()}>
           <header className="room-info-header ai-result-header">
             <div><span className="eyebrow">LANGUAGE TUTOR</span><h2 id="language-tutor-title">{languageTutorState.mode === 'draft' ? 'Tutor this draft' : 'Analyze message'}</h2></div>
@@ -86,7 +91,7 @@ export function AIResultDialogs({
             {languageTutorState.analysis && <LanguageTutorAnalysisDetails analysis={languageTutorState.analysis} originalText={languageTutorState.originalText} />}
           </div>
           <footer className="room-info-footer ai-result-footer">
-            {languageTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" disabled={!languageTutorState.analysis || languageTutorState.busy || hasEditTarget} onClick={onUseLanguageTutorDraft}>Replace draft with {languageName(languageTutorState.analysis?.target_language || languageRoles.learning)}</button>}
+            {languageTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" title={`Replace draft with ${languageName(languageTutorState.analysis?.target_language || languageRoles.learning)} (Ctrl / ⌘ + Enter)`} disabled={!languageTutorState.analysis || languageTutorState.busy || hasEditTarget} onClick={onUseLanguageTutorDraft}>Replace draft with {languageName(languageTutorState.analysis?.target_language || languageRoles.learning)}</button>}
             <button className="settings-command" type="button" onClick={onCloseLanguageTutor}>Close</button>
           </footer>
         </DialogSurface>

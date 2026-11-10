@@ -1,7 +1,9 @@
 package desktop
 
 import (
+	"bytes"
 	"fmt"
+	"image/png"
 	"strings"
 	"testing"
 
@@ -103,6 +105,24 @@ func TestLocalizedUIString(t *testing.T) {
 		if got := localizedUIString(test.language, test.english); got != test.want {
 			t.Errorf("localizedUIString(%q, %q) = %q, want %q", test.language, test.english, got, test.want)
 		}
+	}
+}
+
+func TestTrayMenuIconsAreValidPNGs(t *testing.T) {
+	for _, name := range trayIconNames {
+		t.Run(name, func(t *testing.T) {
+			bitmap, err := trayIconAssets.ReadFile("menu_icons/" + name + ".png")
+			if err != nil {
+				t.Fatal(err)
+			}
+			config, err := png.DecodeConfig(bytes.NewReader(bitmap))
+			if err != nil {
+				t.Fatalf("decode menu icon: %v", err)
+			}
+			if config.Width != 24 || config.Height != 24 {
+				t.Errorf("menu icon size = %dx%d, want 24x24", config.Width, config.Height)
+			}
+		})
 	}
 }
 

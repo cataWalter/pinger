@@ -954,6 +954,7 @@ func TestPublishCoalescesTimelineChangedRoomIDs(t *testing.T) {
 		done:   make(chan struct{}),
 	}
 	client.publishTimeline([]string{"!first:example.org"}, "")
+	client.pendingIncomingMessage = true
 	client.publishTimeline([]string{"!second:example.org"}, "")
 
 	update := <-client.events
@@ -966,6 +967,64 @@ func TestPublishCoalescesTimelineChangedRoomIDs(t *testing.T) {
 	}
 	if len(update.ChangedRoomID) != 0 {
 		t.Fatalf("metadata changed rooms = %v, want none", update.ChangedRoomID)
+	}
+	if !update.NewIncomingMessage {
+		t.Fatal("coalesced update lost its incoming-message signal")
+	}
+}
+
+func TestApplySyncFlagsOnlyLiveTimelineMessages(t *testing.T) {
+	roomID := id.RoomID("!chat:example.org")
+	rowID := database.EventRowID(1)
+	for _, test := range []struct {
+		name   string
+		notify bool
+		reset  bool
+		sender string
+		typeID string
+		want   bool
+	}{
+		{name: "live message", notify: true, typeID: event.EventMessage.Type, want: true},
+		{name: "own message", notify: true, sender: "@me:example.org", typeID: event.EventMessage.Type},
+		{name: "initial history", notify: false, typeID: event.EventMessage.Type},
+		{name: "reset timeline", notify: true, reset: true, typeID: event.EventMessage.Type},
+		{name: "reaction", notify: true, typeID: "m.reaction"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &Client{
+				engine: &hicli.HiClient{Account: &database.Account{UserID: id.UserID("@me:example.org")}},
+				rooms:  make(map[string]Room),
+				events: make(chan Update, 1),
+				done:   make(chan struct{}),
+			}
+			sender := test.sender
+			if sender == "" {
+				sender = "@alice:example.org"
+			}
+			client.applySync(&jsoncmd.SyncComplete{
+				Rooms: map[id.RoomID]*jsoncmd.SyncRoom{
+					roomID: {
+						Meta:     &database.Room{ID: roomID},
+						Reset:    test.reset,
+						Timeline: []database.TimelineRowTuple{{Event: rowID}},
+						Events: []*database.Event{{
+							RowID:   rowID,
+							ID:      id.EventID("$incoming"),
+							Sender:  id.UserID(sender),
+							Type:    test.typeID,
+							Content: json.RawMessage(`{"msgtype":"m.text","body":"hello"}`),
+						}},
+					},
+				},
+			}, test.notify)
+			got := client.pendingIncomingMessage
+			if test.notify {
+				got = (<-client.events).NewIncomingMessage
+			}
+			if got != test.want {
+				t.Fatalf("incoming signal = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 

@@ -194,6 +194,7 @@ type Update struct {
 	TimelineChangedRoomID []string
 	TypingUsers           map[string][]string
 	Notifications         []Notification
+	NewIncomingMessage    bool
 	Error                 string
 	InitialSyncComplete   bool
 	NeedsVerification     bool
@@ -236,21 +237,22 @@ type Client struct {
 	done       chan struct{}
 	cacheReady chan struct{}
 
-	mu                   sync.RWMutex
-	rooms                map[string]Room
-	invites              map[string]Invite
-	urlPreviews          urlPreviewCache
-	local                map[string]map[string]Message
-	mediaEncrypted       map[string]*event.EncryptedFileInfo
-	typing               map[string][]string
-	pendingNotifications []Notification
-	notifiedEvents       map[string]struct{}
-	pendingTimelineRooms map[string]struct{}
-	dismissedEvents      map[string]string
-	syncReady            bool
-	connectionState      ConnectionState
-	mediaCacheDir        string
-	mediaAssetLocks      mediaAssetLocks
+	mu                     sync.RWMutex
+	rooms                  map[string]Room
+	invites                map[string]Invite
+	urlPreviews            urlPreviewCache
+	local                  map[string]map[string]Message
+	mediaEncrypted         map[string]*event.EncryptedFileInfo
+	typing                 map[string][]string
+	pendingNotifications   []Notification
+	pendingIncomingMessage bool
+	notifiedEvents         map[string]struct{}
+	pendingTimelineRooms   map[string]struct{}
+	dismissedEvents        map[string]string
+	syncReady              bool
+	connectionState        ConnectionState
+	mediaCacheDir          string
+	mediaAssetLocks        mediaAssetLocks
 
 	closeOnce       sync.Once
 	eventMu         sync.Mutex
@@ -2483,6 +2485,24 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 			}
 			c.pendingTimelineRooms[key] = struct{}{}
 		}
+		if notify && !syncRoom.Reset && len(syncRoom.Timeline) > 0 {
+			timelineRows := make(map[database.EventRowID]struct{}, len(syncRoom.Timeline))
+			for _, row := range syncRoom.Timeline {
+				timelineRows[row.Event] = struct{}{}
+			}
+			for _, evt := range syncRoom.Events {
+				if evt == nil || evt.Sender == "" || evt.Sender == self {
+					continue
+				}
+				if _, isTimelineMessage := timelineRows[evt.RowID]; !isTimelineMessage {
+					continue
+				}
+				if _, isMessage := messageFromEvent(evt); isMessage {
+					c.pendingIncomingMessage = true
+					break
+				}
+			}
+		}
 		if notify {
 			for _, notification := range syncRoom.Notifications {
 				if notification.Event == nil {
@@ -3659,6 +3679,8 @@ func (c *Client) publish(changed []string, errMessage string) {
 	for roomID, users := range c.typing {
 		update.TypingUsers[roomID] = append([]string(nil), users...)
 	}
+	update.NewIncomingMessage = c.pendingIncomingMessage
+	c.pendingIncomingMessage = false
 	update.Notifications = append([]Notification(nil), c.pendingNotifications...)
 	c.pendingNotifications = c.pendingNotifications[:0]
 	c.mu.Unlock()
@@ -3684,6 +3706,7 @@ func (c *Client) publish(changed []string, errMessage string) {
 	}
 	pendingError := ""
 	initialSyncComplete := update.InitialSyncComplete
+	newIncomingMessage := update.NewIncomingMessage
 	notifications := append([]Notification(nil), update.Notifications...)
 drain:
 	for {
@@ -3699,6 +3722,7 @@ drain:
 				pendingError = pending.Error
 			}
 			initialSyncComplete = initialSyncComplete || pending.InitialSyncComplete
+			newIncomingMessage = newIncomingMessage || pending.NewIncomingMessage
 			notifications = append(notifications, pending.Notifications...)
 		default:
 			break drain
@@ -3711,6 +3735,7 @@ drain:
 		update.Error = pendingError
 	}
 	update.InitialSyncComplete = initialSyncComplete
+	update.NewIncomingMessage = newIncomingMessage
 	update.Notifications = notifications
 	update.ChangedRoomID = update.ChangedRoomID[:0]
 	for roomID := range changedSet {

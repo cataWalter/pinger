@@ -268,6 +268,7 @@ type Update struct {
 	TimelineChangedRoomID   []string            `json:"timelineChangedRoomId"`
 	TypingUsers             map[string][]string `json:"typingUsers"`
 	Notifications           []Notification      `json:"notifications"`
+	NewIncomingMessage      bool                `json:"newIncomingMessage,omitempty"`
 	Error                   string              `json:"error"`
 	InitialSyncComplete     bool                `json:"initialSyncComplete"`
 	NeedsVerification       bool                `json:"needsVerification"`
@@ -1054,34 +1055,6 @@ func (s *AppService) UnsubscribeFromRoom(roomID string) error {
 	return client.UnsubscribeFromRoom(roomID)
 }
 
-func (s *AppService) sendDroppedFiles(paths []string) (string, bool, error) {
-	if len(paths) == 0 {
-		return "", false, nil
-	}
-	s.activeRoomMu.RLock()
-	roomID := s.activeRoomID
-	s.activeRoomMu.RUnlock()
-	if roomID == "" {
-		return "", false, errors.New("select a room before dropping attachments")
-	}
-
-	var combinedErr error
-	sent := false
-	for _, path := range paths {
-		filename, data, err := readDroppedAttachment(path)
-		if err != nil {
-			combinedErr = errors.Join(combinedErr, err)
-			continue
-		}
-		if err = s.sendAttachment(s.ctx, roomID, filename, data, false, false, 0); err != nil {
-			combinedErr = errors.Join(combinedErr, fmt.Errorf("send dropped file %q: %w", filename, err))
-			continue
-		}
-		sent = true
-	}
-	return roomID, sent, combinedErr
-}
-
 func (s *AppService) markAllRead() error {
 	var combinedErr error
 	client := s.currentClient()
@@ -1556,6 +1529,7 @@ func mapUpdate(update matrix.Update, preferences map[string]any) Update {
 		TimelineChangedRoomID: update.TimelineChangedRoomID,
 		TypingUsers:           update.TypingUsers,
 		Notifications:         notifications,
+		NewIncomingMessage:    update.NewIncomingMessage,
 		Error:                 update.Error,
 		InitialSyncComplete:   update.InitialSyncComplete,
 		NeedsVerification:     update.NeedsVerification,

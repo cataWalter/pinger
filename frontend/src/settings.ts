@@ -81,7 +81,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'notifications.repeat', tab: 'Notifications', title: 'Repeat unread reminder', description: 'Remind you once about a room that is still unread.', keywords: 'notification reminder unread repeat' },
   { id: 'notifications.otp-immediate', tab: 'Notifications', title: 'Notify one-time codes immediately', description: 'Alert as soon as a login code arrives.', keywords: 'notification otp code login' },
   { id: 'notifications.otp-copy', tab: 'Notifications', title: 'Copy one-time codes automatically', description: 'Copy login codes to the clipboard.', keywords: 'notification otp code copy clipboard' },
-  { id: 'notifications.sound-effects', tab: 'Notifications', title: 'Sound effects', description: 'Play a short sound when a message is sent.', keywords: 'sound effects sent message' },
+  { id: 'notifications.sound-effects', tab: 'Notifications', title: 'Sound effects', description: 'Chat sounds play while Pinger is focused.', keywords: 'sound effects incoming outgoing received sent message' },
 
   { id: 'keyboard.ctrl-enter', tab: 'Keyboard', title: 'Use Ctrl + Enter to send', description: 'Send a message with Ctrl + Enter.', keywords: 'send enter composer' },
   { id: 'keyboard.spellcheck', tab: 'Keyboard', title: 'Spellcheck messages', description: 'Check spelling while you type.', keywords: 'spellcheck spell check' },

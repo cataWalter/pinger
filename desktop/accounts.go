@@ -477,7 +477,7 @@ func mapAccountUpdate(update matrix.Update, accountID string, preferences map[st
 	mapped.AccountID = accountID
 	mapped.NotificationPreferences = make(map[string]any)
 	for key, value := range preferences {
-		if strings.HasPrefix(key, "notifications.") || strings.HasPrefix(key, "room.muted.") {
+		if strings.HasPrefix(key, "notifications.") || strings.HasPrefix(key, "room.muted.") || key == "sounds.effects" {
 			mapped.NotificationPreferences[key] = value
 		}
 	}

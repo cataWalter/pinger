@@ -1072,8 +1072,8 @@ export function SettingsDialog({
                 }} />
                 <PreferenceToggle label="Notify while Pinger is focused" checked={!preferenceBoolean(preferences, 'notifications.only_when_unfocused', true)} onChange={(value) => onPreferenceChange('notifications.only_when_unfocused', !value)} />
                 <PreferenceToggle label="Play a notification sound" checked={preferenceBoolean(preferences, 'notifications.sound')} onChange={(value) => onPreferenceChange('notifications.sound', value)} />
-                <label className="setting-row"><span><strong>Notification volume</strong><small>Adjust the alert tone level.</small></span>
-                  <PreferenceRange label="Notification volume" min={0} max={100} step={5} value={preferenceNumber(preferences, 'notifications.volume', 50)} onChange={(value) => onPreferenceChange('notifications.volume', value)} />
+                <label className="setting-row"><span><strong>Notification and message volume</strong><small>Adjust notification and chat sound levels.</small></span>
+                  <PreferenceRange label="Notification and message volume" min={0} max={100} step={5} value={preferenceNumber(preferences, 'notifications.volume', 50)} onChange={(value) => onPreferenceChange('notifications.volume', value)} />
                 </label>
                 <label className="setting-row"><span><strong>Notification content</strong><small>Control what appears outside the app.</small></span>
                   <select value={preferenceString(preferences, 'notifications.privacy', 'Sender and message preview')} onChange={(event) => onPreferenceChange('notifications.privacy', event.target.value)}>
@@ -1112,10 +1112,11 @@ export function SettingsDialog({
                 </label>
                 <PreferenceToggle label="Notify one-time codes immediately" checked={preferenceBoolean(preferences, 'notifications.otp_immediate', true)} onChange={(value) => onPreferenceChange('notifications.otp_immediate', value)} />
                 <PreferenceToggle label="Copy one-time codes automatically" checked={preferenceBoolean(preferences, 'notifications.otp_copy')} onChange={(value) => onPreferenceChange('notifications.otp_copy', value)} />
-                <label className="setting-row"><span><strong>Sound effects</strong><small>Play a short sound when a message is sent.</small></span>
+                <label className="setting-row"><span><strong>Sound effects</strong><small>Chat sounds play while Pinger is focused.</small></span>
                   <select aria-label="Sound effects" value={preferenceString(preferences, 'sounds.effects', 'Off')} onChange={(event) => onPreferenceChange('sounds.effects', event.target.value)}>
                     <option value="Off">Off</option>
                     <option value="Sent messages">Sent messages</option>
+                    <option value="Incoming and sent messages">Incoming and sent messages</option>
                   </select>
                 </label>
               </div>

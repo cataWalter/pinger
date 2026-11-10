@@ -1,4 +1,4 @@
-import { lazy, Fragment, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { lazy, Fragment, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Events } from '@wailsio/runtime'
 import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Archive, ArchiveRestore, Bold, ChevronDown, Bell, BellOff, BellRing, Check, Clock3, Code, CircleAlert, CircleDot, Copy, LockKeyhole, MessageCircleMore, MessagesSquare, MoreHorizontal, Paperclip, Pencil, Reply, RotateCcw, ScrollText, Search, Settings, Send, ShieldCheck, Languages, Smile, Sparkles, Star, Trash2, UsersRound, X, Download, EyeOff, Folder, FolderPlus, GraduationCap, Heading1, Images, ImagePlus, Italic, Link, List, ListChecks, ListOrdered, Mic, Plus, Quote, Upload, Square, SquareCode, Strikethrough, Video } from 'lucide-react'
 import { QuickSwitcher } from './QuickSwitcher'
@@ -195,7 +195,6 @@ function AppBody() {
   const [captureKind, setCaptureKind] = useState<CaptureKind>('voice')
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([])
   const [selectedAudioInputDeviceId, setSelectedAudioInputDeviceId] = useState<string>(preferenceString(snapshot?.preferences ?? {}, 'audio.input_device', ''))
-  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   // The unread count is captured when a room opens, so the divider stays put after the room is marked read.
   const [unreadMarker, setUnreadMarker] = useState<{ scope: string; count: number; messageID: string; seen: boolean; offscreen: boolean } | null>(null)
   const unreadObserverRef = useRef<IntersectionObserver | null>(null)
@@ -224,7 +223,7 @@ function AppBody() {
   const currentUserIDRef = useRef('')
   const currentDisplayNameRef = useRef('')
   const triageBusyRef = useRef(false)
-  const dragDepthRef = useRef(0)
+  const stageDroppedFilesRef = useRef<(files: File[]) => void>(() => undefined)
   const timelineRef = useRef<HTMLDivElement>(null)
   const timelineListRef = useRef<TimelineListHandle>(null)
   const timelineHeightBeforePrepend = useRef<number | null>(null)
@@ -1036,6 +1035,12 @@ function AppBody() {
     let active = true
     const applyMatrixUpdate = (update: MatrixUpdate) => {
       if (!active) return
+      const soundPreferences = update.notificationPreferences ?? preferencesRef.current
+      if (document.hasFocus()
+        && preferenceString(soundPreferences, 'sounds.effects', 'Off') === 'Incoming and sent messages'
+        && update.newIncomingMessage) {
+        playNotificationSound(preferenceNumber(soundPreferences, 'notifications.volume', 50), 'Chime')
+      }
       matrixUpdateHandlersRef.current.deliverMatrixNotifications(update)
       if (update.accountId && update.accountId !== matrixUpdateHandlersRef.current.activeAccountID) {
         setOtherAccountRooms((current) => [...current.filter((room) => room.accountId !== update.accountId), ...(update.rooms ?? [])])
@@ -1144,9 +1149,10 @@ function AppBody() {
         matrixUpdateHandlersRef.current.openNotificationRoom(target.accountId ?? '', target.roomId)
       }
     })
-    const unsubscribeAttachmentSent = Events.On('matrix:attachment-sent', (event: { data: unknown }) => {
-      if (active && event.data === selectedRoomRef.current) {
-        setHistoryRevision((revision) => revision + 1)
+    const unsubscribeFilesDropped = Events.On('matrix:files-dropped', (event: { data: unknown }) => {
+      const dropped = (event.data as { files?: { name: string; type: string; data: string }[] } | undefined)?.files ?? []
+      if (active && dropped.length > 0) {
+        stageDroppedFilesRef.current(dropped.map((item) => new File([base64ToBytes(item.data)], item.name, { type: item.type })))
       }
     })
     const unsubscribeScheduledReminder = Events.On('scheduler:reminder', (event: { data: unknown }) => {
@@ -1194,7 +1200,7 @@ function AppBody() {
       unsubscribeMenuSearch()
       unsubscribeMenuAction()
       unsubscribeNotificationOpenRoom()
-      unsubscribeAttachmentSent()
+      unsubscribeFilesDropped()
       unsubscribeScheduledReminder()
     }
   }, [historyRoomIDRef, refreshScheduledJobs, setHistoryRevision, setScheduledJobsError, setScheduledJobsOpen, setSettingsOpen, setSettingsTab])
@@ -2291,7 +2297,8 @@ function AppBody() {
     if (message.replyTo) await AppService.SendReply(message.roomID, message.text, message.replyTo.id)
     else if (message.mentionUserIDs.length > 0) await AppService.SendMessageWithMentions(message.roomID, message.text, message.mentionUserIDs)
     else await AppService.SendMessage(message.roomID, message.text)
-    if (preferenceString(preferencesRef.current, 'sounds.effects', 'Off') === 'Sent messages') {
+    const soundEffects = preferenceString(preferencesRef.current, 'sounds.effects', 'Off')
+    if (soundEffects === 'Sent messages' || soundEffects === 'Incoming and sent messages') {
       playNotificationSound(preferenceNumber(preferencesRef.current, 'notifications.volume', 50), 'Soft')
     }
   }
@@ -2741,35 +2748,6 @@ function AppBody() {
       .catch((pasteError: unknown) => setError(describeError(pasteError)))
   }
 
-  function handleFileDragEnter(event: DragEvent<HTMLElement>) {
-    if (!Array.from(event.dataTransfer.types).includes('Files')) return
-    event.preventDefault()
-    dragDepthRef.current++
-    setIsDraggingFiles(true)
-  }
-
-  function handleFileDragOver(event: DragEvent<HTMLElement>) {
-    if (!Array.from(event.dataTransfer.types).includes('Files')) return
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'copy'
-  }
-
-  function handleFileDragLeave(event: DragEvent<HTMLElement>) {
-    if (!Array.from(event.dataTransfer.types).includes('Files')) return
-    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
-    dragDepthRef.current = 0
-    setIsDraggingFiles(false)
-  }
-
-  function handleFileDrop(event: DragEvent<HTMLElement>) {
-    const files = Array.from(event.dataTransfer.files)
-    if (files.length === 0) return
-    event.preventDefault()
-    dragDepthRef.current = 0
-    setIsDraggingFiles(false)
-    stageAttachmentFiles(files)
-  }
-
   async function changeReaction(message: Message, emoji: string, remove: boolean) {
     if (!selectedRoomID || !message.id || message.id.startsWith('~')) return
     // Both directions share a key so a double click cannot send duplicate annotations.
@@ -2950,6 +2928,14 @@ function AppBody() {
     })
   }
 
+  function toggleRoomRefinement(refinement: 'unanswered' | 'needsReply') {
+    setRoomRefinements((current) => ({
+      unanswered: refinement === 'unanswered' ? !current.unanswered : false,
+      needsReply: refinement === 'needsReply' ? !current.needsReply : false,
+      favorite: false,
+    }))
+  }
+
   function runMenuAction(action: string) {
     if (hasOpenDialog() && (action !== 'undo' || !isTextEntryTarget(document.activeElement))) return
     if (action.startsWith('account:')) {
@@ -3027,6 +3013,7 @@ function AppBody() {
     }
   }
   menuActionRef.current = runMenuAction
+  stageDroppedFilesRef.current = stageAttachmentFiles
   function promptMessages(source: Message[]): PromptMessage[] {
     return source.map((message) => ({
       senderName: message.senderName,
@@ -3893,10 +3880,7 @@ function AppBody() {
     <main
       className="app-shell"
       onKeyDown={handleApplicationKeyDown}
-      onDragEnter={handleFileDragEnter}
-      onDragOver={handleFileDragOver}
-      onDragLeave={handleFileDragLeave}
-      onDrop={handleFileDrop}
+      data-file-drop-target=""
       data-theme={themeChoice}
       data-ui="desktop"
       data-theme-mode={themeModeForPreference(preferenceString(preferences, 'appearance.theme', SYSTEM_THEME_NAME), systemPrefersDark)}
@@ -3933,16 +3917,16 @@ function AppBody() {
               </select>
             )}
             <div className="room-scope-filters" role="group" aria-label="Room visibility">
-              <button type="button" className={menuFilter === 'all' ? 'is-active' : ''} aria-pressed={menuFilter === 'all'} aria-keyshortcuts="Control+Shift+A Meta+Shift+A" title="All rooms (Ctrl / ⌘ + Shift + A)" onClick={() => applyMenuFilter('all')}><MessageCircleMore size={13} /><span className="filter-label">All</span></button>
-              <button type="button" className={menuFilter === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={menuFilter === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => applyMenuFilter('archived')}><Archive size={13} /><span className="filter-label">Archive</span></button>
-              <button type="button" className={menuFilter === 'private' ? 'is-active' : ''} aria-label="Local AI chats" aria-pressed={menuFilter === 'private'} title="Private model chats" onClick={() => applyMenuFilter('private')}><Sparkles size={14} /><span className="filter-label">Local AI</span></button>
+              <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-pressed={roomScope === 'all'} aria-keyshortcuts="Control+Shift+A Meta+Shift+A" title="All rooms (Ctrl / ⌘ + Shift + A)" onClick={() => setRoomScope('all')}><MessageCircleMore size={13} /><span className="filter-label">All</span></button>
+              <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => applyMenuFilter('archived')}><Archive size={13} /><span className="filter-label">Archive</span></button>
+              <button type="button" className={roomScope === 'local-ai' ? 'is-active' : ''} aria-label="Local AI chats" aria-pressed={roomScope === 'local-ai'} title="Private model chats" onClick={() => applyMenuFilter('private')}><Sparkles size={14} /><span className="filter-label">Local AI</span></button>
             </div>
             <div className="room-refinement-filters" role="group" aria-label="Room categories">
-              <button type="button" className={menuFilter === 'unanswered' ? 'is-active' : ''} aria-label="Unanswered rooms" aria-pressed={menuFilter === 'unanswered'} aria-keyshortcuts="Control+Shift+R Meta+Shift+R" title="Unanswered rooms (Ctrl / ⌘ + Shift + R)" onClick={() => applyMenuFilter('unanswered')}><span className="filter-symbol"><Reply size={14} /></span><span className="filter-label">Unanswered</span></button>
-              <button type="button" className={menuFilter === 'needs-reply' ? 'is-active' : ''} aria-label="Needs reply" aria-pressed={menuFilter === 'needs-reply'} aria-keyshortcuts={`${answeredShortcut} Control+Shift+U Meta+Shift+U`} title={`Needs reply (Ctrl / ⌘ + Shift + U; ${answeredShortcut} marks answered)`} onClick={() => applyMenuFilter('needs-reply')} onKeyDown={(event) => handleMarkAnsweredKeyDown(event, selectedRoomID)}>
+              <button type="button" className={roomRefinements.unanswered ? 'is-active' : ''} aria-label="Unanswered rooms" aria-pressed={roomRefinements.unanswered} aria-keyshortcuts="Control+Shift+R Meta+Shift+R" title="Unanswered rooms (Ctrl / ⌘ + Shift + R)" onClick={() => toggleRoomRefinement('unanswered')}><span className="filter-symbol"><Reply size={14} /></span><span className="filter-label">Unanswered</span></button>
+              <button type="button" className={roomRefinements.needsReply ? 'is-active' : ''} aria-label="Needs reply" aria-pressed={roomRefinements.needsReply} aria-keyshortcuts={`${answeredShortcut} Control+Shift+U Meta+Shift+U`} title={`Needs reply (Ctrl / ⌘ + Shift + U; ${answeredShortcut} marks answered)`} onClick={() => toggleRoomRefinement('needsReply')} onKeyDown={(event) => handleMarkAnsweredKeyDown(event, selectedRoomID)}>
                 <span className="filter-symbol"><CircleDot size={14} />{needsReplyCount > 0 && <span className="filter-count">{needsReplyCount}</span>}</span><span className="filter-label">Needs reply</span>
               </button>
-              <button type="button" className={menuFilter === 'favorites' ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={menuFilter === 'favorites'} aria-keyshortcuts="Control+Shift+F Meta+Shift+F" title="Favorites (Ctrl / ⌘ + Shift + F)" onClick={() => applyMenuFilter('favorites')}><span className="filter-symbol"><Star size={14} /></span><span className="filter-label">Favorites</span></button>
+              <button type="button" className={roomRefinements.favorite ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={roomRefinements.favorite} aria-keyshortcuts="Control+Shift+F Meta+Shift+F" title="Favorites (Ctrl / ⌘ + Shift + F)" onClick={() => applyMenuFilter('favorites')}><span className="filter-symbol"><Star size={14} /></span><span className="filter-label">Favorites</span></button>
             </div>
           </div>
           {roomScope === 'local-ai' && <div className="local-ai-folder-bar" role="group" aria-label="AI chat folders">
@@ -4792,9 +4776,13 @@ function AppBody() {
       />}
       {profilePhotoPreview && <ProfilePhotoViewer source={profilePhotoPreview.source} label={profilePhotoPreview.label} onClose={() => setProfilePhotoPreview(null)} />}
       {snapshot.verification && <VerificationDialog key={snapshot.verification.transactionId} verification={snapshot.verification} />}
-      {isDraggingFiles && <div className="drop-overlay" role="status"><div><Upload size={21} /><span>{selectedRoom ? `Add files to ${selectedRoom.name || selectedRoom.id}` : 'Select a room to upload files'}</span></div></div>}
+      <div className="drop-overlay" role="status"><div><Upload size={21} /><span>{selectedRoom ? `Add files to ${selectedRoom.name || selectedRoom.id}` : 'Select a room to upload files'}</span></div></div>
     </main>
   )
+}
+
+function base64ToBytes(encoded: string): Uint8Array {
+  return Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0))
 }
 
 function App() {

@@ -1647,6 +1647,50 @@ describe('room history updates', () => {
     expect(await screen.findAllByText('Batched room')).toHaveLength(2)
   })
 
+  it('plays one incoming chat sound for received messages when enabled', async () => {
+    const soundSpy = vi.spyOn(appShared, 'playNotificationSound')
+    const focusSpy = vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'sounds.effects': 'Incoming and sent messages' } })
+
+    try {
+      render(<App />)
+      expect(await screen.findByText('latest message')).toBeTruthy()
+
+      const emitUpdate = async (newIncomingMessage: boolean) => {
+        await act(async () => {
+          harness.eventHandlers.get('matrix:update')?.({
+            data: {
+              rooms: [room],
+              notificationPreferences: { 'sounds.effects': 'Incoming and sent messages' },
+              timelineChangedRoomId: [],
+              notifications: [],
+              newIncomingMessage,
+              initialSyncComplete: true,
+              needsVerification: false,
+              connectionState: 'connected',
+              error: '',
+            },
+          })
+          await Promise.resolve()
+        })
+      }
+
+      await emitUpdate(false)
+      expect(soundSpy).not.toHaveBeenCalled()
+      await emitUpdate(true)
+
+      expect(soundSpy).toHaveBeenCalledOnce()
+      expect(soundSpy).toHaveBeenCalledWith(50, 'Chime')
+
+      focusSpy.mockReturnValue(false)
+      await emitUpdate(true)
+      expect(soundSpy).toHaveBeenCalledOnce()
+    } finally {
+      soundSpy.mockRestore()
+      focusSpy.mockRestore()
+    }
+  })
+
   it('does not show background sync errors as a banner', async () => {
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
@@ -1787,6 +1831,28 @@ describe('room history updates', () => {
 
     expect(composer.value).toBe('Merhaba, nasılsın?')
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it.each(['ctrlKey', 'metaKey'])('replaces the Language Tutor draft with %s+Enter', async (modifier) => {
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:11434' },
+    })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'Ciao, come stai?' } })
+    await userEvent.click(menuCommand('Analyze draft with Language Tutor'))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
+    const replaceButton = within(dialog).getByRole('button', { name: 'Replace draft with Turkish' })
+    expect(replaceButton.getAttribute('aria-keyshortcuts')).toBe('Control+Enter Meta+Enter')
+    expect(replaceButton.title).toContain('Ctrl / ⌘ + Enter')
+    fireEvent.keyDown(dialog, { key: 'Enter', [modifier]: true })
+
+    await waitFor(() => expect(composer.value).toBe('Merhaba, nasılsın?'))
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Tutor this draft' })).toBeNull()
   })
 
   it.each(['ctrlKey', 'metaKey'])('analyzes the composer draft with %s+Shift+T', async (modifier) => {
@@ -2748,6 +2814,14 @@ describe('room history updates', () => {
     expect(screen.getByText('Second account history')).toBeTruthy()
   })
 
+  it('stages files dropped from the file manager in the composer', async () => {
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    act(() => harness.eventHandlers.get('matrix:files-dropped')?.({ data: { files: [{ name: 'dropped-notes.txt', type: 'text/plain', data: btoa('hello') }] } }))
+    const attachments = await screen.findByRole('list', { name: 'Attachments to send' })
+    expect(within(attachments).getByText('dropped-notes.txt')).toBeTruthy()
+  })
+
   it('discards staged account attachments on logout', async () => {
     const user = userEvent.setup()
     harness.service.Logout.mockResolvedValue(undefined)
@@ -3355,13 +3429,20 @@ describe('room history updates', () => {
     expect(within(roomList).getByRole('button', { name: /Instagram group/ }).querySelector('.needs-reply-dot')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
+    expect(screen.getByRole('button', { name: 'Unanswered rooms' }).getAttribute('aria-pressed')).toBe('true')
     expect(within(roomList).queryByRole('button', { name: /Study group/ })).toBeNull()
     expect(within(roomList).getByRole('button', { name: /Instagram group/ })).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
+    expect(screen.getByRole('button', { name: 'Unanswered rooms' }).getAttribute('aria-pressed')).toBe('false')
+    expect(screen.getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true')
+    expect(within(roomList).getByRole('button', { name: /Study group/ })).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Needs reply' }))
     expect(within(roomList).queryByRole('button', { name: /Study group/ })).toBeNull()
     expect(within(roomList).getByRole('button', { name: /Instagram group/ })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
+    expect(screen.getByRole('button', { name: 'Needs reply' }).getAttribute('aria-pressed')).toBe('false')
+    expect(within(roomList).getByRole('button', { name: /Study group/ })).toBeTruthy()
   })
 
   it('switches exclusive room filters while preserving search', async () => {
@@ -3416,12 +3497,19 @@ describe('room history updates', () => {
     expect(within(roomList).getByRole('button', { name: /Favorite Instagram DM/ })).toBeTruthy()
 
     const filters = screen.getByRole('group', { name: 'Filter rooms' })
-    for (const name of ['Needs reply', 'Unanswered rooms', 'Favorite rooms', 'Archived rooms', 'Local AI chats', 'All']) {
-      const filter = within(filters).getByRole('button', { name })
-      for (let click = 0; click < 2; click++) {
-        await user.click(filter)
-        expect(filters.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(1)
-        expect(filter.getAttribute('aria-pressed')).toBe('true')
+    for (const [groupName, names] of [
+      ['Room categories', ['Needs reply', 'Unanswered rooms', 'Favorite rooms']],
+      ['Room visibility', ['Archived rooms', 'Local AI chats', 'All']],
+    ] as const) {
+      const filterGroup = within(filters).getByRole('group', { name: groupName })
+      for (const name of names) {
+        const filter = within(filterGroup).getByRole('button', { name })
+        for (let click = 0; click < 2; click++) {
+          await user.click(filter)
+          const shouldBeActive = !['Unanswered rooms', 'Needs reply'].includes(name) || click === 0
+          expect(filterGroup.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(shouldBeActive ? 1 : 0)
+          expect(filter.getAttribute('aria-pressed')).toBe(String(shouldBeActive))
+        }
       }
     }
     expect(within(roomList).getByRole('button', { name: /Unread direct/ })).toBeTruthy()
@@ -3523,19 +3611,27 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     const group: Room = { ...room, id: '!group:example.org', name: 'Group project', direct: false, unanswered: true }
     const bridgedDM: Room = { ...room, id: '!whatsapp:example.org', name: 'WhatsApp contact', bridge: 'WA', unanswered: true }
+    const nilay: Room = { ...room, id: '!nilay:example.org', name: 'Nilay', topic: 'WhatsApp private chat', unanswered: true }
     const answeredGroup: Room = { ...room, id: '!answered:example.org', name: 'Answered group', direct: false, unanswered: false }
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, group, bridgedDM, answeredGroup] })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, group, bridgedDM, nilay, answeredGroup] })
     render(<App />)
     const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
 
     await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Unanswered rooms' }).getAttribute('aria-pressed')).toBe('true'))
+    expect(screen.getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true')
     expect(within(roomList).queryByRole('button', { name: /Group project/ })).toBeNull()
     expect(within(roomList).getByRole('button', { name: /WhatsApp contact/ })).toBeTruthy()
+    expect(within(roomList).getByRole('button', { name: /Nilay/ })).toBeTruthy()
     expect(within(roomList).queryByRole('button', { name: /Answered group/ })).toBeNull()
     expect(within(roomList).queryByRole('button', { name: /Test room/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'Needs reply' }).querySelector('.filter-count')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'All' }))
+    expect(screen.getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Unanswered rooms' }).getAttribute('aria-pressed')).toBe('true')
+    expect(within(roomList).getByRole('button', { name: /Nilay/ })).toBeTruthy()
   })
 
   it('adds a private chat to All rooms from its context menu', async () => {
@@ -6004,6 +6100,25 @@ describe('room history updates', () => {
 
     await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, 'sent from the composer'))
     await waitFor(() => expect(container.querySelector('.room-preview')?.textContent).toBe('sent from the composer'))
+  })
+
+  it('plays an outgoing chat sound when sounds are enabled for all messages', async () => {
+    const soundSpy = vi.spyOn(appShared, 'playNotificationSound')
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'sounds.effects': 'Incoming and sent messages' } })
+
+    try {
+      render(<App />)
+      expect(await screen.findByText('latest message')).toBeTruthy()
+
+      await user.type(screen.getByRole('textbox', { name: 'Message' }), 'hello')
+      await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+      await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, 'hello'))
+      expect(soundSpy).toHaveBeenCalledWith(50, 'Soft')
+    } finally {
+      soundSpy.mockRestore()
+    }
   })
 
   it('replaces emoticons as you type when enabled in Keyboard settings', async () => {

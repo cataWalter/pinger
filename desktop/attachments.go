@@ -1,13 +1,35 @@
 package desktop
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"os"
 	"path/filepath"
 )
 
 const maxAttachmentSize = 50 << 20
+
+type droppedFile struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Data []byte `json:"data"`
+}
+
+func readDroppedFiles(paths []string) ([]droppedFile, error) {
+	var files []droppedFile
+	var combinedErr error
+	for _, path := range paths {
+		filename, data, err := readDroppedAttachment(path)
+		if err != nil {
+			combinedErr = errors.Join(combinedErr, err)
+			continue
+		}
+		files = append(files, droppedFile{Name: filename, Type: mime.TypeByExtension(filepath.Ext(filename)), Data: data})
+	}
+	return files, combinedErr
+}
 
 func readDroppedAttachment(path string) (string, []byte, error) {
 	filename := filepath.Base(path)

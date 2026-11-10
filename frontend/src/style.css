@@ -4805,13 +4805,17 @@ a:focus-visible,
   position: fixed;
   z-index: 45;
   inset: 12px;
-  display: grid;
+  display: none;
   place-items: center;
   color: var(--forest);
   background: rgba(247, 251, 248, 0.94);
   border: 2px dashed var(--green);
   border-radius: 7px;
   pointer-events: none;
+}
+
+.app-shell.file-drop-target-active .drop-overlay {
+  display: grid;
 }
 
 .drop-overlay>div {

@@ -80,7 +80,7 @@ func TestMapRoomsWithPreferences(t *testing.T) {
 }
 
 func TestMapUpdateFiltersNotificationsByPreferences(t *testing.T) {
-	update := matrix.Update{Notifications: []matrix.Notification{
+	update := matrix.Update{NewIncomingMessage: true, Notifications: []matrix.Notification{
 		{RoomID: "!group:example.org", Category: matrix.NotificationCategoryGroup},
 		{RoomID: "!mention:example.org", Category: matrix.NotificationCategoryMention},
 		{RoomID: "!muted:example.org", Category: matrix.NotificationCategoryDirect},
@@ -94,6 +94,9 @@ func TestMapUpdateFiltersNotificationsByPreferences(t *testing.T) {
 	mapped := mapUpdate(update, preferences)
 	if len(mapped.Notifications) != 1 || mapped.Notifications[0].RoomID != "!group:example.org" {
 		t.Fatalf("mapped notifications = %+v, want only enabled group notification", mapped.Notifications)
+	}
+	if !mapped.NewIncomingMessage {
+		t.Fatal("mapping dropped the incoming-message signal")
 	}
 }
 
@@ -113,6 +116,22 @@ func TestReadDroppedAttachment(t *testing.T) {
 	}
 	if string(data) != string(want) {
 		t.Fatalf("data = %q, want %q", data, want)
+	}
+}
+
+func TestReadDroppedFilesKeepsReadableFilesAndJoinsErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := readDroppedFiles([]string{path, dir})
+	if err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("error = %v, want regular file error", err)
+	}
+	if len(files) != 1 || files[0].Name != "notes.txt" || string(files[0].Data) != "hello" {
+		t.Fatalf("files = %+v, want notes.txt with its data", files)
 	}
 }
 

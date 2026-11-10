@@ -146,16 +146,21 @@ func (s *AppService) notifyAccountsChanged() {
 // trayMenu builds the menu-bar icon menu.
 func (m *applicationMenus) trayMenu() *application.Menu {
 	menu := application.NewMenu()
-	menu.Add("Open Pinger").OnClick(func(_ *application.Context) {
+	addAction := func(label, icon string) *application.MenuItem {
+		item := menu.Add(label)
+		setTrayMenuIcon(item, icon)
+		return item
+	}
+	addAction("Open Pinger", trayIconOpen).OnClick(func(_ *application.Context) {
 		m.showWindow()
 	})
-	menu.Add("Search Messages").OnClick(m.event(applicationMenuSearchName))
-	menu.Add("Mark All as Read").OnClick(m.markAllReadClick)
+	addAction("Search Messages", trayIconSearch).OnClick(m.event(applicationMenuSearchName))
+	addAction("Mark All as Read", trayIconRead).OnClick(m.markAllReadClick)
 	menu.AddSeparator()
-	menu.Add("Settings...").OnClick(m.event(applicationMenuSettingsName))
-	menu.Add("Check for Updates...").OnClick(m.checkForUpdates)
+	addAction("Settings...", trayIconSettings).OnClick(m.event(applicationMenuSettingsName))
+	addAction("Check for Updates...", trayIconUpdates).OnClick(m.checkForUpdates)
 	menu.AddSeparator()
-	menu.Add("Quit Pinger").OnClick(m.quit)
+	addAction("Quit Pinger", trayIconQuit).OnClick(m.quit)
 	m.tray = menu
 	m.rememberMenuLabels(menu)
 	m.applyLanguage(m.language)
