@@ -7,7 +7,7 @@ import { MAX_CUSTOM_LANGUAGES, resolveLanguageRoles } from './aiSettings'
 const brazilian = JSON.stringify([{ code: 'pt-BR', name: 'Brazilian Portuguese' }])
 
 function renderSettings(preferences: Record<string, string | boolean> = {}, saved = true) {
-  const onPreferencesChange = vi.fn(async (_entries: Record<string, string>) => saved)
+  const onPreferencesChange = vi.fn<(entries: Record<string, string>) => Promise<boolean>>(async () => saved)
   render(<LanguageSettings roles={resolveLanguageRoles(preferences)} onPreferencesChange={onPreferencesChange} />)
   return { onPreferencesChange, user: userEvent.setup() }
 }
