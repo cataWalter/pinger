@@ -74,6 +74,7 @@ export function localAIChatToRoom(chat: LocalAIChatSummary, favorite: boolean): 
         markedUnread: false,
         mentions: 0,
         unanswered: chat.unanswered,
+        needsReply: false,
         lastEventId: '',
         lastEventSender: '',
         lastEventAt: chat.updatedAt,

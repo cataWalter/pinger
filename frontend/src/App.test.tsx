@@ -82,6 +82,7 @@ const harness = vi.hoisted(() => ({
     MarkUnread: vi.fn(),
     SetBooleanPreference: vi.fn(),
     SetStringPreference: vi.fn(),
+    SetStringPreferences: vi.fn(),
     NativeNotificationsSupported: vi.fn(),
     NotificationPermission: vi.fn(),
     RequestNotificationPermission: vi.fn(),
@@ -322,6 +323,7 @@ describe('settings storage, integrations, help, and about', () => {
     harness.service.OpenNotificationSettings.mockResolvedValue(undefined)
     harness.service.SetBooleanPreference.mockResolvedValue(undefined)
     harness.service.SetStringPreference.mockResolvedValue(undefined)
+    harness.service.SetStringPreferences.mockResolvedValue(undefined)
     harness.service.StorageUsage.mockResolvedValue({ databaseBytes: 2048, walBytes: 0 })
     harness.service.MediaCacheUsage.mockResolvedValue({ bytes: 4096, files: 3 })
     harness.service.RoomStorageUsage.mockResolvedValue([])
@@ -340,17 +342,8 @@ describe('settings storage, integrations, help, and about', () => {
     harness.service.GenerateLocalAIChatTitle.mockResolvedValue('')
     harness.tutorService.Analyze.mockResolvedValue({
       detected_language: 'it',
-      target_language: 'tr',
-      explanation_language: 'it',
-      original_text: 'Ciao, come stai?',
       corrected_text: 'Merhaba, nasılsın?',
       translation: 'Ciao, come stai?',
-      has_grammar_errors: false,
-      phrases: [
-        { text: 'Merhaba,', meaning: 'hello,', words: [{ word: 'Merhaba', breakdown: 'merhaba -> ciao', meaning: 'hello' }] },
-        { text: 'nasılsın?', meaning: 'how are you?', words: [{ word: 'nasılsın', breakdown: 'nasıl-sın -> come-sei', meaning: 'how are you' }] },
-      ],
-      grammar_rule: 'The second-person ending follows vowel harmony.',
       text_to_insert: 'Merhaba, nasılsın?',
     })
   })
@@ -526,7 +519,7 @@ describe('settings storage, integrations, help, and about', () => {
 
     await user.selectOptions(screen.getByLabelText('Language to learn'), 'de')
 
-    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('ai.tutor_language', 'de'))
+    await waitFor(() => expect(harness.service.SetStringPreferences).toHaveBeenCalledWith({ 'ai.tutor_language': 'de' }))
     expect(await screen.findByText('Language to learn saved.')).toBeTruthy()
   })
 
@@ -546,8 +539,7 @@ describe('settings storage, integrations, help, and about', () => {
 
     await user.selectOptions(screen.getByLabelText('Default language'), 'fr')
 
-    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('ai.default_language', 'fr'))
-    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('ai.known_languages', '["en","fr"]'))
+    await waitFor(() => expect(harness.service.SetStringPreferences).toHaveBeenCalledWith({ 'ai.default_language': 'fr', 'ai.known_languages': '["en","fr"]' }))
     expect(await screen.findByText('Default language saved.')).toBeTruthy()
   })
 
@@ -558,8 +550,19 @@ describe('settings storage, integrations, help, and about', () => {
     expect((known.getByRole('checkbox', { name: 'English' }) as HTMLInputElement).disabled).toBe(true)
     await user.click(known.getByRole('checkbox', { name: 'Spanish' }))
 
-    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('ai.known_languages', '["en","es"]'))
+    await waitFor(() => expect(harness.service.SetStringPreferences).toHaveBeenCalledWith({ 'ai.known_languages': '["en","es"]' }))
     expect(await screen.findByText('Known languages saved.')).toBeTruthy()
+  })
+
+  it('restores the language choices when the batch save fails', async () => {
+    harness.service.SetStringPreferences.mockRejectedValueOnce(new Error('disk full'))
+    const user = await openSettingsTab('AI')
+    const learning = screen.getByLabelText('Language to learn') as HTMLSelectElement
+
+    await user.selectOptions(learning, 'de')
+
+    expect(await screen.findByText('Not saved.')).toBeTruthy()
+    expect(learning.value).toBe('tr')
   })
 
   it('lists per-chat storage and clears matching cached media after confirmation', async () => {
@@ -1438,17 +1441,8 @@ describe('room history updates', () => {
     harness.service.GenerateLocalAIChatTitle.mockResolvedValue('')
     harness.tutorService.Analyze.mockResolvedValue({
       detected_language: 'it',
-      target_language: 'tr',
-      explanation_language: 'it',
-      original_text: 'Ciao, come stai?',
       corrected_text: 'Merhaba, nasılsın?',
       translation: 'Ciao, come stai?',
-      has_grammar_errors: false,
-      phrases: [
-        { text: 'Merhaba,', meaning: 'hello,', words: [{ word: 'Merhaba', breakdown: 'merhaba -> ciao', meaning: 'hello' }] },
-        { text: 'nasılsın?', meaning: 'how are you?', words: [{ word: 'nasılsın', breakdown: 'nasıl-sın -> come-sei', meaning: 'how are you' }] },
-      ],
-      grammar_rule: 'The second-person ending follows vowel harmony.',
       text_to_insert: 'Merhaba, nasılsın?',
     })
     harness.service.TestAIEndpoint.mockResolvedValue(undefined)
@@ -1826,7 +1820,6 @@ describe('room history updates', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
     expect(dialog.querySelector('.ai-result-disclaimer')).toBeNull()
     expect(within(dialog).getByText('Merhaba, nasılsın?')).toBeTruthy()
-    expect(within(dialog).getByText('nasıl-sın -> come-sei')).toBeTruthy()
     await user.click(within(dialog).getByRole('button', { name: 'Replace draft with Turkish' }))
 
     expect(composer.value).toBe('Merhaba, nasılsın?')
@@ -1954,7 +1947,7 @@ describe('room history updates', () => {
 
     expect(harness.tutorService.Analyze).toHaveBeenCalledWith('latest message', 'message', 'en', expect.any(String))
     const dialog = await screen.findByRole('dialog', { name: 'Analyze message' })
-    expect(await within(dialog).findByText('The second-person ending follows vowel harmony.')).toBeTruthy()
+    expect(await within(dialog).findByText('Ciao, come stai?')).toBeTruthy()
     expect(within(dialog).queryByRole('button', { name: 'Replace draft with Turkish' })).toBeNull()
   })
 
@@ -1988,14 +1981,8 @@ describe('room history updates', () => {
     })
     harness.tutorService.Analyze.mockResolvedValueOnce({
       detected_language: 'en',
-      target_language: 'es',
-      explanation_language: 'en',
-      original_text: 'Hello, how are you?',
       corrected_text: 'Hola, ¿cómo estás?',
       translation: 'Hello, how are you?',
-      has_grammar_errors: false,
-      phrases: [{ text: 'Hola, ¿cómo estás?', meaning: 'how are you?', words: [{ word: 'estás', breakdown: 'estar + ás', meaning: 'you are' }] }],
-      grammar_rule: 'Estar conjugates for the second person.',
       text_to_insert: 'Hola, ¿cómo estás?',
     })
     render(<App />)
@@ -2006,7 +1993,7 @@ describe('room history updates', () => {
     expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Hello, how are you?', 'draft', 'en', expect.any(String))
     const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
     expect(await within(dialog).findByText('CORRECTED · SPANISH')).toBeTruthy()
-    expect(within(dialog).getByText('ORIGINAL · ENGLISH')).toBeTruthy()
+    expect(within(dialog).getByText('TRANSLATION · ENGLISH')).toBeTruthy()
     expect(dialog.querySelector('p[lang="es"]')?.textContent).toBe('Hola, ¿cómo estás?')
     expect(within(dialog).getByRole('button', { name: 'Replace draft with Spanish' })).toBeTruthy()
   })
@@ -2147,15 +2134,8 @@ describe('room history updates', () => {
     harness.service.History.mockResolvedValue({ messages: [message('$received-turkish', 'Nasılsın?', 300)], before: 0, hasMore: false })
     harness.tutorService.Analyze.mockResolvedValueOnce({
       detected_language: 'tr',
-      target_language: 'tr',
-      explanation_language: 'en',
-      original_text: 'Nasılsın?',
       corrected_text: 'Nasılsın?',
       translation: 'How are you?',
-      has_grammar_errors: false,
-      error_explanation: '',
-      phrases: [{ text: 'Nasılsın?', meaning: 'how are you (informal)', words: [{ word: 'Nasılsın?', breakdown: 'nasıl-sın -> come-sei', meaning: 'how are you' }] }],
-      grammar_rule: 'The second-person ending follows vowel harmony.',
       text_to_insert: '',
     })
 
@@ -2167,12 +2147,10 @@ describe('room history updates', () => {
     expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Nasılsın?', 'message', 'en', expect.any(String))
     const translation = container.querySelector<HTMLElement>('[data-event-id="$received-turkish"] .message-translation')
     expect(translation).toBeTruthy()
-    expect(within(translation as HTMLElement).getByText('WORD-BY-WORD')).toBeTruthy()
-    expect((translation as HTMLElement).querySelectorAll('.language-tutor-phrase')).toHaveLength(1)
-    expect(within(translation as HTMLElement).getByText('how are you (informal)')).toBeTruthy()
-    expect(within(translation as HTMLElement).getByText('nasıl-sın -> come-sei')).toBeTruthy()
-    expect(within(translation as HTMLElement).getByText('GRAMMAR RULE')).toBeTruthy()
-    expect(within(translation as HTMLElement).getByText('The second-person ending follows vowel harmony.')).toBeTruthy()
+    expect(within(translation as HTMLElement).getByText('How are you?')).toBeTruthy()
+    expect(within(translation as HTMLElement).queryByText('WORD-BY-WORD')).toBeNull()
+    expect((translation as HTMLElement).querySelector('.language-tutor-phrase')).toBeNull()
+    expect(within(translation as HTMLElement).queryByText('GRAMMAR RULE')).toBeNull()
   })
 
   it.each(['menu', 'ctrlKey', 'metaKey'])('drafts a reply from nearby context with %s and keeps the selected message as the reply target', async (activation) => {

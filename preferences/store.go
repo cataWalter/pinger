@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -167,52 +168,260 @@ func (s *Store) SetAccount(accountID, key string, value any) error {
 }
 
 func (s *Store) Set(scope Scope, accountID, key string, value any) error {
-	if err := validateScope(scope, accountID); err != nil {
-		return err
+	return s.setAll([]write{{scope: scope, accountID: accountID, key: key, value: value}})
+}
+
+// SetMany writes several preferences in one transaction, so either every change is saved or none is.
+// IsAccountKey routes each key to the account scope or the global scope.
+func (s *Store) SetMany(accountID string, values map[string]any) error {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
 	}
-	if err := Validate(key, value); err != nil {
-		return err
+	sort.Strings(keys)
+	writes := make([]write, 0, len(keys))
+	for _, key := range keys {
+		w := write{scope: GlobalScope, key: key, value: values[key]}
+		if IsAccountKey(key) {
+			w.scope = AccountScope
+			w.accountID = accountID
+		}
+		writes = append(writes, w)
 	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Errorf("encode preference %q: %w", key, err)
+	return s.setAll(writes)
+}
+
+// write is one preference change inside a batch.
+type write struct {
+	scope     Scope
+	accountID string
+	key       string
+	value     any
+}
+
+// setAll validates and writes a batch in one transaction. It bumps the revision once and skips unchanged values.
+func (s *Store) setAll(writes []write) error {
+	if len(writes) == 0 {
+		return nil
+	}
+	for _, w := range writes {
+		if err := validateScope(w.scope, w.accountID); err != nil {
+			return err
+		}
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin preference update: %w", err)
 	}
 	defer tx.Rollback()
-	var existing []byte
-	err = tx.QueryRow("SELECT value_json FROM preferences WHERE scope = ? AND account_id = ? AND key = ?", scope, accountID, key).Scan(&existing)
-	if err == nil && bytes.Equal(existing, raw) {
+
+	// Language checks depend on stored values, so they read inside the transaction.
+	customLanguages, err := effectiveString(tx, writes, "ai.custom_languages")
+	if err != nil {
+		return err
+	}
+	languages := LanguageLookupFor(customLanguages)
+	encoded := make([][]byte, len(writes))
+	for i, w := range writes {
+		if err := validatePreference(w.key, w.value, languages); err != nil {
+			return err
+		}
+		raw, err := json.Marshal(w.value)
+		if err != nil {
+			return fmt.Errorf("encode preference %q: %w", w.key, err)
+		}
+		encoded[i] = raw
+	}
+	if err := validateBatchLanguages(tx, writes); err != nil {
+		return err
+	}
+	if err := validateLanguagesAfterCustomChange(tx, writes, languages); err != nil {
+		return err
+	}
+
+	changed := make([]int, 0, len(writes))
+	for i, w := range writes {
+		existing, found, err := readPreferenceRaw(tx, w.scope, w.accountID, w.key)
+		if err != nil {
+			return err
+		}
+		if !found || !bytes.Equal(existing, encoded[i]) {
+			changed = append(changed, i)
+		}
+	}
+	if len(changed) == 0 {
 		return nil
 	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("read preference %q: %w", key, err)
-	}
+
 	var revision int64
-	if err = tx.QueryRow("SELECT revision FROM preference_meta WHERE id = 1").Scan(&revision); err != nil {
+	if err := tx.QueryRow("SELECT revision FROM preference_meta WHERE id = 1").Scan(&revision); err != nil {
 		return fmt.Errorf("read preference revision: %w", err)
 	}
 	revision++
-	if _, err = tx.Exec(`
+	now := time.Now().UnixMilli()
+	for _, i := range changed {
+		w := writes[i]
+		if _, err := tx.Exec(`
 		INSERT INTO preferences (scope, account_id, key, value_json, updated_at, revision)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(scope, account_id, key) DO UPDATE SET
 			value_json = excluded.value_json,
 			updated_at = excluded.updated_at,
-			revision = excluded.revision`, scope, accountID, key, raw, time.Now().UnixMilli(), revision); err != nil {
-		return fmt.Errorf("write preference %q: %w", key, err)
+			revision = excluded.revision`, w.scope, w.accountID, w.key, encoded[i], now, revision); err != nil {
+			return fmt.Errorf("write preference %q: %w", w.key, err)
+		}
 	}
-	if _, err = tx.Exec("UPDATE preference_meta SET revision = ? WHERE id = 1", revision); err != nil {
+	if _, err := tx.Exec("UPDATE preference_meta SET revision = ? WHERE id = 1", revision); err != nil {
 		return fmt.Errorf("write preference revision: %w", err)
 	}
-	if err = tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit preference update: %w", err)
 	}
 	s.markRevision(revision)
 	s.publish(Change{Revision: revision})
 	return nil
+}
+
+// readPreferenceRaw returns the stored JSON for one preference inside tx.
+func readPreferenceRaw(tx *sql.Tx, scope Scope, accountID, key string) ([]byte, bool, error) {
+	var raw []byte
+	err := tx.QueryRow("SELECT value_json FROM preferences WHERE scope = ? AND account_id = ? AND key = ?", scope, accountID, key).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read preference %q: %w", key, err)
+	}
+	return raw, true, nil
+}
+
+// effectiveString returns the value a global string preference will have after writes are applied.
+func effectiveString(tx *sql.Tx, writes []write, key string) (string, error) {
+	for _, w := range writes {
+		if w.key != key {
+			continue
+		}
+		value, ok := w.value.(string)
+		if !ok {
+			return "", fmt.Errorf("preference %q must be a string", key)
+		}
+		return value, nil
+	}
+	raw, found, err := readPreferenceRaw(tx, GlobalScope, "", key)
+	if err != nil || !found {
+		return "", err
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", fmt.Errorf("decode preference %q: %w", key, err)
+	}
+	return value, nil
+}
+
+// validateBatchLanguages checks language rules that involve more than one preference.
+func validateBatchLanguages(tx *sql.Tx, writes []write) error {
+	if touchesAnyKey(writes, "ai.tutor_language", "ai.default_language") {
+		learning, err := effectiveString(tx, writes, "ai.tutor_language")
+		if err != nil {
+			return err
+		}
+		defaultCode, err := effectiveString(tx, writes, "ai.default_language")
+		if err != nil {
+			return err
+		}
+		if defaultCode == "" {
+			defaultCode = "en"
+		}
+		if learning != "" && learning == defaultCode {
+			return errors.New("learning language must differ from the default language")
+		}
+	}
+	var allowed map[string]bool
+	for _, w := range writes {
+		code, _ := w.value.(string)
+		if !strings.HasPrefix(w.key, roomTutorLanguagePrefix) || code == "" {
+			continue
+		}
+		if allowed == nil {
+			var err error
+			allowed, err = tutorLanguagesAllowed(tx, writes)
+			if err != nil {
+				return err
+			}
+		}
+		if !allowed[code] {
+			return errors.New("room tutor language must be the learning, default, or a known language")
+		}
+	}
+	return nil
+}
+
+// tutorLanguagesAllowed lists the languages a chat may use for the tutor: learning, default, and known languages.
+func tutorLanguagesAllowed(tx *sql.Tx, writes []write) (map[string]bool, error) {
+	allowed := make(map[string]bool)
+	for _, key := range []string{"ai.tutor_language", "ai.default_language"} {
+		code, err := effectiveString(tx, writes, key)
+		if err != nil {
+			return nil, err
+		}
+		if code != "" {
+			allowed[code] = true
+		}
+	}
+	serialized, err := effectiveString(tx, writes, "ai.known_languages")
+	if err != nil {
+		return nil, err
+	}
+	var known []string
+	if serialized != "" {
+		_ = json.Unmarshal([]byte(serialized), &known)
+	}
+	for _, code := range known {
+		allowed[code] = true
+	}
+	return allowed, nil
+}
+
+// validateLanguagesAfterCustomChange rejects a custom language change that leaves the learning, default, or known
+// languages pointing at a language that no longer exists.
+func validateLanguagesAfterCustomChange(tx *sql.Tx, writes []write, languages LanguageLookup) error {
+	if !touchesAnyKey(writes, "ai.custom_languages") {
+		return nil
+	}
+	for _, key := range []string{"ai.tutor_language", "ai.default_language"} {
+		code, err := effectiveString(tx, writes, key)
+		if err != nil {
+			return err
+		}
+		if _, ok := languages[code]; code != "" && !ok {
+			return fmt.Errorf("%s still uses a language that would be removed", key)
+		}
+	}
+	serialized, err := effectiveString(tx, writes, "ai.known_languages")
+	if err != nil {
+		return err
+	}
+	var known []string
+	if serialized != "" {
+		_ = json.Unmarshal([]byte(serialized), &known)
+	}
+	for _, code := range known {
+		if _, ok := languages[code]; !ok {
+			return errors.New("ai.known_languages still uses a language that would be removed")
+		}
+	}
+	return nil
+}
+
+func touchesAnyKey(writes []write, keys ...string) bool {
+	for _, w := range writes {
+		for _, key := range keys {
+			if w.key == key {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // retiredPreferenceKeys lists exact keys written by features that have been removed.
@@ -570,7 +779,14 @@ func ValidateAIEndpoint(raw string) error {
 	return nil
 }
 
+// Validate checks one preference against the built-in languages. Set and SetMany also accept
+// the custom languages stored in ai.custom_languages.
 func Validate(key string, value any) error {
+	return validatePreference(key, value, LanguageLookupFor(""))
+}
+
+// validatePreference checks one preference. languages lists the codes that language keys may use.
+func validatePreference(key string, value any, languages LanguageLookup) error {
 	const roomAIAgentsPrefix = "room.ai_agents."
 	const messageBookmarkPrefix = "message.bookmark."
 	if strings.HasPrefix(key, roomAIAgentsPrefix) {
@@ -582,6 +798,19 @@ func Validate(key string, value any) error {
 			return fmt.Errorf("preference %q must be a JSON string", key)
 		}
 		return validateAIAgentCollection(serialized)
+	}
+	if strings.HasPrefix(key, roomTutorLanguagePrefix) {
+		if strings.TrimPrefix(key, roomTutorLanguagePrefix) == "" {
+			return errors.New("room tutor language preference requires a room ID")
+		}
+		code, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("preference %q must be a string", key)
+		}
+		if _, known := languages[code]; code != "" && !known {
+			return errors.New("room tutor language is not a supported language")
+		}
+		return nil
 	}
 	if strings.HasPrefix(key, messageBookmarkPrefix) {
 		if strings.TrimPrefix(key, messageBookmarkPrefix) == "" {
@@ -661,11 +890,13 @@ func Validate(key string, value any) error {
 		if !ok {
 			return fmt.Errorf("preference %q must be a string", key)
 		}
-		if _, known := tutorLanguageNames[code]; code != "" && !known {
+		if _, known := languages[code]; code != "" && !known {
 			return errors.New("AI language is not supported")
 		}
 	case "ai.known_languages":
-		return validateKnownLanguages(value)
+		return validateKnownLanguages(value, languages)
+	case "ai.custom_languages":
+		return validateCustomLanguages(value)
 	case "ai.image.binary_path", "ai.image.model_path":
 		path, ok := value.(string)
 		if !ok {
@@ -797,46 +1028,11 @@ func Validate(key string, value any) error {
 	return nil
 }
 
-// tutorLanguageNames lists the languages the Language Tutor can teach or explain in, keyed by code.
-// The codes must match TUTOR_LANGUAGES in frontend/src/aiSettings.ts.
-var tutorLanguageNames = map[string]string{
-	"ar": "Arabic",
-	"de": "German",
-	"el": "Greek",
-	"en": "English",
-	"es": "Spanish",
-	"fr": "French",
-	"it": "Italian",
-	"ja": "Japanese",
-	"ko": "Korean",
-	"nl": "Dutch",
-	"pl": "Polish",
-	"pt": "Portuguese",
-	"ru": "Russian",
-	"sv": "Swedish",
-	"tr": "Turkish",
-	"zh": "Chinese",
-}
+// roomTutorLanguagePrefix prefixes the per-chat tutor language, room.tutor_language.<roomID>.
+const roomTutorLanguagePrefix = "room.tutor_language."
 
-// TutorLanguageName returns the English name for a Language Tutor language code.
-func TutorLanguageName(code string) (string, bool) {
-	name, ok := tutorLanguageNames[code]
-	return name, ok
-}
-
-// TutorLanguageCode returns the code for an English language name such as "Turkish", ignoring case.
-func TutorLanguageCode(name string) (string, bool) {
-	name = strings.TrimSpace(name)
-	for code, language := range tutorLanguageNames {
-		if strings.EqualFold(language, name) {
-			return code, true
-		}
-	}
-	return "", false
-}
-
-// validateKnownLanguages checks ai.known_languages, a JSON array of distinct supported language codes.
-func validateKnownLanguages(value any) error {
+// validateKnownLanguages checks ai.known_languages, a JSON array of distinct language codes from languages.
+func validateKnownLanguages(value any, languages LanguageLookup) error {
 	serialized, ok := value.(string)
 	if !ok {
 		return errors.New("AI known languages must be a JSON string")
@@ -845,12 +1041,12 @@ func validateKnownLanguages(value any) error {
 	if err := json.Unmarshal([]byte(serialized), &codes); err != nil {
 		return errors.New("AI known languages must be a JSON array of language codes")
 	}
-	if len(codes) == 0 || len(codes) > len(tutorLanguageNames) {
-		return errors.New("AI known languages must contain 1 to 16 languages")
+	if len(codes) == 0 || len(codes) > len(languages) {
+		return fmt.Errorf("AI known languages must contain 1 to %d languages", len(languages))
 	}
 	seen := make(map[string]bool, len(codes))
 	for _, code := range codes {
-		if _, known := tutorLanguageNames[code]; !known {
+		if _, known := languages[code]; !known {
 			return errors.New("AI known languages contains an unsupported language")
 		}
 		if seen[code] {

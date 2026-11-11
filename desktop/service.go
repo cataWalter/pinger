@@ -1082,6 +1082,18 @@ func (s *AppService) SetStringPreference(key, value string) error {
 	return s.setPreference(key, value)
 }
 
+// SetStringPreferences saves several string preferences in one transaction. Either every value is saved or none is.
+func (s *AppService) SetStringPreferences(values map[string]string) error {
+	if s.sharedPreferences == nil {
+		return errors.New("preference store is unavailable")
+	}
+	batch := make(map[string]any, len(values))
+	for key, value := range values {
+		batch[key] = value
+	}
+	return s.sharedPreferences.SetMany(s.currentAccountID(), batch)
+}
+
 func (s *AppService) NativeNotificationsSupported() bool {
 	return s.notifier != nil && s.notifier.Supported()
 }

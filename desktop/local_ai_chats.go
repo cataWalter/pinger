@@ -143,13 +143,13 @@ func (s *AppService) GenerateLocalAIChatTitle(chatID string) (string, error) {
 	}
 
 	preferences := s.preferenceValues()
-	provider, endpoint, model, err := ghostwriterModelConfig(preferences)
+	provider, endpoint, model, err := aiModelConfig(preferences)
 	if err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(s.aiContext(), localAIChatTitleTimeout)
 	defer cancel()
-	reply, err := runLocalAICompletion(ctx, ghostwriterHTTPClient, provider, endpoint, model, localAIChatTitleMessages(input), localAIChatTitleOptions(), nil)
+	reply, err := runLocalAICompletion(ctx, aiLocalHTTPClient, provider, endpoint, model, localAIChatTitleMessages(input), localAIChatTitleOptions(), nil)
 	if err != nil {
 		return "", err
 	}
@@ -412,7 +412,7 @@ func (s *AppService) LocalAIChat(request LocalAIChatRequest) (string, error) {
 		return "", fmt.Errorf("agent instructions must be %d characters or fewer", localAIChatAgentLimit)
 	}
 	preferences := s.preferenceValues()
-	provider, endpoint, model, err := ghostwriterModelConfig(preferences)
+	provider, endpoint, model, err := aiModelConfig(preferences)
 	if err != nil {
 		return "", err
 	}
@@ -437,7 +437,7 @@ func (s *AppService) LocalAIChat(request LocalAIChatRequest) (string, error) {
 		}
 	}
 	thinkingLevel := stringPreference(preferences, aiThinkingLevelPreference, aiThinkingLevelDefault)
-	reply, err := runLocalAICompletion(ctx, ghostwriterHTTPClient, provider, endpoint, model, conversation, localAIChatCompletionOptions(tuning, thinkingLevel), onChunk)
+	reply, err := runLocalAICompletion(ctx, aiLocalHTTPClient, provider, endpoint, model, conversation, localAIChatCompletionOptions(tuning, thinkingLevel), onChunk)
 	if err != nil && ctx.Err() == context.Canceled {
 		return "", errAIRunStopped
 	}

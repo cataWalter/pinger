@@ -5,7 +5,7 @@ import { ArrowUpRight, Bot, Check, Copy, FileText, MessageSquare, MessagesSquare
 import { AppService } from '../bindings/mychat/desktop'
 import { type AIMessage, type ChatExportResult, type Invite, type Member, type Message, type Room, type Snapshot, type TutorAnalysis, type Verification } from '../bindings/mychat/desktop/models.js'
 import { fuzzyScore } from './fuzzy'
-import { AI_ACTION_SHORTCUTS, languageName, type AIFeatureID } from './aiSettings'
+import { AI_ACTION_SHORTCUTS, languageName, type AIFeatureID, type LanguageEntry } from './aiSettings'
 import { matrixMediaURL, matrixMXCMediaURL } from './ChatMediaRenderer'
 import { firstPreviewableURL, LinkPreviewCard } from './LinkPreview'
 import { VoiceMessagePlayer } from './VoiceMessagePlayer'
@@ -784,7 +784,7 @@ export const TimelineMessageList = memo(function TimelineMessageList({
           </div>
           {showTranslation && <aside className="message-translation" role="note" aria-label={`${chatTranslation?.targetLanguage || 'Translation'} translation`} aria-live="polite">
             <span className="message-translation-label">{chatTranslation?.targetLanguage || 'Translation'}</span>
-            {translatedAnalysis ? <LanguageTutorAnalysisDetails analysis={translatedAnalysis} originalText={message.body} /> : <p>Translating…</p>}
+            {translatedAnalysis ? <p>{translatedAnalysis.translation}</p> : <p>Translating…</p>}
           </aside>}
         </article>
       </Fragment>
@@ -1459,45 +1459,17 @@ export function VirtualRoomList({ listRef, rooms, selectedRoomIndex, rowHeight, 
 }
 
 
-export function LanguageTutorAnalysisDetails({ analysis, originalText }: { analysis: TutorAnalysis; originalText: string }) {
-  const detectedCode = analysis.detected_language
-  const learningCode = analysis.target_language
-  const explanationCode = analysis.explanation_language
-  const phrases = analysis.phrases ?? []
+// LanguageTutorAnalysisDetails shows the corrected text and the translation of one analysis.
+export function LanguageTutorAnalysisDetails({ analysis, learningCode, explanationCode, languages }: { analysis: TutorAnalysis; learningCode: string; explanationCode: string; languages: readonly LanguageEntry[] }) {
   return <>
-    <section className="language-tutor-section">
-      <span className="eyebrow">ORIGINAL · {languageName(detectedCode).toUpperCase()}</span>
-      <p lang={detectedCode}>{originalText}</p>
-    </section>
     {analysis.corrected_text && <section className="language-tutor-section">
-      <span className="eyebrow">CORRECTED · {languageName(learningCode).toUpperCase()}</span>
+      <span className="eyebrow">CORRECTED · {languageName(learningCode, languages).toUpperCase()}</span>
       <p lang={learningCode}>{analysis.corrected_text}</p>
-      {analysis.has_grammar_errors && analysis.error_explanation && <small className="language-tutor-error-note">{analysis.error_explanation}</small>}
     </section>}
     <section className="language-tutor-section">
-      <span className="eyebrow">TRANSLATION · {languageName(explanationCode).toUpperCase()}</span>
+      <span className="eyebrow">TRANSLATION · {languageName(explanationCode, languages).toUpperCase()}</span>
       <p lang={explanationCode}>{analysis.translation}</p>
     </section>
-    {phrases.length > 0 && <section className="language-tutor-section">
-      <span className="eyebrow">WORD-BY-WORD</span>
-      {phrases.map((phrase, phraseIndex) => <div className="language-tutor-phrase" key={`${phrase.text}-${phraseIndex}`}>
-        <div className="language-tutor-phrase-head">
-          <strong lang={learningCode}>{phrase.text}</strong>
-          <span>{phrase.meaning}</span>
-        </div>
-        <ol className="language-tutor-morphemes">
-          {(phrase.words ?? []).map((item, index) => <li key={`${item.word}-${index}`}>
-            <strong lang={learningCode}>{item.word}</strong>
-            <span>{item.breakdown}</span>
-            <small>{item.meaning}</small>
-          </li>)}
-        </ol>
-      </div>)}
-    </section>}
-    {analysis.grammar_rule && <section className="language-tutor-section language-tutor-rule">
-      <span className="eyebrow">GRAMMAR RULE</span>
-      <p>{analysis.grammar_rule}</p>
-    </section>}
   </>
 }
 

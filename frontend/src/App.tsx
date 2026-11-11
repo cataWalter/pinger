@@ -29,7 +29,7 @@ import { useSnippetExpander } from './useSnippetExpander'
 import { ConnectionStatusBanner } from './ConnectionStatusBanner'
 import { useConnectionProblem } from './useConnectionProblem'
 import { EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, buildExplainPrompt, buildReplyPrompt, buildSummaryChatDraft, parseChatAgents, serializeChatAgents, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage, endsWithAssistantTurn } from './aiPrompts'
-import { AI_ACTION_SHORTCUTS, languageName, resolveAIFeatureTuning, resolveLanguageRoles, type AIFeatureID } from './aiSettings'
+import { AI_ACTION_SHORTCUTS, languageName, resolveAIFeatureTuning, resolveChatTutorLanguage, resolveLanguageRoles, roomTutorLanguageChoice, roomTutorLanguageKey, tutorLanguageOptions, type AIFeatureID } from './aiSettings'
 import { matrixMXCMediaURL } from './ChatMediaRenderer'
 import { useMatrixBatch } from './useMatrixBatch'
 import { DialogSurface } from './DialogSurface'
@@ -352,8 +352,9 @@ function AppBody() {
     void applyLanguage(languagePreference)
   }, [languagePreference])
   const roomDrafts = useRoomDrafts(activeAccountID, preferenceBoolean(preferences, 'composer.keep_drafts', true))
+  const chatTutorLanguage = resolveChatTutorLanguage(preferences, selectedRoomID)
   const languageRoles = resolveLanguageRoles(preferences)
-  const translateRecentLabel = `Translate messages received since your last message to ${languageName(languageRoles.defaultLanguage)}`
+  const translateRecentLabel = `Translate messages received since your last message to ${languageName(chatTutorLanguage, languageRoles.languages)}`
   const rooms = snapshot?.rooms ?? EMPTY_ROOMS
   const selectedRoom = useMemo(() => rooms.find((room) => room.id === selectedRoomID), [rooms, selectedRoomID])
   const selectedRoomAvatar = useMemo(() => selectedRoom?.avatar || (
@@ -1399,6 +1400,33 @@ function AppBody() {
           ? (current.rooms ?? []).map((room) => room.id === roomPreference[2] ? { ...room, [roomPreference[1]]: previous === true } : room)
           : current.rooms
         return { ...current, preferences: nextPreferences, rooms }
+      })
+      setError(describeError(preferenceError))
+      return false
+    }
+  }
+
+  // setPreferences saves several preferences in one backend transaction and restores them all if the save fails.
+  async function setPreferences(entries: Record<string, string>) {
+    const keys = Object.keys(entries)
+    if (keys.length === 0) return true
+    const previous = Object.fromEntries(keys.map((key) => [key, snapshot?.preferences?.[key]]))
+    setSnapshot((current) => {
+      if (!current) return current
+      return { ...current, preferences: { ...current.preferences, ...entries } }
+    })
+    try {
+      await AppService.SetStringPreferences(entries)
+      return true
+    } catch (preferenceError) {
+      setSnapshot((current) => {
+        if (!current) return current
+        const nextPreferences = { ...current.preferences }
+        for (const key of keys) {
+          if (previous[key] === undefined) delete nextPreferences[key]
+          else nextPreferences[key] = previous[key]
+        }
+        return { ...current, preferences: nextPreferences }
       })
       setError(describeError(preferenceError))
       return false
@@ -3158,7 +3186,7 @@ function AppBody() {
     if (imageSendRun) cancelAIRequest(imageSendRun.requestID)
   }
 
-  async function analyzeWithLanguageTutor(text: string, mode: LanguageTutorState['mode'], explanationLanguage?: string) {
+  async function analyzeWithLanguageTutor(text: string, mode: LanguageTutorState['mode']) {
     const originalText = text.trim()
     if (!originalText) {
       setError(mode === 'draft' ? 'Write a draft first.' : 'This message has no text to analyze.')
@@ -3168,8 +3196,8 @@ function AppBody() {
       setError('Set a local AI endpoint in Settings > AI to use Language Tutor.')
       return
     }
-    const explanation = explanationLanguage || languageRoles.defaultLanguage
-    // A new run replaces the one in progress, such as when the explanation language changes.
+    const explanation = resolveChatTutorLanguage(preferences, selectedRoomID)
+    // A new run replaces the one in progress.
     cancelAIRequest(languageTutorRequestRef.current)
     const requestID = newAIRequestID()
     languageTutorRequestRef.current = requestID
@@ -3328,8 +3356,8 @@ function AppBody() {
     const requestID = chatTranslationRequestRef.current + 1
     chatTranslationRequestRef.current = requestID
     const currentUserID = snapshot?.profile.userId ?? ''
-    const explanation = resolveLanguageRoles(preferencesRef.current).defaultLanguage
-    const targetLanguage = languageName(explanation)
+    const explanation = resolveChatTutorLanguage(preferencesRef.current, roomID)
+    const targetLanguage = languageName(explanation, resolveLanguageRoles(preferencesRef.current).languages)
     let allMessages = [...messages]
     let cursor = olderCursor
     let moreHistory = hasOlder
@@ -4601,7 +4629,6 @@ function AppBody() {
           onFollowUpChange={setAIFollowUp}
           onSendFollowUp={sendAIFollowUp}
           onCloseLanguageTutor={closeLanguageTutor}
-          onAnalyzeWithLanguageTutor={analyzeWithLanguageTutor}
           onUseLanguageTutorDraft={useLanguageTutorDraft}
         />
       </Suspense>}
@@ -4677,6 +4704,7 @@ function AppBody() {
               }
             }}
             onPreferenceChange={(key, value) => setPreference(key, value)}
+            onPreferencesChange={setPreferences}
             onSnippetsChange={updateSnippets}
           />
         </Suspense>
@@ -4725,6 +4753,10 @@ function AppBody() {
         onCreateAgent={createAgentProfile}
         onInvite={inviteToSelectedRoom}
         onLeave={() => { setLeaveRoomError(''); setLeaveConfirmOpen(true) }}
+        tutorLanguage={roomTutorLanguageChoice(preferences, selectedRoom.id)}
+        tutorLanguageOptions={tutorLanguageOptions(languageRoles.known, languageRoles.learning).map((code) => ({ code, name: languageName(code, languageRoles.languages) }))}
+        defaultTutorLanguageName={languageName(languageRoles.defaultLanguage, languageRoles.languages)}
+        onTutorLanguageChange={(code) => void setPreference(roomTutorLanguageKey(selectedRoom.id), code)}
       />}
       {activeThread && <ThreadPanel
         key={activeThread.rootID}
@@ -4781,8 +4813,11 @@ function AppBody() {
   )
 }
 
-function base64ToBytes(encoded: string): Uint8Array {
-  return Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0))
+function base64ToBytes(encoded: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(encoded)
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length))
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
+  return bytes
 }
 
 function App() {

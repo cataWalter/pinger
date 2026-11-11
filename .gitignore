@@ -9,9 +9,10 @@
 /frontend/bindings/
 /frontend/dist/
 /build/linux/appimage/build/
-.DS_Store
 /toolchain/
 /tools/msys64/
+/.kilo/
+/.playwright-mcp/
 
 
 # Logs & environment

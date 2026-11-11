@@ -9741,22 +9741,9 @@ day-divider::after,
   gap: 18px;
 }
 
-.language-tutor-explain-in {
-  display: grid;
-  gap: 4px;
-  justify-items: start;
+.language-tutor-explained-in {
+  margin: 0;
   color: var(--muted);
-  font-size: 10px;
-}
-
-.language-tutor-explain-in select {
-  min-height: 30px;
-  padding: 0 8px;
-  color: inherit;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  font: inherit;
   font-size: 11px;
 }
 
@@ -9777,84 +9764,6 @@ day-divider::after,
   font-size: 14px;
   line-height: 1.55;
   overflow-wrap: anywhere;
-}
-
-.language-tutor-error-note {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.language-tutor-morphemes {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.language-tutor-morphemes li {
-  display: grid;
-  grid-template-columns: minmax(72px, 0.38fr) minmax(0, 1fr);
-  gap: 3px 12px;
-  padding: 0 0 8px;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.language-tutor-morphemes strong {
-  color: var(--accent);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.language-tutor-morphemes span {
-  color: var(--ink);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.language-tutor-morphemes small {
-  grid-column: 2;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.4;
-}
-
-.language-tutor-phrase {
-  display: grid;
-  gap: 6px;
-  padding: 8px 10px;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--accent);
-  border-radius: 6px;
-}
-
-.language-tutor-phrase-head {
-  display: grid;
-  gap: 2px;
-  padding-bottom: 6px;
-  border-bottom: 1px dashed var(--line-soft);
-}
-
-.language-tutor-phrase-head strong {
-  color: var(--ink);
-  font-size: 13px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
-.language-tutor-phrase-head span {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
-.language-tutor-rule {
-  padding-left: 12px;
-  border-left: 2px solid var(--accent);
-  border-bottom: 0;
 }
 
 .language-known-list {

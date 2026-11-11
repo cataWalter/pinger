@@ -4,7 +4,12 @@ import {
   AI_MAX_TOKENS_LIMIT,
   AI_TEMPERATURE_MAX,
   AI_TEMPERATURE_MIN,
-  LANGUAGE_OPTIONS,
+  BUILT_IN_LANGUAGES,
+  customLanguageError,
+  parseCustomLanguages,
+  resolveChatTutorLanguage,
+  roomTutorLanguageChoice,
+  tutorLanguageOptions,
   aiFeatureDraftFromTuning,
   aiFeaturePreferenceEntries,
   aiFeatureResetEntries,
@@ -141,7 +146,7 @@ describe('AI feature settings', () => {
   })
 
   it('lists every supported language once', () => {
-    const codes = LANGUAGE_OPTIONS.map((language) => language.code)
+    const codes = BUILT_IN_LANGUAGES.map((language) => language.code)
 
     expect(codes).toHaveLength(16)
     expect(new Set(codes).size).toBe(codes.length)
@@ -156,20 +161,20 @@ describe('AI feature settings', () => {
   })
 
   it('resolves the learning, default, and known languages with the backend fallbacks', () => {
-    expect(resolveLanguageRoles({})).toEqual({ learning: 'tr', defaultLanguage: 'en', known: ['en'] })
+    expect(resolveLanguageRoles({})).toMatchObject({ learning: 'tr', defaultLanguage: 'en', known: ['en'] })
     expect(resolveLanguageRoles({
       'ai.tutor_language': 'de',
       'ai.default_language': 'fr',
       'ai.known_languages': '["en","fr"]',
-    })).toEqual({ learning: 'de', defaultLanguage: 'fr', known: ['en', 'fr'] })
+    })).toMatchObject({ learning: 'de', defaultLanguage: 'fr', known: ['en', 'fr'] })
     expect(resolveLanguageRoles({ 'ai.default_language': 'fr', 'ai.known_languages': '["en"]' }).known).toEqual(['en', 'fr'])
-    expect(resolveLanguageRoles({ 'ai.tutor_language': 'xx', 'ai.default_language': 'tr' })).toEqual({ learning: 'es', defaultLanguage: 'tr', known: ['tr'] })
-    expect(resolveLanguageRoles({ 'ai.tutor_language': true, 'ai.default_language': 'de' })).toEqual({ learning: 'tr', defaultLanguage: 'de', known: ['de'] })
+    expect(resolveLanguageRoles({ 'ai.tutor_language': 'xx', 'ai.default_language': 'tr' })).toMatchObject({ learning: 'es', defaultLanguage: 'tr', known: ['tr'] })
+    expect(resolveLanguageRoles({ 'ai.tutor_language': true, 'ai.default_language': 'de' })).toMatchObject({ learning: 'tr', defaultLanguage: 'de', known: ['de'] })
   })
 
   it('chooses a different learning language when the learning and default languages match', () => {
-    expect(resolveLanguageRoles({ 'ai.tutor_language': 'es', 'ai.default_language': 'es' })).toEqual({ learning: 'tr', defaultLanguage: 'es', known: ['es'] })
-    expect(resolveLanguageRoles({ 'ai.tutor_language': 'tr', 'ai.default_language': 'tr' })).toEqual({ learning: 'es', defaultLanguage: 'tr', known: ['tr'] })
+    expect(resolveLanguageRoles({ 'ai.tutor_language': 'es', 'ai.default_language': 'es' })).toMatchObject({ learning: 'tr', defaultLanguage: 'es', known: ['es'] })
+    expect(resolveLanguageRoles({ 'ai.tutor_language': 'tr', 'ai.default_language': 'tr' })).toMatchObject({ learning: 'es', defaultLanguage: 'tr', known: ['tr'] })
   })
 
   it('parses known languages and drops unsupported or repeated codes', () => {
@@ -182,5 +187,39 @@ describe('AI feature settings', () => {
   it('serializes known languages in a stable order without unsupported codes', () => {
     expect(serializeKnownLanguages(['tr', 'en', 'xx'])).toBe('["en","tr"]')
     expect(serializeKnownLanguages([])).toBe('[]')
+  })
+
+  it('parses custom languages and rejects invalid lists as a whole', () => {
+    expect(parseCustomLanguages('[{"code":"pt-BR","name":"Brazilian Portuguese"}]')).toEqual([{ code: 'pt-BR', name: 'Brazilian Portuguese' }])
+    expect(parseCustomLanguages('[{"code":"en","name":"English"}]')).toEqual([])
+    expect(parseCustomLanguages('not json')).toEqual([])
+  })
+
+  it('rejects custom languages that collide with built-in or existing entries', () => {
+    const existing = [{ code: 'pt-BR', name: 'Brazilian Portuguese' }]
+
+    expect(customLanguageError({ code: 'pt-BR', name: 'Portuguese' }, [])).toBe('')
+    expect(customLanguageError({ code: 'en', name: 'English' }, [])).not.toBe('')
+    expect(customLanguageError({ code: 'pt-br', name: 'Other' }, existing)).not.toBe('')
+    expect(customLanguageError({ code: 'pt-BR', name: '' }, [])).not.toBe('')
+  })
+
+  it('resolves the tutor language for each chat and falls back to the default', () => {
+    const preferences = {
+      'ai.tutor_language': 'de',
+      'ai.default_language': 'en',
+      'ai.known_languages': '["en"]',
+      'room.tutor_language.!a:example.org': 'fr',
+    }
+
+    expect(resolveChatTutorLanguage(preferences, '!a:example.org')).toBe('en')
+    expect(resolveChatTutorLanguage(preferences, '!b:example.org')).toBe('en')
+    expect(resolveChatTutorLanguage({ ...preferences, 'room.tutor_language.!a:example.org': 'de' }, '!a:example.org')).toBe('de')
+    expect(resolveChatTutorLanguage({ ...preferences, 'room.tutor_language.!a:example.org': 'ja' }, '!a:example.org')).toBe('en')
+    expect(roomTutorLanguageChoice({ ...preferences, 'room.tutor_language.!a:example.org': 'ja' }, '!a:example.org')).toBe('')
+  })
+
+  it('lists each tutor language option once', () => {
+    expect([...tutorLanguageOptions(['en', 'fr'], 'de')].sort()).toEqual(['de', 'en', 'fr'])
   })
 })

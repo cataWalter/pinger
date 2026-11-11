@@ -11,7 +11,7 @@ import (
 )
 
 func testLanguageTutorLanguages() tutorLanguages {
-	return tutorLanguages{Learning: "tr", Default: "it", Known: []string{"it", "tr", "en"}}
+	return tutorLanguages{Learning: "tr", Default: "it", Known: []string{"it", "tr", "en"}, Names: map[string]string{"it": "Italian", "tr": "Turkish", "en": "English"}}
 }
 
 func testLanguageTutorTuning() aiFeatureTuning {
@@ -52,7 +52,7 @@ func TestAnalyzeLanguageTutorUsesLocalStructuredRequest(t *testing.T) {
 		if request.Model != "tutor-model" || request.Stream || request.Temperature != languageTutorTemperature || request.MaxTokens != languageTutorMaxTokens || len(request.Messages) != 2 {
 			t.Errorf("unexpected AI request: %+v", request)
 		}
-		if !strings.Contains(request.Messages[0].Content, "Word-by-word analysis") || !strings.Contains(request.Messages[0].Content, "NEVER suggest") {
+		if !strings.Contains(request.Messages[0].Content, "untrusted data") || !strings.Contains(request.Messages[0].Content, "suggest what to say next") {
 			t.Errorf("system prompt omitted tutor rules: %q", request.Messages[0].Content)
 		}
 		if !strings.Contains(request.Messages[1].Content, "Explanation language: Italian (it)") {
@@ -61,7 +61,7 @@ func TestAnalyzeLanguageTutorUsesLocalStructuredRequest(t *testing.T) {
 		if !strings.Contains(request.Messages[1].Content, `"Ben okula gidiyorum"`) {
 			t.Errorf("user prompt did not safely quote input: %q", request.Messages[1].Content)
 		}
-		content := "```json\n" + `{"detected_language":"tr","corrected_text":"Ben okula gidiyorum.","translation":"Vado a scuola.","has_grammar_errors":false,"phrases":[{"text":"Ben okula gidiyorum.","meaning":"I go to school.","words":[{"word":"okula","breakdown":"okul-a -> scuola-verso","meaning":"to school"}]}],"grammar_rule":"Turkish uses SOV order.","text_to_insert":""}` + "\n```"
+		content := "```json\n" + `{"detected_language":"tr","corrected_text":"Ben okula gidiyorum.","translation":"Vado a scuola."}` + "\n```"
 		if err := json.NewEncoder(w).Encode(chatCompletionResponse(content)); err != nil {
 			t.Errorf("encode response: %v", err)
 		}
@@ -73,14 +73,11 @@ func TestAnalyzeLanguageTutorUsesLocalStructuredRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("analyzeLanguageTutor() error = %v", err)
 	}
-	if analysis.DetectedLanguage != "tr" || analysis.TargetLanguage != "tr" || analysis.ExplanationLanguage != "it" || analysis.OriginalText != input || analysis.Translation != "Vado a scuola." {
+	if analysis.DetectedLanguage != "tr" || analysis.CorrectedText != "Ben okula gidiyorum." || analysis.Translation != "Vado a scuola." {
 		t.Fatalf("unexpected analysis: %+v", analysis)
 	}
 	if analysis.TextToInsert != "" {
 		t.Fatalf("incoming message produced text to insert: %q", analysis.TextToInsert)
-	}
-	if len(analysis.Phrases) != 1 || len(analysis.Phrases[0].Words) != 1 || analysis.Phrases[0].Words[0].Word != "okula" {
-		t.Fatalf("phrases = %+v", analysis.Phrases)
 	}
 }
 
@@ -105,26 +102,20 @@ func TestAnalyzeLanguageTutorRejectsEmptyAndRemoteInput(t *testing.T) {
 
 func TestParseTutorAnalysisValidatesDraftOutput(t *testing.T) {
 	draft := mustLanguageTutorRequest(t, "Merhaba", languageTutorModeDraft, "it")
-	valid := `{"detected_language":"Turkish","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}]}],"grammar_rule":"Vowel harmony.","text_to_insert":"Merhaba."}`
+	valid := `{"detected_language":"Turkish","corrected_text":"Merhaba.","translation":"Ciao."}`
 	analysis, err := parseTutorAnalysis(valid, draft)
 	if err != nil {
 		t.Fatalf("parseTutorAnalysis() error = %v", err)
 	}
-	if analysis.DetectedLanguage != "tr" || analysis.OriginalText != "Merhaba" || analysis.TextToInsert != "Merhaba." || len(analysis.Phrases) != 1 {
+	if analysis.DetectedLanguage != "tr" || analysis.TextToInsert != "Merhaba." || analysis.Translation != "Ciao." {
 		t.Fatalf("normalized analysis = %+v", analysis)
 	}
 
 	for _, response := range []string{
 		`not json`,
-		`{"detected_language":"xyz-unknown","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba"}]}],"grammar_rule":"rule","text_to_insert":"Merhaba."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"x"}]}],"grammar_rule":"","text_to_insert":"Merhaba."}`,
+		`{"detected_language":"12","corrected_text":"Merhaba.","translation":"Ciao."}`,
+		`{"detected_language":"tr","corrected_text":"","translation":"Ciao."}`,
+		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":""}`,
 	} {
 		if _, err := parseTutorAnalysis(response, draft); err == nil {
 			t.Errorf("parseTutorAnalysis(%q) accepted invalid output", response)
@@ -134,46 +125,33 @@ func TestParseTutorAnalysisValidatesDraftOutput(t *testing.T) {
 
 func TestParseTutorAnalysisHandlesIncomingMessages(t *testing.T) {
 	incoming := mustLanguageTutorRequest(t, "Ciao, come stai?", languageTutorModeMessage, "en")
-	response := `{"detected_language":"it","translation":"Hi, how are you?","has_grammar_errors":true,"error_explanation":"ignored","phrases":[],"grammar_rule":"","text_to_insert":"Merhaba"}`
+	response := `{"detected_language":"it","corrected_text":"Ciao, come stai?","translation":"Hi, how are you?","text_to_insert":"Merhaba"}`
 	analysis, err := parseTutorAnalysis(response, incoming)
 	if err != nil {
 		t.Fatalf("parseTutorAnalysis() error = %v", err)
 	}
-	if analysis.DetectedLanguage != "it" || analysis.TargetLanguage != "tr" || analysis.ExplanationLanguage != "en" {
-		t.Fatalf("unexpected analysis roles: %+v", analysis)
+	if analysis.DetectedLanguage != "it" || analysis.Translation != "Hi, how are you?" {
+		t.Fatalf("unexpected analysis: %+v", analysis)
 	}
-	if analysis.HasGrammarErrors || analysis.ErrorExplanation != "" {
-		t.Fatalf("grammar checked outside the learning language: %+v", analysis)
+	if analysis.CorrectedText != "" || analysis.TextToInsert != "" {
+		t.Fatalf("text outside the learning language kept corrected or insertable text: %+v", analysis)
 	}
-	if analysis.TextToInsert != "" {
-		t.Fatalf("incoming message produced text to insert: %q", analysis.TextToInsert)
-	}
-	if analysis.Phrases == nil || len(analysis.Phrases) != 0 {
-		t.Fatalf("phrases = %#v, want an empty list", analysis.Phrases)
+
+	learningIncoming := mustLanguageTutorRequest(t, "Ben okula gidiyorum", languageTutorModeMessage, "en")
+	if _, err := parseTutorAnalysis(`{"detected_language":"tr","corrected_text":"","translation":"I go to school."}`, learningIncoming); err == nil {
+		t.Fatal("learning-language message without corrected text was accepted")
 	}
 }
 
 func TestParseTutorAnalysisFindsWrappedJSONAndDefaultsTextToInsert(t *testing.T) {
 	draft := mustLanguageTutorRequest(t, "Merhaba.", languageTutorModeDraft, "it")
-	response := "Here is the analysis:\n```json\n" + `{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}]}],"grammar_rule":"Turkish uses vowel harmony."}` + "\n```\n"
+	response := "Here is the analysis:\n```json\n" + `{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao."}` + "\n```\n"
 	analysis, err := parseTutorAnalysis(response, draft)
 	if err != nil {
 		t.Fatalf("parseTutorAnalysis() error = %v", err)
 	}
-	if analysis.OriginalText != "Merhaba." || analysis.CorrectedText != "Merhaba." || analysis.TextToInsert != "Merhaba." {
+	if analysis.CorrectedText != "Merhaba." || analysis.TextToInsert != "Merhaba." {
 		t.Fatalf("normalized analysis = %+v", analysis)
-	}
-}
-
-func TestParseTutorAnalysisKeepsPhraseBoundaries(t *testing.T) {
-	request := mustLanguageTutorRequest(t, "Yaa ben seni arzuluyorum", languageTutorModeMessage, "it")
-	response := `{"detected_language":"tr","corrected_text":"Yaa ben seni arzuluyorum","translation":"Sì, ti desidero.","phrases":[{"text":"Yaa","meaning":"Sì","words":[{"word":"Yaa","breakdown":"Yaa","meaning":"yeah (interjection)"}]},{"text":"ben seni arzuluyorum","meaning":"ti desidero","words":[{"word":"ben","breakdown":"ben","meaning":"I"},{"word":"seni","breakdown":"sen-i","meaning":"you (accusative)"},{"word":"arzuluyorum","breakdown":"arzu-la-yor-um","meaning":"I desire"}]}],"grammar_rule":"Turkish places the verb last.","text_to_insert":""}`
-	analysis, err := parseTutorAnalysis(response, request)
-	if err != nil {
-		t.Fatalf("parseTutorAnalysis() error = %v", err)
-	}
-	if len(analysis.Phrases) != 2 || analysis.Phrases[0].Text != "Yaa" || analysis.Phrases[1].Text != "ben seni arzuluyorum" || len(analysis.Phrases[1].Words) != 3 {
-		t.Fatalf("phrases = %+v", analysis.Phrases)
 	}
 }
 
@@ -190,10 +168,10 @@ func TestAnalyzeLanguageTutorRetriesMalformedResponseAndResetsStream(t *testing.
 		requestCount++
 		content := "The response was truncated: {"
 		if requestCount == 2 {
-			if request.MaxTokens != languageTutorRetryMaxTokens || len(request.Messages) != 2 || !strings.Contains(request.Messages[1].Content, "Re-analyze the original source text") {
+			if request.MaxTokens != languageTutorRetryMaxTokens || len(request.Messages) != 2 || !strings.Contains(request.Messages[1].Content, "Return one complete JSON object") {
 				t.Errorf("unexpected retry request: %+v", request)
 			}
-			content = `{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","phrases":[{"text":"Merhaba.","meaning":"Ciao.","words":[{"word":"Merhaba","breakdown":"merhaba -> ciao","meaning":"hello"}]}],"grammar_rule":"Turkish uses vowel harmony.","text_to_insert":""}`
+			content = `{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao."}`
 		}
 		if err := json.NewEncoder(w).Encode(chatCompletionResponse(content)); err != nil {
 			t.Errorf("encode response: %v", err)
@@ -247,11 +225,12 @@ func TestDetectedLanguageCode(t *testing.T) {
 		code string
 		ok   bool
 	}{
-		"Turkish":     {code: "tr", ok: true},
-		"IT":          {code: "it", ok: true},
-		"ja":          {code: "ja", ok: true},
-		"xyz-unknown": {ok: false},
-		"":            {ok: false},
+		"Turkish": {code: "tr", ok: true},
+		"IT":      {code: "it", ok: true},
+		"ja":      {code: "ja", ok: true},
+		"123":     {ok: false},
+		"pt-BR":   {code: "pt-br", ok: true},
+		"":        {ok: false},
 	}
 	for input, want := range tests {
 		code, ok := detectedLanguageCode(input)

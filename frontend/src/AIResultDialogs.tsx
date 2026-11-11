@@ -17,7 +17,6 @@ export type AIResultDialogsProps = {
   onFollowUpChange: (followUp: string) => void
   onSendFollowUp: (event: FormEvent<HTMLFormElement>) => void
   onCloseLanguageTutor: () => void
-  onAnalyzeWithLanguageTutor: (text: string, mode: LanguageTutorState['mode'], explanationLanguage?: string) => void | Promise<void>
   onUseLanguageTutorDraft: () => void
 }
 
@@ -34,7 +33,6 @@ export function AIResultDialogs({
   onFollowUpChange,
   onSendFollowUp,
   onCloseLanguageTutor,
-  onAnalyzeWithLanguageTutor,
   onUseLanguageTutorDraft,
 }: AIResultDialogsProps) {
   return (
@@ -82,16 +80,14 @@ export function AIResultDialogs({
             <button className="icon-button" type="button" aria-label="Close Language Tutor" title="Close Language Tutor" onClick={onCloseLanguageTutor}><X size={16} /></button>
           </header>
           <div className="ai-result-content language-tutor-content" aria-live="polite" aria-busy={languageTutorState.busy}>
-            <label className="language-tutor-explain-in"><span>Explain in</span><select aria-label="Explain in" value={languageTutorState.explanationLanguage} disabled={languageTutorState.busy} onChange={(event) => void onAnalyzeWithLanguageTutor(languageTutorState.originalText, languageTutorState.mode, event.target.value)}>
-              {languageRoles.known.map((code) => <option key={code} value={code}>{languageName(code)}</option>)}
-            </select></label>
+            <p className="language-tutor-explained-in">Explained in {languageName(languageTutorState.explanationLanguage, languageRoles.languages)}</p>
             {languageTutorState.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with the local model…</p>}
             {languageTutorState.busy && languageTutorState.preview !== '' && <pre className="language-tutor-preview">{languageTutorState.preview}</pre>}
             {languageTutorState.error && <p className="settings-error" role="alert">{languageTutorState.error}</p>}
-            {languageTutorState.analysis && <LanguageTutorAnalysisDetails analysis={languageTutorState.analysis} originalText={languageTutorState.originalText} />}
+            {languageTutorState.analysis && <LanguageTutorAnalysisDetails analysis={languageTutorState.analysis} learningCode={languageRoles.learning} explanationCode={languageTutorState.explanationLanguage} languages={languageRoles.languages} />}
           </div>
           <footer className="room-info-footer ai-result-footer">
-            {languageTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" title={`Replace draft with ${languageName(languageTutorState.analysis?.target_language || languageRoles.learning)} (Ctrl / ⌘ + Enter)`} disabled={!languageTutorState.analysis || languageTutorState.busy || hasEditTarget} onClick={onUseLanguageTutorDraft}>Replace draft with {languageName(languageTutorState.analysis?.target_language || languageRoles.learning)}</button>}
+            {languageTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" title={`Replace draft with ${languageName(languageRoles.learning, languageRoles.languages)} (Ctrl / ⌘ + Enter)`} disabled={!languageTutorState.analysis || languageTutorState.busy || hasEditTarget} onClick={onUseLanguageTutorDraft}>Replace draft with {languageName(languageRoles.learning, languageRoles.languages)}</button>}
             <button className="settings-command" type="button" onClick={onCloseLanguageTutor}>Close</button>
           </footer>
         </DialogSurface>

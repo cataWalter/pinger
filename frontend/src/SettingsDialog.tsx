@@ -382,6 +382,7 @@ export function SettingsDialog({
   onClose,
   onLogout,
   onPreferenceChange,
+  onPreferencesChange,
   onSnippetsChange,
 }: {
   tab: SettingsTab
@@ -396,6 +397,7 @@ export function SettingsDialog({
   onClose: () => void
   onLogout: () => Promise<void>
   onPreferenceChange: (key: string, value: boolean | string) => Promise<boolean>
+  onPreferencesChange: (entries: Record<string, string>) => Promise<boolean>
   onSnippetsChange: (snippets: Snippet[]) => void
 }) {
   const { t } = useTranslation()
@@ -1298,7 +1300,7 @@ export function SettingsDialog({
                   onSave={onPreferenceChange}
                 />
                 <LocalAIAgentSettings agents={localAIAgents} onSave={(collection) => onPreferenceChange('ai.local_agents', serializeChatAgents(collection))} />
-                <LanguageSettings roles={resolveLanguageRoles(preferences)} onSave={onPreferenceChange} />
+                <LanguageSettings roles={resolveLanguageRoles(preferences)} onPreferencesChange={onPreferencesChange} />
                 <AIPromptSettings preferences={preferences} onSave={onPreferenceChange} />
               </div>
             )}

@@ -54,7 +54,7 @@ var aiBackendFeatureDefaults = []AIFeatureDefault{
 	{
 		ID:          aiFeatureLanguageTutor,
 		Label:       "Language Tutor",
-		Description: "Translation, word-by-word analysis, and grammar notes for messages you read and drafts you write.",
+		Description: "Translation and corrected text for messages you read and drafts you write.",
 		Prompt:      languageTutorSystemPrompt,
 		Temperature: languageTutorTemperature,
 		MaxTokens:   languageTutorMaxTokens,

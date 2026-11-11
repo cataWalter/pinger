@@ -6,7 +6,7 @@ import { MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, 
 import { initials } from './appShared'
 import { InvitePeopleForm } from './RoomMembership'
 
-export function RoomInfoDialog({ room, agents, agentEditor, agentSettingsError, members, membersLoading, membersError, onClose, onAgentEditorChange, onDefaultAgentChange, onEditAgent, onDeleteAgent, onSaveAgent, onCreateAgent, onInvite, onLeave }: {
+export function RoomInfoDialog({ room, agents, agentEditor, agentSettingsError, members, membersLoading, membersError, onClose, onAgentEditorChange, onDefaultAgentChange, onEditAgent, onDeleteAgent, onSaveAgent, onCreateAgent, onInvite, onLeave, tutorLanguage, tutorLanguageOptions, defaultTutorLanguageName, onTutorLanguageChange }: {
   room: Room
   agents: ChatAgentCollection
   agentEditor: ChatAgentProfile | null
@@ -23,6 +23,11 @@ export function RoomInfoDialog({ room, agents, agentEditor, agentSettingsError, 
   onCreateAgent: () => void
   onInvite: (userIDs: string[]) => Promise<void>
   onLeave: () => void
+  // tutorLanguage is the chat's chosen tutor language, or an empty string for the default.
+  tutorLanguage: string
+  tutorLanguageOptions: { code: string; name: string }[]
+  defaultTutorLanguageName: string
+  onTutorLanguageChange: (code: string) => void
 }) {
   return (
     <div className="room-info-scrim" role="presentation" onClick={onClose}>
@@ -34,6 +39,14 @@ export function RoomInfoDialog({ room, agents, agentEditor, agentSettingsError, 
         <div className="room-info-content">
           <div className="room-info-fact"><span>Room ID</span><strong>{room.id}</strong></div>
           {room.topic && <div className="room-info-fact"><span>Topic</span><strong>{room.topic}</strong></div>}
+          <section className="room-agent-settings room-tutor-settings" aria-label="Language tutor">
+            <div className="room-members-heading"><h3>Language tutor</h3></div>
+            <label className="room-agent-field"><span>Tutor language</span><select aria-label="Tutor language" value={tutorLanguage} onChange={(event) => onTutorLanguageChange(event.target.value)}>
+              <option value="">Default ({defaultTutorLanguageName})</option>
+              {tutorLanguageOptions.map((option) => <option key={option.code} value={option.code}>{option.name}</option>)}
+            </select></label>
+            <p className="room-agent-note">Translations and explanations in this chat use this language.</p>
+          </section>
           <section className="room-agent-settings" aria-label="Chat agents">
             <div className="room-members-heading"><h3>Chat agents</h3><span>{agents.agents.length}/{MAX_CHAT_AGENTS}</span></div>
             <p className="room-agent-note">Profiles are saved to this account for this room. Profile instructions and included chat text are sent to the configured endpoint, which may be remote.</p>
