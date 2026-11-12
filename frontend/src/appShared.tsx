@@ -1466,10 +1466,10 @@ export function LanguageTutorAnalysisDetails({ analysis, learningCode, explanati
       <span className="eyebrow">CORRECTED · {languageName(learningCode, languages).toUpperCase()}</span>
       <p lang={learningCode}>{analysis.corrected_text}</p>
     </section>}
-    <section className="language-tutor-section">
+    {analysis.translation && <section className="language-tutor-section">
       <span className="eyebrow">TRANSLATION · {languageName(explanationCode, languages).toUpperCase()}</span>
       <p lang={explanationCode}>{analysis.translation}</p>
-    </section>
+    </section>}
   </>
 }
 

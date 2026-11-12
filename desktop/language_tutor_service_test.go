@@ -115,11 +115,28 @@ func TestParseTutorAnalysisValidatesDraftOutput(t *testing.T) {
 		`not json`,
 		`{"detected_language":"12","corrected_text":"Merhaba.","translation":"Ciao."}`,
 		`{"detected_language":"tr","corrected_text":"","translation":"Ciao."}`,
-		`{"detected_language":"tr","corrected_text":"Merhaba.","translation":""}`,
 	} {
 		if _, err := parseTutorAnalysis(response, draft); err == nil {
 			t.Errorf("parseTutorAnalysis(%q) accepted invalid output", response)
 		}
+	}
+}
+
+func TestDraftRequestReturnsOnlyTargetLanguageText(t *testing.T) {
+	draft := mustLanguageTutorRequest(t, "Merhaba", languageTutorModeDraft, "it")
+	analysis, err := parseTutorAnalysis(`{"detected_language":"tr","corrected_text":"Merhaba."}`, draft)
+	if err != nil {
+		t.Fatalf("parseTutorAnalysis() error = %v", err)
+	}
+	if analysis.TextToInsert != "Merhaba." {
+		t.Fatalf("TextToInsert = %q, want the corrected draft", analysis.TextToInsert)
+	}
+	prompt, err := languageTutorUserPrompt(draft)
+	if err != nil {
+		t.Fatalf("languageTutorUserPrompt() error = %v", err)
+	}
+	if !strings.Contains(prompt, "Target language: Turkish (tr)") || strings.Contains(prompt, "translation") {
+		t.Fatalf("draft prompt = %q", prompt)
 	}
 }
 
@@ -140,6 +157,9 @@ func TestParseTutorAnalysisHandlesIncomingMessages(t *testing.T) {
 	learningIncoming := mustLanguageTutorRequest(t, "Ben okula gidiyorum", languageTutorModeMessage, "en")
 	if _, err := parseTutorAnalysis(`{"detected_language":"tr","corrected_text":"","translation":"I go to school."}`, learningIncoming); err == nil {
 		t.Fatal("learning-language message without corrected text was accepted")
+	}
+	if _, err := parseTutorAnalysis(`{"detected_language":"it","corrected_text":"","translation":""}`, incoming); err == nil {
+		t.Fatal("incoming message without translation was accepted")
 	}
 }
 
