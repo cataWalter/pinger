@@ -50,7 +50,7 @@ describe('AI feature settings', () => {
   it('resolves built-in defaults when no overrides are saved', () => {
     expect(resolveAIFeatureTuning({}, 'tone_guard')).toEqual({
       prompt: aiFeatureSpec('tone_guard').prompt,
-      temperature: 0.6,
+      temperature: aiFeatureSpec('tone_guard').temperature,
       maxTokens: 192,
     })
     expect(resolveAIFeatureTuning({}, 'summarize').maxTokens).toBe(0)
@@ -68,7 +68,7 @@ describe('AI feature settings', () => {
     expect(resolveAIFeatureTuning(preferences, 'explain')).toEqual({ prompt: 'Explain like a teacher.', temperature: 0.9, maxTokens: 300 })
     expect(resolveAIFeatureTuning(preferences, 'summarize')).toEqual({
       prompt: aiFeatureSpec('summarize').prompt,
-      temperature: 0.6,
+      temperature: aiFeatureSpec('summarize').temperature,
       maxTokens: 0,
     })
   })

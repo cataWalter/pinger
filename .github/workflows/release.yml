@@ -22,7 +22,7 @@ concurrency:
 env:
   # Run 47 continues at v0.25 after the existing v0.24 release.
   RELEASE_VERSION_OFFSET: "22"
-  GOTOOLCHAIN: go1.26.10
+  GOTOOLCHAIN: go1.26.11
 
 jobs:
   test:

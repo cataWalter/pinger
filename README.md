@@ -252,7 +252,7 @@ npm --prefix frontend run test:browser
 npm --prefix frontend run lint
 npm --prefix frontend run build
 npm --prefix frontend audit --audit-level=moderate
-export GOTOOLCHAIN=go1.26.10
+export GOTOOLCHAIN=go1.26.11
 go test -tags "sqlite_fts5 goolm" ./...
 go test -race -count=1 -tags "sqlite_fts5 goolm" ./desktop ./matrix ./preferences
 go vet -tags "sqlite_fts5 goolm" ./...

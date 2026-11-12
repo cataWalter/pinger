@@ -54,7 +54,9 @@ type aiChatRequest struct {
 	Model              string            `json:"model,omitempty"`
 	Messages           []aiOpenAIMessage `json:"messages"`
 	Stream             bool              `json:"stream"`
-	Temperature        *float64          `json:"temperature,omitempty"`
+	Temperature        float64           `json:"temperature"`
+	TopP               float64           `json:"top_p"`
+	TopK               int               `json:"top_k"`
 	MaxTokens          int               `json:"max_tokens,omitempty"`
 	Stop               []string          `json:"stop,omitempty"`
 	ResponseFormat     json.RawMessage   `json:"response_format,omitempty"`
@@ -89,21 +91,22 @@ func validateAIEndpoint(raw string) error {
 
 // aiChatCompletion posts to an OpenAI-compatible chat endpoint such as llama-server.
 func aiChatCompletion(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage) (string, error) {
-	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiCompletionTimeout, nil, 0)
+	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiCompletionTimeout, 0)
 }
 
-func aiChatCompletionWithOptions(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, timeout time.Duration, temperature *float64, maxTokens int) (string, error) {
-	return aiChatCompletionWithThinking(ctx, client, endpoint, model, messages, timeout, temperature, maxTokens, aiThinkingDisabled())
+func aiChatCompletionWithOptions(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, timeout time.Duration, maxTokens int) (string, error) {
+	return aiChatCompletionWithThinking(ctx, client, endpoint, model, messages, timeout, maxTokens, aiThinkingDisabled())
 }
 
-func aiChatCompletionWithThinking(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, timeout time.Duration, temperature *float64, maxTokens int, chatTemplateKwargs map[string]any) (string, error) {
+// aiChatCompletionWithThinking always sends the fixed sampling parameters.
+func aiChatCompletionWithThinking(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, timeout time.Duration, maxTokens int, chatTemplateKwargs map[string]any) (string, error) {
 	if err := validateAIEndpoint(endpoint); err != nil {
 		return "", err
 	}
 	if len(messages) == 0 {
 		return "", errors.New("AI request has no messages")
 	}
-	body, err := json.Marshal(aiChatRequest{Model: model, Messages: aiOpenAIMessages(messages), Stream: false, Temperature: temperature, MaxTokens: maxTokens, ChatTemplateKwargs: chatTemplateKwargs})
+	body, err := json.Marshal(aiChatRequest{Model: model, Messages: aiOpenAIMessages(messages), Stream: false, Temperature: aiSamplingTemperature, TopP: aiSamplingTopP, TopK: aiSamplingTopK, MaxTokens: maxTokens, ChatTemplateKwargs: chatTemplateKwargs})
 	if err != nil {
 		return "", fmt.Errorf("encode AI request: %w", err)
 	}
@@ -144,8 +147,7 @@ func aiToneGuardCompletion(ctx context.Context, client *http.Client, endpoint, m
 	if err := sharedpreferences.ValidateLocalHTTPEndpoint(endpoint); err != nil {
 		return "", fmt.Errorf("Tone Guard requires a localhost HTTP endpoint: %w", err)
 	}
-	temperature := 0.1
-	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiToneGuardTimeout, &temperature, aiToneGuardMaxTokens)
+	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiToneGuardTimeout, aiToneGuardMaxTokens)
 }
 
 func aiAudioTranscription(ctx context.Context, client *http.Client, endpoint, model, filename, contentType string, audio []byte) (string, error) {
@@ -372,6 +374,7 @@ func aiCompletionTimeoutFor(messages []AIMessage) time.Duration {
 }
 
 // AIComplete sends chat messages to the configured local endpoint and returns the reply text.
+// The temperature argument is kept for the frontend binding; every request uses the fixed sampling values.
 func (s *AppService) AIComplete(messages []AIMessage, requestID string, temperature float64, maxTokens int) (string, error) {
 	endpoint, model, err := s.aiEndpointSettings()
 	if err != nil {
@@ -380,7 +383,7 @@ func (s *AppService) AIComplete(messages []AIMessage, requestID string, temperat
 	thinkingLevel := stringPreference(s.preferenceValues(), aiThinkingLevelPreference, aiThinkingLevelDefault)
 	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
 	defer release()
-	return aiChatCompletionWithThinking(ctx, aiHTTPClient, endpoint, model, messages, aiCompletionTimeoutFor(messages), &temperature, maxTokens, aiThinkingOptions(thinkingLevel))
+	return aiChatCompletionWithThinking(ctx, aiHTTPClient, endpoint, model, messages, aiCompletionTimeoutFor(messages), maxTokens, aiThinkingOptions(thinkingLevel))
 }
 
 // AICancel stops a running AI request.

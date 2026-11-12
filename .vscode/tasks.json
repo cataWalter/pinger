@@ -29,7 +29,7 @@
 			"options": {
 				"cwd": "${workspaceFolder}",
 				"env": {
-					"GOTOOLCHAIN": "go1.26.10"
+					"GOTOOLCHAIN": "go1.26.11"
 				}
 			},
 			"problemMatcher": [],

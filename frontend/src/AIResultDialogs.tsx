@@ -80,11 +80,11 @@ export function AIResultDialogs({
             <button className="icon-button" type="button" aria-label="Close Language Tutor" title="Close Language Tutor" onClick={onCloseLanguageTutor}><X size={16} /></button>
           </header>
           <div className="ai-result-content language-tutor-content" aria-live="polite" aria-busy={languageTutorState.busy}>
-            <p className="language-tutor-explained-in">Explained in {languageName(languageTutorState.explanationLanguage, languageRoles.languages)}</p>
+            {languageTutorState.mode !== 'draft' && <p className="language-tutor-explained-in">Explained in {languageName(languageTutorState.explanationLanguage, languageRoles.languages)}</p>}
             {languageTutorState.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with the local model…</p>}
             {languageTutorState.busy && languageTutorState.preview !== '' && <pre className="language-tutor-preview">{languageTutorState.preview}</pre>}
             {languageTutorState.error && <p className="settings-error" role="alert">{languageTutorState.error}</p>}
-            {languageTutorState.analysis && <LanguageTutorAnalysisDetails analysis={languageTutorState.analysis} learningCode={languageRoles.learning} explanationCode={languageTutorState.explanationLanguage} languages={languageRoles.languages} />}
+            {languageTutorState.analysis && <LanguageTutorAnalysisDetails analysis={languageTutorState.analysis} mode={languageTutorState.mode} originalText={languageTutorState.originalText} learningCode={languageRoles.learning} explanationCode={languageTutorState.explanationLanguage} languages={languageRoles.languages} />}
           </div>
           <footer className="room-info-footer ai-result-footer">
             {languageTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" title={`Replace draft with ${languageName(languageRoles.learning, languageRoles.languages)} (Ctrl / ⌘ + Enter)`} disabled={!languageTutorState.analysis || languageTutorState.busy || hasEditTarget} onClick={onUseLanguageTutorDraft}>Replace draft with {languageName(languageRoles.learning, languageRoles.languages)}</button>}

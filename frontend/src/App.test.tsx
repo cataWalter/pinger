@@ -2128,6 +2128,32 @@ describe('room history updates', () => {
     expect(harness.tutorService.Analyze).not.toHaveBeenCalled()
   })
 
+  it('notes an unchanged draft and copies a tutor result', async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:11434', 'ai.tutor_language': 'es', 'ai.default_language': 'en' },
+    })
+    harness.tutorService.Analyze.mockResolvedValueOnce({
+      detected_language: 'es',
+      corrected_text: 'Hola, ¿cómo estás?',
+      translation: 'Hello, how are you?',
+      text_to_insert: 'Hola, ¿cómo estás?',
+    })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hola, ¿cómo estás?' } })
+    await user.click(menuCommand('Analyze draft with Language Tutor'))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
+    expect(await within(dialog).findByText('No changes needed. The text is already correct.')).toBeTruthy()
+    expect(within(dialog).queryByText('Explained in English')).toBeNull()
+    await user.click(within(dialog).getByRole('button', { name: 'Copy corrected · spanish' }))
+    expect(writeText).toHaveBeenCalledWith('Hola, ¿cómo estás?')
+  })
+
   it('shows the Language Tutor analysis for each translated message', async () => {
     const user = userEvent.setup()
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })

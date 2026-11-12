@@ -140,6 +140,23 @@ func TestDraftRequestReturnsOnlyTargetLanguageText(t *testing.T) {
 	}
 }
 
+func TestDraftRejectsUntranslatedSourceEcho(t *testing.T) {
+	draft := mustLanguageTutorRequest(t, "Domani non so quando potrò arrivare.", languageTutorModeDraft, "en")
+	if _, err := parseTutorAnalysis(`{"detected_language":"it","corrected_text":"Domani non so quando potrò arrivare."}`, draft); err == nil {
+		t.Fatal("untranslated draft echo was accepted")
+	}
+	if _, err := parseTutorAnalysis(`{"detected_language":"it","corrected_text":"\"Domani non so quando potrò arrivare.\""}`, draft); err == nil {
+		t.Fatal("quoted untranslated draft echo was accepted")
+	}
+	analysis, err := parseTutorAnalysis(`{"detected_language":"it","corrected_text":"Yarın ne zaman gelebileceğimi bilmiyorum."}`, draft)
+	if err != nil {
+		t.Fatalf("parseTutorAnalysis() error = %v", err)
+	}
+	if analysis.TextToInsert != "Yarın ne zaman gelebileceğimi bilmiyorum." {
+		t.Fatalf("TextToInsert = %q, want the translated draft", analysis.TextToInsert)
+	}
+}
+
 func TestParseTutorAnalysisHandlesIncomingMessages(t *testing.T) {
 	incoming := mustLanguageTutorRequest(t, "Ciao, come stai?", languageTutorModeMessage, "en")
 	response := `{"detected_language":"it","corrected_text":"Ciao, come stai?","translation":"Hi, how are you?","text_to_insert":"Merhaba"}`

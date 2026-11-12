@@ -173,7 +173,7 @@ func TestAIChatCompletionSendsMessagesAndReturnsReply(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reply, err := aiChatCompletionWithThinking(context.Background(), server.Client(), server.URL+"/", "local.gguf", []AIMessage{{Role: "user", Content: "Translate hello"}}, aiCompletionTimeout, nil, 0, aiThinkingOptions("high"))
+	reply, err := aiChatCompletionWithThinking(context.Background(), server.Client(), server.URL+"/", "local.gguf", []AIMessage{{Role: "user", Content: "Translate hello"}}, aiCompletionTimeout, 0, aiThinkingOptions("high"))
 	if err != nil {
 		t.Fatalf("aiChatCompletion() error = %v", err)
 	}
@@ -197,19 +197,21 @@ func TestAICompletionTimeoutGrowsWithPromptSizeUpToCap(t *testing.T) {
 	}
 }
 
-func TestAIToneGuardCompletionUsesLocalLowTemperatureRequest(t *testing.T) {
+func TestAIToneGuardCompletionUsesFixedSamplingRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Model       string      `json:"model"`
 			Messages    []AIMessage `json:"messages"`
 			Stream      bool        `json:"stream"`
 			Temperature float64     `json:"temperature"`
+			TopP        float64     `json:"top_p"`
+			TopK        int         `json:"top_k"`
 			MaxTokens   int         `json:"max_tokens"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		if body.Model != "local-tone-model" || body.Stream || body.Temperature != 0.1 || body.MaxTokens != aiToneGuardMaxTokens || len(body.Messages) != 2 {
+		if body.Model != "local-tone-model" || body.Stream || body.Temperature != 1.0 || body.TopP != 0.95 || body.TopK != 64 || body.MaxTokens != aiToneGuardMaxTokens || len(body.Messages) != 2 {
 			t.Errorf("unexpected Tone Guard request: %+v", body)
 		}
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"{\"is_hostile_or_unprofessional\":false}"}}]}`)

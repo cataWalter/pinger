@@ -16,7 +16,7 @@ export CGO_ENABLED="${CGO_ENABLED:-1}"
 export CGO_CFLAGS="${CGO_CFLAGS:--mmacosx-version-min=12.0}"
 export CGO_LDFLAGS="${CGO_LDFLAGS:--mmacosx-version-min=12.0}"
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
-export GOTOOLCHAIN=go1.26.10
+export GOTOOLCHAIN=go1.26.11
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "This script must run on macOS." >&2

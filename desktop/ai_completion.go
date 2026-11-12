@@ -42,6 +42,13 @@ type AIStreamEvent struct {
 	Reset     bool   `json:"reset,omitempty"`
 }
 
+// Sampling parameters sent with every model call. They override per-feature temperature settings.
+const (
+	aiSamplingTemperature = 1.0
+	aiSamplingTopP        = 0.95
+	aiSamplingTopK        = 64
+)
+
 // aiCompletionOptions describes one model call. Zero values mean the server default.
 type aiCompletionOptions struct {
 	Temperature float64
@@ -93,6 +100,8 @@ func aiOllamaThinkingOption(kwargs map[string]any) any {
 
 type aiOllamaOptions struct {
 	Temperature float64  `json:"temperature"`
+	TopP        float64  `json:"top_p"`
+	TopK        int      `json:"top_k"`
 	NumPredict  int      `json:"num_predict,omitempty"`
 	Stop        []string `json:"stop,omitempty"`
 }
@@ -260,7 +269,7 @@ func encodeAICompletionRequest(provider AIProvider, model string, messages []AIM
 			Think:   aiOllamaThinkingOption(options.ChatTemplateKwargs),
 			Stream:  stream,
 			Format:  aiOllamaFormat(options),
-			Options: aiOllamaOptions{Temperature: options.Temperature, NumPredict: options.MaxTokens, Stop: options.Stop},
+			Options: aiOllamaOptions{Temperature: aiSamplingTemperature, TopP: aiSamplingTopP, TopK: aiSamplingTopK, NumPredict: options.MaxTokens, Stop: options.Stop},
 		}
 		var requestPath string
 		if options.Chat {
@@ -283,12 +292,13 @@ func encodeAICompletionRequest(provider AIProvider, model string, messages []AIM
 		if err != nil {
 			return nil, "", fmt.Errorf("encode response format: %w", err)
 		}
-		temperature := options.Temperature
 		body, err := json.Marshal(aiChatRequest{
 			Model:              model,
 			Messages:           aiOpenAIMessages(messages),
 			Stream:             stream,
-			Temperature:        &temperature,
+			Temperature:        aiSamplingTemperature,
+			TopP:               aiSamplingTopP,
+			TopK:               aiSamplingTopK,
 			MaxTokens:          options.MaxTokens,
 			Stop:               options.Stop,
 			ResponseFormat:     responseFormat,

@@ -49,7 +49,7 @@ var aiBackendFeatureDefaults = []AIFeatureDefault{
 		Label:       "Local AI chat",
 		Description: "The private local AI chat in the main window.",
 		Prompt:      localChatDefaultInstructions,
-		Temperature: 0.8,
+		Temperature: aiSamplingTemperature,
 	},
 	{
 		ID:          aiFeatureLanguageTutor,

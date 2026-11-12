@@ -25,7 +25,7 @@ const (
 	// suggestedRepliesContextBytes bounds the transcript. The oldest lines are dropped first.
 	suggestedRepliesContextBytes = 64 << 10
 	suggestedRepliesMaxTokens    = 600
-	suggestedRepliesTemperature  = 0.6
+	suggestedRepliesTemperature  = aiSamplingTemperature
 	suggestedRepliesRetryCount   = 2
 	// suggestedRepliesTextRunes caps one suggestion so the picker stays compact.
 	suggestedRepliesTextRunes = 300

@@ -9754,7 +9754,7 @@ day-divider::after,
   border-bottom: 1px solid var(--line-soft);
 }
 
-.language-tutor-section>.eyebrow {
+.language-tutor-section .eyebrow {
   color: var(--accent);
 }
 
@@ -9764,6 +9764,51 @@ day-divider::after,
   font-size: 14px;
   line-height: 1.55;
   overflow-wrap: anywhere;
+}
+
+.language-tutor-dialog .language-tutor-section {
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--canvas-warm);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+
+.language-tutor-dialog .language-tutor-section.is-primary {
+  border-color: var(--accent);
+}
+
+.language-tutor-dialog .language-tutor-section.is-primary>p {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.language-tutor-dialog .language-tutor-section.is-source {
+  background: transparent;
+}
+
+.language-tutor-dialog .language-tutor-section.is-source>p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.language-tutor-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.language-tutor-copy {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+.language-tutor-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .language-known-list {

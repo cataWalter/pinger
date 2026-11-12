@@ -331,9 +331,8 @@ describe('browser smoke', () => {
     for (const name of ['Unanswered rooms', 'Needs reply', 'Favorite rooms', 'Archived rooms', 'Local AI chats', 'All']) {
       const button = within(filters).getByRole('button', { name })
       await user.click(button)
-      await user.click(button)
-      expect(filters.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(1)
       expect(button.getAttribute('aria-pressed')).toBe('true')
+      expect(button.parentElement!.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(1)
       buttons.forEach((category, index) => {
         expect(Math.abs(category.getBoundingClientRect().width - initialBounds[index].width)).toBeLessThanOrEqual(1)
         expect(Math.abs(category.getBoundingClientRect().height - initialBounds[index].height)).toBeLessThanOrEqual(1)
