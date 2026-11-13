@@ -6,7 +6,7 @@ import { RoomInfoDialog } from './RoomInfoDialog'
 
 const room = { id: '!room:example.org', name: 'Test room', topic: '' } as Room
 
-function renderRoomInfo(tutorLanguage: string, onTutorLanguageChange = vi.fn()) {
+function renderRoomInfo(learningLanguage = '', explanationLanguage = '', onLearningLanguageChange = vi.fn(), onExplanationLanguageChange = vi.fn()) {
   render(<RoomInfoDialog
     room={room}
     agents={{ agents: [], defaultAgentId: '' }}
@@ -24,12 +24,15 @@ function renderRoomInfo(tutorLanguage: string, onTutorLanguageChange = vi.fn()) 
     onCreateAgent={() => {}}
     onInvite={async () => {}}
     onLeave={() => {}}
-    tutorLanguage={tutorLanguage}
-    tutorLanguageOptions={[{ code: 'de', name: 'German' }, { code: 'fr', name: 'French' }]}
-    defaultTutorLanguageName="English"
-    onTutorLanguageChange={onTutorLanguageChange}
+    learningLanguage={learningLanguage}
+    explanationLanguage={explanationLanguage}
+    languageOptions={[{ code: 'de', name: 'German' }, { code: 'fr', name: 'French' }]}
+    defaultLearningLanguageName="Turkish"
+    defaultExplanationLanguageName="English"
+    onLearningLanguageChange={onLearningLanguageChange}
+    onExplanationLanguageChange={onExplanationLanguageChange}
   />)
-  return onTutorLanguageChange
+  return { onLearningLanguageChange, onExplanationLanguageChange }
 }
 
 afterEach(() => {
@@ -37,19 +40,22 @@ afterEach(() => {
 })
 
 describe('RoomInfoDialog tutor language', () => {
-  it('shows the default tutor language when the chat has no choice', () => {
+  it('shows independent global defaults when the chat has no language overrides', () => {
     renderRoomInfo('')
 
-    const select = screen.getByLabelText('Tutor language') as HTMLSelectElement
-    expect(select.value).toBe('')
+    expect((screen.getByLabelText('Language to learn') as HTMLSelectElement).value).toBe('')
+    expect((screen.getByLabelText('Translations and explanations') as HTMLSelectElement).value).toBe('')
+    expect(screen.getByRole('option', { name: 'Default (Turkish)' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'Default (English)' })).toBeTruthy()
   })
 
-  it('saves the chosen tutor language for this chat', async () => {
-    const onTutorLanguageChange = renderRoomInfo('')
+  it('saves the learning and explanation languages independently for this chat', async () => {
+    const callbacks = renderRoomInfo()
 
-    await userEvent.setup().selectOptions(screen.getByLabelText('Tutor language'), 'fr')
+    await userEvent.setup().selectOptions(screen.getByLabelText('Language to learn'), 'de')
+    await userEvent.setup().selectOptions(screen.getByLabelText('Translations and explanations'), 'fr')
 
-    expect(onTutorLanguageChange).toHaveBeenCalledWith('fr')
+    expect(callbacks.onLearningLanguageChange).toHaveBeenCalledWith('de')
+    expect(callbacks.onExplanationLanguageChange).toHaveBeenCalledWith('fr')
   })
 })

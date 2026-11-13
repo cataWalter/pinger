@@ -170,7 +170,7 @@ func TestCustomLanguageRemovalRejectedWhileInUse(t *testing.T) {
 	}
 }
 
-func TestRoomTutorLanguageAllowsOnlyChatLanguages(t *testing.T) {
+func TestRoomLanguageOverridesAllowAllSupportedLanguages(t *testing.T) {
 	store := openLanguageTestStore(t)
 	if err := store.SetMany("", map[string]any{
 		"ai.default_language": "en",
@@ -180,21 +180,52 @@ func TestRoomTutorLanguageAllowsOnlyChatLanguages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const roomKey = "room.tutor_language.!room:example.org"
-	for _, value := range []string{"", "en", "tr", "it"} {
-		if err := store.Set(AccountScope, "acct", roomKey, value); err != nil {
-			t.Errorf("Set(%q) error = %v", value, err)
+	roomKeys := []string{"room.tutor_language.!room:example.org", "room.learning_language.!room:example.org"}
+	for _, roomKey := range roomKeys {
+		for _, value := range []string{"", "en", "tr", "it", "de", "ja"} {
+			if err := store.Set(AccountScope, "acct", roomKey, value); err != nil {
+				t.Errorf("Set(%q, %q) error = %v", roomKey, value, err)
+			}
+		}
+		if err := store.Set(AccountScope, "acct", roomKey, "xx"); err == nil {
+			t.Errorf("Set(%q) accepted an unsupported language", roomKey)
+		}
+		if err := store.Set(AccountScope, "acct", strings.TrimSuffix(roomKey, "!room:example.org"), "en"); err == nil {
+			t.Errorf("Set(%q) accepted a language preference without a room ID", roomKey)
+		}
+		if err := store.Set(AccountScope, "acct", roomKey, true); err == nil {
+			t.Errorf("Set(%q) accepted a non-string language", roomKey)
 		}
 	}
-	for _, value := range []string{"de", "xx"} {
-		if err := store.Set(AccountScope, "acct", roomKey, value); err == nil {
-			t.Errorf("Set(%q) accepted a language outside the chat's allowed set", value)
+	if err := store.SetMany("acct", map[string]any{
+		"ai.custom_languages": customLanguagesJSON(t, LanguageEntry{Code: "pt-BR", Name: "Brazilian Portuguese"}),
+	}); err != nil {
+		t.Fatalf("SetMany() adding custom language error = %v", err)
+	}
+	for _, roomKey := range roomKeys {
+		if err := store.Set(AccountScope, "acct", roomKey, "pt-BR"); err != nil {
+			t.Errorf("Set(%q, custom language) error = %v", roomKey, err)
 		}
 	}
-	if err := store.Set(AccountScope, "acct", "room.tutor_language.", "en"); err == nil {
-		t.Error("Set() accepted a room tutor language without a room ID")
-	}
-	if err := store.Set(AccountScope, "acct", roomKey, true); err == nil {
-		t.Error("Set() accepted a non-string room tutor language")
+}
+
+func TestCustomLanguageRemovalChecksRoomOverrides(t *testing.T) {
+	store := openLanguageTestStore(t)
+	roomKeys := []string{"room.tutor_language.!room:example.org", "room.learning_language.!room:example.org"}
+	for _, roomKey := range roomKeys {
+		if err := store.SetMany("acct", map[string]any{
+			"ai.custom_languages": customLanguagesJSON(t, LanguageEntry{Code: "pt-BR", Name: "Brazilian Portuguese"}),
+		}); err != nil {
+			t.Fatalf("SetMany() adding custom language error = %v", err)
+		}
+		if err := store.SetAccount("acct", roomKey, "pt-BR"); err != nil {
+			t.Fatalf("SetAccount(%q) error = %v", roomKey, err)
+		}
+		if err := store.SetMany("acct", map[string]any{"ai.custom_languages": "[]"}); err == nil {
+			t.Fatalf("SetMany() removed a custom language still used by %q", roomKey)
+		}
+		if err := store.SetMany("acct", map[string]any{"ai.custom_languages": "[]", roomKey: ""}); err != nil {
+			t.Fatalf("SetMany() removing a custom language and clearing %q error = %v", roomKey, err)
+		}
 	}
 }

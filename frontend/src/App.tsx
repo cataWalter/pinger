@@ -29,13 +29,14 @@ import { useSnippetExpander } from './useSnippetExpander'
 import { ConnectionStatusBanner } from './ConnectionStatusBanner'
 import { useConnectionProblem } from './useConnectionProblem'
 import { EMPTY_CHAT_AGENTS, MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, buildExplainPrompt, buildReplyPrompt, buildSummaryChatDraft, parseChatAgents, serializeChatAgents, type ChatAgentCollection, type ChatAgentProfile, type PromptMessage, endsWithAssistantTurn } from './aiPrompts'
-import { AI_ACTION_SHORTCUTS, languageName, resolveAIFeatureTuning, resolveChatTutorLanguage, resolveLanguageRoles, roomTutorLanguageChoice, roomTutorLanguageKey, tutorLanguageOptions, type AIFeatureID } from './aiSettings'
+import { AI_ACTION_SHORTCUTS, languageName, resolveAIFeatureTuning, resolveChatLearningLanguage, resolveChatTutorLanguage, resolveLanguageRoles, roomLearningLanguageChoice, roomLearningLanguageKey, roomTutorLanguageChoice, roomTutorLanguageKey, type AIFeatureID } from './aiSettings'
 import { matrixMXCMediaURL } from './ChatMediaRenderer'
 import { useMatrixBatch } from './useMatrixBatch'
 import { DialogSurface } from './DialogSurface'
 import { ActionMenu, preferredScrollBehavior, primaryShiftShortcutKey, primaryShiftShortcutLabel, VIRTUAL_TIMELINE_THRESHOLD, type ActionMenuEntry, type TimelineListHandle } from './appShared'
 import LocalAIChat from './LocalAIChat'
 import { SuggestedRepliesPicker, type SuggestedRepliesState } from './SuggestedRepliesPicker'
+import { RoomLanguageMenu } from './RoomLanguageMenu'
 import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIErrorMessage, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID, LOCAL_AI_FOLDER_NAME_CHARACTERS, LOCAL_AI_TITLE_CHARACTERS, type LocalAIChatKind, useLocalAIChatList } from './localAIChats'
 import { type MatrixUpdate, type MatrixNotification, type PreferenceValues, type RoomScope, type RoomRefinements, type OutgoingMessage, type MessageMenuItem, type AIAcceptAction, type AIPanel, type AIStreamChunk, type AIStreamHandler, type LanguageTutorState, type ChatTranslationState, type ChatExportState, type ChatExportProgressEvent, type ScheduledDraft, type TimelineMessageActions, type RoomButtonActions, IN_APP_NOTICE_TIMEOUT_MS, EMPTY_ROOMS, newestPersistentMessage, firstUnreadMessageID, formatTypingStatus, newestOtherAvatar, describeError, chatExportStatusText, isTextEntryTarget, displayMessageBody, initials, Avatar, localDateTimeInputValue, preferenceBoolean, preferenceString, preferenceNumber, parseTimeSuggestionMinutes, reconcileRoomSnapshots, mergeTimelineMessages, timelineMessageID, incomingSinceOwnMessage, isDirectLikeRoom, isUnansweredRoom, isNeedsReplyRoom, isUnreadRoom, primaryModifierLabel, TimelineMessageList, roomActivityAt, compareRoomActivity, rankQuickSwitcherRooms, playNotificationSound, notificationAllowed, notificationTone, notificationText, detectOneTimeCode, type NotificationText, type CaptureKind, type RecordedUpload, type StagedAttachment, type MediaApprovalRequest, mediaKindForFile, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, requestLocalAsset, encodeVoiceNoteWav, RoomButton, reportRoomListVisibleRange, VirtualRoomList, IconTooltip } from './appShared'
 
@@ -353,6 +354,7 @@ function AppBody() {
   }, [languagePreference])
   const roomDrafts = useRoomDrafts(activeAccountID, preferenceBoolean(preferences, 'composer.keep_drafts', true))
   const chatTutorLanguage = resolveChatTutorLanguage(preferences, selectedRoomID)
+  const chatLearningLanguage = resolveChatLearningLanguage(preferences, selectedRoomID)
   const languageRoles = resolveLanguageRoles(preferences)
   const translateRecentLabel = `Translate messages received since your last message to ${languageName(chatTutorLanguage, languageRoles.languages)}`
   const rooms = snapshot?.rooms ?? EMPTY_ROOMS
@@ -3196,19 +3198,20 @@ function AppBody() {
       setError('Set a local AI endpoint in Settings > AI to use Language Tutor.')
       return
     }
+    const learningLanguage = resolveChatLearningLanguage(preferences, selectedRoomID)
     const explanation = resolveChatTutorLanguage(preferences, selectedRoomID)
     // A new run replaces the one in progress.
     cancelAIRequest(languageTutorRequestRef.current)
     const requestID = newAIRequestID()
     languageTutorRequestRef.current = requestID
-    setLanguageTutorState({ accountID: activeAccountID, roomID: selectedRoomID, mode, originalText, explanationLanguage: explanation, analysis: null, busy: true, error: '', requestID, preview: '' })
+    setLanguageTutorState({ accountID: activeAccountID, roomID: selectedRoomID, mode, originalText, learningLanguage, explanationLanguage: explanation, analysis: null, busy: true, error: '', requestID, preview: '' })
     const unregister = registerAIStream(requestID, (chunk) => {
       setLanguageTutorState((current) => current?.requestID === requestID
         ? { ...current, preview: (chunk.reset ? '' : current.preview) + chunk.text }
         : current)
     })
     try {
-      const analysis = await LanguageTutorService.Analyze(originalText, mode, explanation, requestID)
+      const analysis = await LanguageTutorService.Analyze(originalText, mode, learningLanguage, explanation, requestID)
       if (languageTutorRequestRef.current === requestID) {
         setLanguageTutorState((current) => current ? { ...current, analysis, busy: false, preview: '' } : current)
       }
@@ -3356,6 +3359,7 @@ function AppBody() {
     const requestID = chatTranslationRequestRef.current + 1
     chatTranslationRequestRef.current = requestID
     const currentUserID = snapshot?.profile.userId ?? ''
+    const learningLanguage = resolveChatLearningLanguage(preferencesRef.current, roomID)
     const explanation = resolveChatTutorLanguage(preferencesRef.current, roomID)
     const targetLanguage = languageName(explanation, resolveLanguageRoles(preferencesRef.current).languages)
     let allMessages = [...messages]
@@ -3419,7 +3423,7 @@ function AppBody() {
         chatTranslationAIRequestRef.current = analysisRequestID
         let analysis: TutorAnalysis
         try {
-          analysis = await LanguageTutorService.Analyze(message.body, 'message', explanation, analysisRequestID)
+          analysis = await LanguageTutorService.Analyze(message.body, 'message', learningLanguage, explanation, analysisRequestID)
         } finally {
           if (chatTranslationAIRequestRef.current === analysisRequestID) chatTranslationAIRequestRef.current = ''
         }
@@ -4192,6 +4196,17 @@ function AppBody() {
                 <div className="conversation-action-group" role="group" aria-label="Room controls">
                   {isNeedsReplyRoom(selectedRoom) && <IconTooltip label="Mark room answered"><button className="icon-button" type="button" aria-label="Mark room answered" onClick={() => void markRoomAnswered(selectedRoom.id)}><Check size={16} /></button></IconTooltip>}
                 </div>
+                <div className="conversation-action-group" role="group" aria-label="Room language">
+                  <RoomLanguageMenu
+                    learningLanguage={roomLearningLanguageChoice(preferences, selectedRoom.id)}
+                    explanationLanguage={roomTutorLanguageChoice(preferences, selectedRoom.id)}
+                    learningDefaultName={languageName(languageRoles.learning, languageRoles.languages)}
+                    explanationDefaultName={languageName(languageRoles.defaultLanguage, languageRoles.languages)}
+                    languages={languageRoles.languages}
+                    onLearningLanguageChange={(code) => void setPreference(roomLearningLanguageKey(selectedRoom.id), code)}
+                    onExplanationLanguageChange={(code) => void setPreference(roomTutorLanguageKey(selectedRoom.id), code)}
+                  />
+                </div>
                 <div className="conversation-action-group" role="group" aria-label="Room details">
                   <IconTooltip label="Room details">
                     <button className="icon-button" type="button" aria-label="Room details" onClick={() => void openRoomInfo()}>
@@ -4590,7 +4605,7 @@ function AppBody() {
                     </div>
                   </div>
                   {suggestedReplies && suggestedReplies.roomId === selectedRoomID && (
-                    <SuggestedRepliesPicker state={suggestedReplies} hasDraft={composeText.trim() !== ''} onUse={useSuggestedReply} onRegenerate={() => void suggestRepliesForRoom(suggestedReplies.roomId)} onClose={cancelSuggestedReplies} />
+                    <SuggestedRepliesPicker state={suggestedReplies} hasDraft={composeText.trim() !== ''} learningLanguage={chatLearningLanguage} explanationLanguage={chatTutorLanguage} onUse={useSuggestedReply} onRegenerate={() => void suggestRepliesForRoom(suggestedReplies.roomId)} onClose={cancelSuggestedReplies} />
                   )}
                   {(voiceCaptureStatus !== null || busy || imageRunHere || summaryStatus) && <span className="composer-operation-status" role="status">{voiceCaptureStatus === 'recording' ? `Recording ${captureNoun}` : voiceCaptureStatus === 'processing' ? `Preparing ${captureNoun}…` : imageRunHere ? imageRunStatus : summaryStatus || 'Sending…'}</span>}
                   <IconTooltip label={editTarget ? 'Save edit' : 'Send message'} className="send-tooltip">
@@ -4753,10 +4768,13 @@ function AppBody() {
         onCreateAgent={createAgentProfile}
         onInvite={inviteToSelectedRoom}
         onLeave={() => { setLeaveRoomError(''); setLeaveConfirmOpen(true) }}
-        tutorLanguage={roomTutorLanguageChoice(preferences, selectedRoom.id)}
-        tutorLanguageOptions={tutorLanguageOptions(languageRoles.known, languageRoles.learning).map((code) => ({ code, name: languageName(code, languageRoles.languages) }))}
-        defaultTutorLanguageName={languageName(languageRoles.defaultLanguage, languageRoles.languages)}
-        onTutorLanguageChange={(code) => void setPreference(roomTutorLanguageKey(selectedRoom.id), code)}
+        learningLanguage={roomLearningLanguageChoice(preferences, selectedRoom.id)}
+        explanationLanguage={roomTutorLanguageChoice(preferences, selectedRoom.id)}
+        languageOptions={languageRoles.languages}
+        defaultLearningLanguageName={languageName(languageRoles.learning, languageRoles.languages)}
+        defaultExplanationLanguageName={languageName(languageRoles.defaultLanguage, languageRoles.languages)}
+        onLearningLanguageChange={(code) => void setPreference(roomLearningLanguageKey(selectedRoom.id), code)}
+        onExplanationLanguageChange={(code) => void setPreference(roomTutorLanguageKey(selectedRoom.id), code)}
       />}
       {activeThread && <ThreadPanel
         key={activeThread.rootID}

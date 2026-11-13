@@ -336,50 +336,7 @@ func validateBatchLanguages(tx *sql.Tx, writes []write) error {
 			return errors.New("learning language must differ from the default language")
 		}
 	}
-	var allowed map[string]bool
-	for _, w := range writes {
-		code, _ := w.value.(string)
-		if !strings.HasPrefix(w.key, roomTutorLanguagePrefix) || code == "" {
-			continue
-		}
-		if allowed == nil {
-			var err error
-			allowed, err = tutorLanguagesAllowed(tx, writes)
-			if err != nil {
-				return err
-			}
-		}
-		if !allowed[code] {
-			return errors.New("room tutor language must be the learning, default, or a known language")
-		}
-	}
 	return nil
-}
-
-// tutorLanguagesAllowed lists the languages a chat may use for the tutor: learning, default, and known languages.
-func tutorLanguagesAllowed(tx *sql.Tx, writes []write) (map[string]bool, error) {
-	allowed := make(map[string]bool)
-	for _, key := range []string{"ai.tutor_language", "ai.default_language"} {
-		code, err := effectiveString(tx, writes, key)
-		if err != nil {
-			return nil, err
-		}
-		if code != "" {
-			allowed[code] = true
-		}
-	}
-	serialized, err := effectiveString(tx, writes, "ai.known_languages")
-	if err != nil {
-		return nil, err
-	}
-	var known []string
-	if serialized != "" {
-		_ = json.Unmarshal([]byte(serialized), &known)
-	}
-	for _, code := range known {
-		allowed[code] = true
-	}
-	return allowed, nil
 }
 
 // validateLanguagesAfterCustomChange rejects a custom language change that leaves the learning, default, or known
@@ -410,7 +367,48 @@ func validateLanguagesAfterCustomChange(tx *sql.Tx, writes []write, languages La
 			return errors.New("ai.known_languages still uses a language that would be removed")
 		}
 	}
+	return validateRoomLanguagesAfterCustomChange(tx, writes, languages)
+}
+
+func validateRoomLanguagesAfterCustomChange(tx *sql.Tx, writes []write, languages LanguageLookup) error {
+	rows, err := tx.Query(`SELECT account_id, key, value_json FROM preferences
+		WHERE scope = ? AND (key GLOB ? OR key GLOB ?)`, AccountScope, roomTutorLanguagePrefix+"*", roomLearningLanguagePrefix+"*")
+	if err != nil {
+		return fmt.Errorf("read room language preferences: %w", err)
+	}
+	defer rows.Close()
+	values := make(map[string]string)
+	for rows.Next() {
+		var accountID, key string
+		var raw []byte
+		if err := rows.Scan(&accountID, &key, &raw); err != nil {
+			return fmt.Errorf("read room language preference: %w", err)
+		}
+		var code string
+		if err := json.Unmarshal(raw, &code); err != nil {
+			return fmt.Errorf("decode room language preference %q: %w", key, err)
+		}
+		values[accountID+"\x00"+key] = code
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read room language preferences: %w", err)
+	}
+	for _, w := range writes {
+		if w.scope == AccountScope && isRoomLanguagePreference(w.key) {
+			code, _ := w.value.(string)
+			values[w.accountID+"\x00"+w.key] = code
+		}
+	}
+	for key, code := range values {
+		if _, ok := languages[code]; code != "" && !ok {
+			return fmt.Errorf("room language preference %q still uses a language that would be removed", key)
+		}
+	}
 	return nil
+}
+
+func isRoomLanguagePreference(key string) bool {
+	return strings.HasPrefix(key, roomTutorLanguagePrefix) || strings.HasPrefix(key, roomLearningLanguagePrefix)
 }
 
 func touchesAnyKey(writes []write, keys ...string) bool {
@@ -799,16 +797,19 @@ func validatePreference(key string, value any, languages LanguageLookup) error {
 		}
 		return validateAIAgentCollection(serialized)
 	}
-	if strings.HasPrefix(key, roomTutorLanguagePrefix) {
-		if strings.TrimPrefix(key, roomTutorLanguagePrefix) == "" {
-			return errors.New("room tutor language preference requires a room ID")
+	for _, prefix := range []string{roomTutorLanguagePrefix, roomLearningLanguagePrefix} {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if strings.TrimPrefix(key, prefix) == "" {
+			return errors.New("room language preference requires a room ID")
 		}
 		code, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("preference %q must be a string", key)
 		}
 		if _, known := languages[code]; code != "" && !known {
-			return errors.New("room tutor language is not a supported language")
+			return errors.New("room language is not supported")
 		}
 		return nil
 	}
@@ -1030,6 +1031,9 @@ func validatePreference(key string, value any, languages LanguageLookup) error {
 
 // roomTutorLanguagePrefix prefixes the per-chat tutor language, room.tutor_language.<roomID>.
 const roomTutorLanguagePrefix = "room.tutor_language."
+
+// roomLearningLanguagePrefix prefixes the per-chat learning language, room.learning_language.<roomID>.
+const roomLearningLanguagePrefix = "room.learning_language."
 
 // validateKnownLanguages checks ai.known_languages, a JSON array of distinct language codes from languages.
 func validateKnownLanguages(value any, languages LanguageLookup) error {

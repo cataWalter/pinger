@@ -7,9 +7,11 @@ import {
   BUILT_IN_LANGUAGES,
   customLanguageError,
   parseCustomLanguages,
+  resolveChatLearningLanguage,
   resolveChatTutorLanguage,
+  roomLearningLanguageChoice,
+  roomLearningLanguageKey,
   roomTutorLanguageChoice,
-  tutorLanguageOptions,
   aiFeatureDraftFromTuning,
   aiFeaturePreferenceEntries,
   aiFeatureResetEntries,
@@ -204,22 +206,40 @@ describe('AI feature settings', () => {
     expect(customLanguageError({ code: 'pt-BR', name: '' }, [])).not.toBe('')
   })
 
-  it('resolves the tutor language for each chat and falls back to the default', () => {
+  it('resolves independent learning and explanation languages for each chat', () => {
     const preferences = {
       'ai.tutor_language': 'de',
       'ai.default_language': 'en',
       'ai.known_languages': '["en"]',
       'room.tutor_language.!a:example.org': 'fr',
+      [roomLearningLanguageKey('!a:example.org')]: 'es',
     }
 
-    expect(resolveChatTutorLanguage(preferences, '!a:example.org')).toBe('en')
+    expect(resolveChatTutorLanguage(preferences, '!a:example.org')).toBe('fr')
     expect(resolveChatTutorLanguage(preferences, '!b:example.org')).toBe('en')
-    expect(resolveChatTutorLanguage({ ...preferences, 'room.tutor_language.!a:example.org': 'de' }, '!a:example.org')).toBe('de')
-    expect(resolveChatTutorLanguage({ ...preferences, 'room.tutor_language.!a:example.org': 'ja' }, '!a:example.org')).toBe('en')
-    expect(roomTutorLanguageChoice({ ...preferences, 'room.tutor_language.!a:example.org': 'ja' }, '!a:example.org')).toBe('')
+    expect(roomTutorLanguageChoice(preferences, '!a:example.org')).toBe('fr')
+    expect(resolveChatLearningLanguage(preferences, '!a:example.org')).toBe('es')
+    expect(resolveChatLearningLanguage(preferences, '!b:example.org')).toBe('de')
+    expect(roomLearningLanguageChoice(preferences, '!a:example.org')).toBe('es')
+
+    const invalid = { ...preferences, 'room.tutor_language.!a:example.org': 'xx', [roomLearningLanguageKey('!a:example.org')]: 'xx' }
+    expect(resolveChatTutorLanguage(invalid, '!a:example.org')).toBe('en')
+    expect(resolveChatLearningLanguage(invalid, '!a:example.org')).toBe('de')
+    expect(roomTutorLanguageChoice(invalid, '!a:example.org')).toBe('')
+    expect(roomLearningLanguageChoice(invalid, '!a:example.org')).toBe('')
   })
 
-  it('lists each tutor language option once', () => {
-    expect([...tutorLanguageOptions(['en', 'fr'], 'de')].sort()).toEqual(['de', 'en', 'fr'])
+  it('accepts custom languages as independent per-chat choices', () => {
+    const preferences = {
+      'ai.tutor_language': 'de',
+      'ai.default_language': 'en',
+      'ai.custom_languages': '[{"code":"pt-BR","name":"Brazilian Portuguese"}]',
+      'room.tutor_language.!a:example.org': 'pt-BR',
+      [roomLearningLanguageKey('!a:example.org')]: 'fr',
+    }
+
+    expect(resolveChatTutorLanguage(preferences, '!a:example.org')).toBe('pt-BR')
+    expect(resolveChatLearningLanguage(preferences, '!a:example.org')).toBe('fr')
   })
+
 })

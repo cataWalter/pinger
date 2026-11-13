@@ -9647,6 +9647,18 @@ day-divider::after,
   overflow-wrap: anywhere;
 }
 
+.suggested-reply-content {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.suggested-reply-translation {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .suggested-reply-key {
   display: inline-grid;
   place-items: center;
@@ -9792,6 +9804,48 @@ day-divider::after,
   font-size: 13px;
 }
 
+.language-tutor-learning-details {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--canvas-warm);
+}
+
+.language-tutor-learning-details .eyebrow {
+  color: var(--accent);
+}
+
+.language-tutor-learning-details ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.language-tutor-learning-details li {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.language-tutor-learning-details li span,
+.language-tutor-learning-details li p {
+  color: var(--muted);
+}
+
+.language-tutor-learning-details li p {
+  margin: 0;
+  font-size: 12px;
+}
+
 .language-tutor-section-head {
   display: flex;
   align-items: center;
@@ -9846,6 +9900,60 @@ day-divider::after,
 
 .language-known-list label[title] {
   cursor: default;
+}
+
+.language-room-overrides {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.language-room-overrides legend {
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.language-room-overrides ul {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.language-room-overrides li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  min-width: 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.language-room-summary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.language-room-summary strong {
+  color: var(--ink);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.language-room-summary p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 760px) {
@@ -11303,6 +11411,41 @@ day-divider::after,
   position: relative;
   display: inline-flex;
   flex: 0 0 auto;
+}
+
+.conversation-language-control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.action-menu.conversation-language-menu {
+  display: grid;
+  gap: 12px;
+  width: min(320px, calc(100vw - 32px));
+  min-width: 0;
+  padding: 14px;
+}
+
+.conversation-language-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.conversation-language-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  background: var(--paper);
+  font: inherit;
+  font-size: 12px;
 }
 
 .app-shell[data-ui='desktop'] .action-menu-trigger.has-label {

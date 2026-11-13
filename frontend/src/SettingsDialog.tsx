@@ -1300,7 +1300,7 @@ export function SettingsDialog({
                   onSave={onPreferenceChange}
                 />
                 <LocalAIAgentSettings agents={localAIAgents} onSave={(collection) => onPreferenceChange('ai.local_agents', serializeChatAgents(collection))} />
-                <LanguageSettings roles={resolveLanguageRoles(preferences)} onPreferencesChange={onPreferencesChange} />
+                <LanguageSettings roles={resolveLanguageRoles(preferences)} preferences={preferences} rooms={rooms} onPreferencesChange={onPreferencesChange} />
                 <AIPromptSettings preferences={preferences} onSave={onPreferenceChange} />
               </div>
             )}

@@ -4,6 +4,7 @@ import { RefreshCw, Sparkles, X } from 'lucide-react'
 export type SuggestedReplyOption = {
   tone: string
   text: string
+  translation: string
 }
 
 export type SuggestedRepliesState = {
@@ -17,6 +18,8 @@ export type SuggestedRepliesState = {
 type SuggestedRepliesPickerProps = {
   state: SuggestedRepliesState
   hasDraft: boolean
+  learningLanguage: string
+  explanationLanguage: string
   onUse: (text: string) => void
   onRegenerate: () => void
   onClose: () => void
@@ -29,7 +32,7 @@ function isEditableTarget(target: EventTarget | null) {
 }
 
 // SuggestedRepliesPicker lists AI reply options above the composer. Choosing one fills the draft and never sends it.
-export function SuggestedRepliesPicker({ state, hasDraft, onUse, onRegenerate, onClose }: SuggestedRepliesPickerProps) {
+export function SuggestedRepliesPicker({ state, hasDraft, learningLanguage, explanationLanguage, onUse, onRegenerate, onClose }: SuggestedRepliesPickerProps) {
   const [pending, setPending] = useState<string | null>(null)
   const loading = state.status === 'loading'
   const ready = state.status === 'ready'
@@ -98,7 +101,10 @@ export function SuggestedRepliesPicker({ state, hasDraft, onUse, onRegenerate, o
             <li key={`${index}-${option.tone}`}>
               <button type="button" className="suggested-reply-option" disabled={loading} onClick={() => choose(option.text)}>
                 <span className="suggested-reply-tone">{option.tone}</span>
-                <span className="suggested-reply-text">{option.text}</span>
+                <span className="suggested-reply-content">
+                  <span className="suggested-reply-text" lang={learningLanguage}>{option.text}</span>
+                  <span className="suggested-reply-translation" lang={explanationLanguage}>{option.translation}</span>
+                </span>
                 <kbd className="suggested-reply-key" aria-hidden="true">{index + 1}</kbd>
               </button>
             </li>

@@ -1,14 +1,19 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LanguageSettings } from './LanguageSettings'
-import { MAX_CUSTOM_LANGUAGES, resolveLanguageRoles } from './aiSettings'
+import {
+  MAX_CUSTOM_LANGUAGES,
+  resolveLanguageRoles,
+  roomLearningLanguageKey,
+  roomTutorLanguageKey,
+} from './aiSettings'
 
 const brazilian = JSON.stringify([{ code: 'pt-BR', name: 'Brazilian Portuguese' }])
 
-function renderSettings(preferences: Record<string, string | boolean> = {}, saved = true) {
+function renderSettings(preferences: Record<string, string | boolean> = {}, saved = true, rooms: Array<{ id: string; name: string }> = []) {
   const onPreferencesChange = vi.fn<(entries: Record<string, string>) => Promise<boolean>>(async () => saved)
-  render(<LanguageSettings roles={resolveLanguageRoles(preferences)} onPreferencesChange={onPreferencesChange} />)
+  render(<LanguageSettings roles={resolveLanguageRoles(preferences)} preferences={preferences} rooms={rooms} onPreferencesChange={onPreferencesChange} />)
   return { onPreferencesChange, user: userEvent.setup() }
 }
 
@@ -20,7 +25,7 @@ describe('LanguageSettings', () => {
   it('saves the language to learn in one batch', async () => {
     const { onPreferencesChange, user } = renderSettings()
 
-    await user.selectOptions(screen.getByLabelText('Language to learn'), 'de')
+    await user.selectOptions(screen.getByLabelText('Default learning language'), 'de')
 
     await waitFor(() => expect(onPreferencesChange).toHaveBeenCalledWith({ 'ai.tutor_language': 'de' }))
     expect(await screen.findByText('Language to learn saved.')).toBeTruthy()
@@ -29,7 +34,7 @@ describe('LanguageSettings', () => {
   it('saves the default language together with the known list', async () => {
     const { onPreferencesChange, user } = renderSettings()
 
-    await user.selectOptions(screen.getByLabelText('Default language'), 'fr')
+    await user.selectOptions(screen.getByLabelText('Default for translations and explanations'), 'fr')
 
     await waitFor(() => expect(onPreferencesChange).toHaveBeenCalledWith({
       'ai.default_language': 'fr',
@@ -41,7 +46,7 @@ describe('LanguageSettings', () => {
   it('reports when the batch was not saved', async () => {
     const { user } = renderSettings({}, false)
 
-    await user.selectOptions(screen.getByLabelText('Language to learn'), 'de')
+    await user.selectOptions(screen.getByLabelText('Default learning language'), 'de')
 
     expect(await screen.findByText('Not saved.')).toBeTruthy()
   })
@@ -65,6 +70,40 @@ describe('LanguageSettings', () => {
     expect(entries['ai.custom_languages']).not.toContain('pt-BR')
     expect(entries['ai.known_languages']).toBe('["en"]')
     expect(await screen.findByText('Custom language removed.')).toBeTruthy()
+  })
+
+  it('shows chat language overrides and resets both to the global defaults', async () => {
+    const room = { id: '!study:example.org', name: 'French practice' }
+    const { onPreferencesChange, user } = renderSettings({
+      'ai.tutor_language': 'tr',
+      'ai.default_language': 'en',
+      [roomLearningLanguageKey(room.id)]: 'fr',
+      [roomTutorLanguageKey(room.id)]: 'de',
+    }, true, [room])
+
+    const item = screen.getByText('French practice').closest('li')!
+    expect(item.textContent).toContain('Learning: French')
+    expect(item.textContent).toContain('Translations and explanations: German')
+    await user.click(within(item).getByRole('button', { name: 'Reset languages for French practice' }))
+
+    await waitFor(() => expect(onPreferencesChange).toHaveBeenCalledWith({
+      [roomLearningLanguageKey(room.id)]: '',
+      [roomTutorLanguageKey(room.id)]: '',
+    }))
+    expect(await screen.findByText('French practice now uses the global language defaults.')).toBeTruthy()
+  })
+
+  it('identifies chats using a custom language before removing it', async () => {
+    const room = { id: '!study:example.org', name: 'French practice' }
+    const { onPreferencesChange, user } = renderSettings({
+      'ai.custom_languages': brazilian,
+      [roomLearningLanguageKey(room.id)]: 'pt-BR',
+    }, true, [room])
+
+    await user.click(screen.getByRole('button', { name: 'Remove Brazilian Portuguese' }))
+
+    expect(await screen.findByText(/This language is used by chat-specific settings in French practice/)).toBeTruthy()
+    expect(onPreferencesChange).not.toHaveBeenCalled()
   })
 
   it('adds a custom language with a free-text name in one batch', async () => {

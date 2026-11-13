@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Plus, X } from 'lucide-react'
+import { Plus, RotateCcw, X } from 'lucide-react'
 import {
   BUILT_IN_LANGUAGES,
   CUSTOM_LANGUAGES_PREFERENCE,
@@ -9,14 +9,19 @@ import {
   MAX_CUSTOM_LANGUAGES,
   TUTOR_LANGUAGE_PREFERENCE,
   customLanguageError,
+  languageName,
+  roomLearningLanguageKey,
+  roomTutorLanguageKey,
   serializeCustomLanguages,
   serializeKnownLanguages,
   type LanguageEntry,
   type LanguageRoles,
 } from './aiSettings'
 
-export function LanguageSettings({ roles, onPreferencesChange }: {
+export function LanguageSettings({ roles, preferences, rooms, onPreferencesChange }: {
   roles: LanguageRoles
+  preferences: Readonly<Record<string, unknown>>
+  rooms: readonly { id: string; name: string }[]
   // onPreferencesChange saves every entry in one request, so related preferences never end up half-saved.
   onPreferencesChange: (entries: Record<string, string>) => Promise<boolean>
 }) {
@@ -24,6 +29,14 @@ export function LanguageSettings({ roles, onPreferencesChange }: {
   const [busy, setBusy] = useState(false)
   const [newCode, setNewCode] = useState('')
   const [newName, setNewName] = useState('')
+  const supportedLanguageCodes = new Set(roles.languages.map((language) => language.code))
+  const roomOverrides = rooms.flatMap((room) => {
+    const learningValue = preferences[roomLearningLanguageKey(room.id)]
+    const explanationValue = preferences[roomTutorLanguageKey(room.id)]
+    const learning = typeof learningValue === 'string' && supportedLanguageCodes.has(learningValue) ? learningValue : ''
+    const explanation = typeof explanationValue === 'string' && supportedLanguageCodes.has(explanationValue) ? explanationValue : ''
+    return learning || explanation ? [{ room, learning, explanation }] : []
+  })
 
   async function save(entries: Record<string, string>, savedMessage: string) {
     setBusy(true)
@@ -83,6 +96,13 @@ export function LanguageSettings({ roles, onPreferencesChange }: {
       setStatus('Choose another language to learn or default language before removing this one.')
       return
     }
+    const overridingRooms = roomOverrides
+      .filter(({ learning, explanation }) => learning === code || explanation === code)
+      .map(({ room }) => room.name || room.id)
+    if (overridingRooms.length > 0) {
+      setStatus(`This language is used by chat-specific settings in ${overridingRooms.join(', ')}. Reset those chats to global defaults before removing it.`)
+      return
+    }
     const remaining = roles.custom.filter((language) => language.code !== code)
     const remainingLanguages = [...BUILT_IN_LANGUAGES, ...remaining]
     await save({
@@ -91,16 +111,44 @@ export function LanguageSettings({ roles, onPreferencesChange }: {
     }, 'Custom language removed.')
   }
 
+  async function resetRoomLanguages(roomID: string, roomName: string) {
+    await save({
+      [roomLearningLanguageKey(roomID)]: '',
+      [roomTutorLanguageKey(roomID)]: '',
+    }, `${roomName} now uses the global language defaults.`)
+  }
+
   return (
     <section className="ai-settings-form language-settings">
       <h4>Languages</h4>
-      <p className="settings-note">Choose the language you are learning, the default language for translations and explanations, and the languages you know. Each change saves when you make it.</p>
-      <label><span>Language to learn</span><select aria-label="Language to learn" value={roles.learning} disabled={busy} onChange={(event) => void chooseLearningLanguage(event.target.value)}>
+      <p className="settings-note">Set the global learning and translation defaults. Each chat can use different languages. Each change saves when you make it.</p>
+      <label><span>Default learning language</span><select aria-label="Default learning language" value={roles.learning} disabled={busy} onChange={(event) => void chooseLearningLanguage(event.target.value)}>
         {roles.languages.map((language) => <option key={language.code} value={language.code}>{language.name}</option>)}
       </select></label>
-      <label><span>Default language</span><select aria-label="Default language" value={roles.defaultLanguage} disabled={busy} onChange={(event) => void chooseDefaultLanguage(event.target.value)}>
+      <label><span>Default for translations and explanations</span><select aria-label="Default for translations and explanations" value={roles.defaultLanguage} disabled={busy} onChange={(event) => void chooseDefaultLanguage(event.target.value)}>
         {roles.languages.map((language) => <option key={language.code} value={language.code}>{language.name}</option>)}
       </select></label>
+      {roomOverrides.length > 0 && <fieldset className="language-room-overrides">
+        <legend>Chat-specific languages</legend>
+        <ul>
+          {roomOverrides.map(({ room, learning, explanation }) => {
+            const roomName = room.name || room.id
+            const learningName = languageName(learning || roles.learning, roles.languages)
+            const explanationName = languageName(explanation || roles.defaultLanguage, roles.languages)
+            return <li key={room.id}>
+              <div className="language-room-summary">
+                <strong>{roomName}</strong>
+                <p>Learning: {learningName}{learning ? '' : ' (default)'}</p>
+                <p>Translations and explanations: {explanationName}{explanation ? '' : ' (default)'}</p>
+              </div>
+              <button type="button" className="settings-command" aria-label={`Reset languages for ${roomName}`} disabled={busy} onClick={() => void resetRoomLanguages(room.id, roomName)}>
+                <RotateCcw size={13} aria-hidden="true" />
+                <span>Use defaults</span>
+              </button>
+            </li>
+          })}
+        </ul>
+      </fieldset>}
       <fieldset className="language-known-list" disabled={busy}>
         <legend>Languages you know</legend>
         {roles.languages.map((language) => {

@@ -262,9 +262,9 @@ function menuCommand(label: string) {
 }
 
 const suggestedReplyFixture = [
-  { tone: 'Warm', text: 'Sounds good!' },
-  { tone: 'Brief', text: 'Maybe later?' },
-  { tone: 'Direct', text: 'Let me check and tell you.' },
+  { tone: 'Warm', text: 'Sounds good!', translation: 'Sounds good!' },
+  { tone: 'Brief', text: 'Maybe later?', translation: 'Maybe later?' },
+  { tone: 'Direct', text: 'Let me check and tell you.', translation: 'Let me check and tell you.' },
 ]
 
 const snapshot: Snapshot = {
@@ -517,7 +517,7 @@ describe('settings storage, integrations, help, and about', () => {
   it('saves the language to learn from AI settings', async () => {
     const user = await openSettingsTab('AI')
 
-    await user.selectOptions(screen.getByLabelText('Language to learn'), 'de')
+    await user.selectOptions(screen.getByLabelText('Default learning language'), 'de')
 
     await waitFor(() => expect(harness.service.SetStringPreferences).toHaveBeenCalledWith({ 'ai.tutor_language': 'de' }))
     expect(await screen.findByText('Language to learn saved.')).toBeTruthy()
@@ -525,7 +525,7 @@ describe('settings storage, integrations, help, and about', () => {
 
   it('blocks choosing the default language as the language to learn', async () => {
     const user = await openSettingsTab('AI')
-    const learning = screen.getByLabelText('Language to learn') as HTMLSelectElement
+    const learning = screen.getByLabelText('Default learning language') as HTMLSelectElement
 
     await user.selectOptions(learning, 'en')
 
@@ -537,7 +537,7 @@ describe('settings storage, integrations, help, and about', () => {
   it('saves the default language and adds it to the known languages', async () => {
     const user = await openSettingsTab('AI')
 
-    await user.selectOptions(screen.getByLabelText('Default language'), 'fr')
+    await user.selectOptions(screen.getByLabelText('Default for translations and explanations'), 'fr')
 
     await waitFor(() => expect(harness.service.SetStringPreferences).toHaveBeenCalledWith({ 'ai.default_language': 'fr', 'ai.known_languages': '["en","fr"]' }))
     expect(await screen.findByText('Default language saved.')).toBeTruthy()
@@ -557,7 +557,7 @@ describe('settings storage, integrations, help, and about', () => {
   it('restores the language choices when the batch save fails', async () => {
     harness.service.SetStringPreferences.mockRejectedValueOnce(new Error('disk full'))
     const user = await openSettingsTab('AI')
-    const learning = screen.getByLabelText('Language to learn') as HTMLSelectElement
+    const learning = screen.getByLabelText('Default learning language') as HTMLSelectElement
 
     await user.selectOptions(learning, 'de')
 
@@ -1816,7 +1816,7 @@ describe('room history updates', () => {
     fireEvent.change(composer, { target: { value: 'Ciao, come stai?' } })
     await user.click(menuCommand('Analyze draft with Language Tutor'))
 
-    expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Ciao, come stai?', 'draft', 'en', expect.any(String))
+    expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Ciao, come stai?', 'draft', 'tr', 'en', expect.any(String))
     const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
     expect(dialog.querySelector('.ai-result-disclaimer')).toBeNull()
     expect(within(dialog).getByText('Merhaba, nasılsın?')).toBeTruthy()
@@ -1859,7 +1859,7 @@ describe('room history updates', () => {
     fireEvent.change(composer, { target: { value: 'Ben iyiyim.' } })
     fireEvent.keyDown(composer, { key: 'T', code: 'KeyT', [modifier]: true, shiftKey: true })
 
-    await waitFor(() => expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Ben iyiyim.', 'draft', 'en', expect.any(String)))
+    await waitFor(() => expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Ben iyiyim.', 'draft', 'tr', 'en', expect.any(String)))
     expect(await screen.findByRole('dialog', { name: 'Tutor this draft' })).toBeTruthy()
   })
 
@@ -1885,7 +1885,7 @@ describe('room history updates', () => {
     row.focus()
     fireEvent.keyDown(row, { key: 'C', code: 'KeyC', [modifier]: true, shiftKey: true })
 
-    await waitFor(() => expect(harness.tutorService.Analyze).toHaveBeenCalledWith('latest message', 'message', 'en', expect.any(String)))
+    await waitFor(() => expect(harness.tutorService.Analyze).toHaveBeenCalledWith('latest message', 'message', 'tr', 'en', expect.any(String)))
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
@@ -1945,7 +1945,7 @@ describe('room history updates', () => {
     openMessageMenu(container)
     await user.click(await screen.findByRole('menuitem', { name: 'Analyze message with Language Tutor' }))
 
-    expect(harness.tutorService.Analyze).toHaveBeenCalledWith('latest message', 'message', 'en', expect.any(String))
+    expect(harness.tutorService.Analyze).toHaveBeenCalledWith('latest message', 'message', 'tr', 'en', expect.any(String))
     const dialog = await screen.findByRole('dialog', { name: 'Analyze message' })
     expect(await within(dialog).findByText('Ciao, come stai?')).toBeTruthy()
     expect(within(dialog).queryByRole('button', { name: 'Replace draft with Turkish' })).toBeNull()
@@ -1963,7 +1963,7 @@ describe('room history updates', () => {
     await user.click(menuCommand('Analyze draft with Language Tutor'))
     await screen.findByRole('dialog', { name: 'Tutor this draft' })
     const calls = harness.tutorService.Analyze.mock.calls
-    const requestID = calls[calls.length - 1][3]
+    const requestID = calls[calls.length - 1][4]
     act(() => harness.eventHandlers.get('notification:open-room')?.({ data: { accountId: 'primary', roomId: secondRoom.id } }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Tutor this draft' })).toBeNull())
     expect(harness.service.AICancel).toHaveBeenCalledWith(requestID)
@@ -1977,25 +1977,35 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     harness.service.Snapshot.mockResolvedValue({
       ...snapshot,
-      preferences: { 'ai.endpoint': 'http://localhost:11434', 'ai.tutor_language': 'es', 'ai.default_language': 'en' },
+      preferences: {
+        'ai.endpoint': 'http://localhost:11434',
+        'ai.tutor_language': 'es',
+        'ai.default_language': 'en',
+        [`room.learning_language.${room.id}`]: 'fr',
+        [`room.tutor_language.${room.id}`]: 'de',
+      },
     })
     harness.tutorService.Analyze.mockResolvedValueOnce({
       detected_language: 'en',
-      corrected_text: 'Hola, ¿cómo estás?',
+      corrected_text: 'Bonjour, comment ça va ?',
       translation: 'Hello, how are you?',
-      text_to_insert: 'Hola, ¿cómo estás?',
+      grammar_notes: ['Use the contraction “ça va” in this expression.'],
+      vocabulary: [{ term: 'bonjour', meaning: 'hello', example: 'Bonjour, Aline.' }],
+      text_to_insert: 'Bonjour, comment ça va ?',
     })
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
     fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hello, how are you?' } })
     await user.click(menuCommand('Analyze draft with Language Tutor'))
 
-    expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Hello, how are you?', 'draft', 'en', expect.any(String))
+    expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Hello, how are you?', 'draft', 'fr', 'de', expect.any(String))
     const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
-    expect(await within(dialog).findByText('CORRECTED · SPANISH')).toBeTruthy()
-    expect(within(dialog).getByText('TRANSLATION · ENGLISH')).toBeTruthy()
-    expect(dialog.querySelector('p[lang="es"]')?.textContent).toBe('Hola, ¿cómo estás?')
-    expect(within(dialog).getByRole('button', { name: 'Replace draft with Spanish' })).toBeTruthy()
+    expect(await within(dialog).findByText('CORRECTED · FRENCH')).toBeTruthy()
+    expect(within(dialog).getByText('TRANSLATION · GERMAN')).toBeTruthy()
+    expect(dialog.querySelector('p[lang="fr"]')?.textContent).toBe('Bonjour, comment ça va ?')
+    expect(within(dialog).getByText('Use the contraction “ça va” in this expression.')).toBeTruthy()
+    expect(within(dialog).getByText('bonjour')).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Replace draft with French' })).toBeTruthy()
   })
 
   it.each(['menu', 'ctrlKey', 'metaKey'])('translates messages received after your last message with %s and skips own and redacted messages', async (activation) => {
@@ -2007,24 +2017,27 @@ describe('room history updates', () => {
       { ...message('$received-redacted', 'Silinmiş mesaj', 350), redacted: true },
       message('$received-second', 'Nasılsın?', 400),
     ]
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:8080', [`room.tutor_language.${room.id}`]: 'fr' },
+    })
     harness.service.History.mockResolvedValue({ messages: timeline, before: 80, hasMore: true })
-    harness.tutorService.Analyze.mockImplementation(async (body: string) => ({ translation: body === 'Günaydın' ? 'Good morning' : 'How are you?' }))
+    harness.tutorService.Analyze.mockImplementation(async (body: string) => ({ translation: body === 'Günaydın' ? 'Bonjour' : 'Comment ça va ?' }))
 
     const { container } = render(<App />)
     expect(await screen.findByText('Günaydın')).toBeTruthy()
     const composer = screen.getByRole('textbox', { name: 'Message' })
-    if (activation === 'menu') await user.click(menuCommand('Translate messages received since your last message to English'))
+    if (activation === 'menu') await user.click(menuCommand('Translate messages received since your last message to French'))
     else fireEvent.keyDown(composer, { key: 'Y', code: 'KeyY', [activation]: true, shiftKey: true })
 
-    await screen.findByText('Good morning')
-    await screen.findByText('How are you?')
-    expect(harness.tutorService.Analyze.mock.calls.map((call) => call.slice(0, 3))).toEqual([
-      ['Günaydın', 'message', 'en'],
-      ['Nasılsın?', 'message', 'en'],
+    await screen.findByText('Bonjour')
+    await screen.findByText('Comment ça va ?')
+    expect(harness.tutorService.Analyze.mock.calls.map((call) => call.slice(0, 4))).toEqual([
+      ['Günaydın', 'message', 'tr', 'fr'],
+      ['Nasılsın?', 'message', 'tr', 'fr'],
     ])
-    expect(container.querySelector('[data-event-id="$received-first"] .message-translation')?.textContent).toContain('Good morning')
-    expect(container.querySelector('[data-event-id="$received-second"] .message-translation')?.textContent).toContain('How are you?')
+    expect(container.querySelector('[data-event-id="$received-first"] .message-translation')?.textContent).toContain('Bonjour')
+    expect(container.querySelector('[data-event-id="$received-second"] .message-translation')?.textContent).toContain('Comment ça va ?')
     expect(container.querySelector('[data-event-id="$before-own"] .message-translation')).toBeNull()
     expect(container.querySelector('[data-event-id="$own-latest"] .message-translation')).toBeNull()
     expect(container.querySelector('[data-event-id="$received-redacted"] .message-translation')).toBeNull()
@@ -2170,7 +2183,7 @@ describe('room history updates', () => {
     await user.click(menuCommand('Translate messages received since your last message to English'))
 
     await waitFor(() => expect(container.querySelector('[data-event-id="$received-turkish"] .message-translation')?.textContent).toContain('How are you?'))
-    expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Nasılsın?', 'message', 'en', expect.any(String))
+    expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Nasılsın?', 'message', 'tr', 'en', expect.any(String))
     const translation = container.querySelector<HTMLElement>('[data-event-id="$received-turkish"] .message-translation')
     expect(translation).toBeTruthy()
     expect(within(translation as HTMLElement).getByText('How are you?')).toBeTruthy()
@@ -2235,6 +2248,8 @@ describe('room history updates', () => {
     await user.click(menuCommand('Suggest replies'))
     const picker = await screen.findByRole('group', { name: 'Suggested replies' })
     expect(harness.service.AISuggestReplies).toHaveBeenCalledWith(expect.any(String), expect.any(String))
+    expect(within(picker).getByText('Sounds good!', { selector: '.suggested-reply-text' }).getAttribute('lang')).toBe('tr')
+    expect(within(picker).getByText('Sounds good!', { selector: '.suggested-reply-translation' }).getAttribute('lang')).toBe('en')
     await user.click(within(picker).getByRole('button', { name: /Maybe later\?/ }))
 
     expect(composer.value).toBe('Maybe later?')
@@ -2468,6 +2483,19 @@ describe('room history updates', () => {
     expect(followUpRequest).toHaveLength(4)
     expect(followUpRequest[2]).toEqual({ role: 'assistant', content: 'This is an explanation.' })
     expect(followUpRequest[3]).toEqual({ role: 'user', content: 'Make it shorter' })
+  })
+
+  it('saves independent per-room learning and translation languages from the header', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Chat languages' }))
+    await user.selectOptions(screen.getByLabelText('Language to learn'), 'fr')
+    await user.selectOptions(screen.getByLabelText('Translations and explanations'), 'de')
+
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith(`room.learning_language.${room.id}`, 'fr'))
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith(`room.tutor_language.${room.id}`, 'de'))
   })
 
   it('saves per-room agent profiles and default chat agent', async () => {
@@ -6765,7 +6793,7 @@ describe('native application menu actions', () => {
 
     act(() => dispatchMenuAction('tutor-draft'))
 
-    await waitFor(() => expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Ben iyiyim.', 'draft', 'en', expect.any(String)))
+    await waitFor(() => expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Ben iyiyim.', 'draft', 'tr', 'en', expect.any(String)))
   })
 
   it('sends undo to the focused text field from the native menu', async () => {
