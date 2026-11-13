@@ -199,7 +199,7 @@ From the repository root:
 ```sh
 wails3 generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
 npm --prefix frontend ci
-sh scripts/build-macos-app.sh
+sh scripts/macos/build-macos-app.sh
 open bin/Pinger.app
 ```
 
@@ -231,7 +231,7 @@ For a native executable without the desktop installer, run `wails3 task build:li
 | `migration/` | First-run migration from the legacy Fyne app |
 | `preferences/` | Shared SQLite preference store (global and per-account scopes) |
 | `notifications/` | Desktop notification backends (native macOS and fallback) |
-| `scripts/` | macOS app packaging script |
+| `scripts/` | Dev launchers, packaging, icon generation, CI checks, and release helpers, grouped by subfolder |
 | `build/` | Wails build configuration and platform assets |
 | `assets/` | Application icons |
 | `.github/workflows/` | CI and release pipelines |
@@ -267,8 +267,8 @@ Workflow definitions and external actions are checked by pinned `actionlint`; th
 
 ```bash
 actionlint
-ruby scripts/check-workflows.rb
-node --test scripts/release-assets.test.mjs
+ruby scripts/ci/check-workflows.rb
+node --test scripts/release/release-assets.test.mjs
 ```
 
 Windows and Linux PR jobs compile the package tests and native application using the release pipeline's CGO setup. They do not exercise native windows, notifications, or operating-system permissions. Production JavaScript and CSS explicitly target Safari 15 for macOS 12; current Playwright WebKit is not a substitute for testing that minimum operating system.

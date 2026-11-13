@@ -29,7 +29,7 @@ tasks:
     summary: Builds a named macOS app bundle from the Go binary
     platforms: [darwin]
     cmds:
-      - sh scripts/build-macos-app.sh
+      - sh scripts/macos/build-macos-app.sh
 
   run:
     summary: Runs the macOS application
@@ -65,19 +65,19 @@ tasks:
     sources:
       - build/windows/icon.ico
       - build/windows/pinger.exe.manifest
-      - scripts/generate-windows-resources.go
+      - scripts/windows/generate-windows-resources.go
       - go.mod
     generates:
       - rsrc_windows_{{.ARCH}}.syso
     cmds:
-      - go run scripts/generate-windows-resources.go -arch {{.ARCH}} -icon build/windows/icon.ico -manifest build/windows/pinger.exe.manifest -out rsrc_windows_{{.ARCH}}.syso
+      - go run scripts/windows/generate-windows-resources.go -arch {{.ARCH}} -icon build/windows/icon.ico -manifest build/windows/pinger.exe.manifest -out rsrc_windows_{{.ARCH}}.syso
 
   dev:
     summary: Runs the application in development mode
     cmds:
-      - cmd: bash scripts/dev.sh
+      - cmd: bash scripts/dev/dev.sh
         platforms: [darwin]
-      - cmd: node scripts/dev.mjs
+      - cmd: node scripts/dev/dev.mjs
         platforms: [linux, windows]
     env:
       WAILS_VITE_PORT: "{{.VITE_PORT}}"

@@ -4,10 +4,24 @@ set -euo pipefail
 export GOTOOLCHAIN=go1.26.11
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 PORT="${WAILS_VITE_PORT:-9245}"
 PLATFORM="$(uname -s)"
 CONFIG="./build/config.yml"
+
+if ! command -v node >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    NODE_PREFIX="$(brew --prefix node 2>/dev/null || true)"
+    if [[ -n "$NODE_PREFIX" && -x "$NODE_PREFIX/bin/node" ]]; then
+      export PATH="$NODE_PREFIX/bin:$PATH"
+    fi
+  fi
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  printf 'Node.js was not found. Install it with `brew install node` or add its bin directory to PATH.\n' >&2
+  exit 1
+fi
 
 if [[ "$PLATFORM" == "Darwin" ]]; then
   CONFIG="./build/darwin/dev-config.yml"

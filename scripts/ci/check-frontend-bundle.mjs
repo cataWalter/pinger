@@ -3,7 +3,7 @@ import { gzipSync } from 'node:zlib'
 
 const rawBudget = 2_200_000
 const gzipBudget = 620_000
-const assetsDirectory = new URL('../frontend/dist/assets/', import.meta.url)
+const assetsDirectory = new URL('../../frontend/dist/assets/', import.meta.url)
 const entries = await readdir(assetsDirectory, { withFileTypes: true })
 const bundleFiles = entries.filter((entry) => entry.isFile() && /\.(?:css|js)$/.test(entry.name))
 

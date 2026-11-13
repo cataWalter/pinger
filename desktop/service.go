@@ -19,9 +19,10 @@ import (
 	"mychat/matrix"
 	"mychat/notifications"
 	sharedpreferences "mychat/preferences"
-)
+	"mychat/desktop/schedule"
 
-type AppService struct {
+	"github.com/wailsapp/wails/v3/pkg/application"
+
 	// Lock order: accountOpenMu, then accountMu, then activeRoomMu. localAIChatMu and chatExportMu are leaves; never nest them.
 	client                 *matrix.Client
 	accountMu              sync.RWMutex
@@ -60,9 +61,10 @@ type AppService struct {
 	aiRuns                 aiRunRegistry
 	imageEngine            imageEngine
 	workers                sync.WaitGroup
-	scheduled              *scheduledJobStore
+	scheduled              *schedule.ScheduledJobStore
 	chatExportMu           sync.Mutex
 	chatExportCancel       context.CancelFunc
+
 
 	emitUpdate               func(Update)
 	emitReminder             func(ScheduledJob)
@@ -866,114 +868,6 @@ func (s *AppService) RevealFile(path string) error {
 		return fmt.Errorf("reveal file: %w", err)
 	}
 	return s.revealFile(path)
-}
-
-func safeDownloadName(filename string) string {
-	name := filepath.Base(strings.TrimSpace(filename))
-	if name == "" || name == "." || name == ".." || name == string(filepath.Separator) {
-		return "attachment"
-	}
-	return name
-}
-
-func saveDownload(directory, name string, data []byte) (string, error) {
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return "", fmt.Errorf("create download folder: %w", err)
-	}
-	ext := filepath.Ext(name)
-	base := strings.TrimSuffix(name, ext)
-	for index := 0; index < 1000; index++ {
-		candidateName := name
-		if index > 0 {
-			candidateName = fmt.Sprintf("%s (%d)%s", base, index, ext)
-		}
-		candidate := filepath.Join(directory, candidateName)
-		file, err := os.OpenFile(candidate, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-		if errors.Is(err, os.ErrExist) {
-			continue
-		}
-		if err != nil {
-			return "", fmt.Errorf("create download: %w", err)
-		}
-		_, writeErr := file.Write(data)
-		closeErr := file.Close()
-		if writeErr != nil || closeErr != nil {
-			_ = os.Remove(candidate)
-			return "", fmt.Errorf("save attachment: %w", errors.Join(writeErr, closeErr))
-		}
-		return candidate, nil
-	}
-	return "", fmt.Errorf("no available download filename for %q after 1000 attempts", name)
-}
-
-func (s *AppService) StorageUsage() (StorageUsage, error) {
-	databaseBytes, walBytes, err := s.currentClient().StorageUsage()
-	if err != nil {
-		return StorageUsage{}, err
-	}
-	return StorageUsage{DatabaseBytes: databaseBytes, WALBytes: walBytes}, nil
-}
-
-func (s *AppService) MediaCacheUsage() (MediaCacheUsage, error) {
-	bytes, files, err := s.currentClient().MediaCacheUsage()
-	if err != nil {
-		return MediaCacheUsage{}, err
-	}
-	return MediaCacheUsage{Bytes: bytes, Files: files}, nil
-}
-
-func (s *AppService) ClearMediaCache() error {
-	return s.currentClient().ClearMediaCache()
-}
-
-// RoomStorageUsage reports cached media and approximate message storage per chat.
-func (s *AppService) RoomStorageUsage() ([]RoomStorage, error) {
-	usage, err := s.currentClient().RoomStorageUsage(s.ctx)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]RoomStorage, 0, len(usage))
-	for _, entry := range usage {
-		result = append(result, RoomStorage{
-			RoomID:     entry.RoomID,
-			Name:       entry.Name,
-			Messages:   entry.Messages,
-			TextBytes:  entry.TextBytes,
-			MediaBytes: entry.MediaBytes,
-			MediaFiles: entry.MediaFiles,
-		})
-	}
-	return result, nil
-}
-
-// ClearCachedMedia deletes cached media matching the request. Messages are kept.
-func (s *AppService) ClearCachedMedia(request MediaCleanupRequest) (MediaCleanupResult, error) {
-	filter, err := mediaCleanupFilter(request, time.Now())
-	if err != nil {
-		return MediaCleanupResult{}, err
-	}
-	result, err := s.currentClient().ClearCachedMedia(s.ctx, filter)
-	if err != nil {
-		return MediaCleanupResult{}, err
-	}
-	return MediaCleanupResult{Files: result.Files, Bytes: result.Bytes}, nil
-}
-
-func mediaCleanupFilter(request MediaCleanupRequest, now time.Time) (matrix.MediaCleanupFilter, error) {
-	if request.OlderThanDays < 0 {
-		return matrix.MediaCleanupFilter{}, errors.New("age must be zero or more days")
-	}
-	filter := matrix.MediaCleanupFilter{
-		RoomID:    strings.TrimSpace(request.RoomID),
-		MediaType: strings.TrimSpace(request.MediaType),
-	}
-	if request.OlderThanDays > 0 {
-		filter.OlderThan = now.AddDate(0, 0, -request.OlderThanDays)
-	}
-	if err := filter.Validate(); err != nil {
-		return matrix.MediaCleanupFilter{}, err
-	}
-	return filter, nil
 }
 
 func (s *AppService) OptimizeDatabase() error {

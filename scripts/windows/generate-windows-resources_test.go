@@ -35,7 +35,7 @@ func TestWindowsResourcesMatchNativeIconLoader(test *testing.T) {
 	} {
 		test.Run(architecture, func(subtest *testing.T) {
 			output := filepath.Join(subtest.TempDir(), "icon.syso")
-			if err := generateWindowsResources(architecture, "../build/windows/icon.ico", "../build/windows/pinger.exe.manifest", output); err != nil {
+			if err := generateWindowsResources(architecture, "../../build/windows/icon.ico", "../../build/windows/pinger.exe.manifest", output); err != nil {
 				subtest.Fatal(err)
 			}
 			object, err := pe.Open(output)

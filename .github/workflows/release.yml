@@ -178,7 +178,7 @@ jobs:
       - name: Generate Windows application resources
         shell: pwsh
         run: |
-          go run scripts/generate-windows-resources.go `
+          go run scripts/windows/generate-windows-resources.go `
             -arch amd64 `
             -icon build/windows/icon.ico `
             -manifest build/windows/pinger.exe.manifest `
@@ -460,8 +460,8 @@ jobs:
 
       - name: Generate SHA-256 checksums
         run: |
-          node scripts/release-assets.mjs checksums dist
-          node scripts/release-assets.mjs verify dist
+          node scripts/release/release-assets.mjs checksums dist
+          node scripts/release/release-assets.mjs verify dist
 
       - name: Publish release assets
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3

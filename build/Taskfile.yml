@@ -198,7 +198,7 @@ tasks:
       - task: install:frontend:deps
     sources:
       - assets/pinger.svg
-      - scripts/generate-icons.mjs
+      - scripts/icons/generate-icons.mjs
       - frontend/package-lock.json
     generates:
       - build/appicon.png
@@ -210,7 +210,7 @@ tasks:
       - frontend/public/favicon-16.png
       - frontend/public/favicon-32.png
     cmds:
-      - node scripts/generate-icons.mjs
+      - node scripts/icons/generate-icons.mjs
 
   dev:frontend:
     summary: Runs the frontend in development mode

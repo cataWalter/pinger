@@ -5,8 +5,8 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const root = fileURLToPath(new URL('../', import.meta.url))
-const require = createRequire(new URL('../frontend/package.json', import.meta.url))
+const root = fileURLToPath(new URL('../../', import.meta.url))
+const require = createRequire(new URL('../../frontend/package.json', import.meta.url))
 const { Resvg } = require('@resvg/resvg-js')
 const source = readFileSync(join(root, 'assets/pinger.svg'))
 const check = process.argv.includes('--check')

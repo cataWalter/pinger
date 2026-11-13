@@ -6,7 +6,7 @@
 			"type": "process",
 			"command": "bash",
 			"args": [
-				"scripts/dev.sh"
+				"scripts/dev/dev.sh"
 			],
 			"options": {
 				"cwd": "${workspaceFolder}"
@@ -43,7 +43,7 @@
 			"type": "process",
 			"command": "bash",
 			"args": [
-				"scripts/install-macos-app.sh"
+				"scripts/macos/install-macos-app.sh"
 			],
 			"options": {
 				"cwd": "${workspaceFolder}"

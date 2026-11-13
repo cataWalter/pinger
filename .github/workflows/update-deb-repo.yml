@@ -75,7 +75,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          node scripts/release-assets.mjs download debian "$RUNNER_TEMP/debian"
+          node scripts/release/release-assets.mjs download debian "$RUNNER_TEMP/debian"
 
       - name: Checkout deb-repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

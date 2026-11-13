@@ -5,17 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "icons": "node ../scripts/generate-icons.mjs",
-    "icons:check": "node ../scripts/generate-icons.mjs --check",
-    "icons:menu": "node ../scripts/generate-menu-icons.mjs",
-    "icons:menu:check": "node ../scripts/generate-menu-icons.mjs --check",
+    "icons": "node ../scripts/icons/generate-icons.mjs",
+    "icons:check": "node ../scripts/icons/generate-icons.mjs --check",
+    "icons:menu": "node ../scripts/icons/generate-menu-icons.mjs",
+    "icons:menu:check": "node ../scripts/icons/generate-menu-icons.mjs --check",
     "build:dev": "tsc && vite build --minify false --mode development",
     "build": "tsc && vite build --mode production",
     "bench": "vitest bench src/appShared.bench.ts",
     "test": "vitest run",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "lint": "eslint src",
-    "check:bundle": "node ../scripts/check-frontend-bundle.mjs",
+    "check:bundle": "node ../scripts/ci/check-frontend-bundle.mjs",
     "preview": "vite preview"
   },
   "overrides": {

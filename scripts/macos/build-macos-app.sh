@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 BIN_DIR=${BIN_DIR:-"$ROOT_DIR/bin"}
 APP_NAME=${APP_NAME:-Pinger}
 BINARY_NAME=${BINARY_NAME:-pinger}

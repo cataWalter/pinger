@@ -4,7 +4,7 @@
 # Enforces the repository's workflow hardening conventions beyond what actionlint checks.
 require 'yaml'
 
-ROOT = File.expand_path('..', __dir__)
+ROOT = File.expand_path('../..', __dir__)
 PINNED_ACTION = %r{\A[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}\z}.freeze
 EXPRESSION = /\$\{\{/.freeze
 

@@ -36,8 +36,8 @@ jobs:
       - name: Validate workflow definitions
         run: |
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-          ruby scripts/check-workflows.rb
-          node --test scripts/release-assets.test.mjs
+          ruby scripts/ci/check-workflows.rb
+          node --test scripts/release/release-assets.test.mjs
 
       - name: Build frontend
         working-directory: frontend
@@ -113,7 +113,7 @@ jobs:
         uses: ./.github/actions/setup-build
 
       - name: Test release asset helpers
-        run: node --test scripts/release-assets.test.mjs
+        run: node --test scripts/release/release-assets.test.mjs
 
       - name: Build frontend
         working-directory: frontend
@@ -125,7 +125,7 @@ jobs:
       - name: Generate Windows application resources
         shell: pwsh
         run: |
-          go run scripts/generate-windows-resources.go `
+          go run scripts/windows/generate-windows-resources.go `
             -arch amd64 `
             -icon build/windows/icon.ico `
             -manifest build/windows/pinger.exe.manifest `
@@ -160,7 +160,7 @@ jobs:
         uses: ./.github/actions/setup-build
 
       - name: Test release asset helpers
-        run: node --test scripts/release-assets.test.mjs
+        run: node --test scripts/release/release-assets.test.mjs
 
       - name: Build frontend
         working-directory: frontend

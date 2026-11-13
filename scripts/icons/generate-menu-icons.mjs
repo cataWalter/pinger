@@ -3,8 +3,8 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const root = fileURLToPath(new URL('../', import.meta.url))
-const require = createRequire(new URL('../frontend/package.json', import.meta.url))
+const root = fileURLToPath(new URL('../../', import.meta.url))
+const require = createRequire(new URL('../../frontend/package.json', import.meta.url))
 const { createElement } = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
 const { AppWindow, MailCheck, Power, RefreshCw, Search, Settings2 } = require('lucide-react')

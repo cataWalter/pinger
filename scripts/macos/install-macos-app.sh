@@ -2,7 +2,7 @@
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 BIN_DIR=${BIN_DIR:-"$ROOT_DIR/bin"}
 APP_NAME=${APP_NAME:-Pinger}
 INSTALL_DIR=${INSTALL_DIR:-"$HOME/Applications"}
