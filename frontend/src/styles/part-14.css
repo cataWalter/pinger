@@ -1,0 +1,255 @@
+
+.snippet-manager-item p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.snippet-manager-item>small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.snippet-manager-empty {
+  padding: 16px 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.snippet-manager-editor {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  background: var(--canvas-warm);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.snippet-manager-editor h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.snippet-manager-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.snippet-manager-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.snippet-manager-field input,
+.snippet-manager-field textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 8px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  font: inherit;
+  font-size: 10px;
+}
+
+.snippet-manager-field textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.snippet-manager-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.snippet-manager-actions .settings-command {
+  margin-top: 0;
+}
+
+@media (max-width: 560px) {
+  .snippet-manager-dialog {
+    max-height: 100%;
+  }
+
+  .snippet-manager-content {
+    padding: 12px 14px;
+  }
+
+  .snippet-manager-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.composer textarea {
+  width: 100%;
+  min-height: 44px;
+  max-height: 150px;
+  resize: vertical;
+  padding: 4px 2px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.composer textarea::placeholder {
+  color: #929c96;
+}
+
+.composer textarea:focus-visible {
+  outline: 0;
+}
+
+.composer-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 8px;
+  background: #f7f9f7;
+  border-left: 2px solid var(--coral);
+}
+
+.composer-context>div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.composer-context strong {
+  color: #52665a;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.composer-context span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-context .icon-button {
+  width: 27px;
+  height: 27px;
+}
+
+.composer-staged-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  max-height: 208px;
+  max-height: min(208px, 28vh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 3px;
+  list-style: none;
+}
+
+.composer-staged-attachments li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  background: var(--paper, #fff);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.composer-staged-attachments li.is-image {
+  position: relative;
+  flex: 0 0 auto;
+  width: 120px;
+  height: 96px;
+  padding: 4px;
+  background: var(--canvas-warm);
+}
+
+.composer-staged-attachments img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-xs);
+}
+
+.composer-staged-attachments span {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-staged-attachments .icon-button {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+}
+
+.app-shell .composer-staged-attachments .is-image .attachment-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--control-border, var(--line));
+  border-radius: 50%;
+}
+
+.app-shell .composer-staged-attachments .is-image .attachment-remove:hover:not(:disabled) {
+  background: var(--canvas-warm);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.send-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 30px;
+  color: #f7fbf8;
+  background: var(--forest);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, transform var(--motion-fast) ease;
+}
+
+.send-button:hover:not(:disabled) {
+  background: #28634f;
+  transform: translateY(-1px);
+}
+
+.send-button:disabled {
+  color: #a5b2a9;
+  background: #e8ede9;
+  cursor: not-allowed;
+}

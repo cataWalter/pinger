@@ -13,9 +13,9 @@ APP_DIR="$BIN_DIR/$APP_NAME.app"
 BINARY_PATH="$BIN_DIR/$BINARY_NAME"
 ICON_PATH="$ROOT_DIR/build/darwin/icons.icns"
 export CGO_ENABLED="${CGO_ENABLED:-1}"
-export CGO_CFLAGS="${CGO_CFLAGS:--mmacosx-version-min=12.0}"
-export CGO_LDFLAGS="${CGO_LDFLAGS:--mmacosx-version-min=12.0}"
-export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
+export CGO_CFLAGS="${CGO_CFLAGS:--mmacosx-version-min=13.0}"
+export CGO_LDFLAGS="${CGO_LDFLAGS:--mmacosx-version-min=13.0}"
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 export GOTOOLCHAIN=go1.26.11
 
 if [ "$(uname -s)" != "Darwin" ]; then

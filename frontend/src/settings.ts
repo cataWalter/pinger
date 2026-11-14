@@ -107,6 +107,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'storage.optimize', tab: 'Storage', title: 'Optimize database', description: 'Compact the local database to reclaim space.', keywords: 'storage database optimize compact' },
   { id: 'storage.by-chat', tab: 'Storage', title: 'Storage by chat', description: 'See how much space each chat uses and clean it up.', keywords: 'storage per chat room usage cleanup', anchor: '.chat-storage' },
   { id: 'storage.clear-matching', tab: 'Storage', title: 'Clear matching cached media', description: 'Remove cached media for the selected chats.', keywords: 'storage cleanup media age type' },
+  { id: 'storage.export-recent', tab: 'Storage', title: 'Export recent messages for all chats', description: 'Save the newest messages of every chat as text files in a folder.', keywords: 'storage export download backup messages chats history transcript recent last' },
 
   { id: 'security.verification', tab: 'Security', title: 'Device verification', description: 'Whether this device is verified with your account.', keywords: 'security encryption verified device', anchor: '.settings-note' },
   { id: 'security.backup-passphrase', tab: 'Security', title: 'Backup passphrase', description: 'Protect the exported key backup with a passphrase.', keywords: 'security passphrase backup keys' },

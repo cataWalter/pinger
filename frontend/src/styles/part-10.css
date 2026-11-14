@@ -1,0 +1,253 @@
+
+.markdown-code .hljs-number,
+.markdown-code .hljs-literal,
+.markdown-code .hljs-variable {
+  color: #79c0ff;
+}
+
+.markdown-code .hljs-title,
+.markdown-code .hljs-function,
+.markdown-code .hljs-section {
+  color: #d2a8ff;
+}
+
+.markdown-code .hljs-type,
+.markdown-code .hljs-attr {
+  color: #ffa657;
+}
+
+.markdown-code .hljs-symbol,
+.markdown-code .hljs-bullet {
+  color: #7ee787;
+}
+
+.code-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 6px;
+  color: #c3d0dc;
+  background: transparent;
+  border: 1px solid #3a4652;
+  border-radius: var(--radius-xs);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.code-copy:hover {
+  color: #fff;
+  background: #29323c;
+}
+
+.code-copy-error {
+  display: block;
+  padding: 4px 10px 7px;
+  color: #ff9585;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+.message-link-error {
+  display: block;
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+  .message-translation {
+    padding: 7px 8px;
+  }
+
+  .message-translation p {
+    font-size: 11px;
+  }
+}
+
+.message-row.is-own .message-link-error {
+  color: #ffe0dd;
+}
+
+.message-row.is-own .message-body {
+  color: #f3f8f4;
+  background: var(--own-bubble, var(--accent));
+  border-color: var(--own-bubble, var(--accent));
+  border-radius: 9px 2px 9px 9px;
+}
+
+.message-row.is-own .message-meta {
+  justify-content: flex-end;
+}
+
+.reply-preview {
+  display: grid;
+  gap: 3px;
+  max-width: 500px;
+  margin: 0 0 5px;
+  padding: 7px 10px;
+  color: #6c7771;
+  background: #f8f9f7;
+  border-left: 2px solid #d87958;
+  font-size: 10px;
+}
+
+.reply-preview span {
+  color: #54665c;
+  font-weight: 600;
+}
+
+.message-attachment {
+  display: grid;
+  gap: 7px;
+  width: min(100%, 420px);
+  margin: 7px 0;
+}
+
+/* Images hug their own width so the Download control lines up with the image edge, and the row alignment places the whole group on the correct side. */
+.message-attachment.is-image {
+  width: fit-content;
+  max-width: min(100%, 420px);
+}
+
+.media-load,
+.media-download {
+  display: inline-flex;
+  font-family: inherit;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  width: max-content;
+  max-width: 100%;
+  min-height: 29px;
+  padding: 5px 8px;
+  color: #59675f;
+  background: #f7f9f7;
+  border: 1px solid #e0e7e2;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.media-load span {
+  color: #89948d;
+}
+
+.media-load:hover:not(:disabled),
+.media-download:hover {
+  color: var(--forest);
+  background: #edf4ef;
+  border-color: #bfd4c4;
+}
+
+.media-load:disabled {
+  cursor: progress;
+}
+
+.media-reveal {
+  max-width: 100%;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.media-reveal:hover {
+  color: var(--forest);
+}
+
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: min(100%, 420px);
+  min-height: 54px;
+  padding: 7px 9px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.file-card-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 32px;
+  aspect-ratio: 1;
+  color: var(--forest);
+  background: #edf4ef;
+  border-radius: var(--radius-xs);
+}
+
+.file-card-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  flex: 1;
+}
+
+.file-card-copy strong {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-card-copy small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.file-card-copy .media-download-status {
+  color: var(--forest);
+  overflow-wrap: anywhere;
+}
+
+.file-card .icon-button {
+  flex: 0 0 30px;
+}
+
+.media-preview-button {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  max-height: 320px;
+  padding: 0;
+  background: #f1f4f1;
+  border: 1px solid #e0e7e2;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.media-preview {
+  display: block;
+  width: auto;
+  max-width: min(100%, 420px);
+  max-height: 320px;
+  object-fit: contain;
+}
+
+.media-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.media-toolbar>span {
+  min-width: 0;
+  overflow: hidden;
+  color: #66736b;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

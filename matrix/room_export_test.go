@@ -190,6 +190,64 @@ func TestCollectRoomHistoryReturnsFetchErrors(t *testing.T) {
 	}
 }
 
+func TestCollectRecentRoomHistoryStopsOnceLimitIsReached(t *testing.T) {
+	pages := map[int64]HistoryPage{
+		0:  {Messages: []Message{{ID: "$5"}, {ID: "$6"}}, Before: 40, HasMore: true},
+		40: {Messages: []Message{{ID: "$3"}, {ID: "$4"}}, Before: 20, HasMore: true},
+		20: {Messages: []Message{{ID: "$1"}, {ID: "$2"}}, Before: 10, HasMore: false},
+	}
+	var requested []int64
+	messages, err := collectRecentRoomHistory(func(before int64) (HistoryPage, error) {
+		requested = append(requested, before)
+		return pages[before], nil
+	}, func() error {
+		t.Fatal("backfill should not run when the local timeline has messages")
+		return nil
+	}, 3)
+	if err != nil {
+		t.Fatalf("collectRecentRoomHistory() error = %v", err)
+	}
+	assertMessageIDs(t, messages, "$4", "$5", "$6")
+	if len(requested) != 2 || requested[0] != 0 || requested[1] != 40 {
+		t.Fatalf("requested cursors = %v, want [0 40]", requested)
+	}
+}
+
+func TestCollectRecentRoomHistoryFetchesOnlyOnePageWhenEnough(t *testing.T) {
+	var requested []int64
+	messages, err := collectRecentRoomHistory(func(before int64) (HistoryPage, error) {
+		requested = append(requested, before)
+		return HistoryPage{Messages: []Message{{ID: "$1"}, {ID: "$2"}, {ID: "$3"}}, Before: 30, HasMore: true}, nil
+	}, func() error { return nil }, 2)
+	if err != nil {
+		t.Fatalf("collectRecentRoomHistory() error = %v", err)
+	}
+	assertMessageIDs(t, messages, "$2", "$3")
+	if len(requested) != 1 {
+		t.Fatalf("requested cursors = %v, want one page", requested)
+	}
+}
+
+func TestCollectRecentRoomHistoryBackfillsEmptyLocalTimeline(t *testing.T) {
+	backfilled := false
+	messages, err := collectRecentRoomHistory(func(before int64) (HistoryPage, error) {
+		if !backfilled {
+			return HistoryPage{HasMore: true}, nil
+		}
+		return HistoryPage{Messages: []Message{{ID: "$1"}, {ID: "$2"}}, Before: 10, HasMore: false}, nil
+	}, func() error {
+		backfilled = true
+		return nil
+	}, 50)
+	if err != nil {
+		t.Fatalf("collectRecentRoomHistory() error = %v", err)
+	}
+	if !backfilled {
+		t.Fatal("backfill did not run for an empty local timeline")
+	}
+	assertMessageIDs(t, messages, "$1", "$2")
+}
+
 func assertMessageIDs(t *testing.T, messages []Message, want ...string) {
 	t.Helper()
 	if len(messages) != len(want) {

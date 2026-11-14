@@ -13,6 +13,11 @@
 /tools/msys64/
 /.kilo/
 /.playwright-mcp/
+/build/bin/
+/coverage/
+/frontend/coverage/
+/frontend/playwright-report/
+/frontend/test-results/
 
 
 # Logs & environment

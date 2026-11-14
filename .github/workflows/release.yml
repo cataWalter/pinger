@@ -36,12 +36,10 @@ jobs:
     needs: [test]
     env:
       # Matches the deployment target in build/darwin/Taskfile.yml and the
-      # "macOS 12 or newer" support statement in the README. Go 1.26 is the
-      # last compiler line supporting that runtime; CGO flags alone cannot
-      # restore compatibility with a newer compiler.
-      MACOSX_DEPLOYMENT_TARGET: "12.0"
-      CGO_CFLAGS: "-mmacosx-version-min=12.0"
-      CGO_LDFLAGS: "-mmacosx-version-min=12.0 -Wl,-no_warn_duplicate_libraries"
+      # "macOS 13 or newer" support statement in the README.
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+      CGO_CFLAGS: "-mmacosx-version-min=13.0"
+      CGO_LDFLAGS: "-mmacosx-version-min=13.0 -Wl,-no_warn_duplicate_libraries"
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

@@ -34,7 +34,7 @@ jobs:
       - name: Validate workflow and merge policies without writing
         run: |
           ruby scripts/ci/check-workflows.rb
-          node --test scripts/release/release-assets.test.mjs
+          node --test scripts/release/release-assets.test.mjs scripts/release/release-assets-downloads.test.mjs
 
   auto-merge:
     if: >-

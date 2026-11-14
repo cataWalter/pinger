@@ -1,7 +1,12 @@
 import { useEffect, useRef, type MouseEventHandler, type ReactNode } from 'react'
 
+// Dialogs inside a DialogPresence that is fading out no longer count as open.
+function openDialogElements(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"]')).filter((element) => !element.closest('.dialog-presence[data-closing="true"]'))
+}
+
 export function hasOpenDialog(): boolean {
-  return document.querySelector('[aria-modal="true"]') !== null
+  return openDialogElements().length > 0
 }
 
 export interface DialogSurfaceProps {
@@ -28,7 +33,7 @@ export function DialogSurface({ children, className, role = 'dialog', labelledBy
       ; (firstFocusable ?? dialog).focus()
 
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      const openDialogs = document.querySelectorAll<HTMLElement>('[aria-modal="true"]')
+      const openDialogs = openDialogElements()
       if (openDialogs[openDialogs.length - 1] !== dialog) return
       if (event.key === 'Escape') {
         event.preventDefault()

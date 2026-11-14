@@ -1,0 +1,260 @@
+
+.app-shell[data-theme='bosco'] .message-actions,
+.app-shell[data-theme='rosa'] .message-actions,
+.app-shell[data-theme='solarized'] .message-actions,
+.app-shell[data-theme='sepia'] .message-actions,
+.app-shell[data-theme='dracula'] .message-actions,
+.app-shell[data-theme='midnight'] .message-actions,
+.app-shell[data-theme='slate'] .message-actions,
+.app-shell[data-theme='bosco'] .reaction-chip,
+.app-shell[data-theme='rosa'] .reaction-chip,
+.app-shell[data-theme='solarized'] .reaction-chip,
+.app-shell[data-theme='sepia'] .reaction-chip,
+.app-shell[data-theme='dracula'] .reaction-chip,
+.app-shell[data-theme='midnight'] .reaction-chip,
+.app-shell[data-theme='slate'] .reaction-chip,
+.app-shell[data-theme='bosco'] .reaction-picker button,
+.app-shell[data-theme='rosa'] .reaction-picker button,
+.app-shell[data-theme='solarized'] .reaction-picker button,
+.app-shell[data-theme='sepia'] .reaction-picker button,
+.app-shell[data-theme='dracula'] .reaction-picker button,
+.app-shell[data-theme='midnight'] .reaction-picker button,
+.app-shell[data-theme='slate'] .reaction-picker button {
+  color: var(--ink-soft);
+  background: var(--paper);
+  border-color: var(--line);
+}
+
+.app-shell[data-theme='bosco'] .day-divider span,
+.app-shell[data-theme='rosa'] .day-divider span,
+.app-shell[data-theme='solarized'] .day-divider span,
+.app-shell[data-theme='sepia'] .day-divider span,
+.app-shell[data-theme='dracula'] .day-divider span,
+.app-shell[data-theme='midnight'] .day-divider span,
+.app-shell[data-theme='slate'] .day-divider span {
+  color: var(--ink-soft);
+  background: var(--canvas);
+  border-color: var(--line);
+}
+
+.app-shell[data-theme='bosco'] .composer-context,
+.app-shell[data-theme='rosa'] .composer-context,
+.app-shell[data-theme='solarized'] .composer-context,
+.app-shell[data-theme='sepia'] .composer-context,
+.app-shell[data-theme='dracula'] .composer-context,
+.app-shell[data-theme='midnight'] .composer-context,
+.app-shell[data-theme='slate'] .composer-context {
+  background: var(--canvas-warm);
+  border-color: var(--line);
+}
+
+.app-shell[data-theme='bosco'] .settings-dialog,
+.app-shell[data-theme='rosa'] .settings-dialog,
+.app-shell[data-theme='solarized'] .settings-dialog,
+.app-shell[data-theme='sepia'] .settings-dialog,
+.app-shell[data-theme='dracula'] .settings-dialog,
+.app-shell[data-theme='midnight'] .settings-dialog,
+.app-shell[data-theme='slate'] .settings-dialog,
+.app-shell[data-theme='bosco'] .room-info-dialog,
+.app-shell[data-theme='rosa'] .room-info-dialog,
+.app-shell[data-theme='solarized'] .room-info-dialog,
+.app-shell[data-theme='sepia'] .room-info-dialog,
+.app-shell[data-theme='dracula'] .room-info-dialog,
+.app-shell[data-theme='midnight'] .room-info-dialog,
+.app-shell[data-theme='slate'] .room-info-dialog,
+.app-shell[data-theme='bosco'] .message-search-panel,
+.app-shell[data-theme='rosa'] .message-search-panel,
+.app-shell[data-theme='solarized'] .message-search-panel,
+.app-shell[data-theme='sepia'] .message-search-panel,
+.app-shell[data-theme='dracula'] .message-search-panel,
+.app-shell[data-theme='midnight'] .message-search-panel,
+.app-shell[data-theme='slate'] .message-search-panel,
+.app-shell[data-theme='bosco'] .confirm-dialog,
+.app-shell[data-theme='rosa'] .confirm-dialog,
+.app-shell[data-theme='solarized'] .confirm-dialog,
+.app-shell[data-theme='sepia'] .confirm-dialog,
+.app-shell[data-theme='dracula'] .confirm-dialog,
+.app-shell[data-theme='midnight'] .confirm-dialog,
+.app-shell[data-theme='slate'] .confirm-dialog,
+.app-shell[data-theme='bosco'] .quick-switcher,
+.app-shell[data-theme='rosa'] .quick-switcher,
+.app-shell[data-theme='solarized'] .quick-switcher,
+.app-shell[data-theme='sepia'] .quick-switcher,
+.app-shell[data-theme='dracula'] .quick-switcher,
+.app-shell[data-theme='midnight'] .quick-switcher,
+.app-shell[data-theme='slate'] .quick-switcher {
+  color: var(--ink);
+  background: var(--paper);
+  border-color: var(--line);
+}
+
+.app-shell[data-theme='bosco'] .settings-header,
+.app-shell[data-theme='rosa'] .settings-header,
+.app-shell[data-theme='solarized'] .settings-header,
+.app-shell[data-theme='sepia'] .settings-header,
+.app-shell[data-theme='dracula'] .settings-header,
+.app-shell[data-theme='midnight'] .settings-header,
+.app-shell[data-theme='slate'] .settings-header,
+.app-shell[data-theme='bosco'] .settings-tabs,
+.app-shell[data-theme='rosa'] .settings-tabs,
+.app-shell[data-theme='solarized'] .settings-tabs,
+.app-shell[data-theme='sepia'] .settings-tabs,
+.app-shell[data-theme='dracula'] .settings-tabs,
+.app-shell[data-theme='midnight'] .settings-tabs,
+.app-shell[data-theme='slate'] .settings-tabs,
+.app-shell[data-theme='bosco'] .room-info-header,
+.app-shell[data-theme='rosa'] .room-info-header,
+.app-shell[data-theme='solarized'] .room-info-header,
+.app-shell[data-theme='sepia'] .room-info-header,
+.app-shell[data-theme='dracula'] .room-info-header,
+.app-shell[data-theme='midnight'] .room-info-header,
+.app-shell[data-theme='slate'] .room-info-header,
+.app-shell[data-theme='bosco'] .room-info-footer,
+.app-shell[data-theme='rosa'] .room-info-footer,
+.app-shell[data-theme='solarized'] .room-info-footer,
+.app-shell[data-theme='sepia'] .room-info-footer,
+.app-shell[data-theme='dracula'] .room-info-footer,
+.app-shell[data-theme='midnight'] .room-info-footer,
+.app-shell[data-theme='slate'] .room-info-footer {
+  background: var(--paper);
+  border-color: var(--line);
+}
+
+.app-shell[data-theme='bosco'] .settings-tabs button.is-active,
+.app-shell[data-theme='rosa'] .settings-tabs button.is-active,
+.app-shell[data-theme='solarized'] .settings-tabs button.is-active,
+.app-shell[data-theme='sepia'] .settings-tabs button.is-active,
+.app-shell[data-theme='dracula'] .settings-tabs button.is-active,
+.app-shell[data-theme='midnight'] .settings-tabs button.is-active,
+.app-shell[data-theme='slate'] .settings-tabs button.is-active {
+  color: var(--accent);
+  background: var(--signal-soft);
+}
+
+.app-shell[data-theme='bosco'] .settings-command,
+.app-shell[data-theme='rosa'] .settings-command,
+.app-shell[data-theme='solarized'] .settings-command,
+.app-shell[data-theme='sepia'] .settings-command,
+.app-shell[data-theme='dracula'] .settings-command,
+.app-shell[data-theme='midnight'] .settings-command,
+.app-shell[data-theme='slate'] .settings-command,
+.app-shell[data-theme='bosco'] .setting-row select,
+.app-shell[data-theme='rosa'] .setting-row select,
+.app-shell[data-theme='solarized'] .setting-row select,
+.app-shell[data-theme='sepia'] .setting-row select,
+.app-shell[data-theme='dracula'] .setting-row select,
+.app-shell[data-theme='midnight'] .setting-row select,
+.app-shell[data-theme='slate'] .setting-row select,
+.app-shell[data-theme='bosco'] .shortcut-input,
+.app-shell[data-theme='rosa'] .shortcut-input,
+.app-shell[data-theme='solarized'] .shortcut-input,
+.app-shell[data-theme='sepia'] .shortcut-input,
+.app-shell[data-theme='dracula'] .shortcut-input,
+.app-shell[data-theme='midnight'] .shortcut-input,
+.app-shell[data-theme='slate'] .shortcut-input,
+.app-shell[data-theme='bosco'] .security-field input,
+.app-shell[data-theme='rosa'] .security-field input,
+.app-shell[data-theme='solarized'] .security-field input,
+.app-shell[data-theme='sepia'] .security-field input,
+.app-shell[data-theme='dracula'] .security-field input,
+.app-shell[data-theme='midnight'] .security-field input,
+.app-shell[data-theme='slate'] .security-field input {
+  color: var(--ink);
+  background: var(--canvas-warm);
+  border-color: var(--line);
+}
+
+.app-shell[data-theme='bosco'] .primary-button,
+.app-shell[data-theme='rosa'] .primary-button,
+.app-shell[data-theme='solarized'] .primary-button,
+.app-shell[data-theme='sepia'] .primary-button,
+.app-shell[data-theme='dracula'] .primary-button,
+.app-shell[data-theme='midnight'] .primary-button,
+.app-shell[data-theme='slate'] .primary-button,
+.app-shell[data-theme='bosco'] .send-button,
+.app-shell[data-theme='rosa'] .send-button,
+.app-shell[data-theme='solarized'] .send-button,
+.app-shell[data-theme='sepia'] .send-button,
+.app-shell[data-theme='dracula'] .send-button,
+.app-shell[data-theme='midnight'] .send-button,
+.app-shell[data-theme='slate'] .send-button,
+.app-shell[data-theme='bosco'] .search-submit,
+.app-shell[data-theme='rosa'] .search-submit,
+.app-shell[data-theme='solarized'] .search-submit,
+.app-shell[data-theme='sepia'] .search-submit,
+.app-shell[data-theme='dracula'] .search-submit,
+.app-shell[data-theme='midnight'] .search-submit,
+.app-shell[data-theme='slate'] .search-submit {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.app-shell[data-theme='bosco'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='rosa'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='solarized'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='sepia'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='dracula'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='midnight'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='slate'] .icon-button:hover:not(:disabled),
+.app-shell[data-theme='bosco'] .settings-command:hover:not(:disabled),
+.app-shell[data-theme='rosa'] .settings-command:hover:not(:disabled),
+.app-shell[data-theme='solarized'] .settings-command:hover:not(:disabled),
+.app-shell[data-theme='sepia'] .settings-command:hover:not(:disabled),
+.app-shell[data-theme='dracula'] .settings-command:hover:not(:disabled),
+.app-shell[data-theme='midnight'] .settings-command:hover:not(:disabled),
+.app-shell[data-theme='slate'] .settings-command:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--signal-soft);
+  border-color: var(--line);
+}
+
+.app-shell[data-theme='bosco'] .reaction-chip.is-reacted,
+.app-shell[data-theme='rosa'] .reaction-chip.is-reacted,
+.app-shell[data-theme='solarized'] .reaction-chip.is-reacted,
+.app-shell[data-theme='sepia'] .reaction-chip.is-reacted,
+.app-shell[data-theme='dracula'] .reaction-chip.is-reacted,
+.app-shell[data-theme='midnight'] .reaction-chip.is-reacted,
+.app-shell[data-theme='slate'] .reaction-chip.is-reacted {
+  color: var(--accent);
+  background: var(--signal-soft);
+  border-color: var(--signal);
+}
+
+.app-shell[data-theme='bosco'] .room-info-fact,
+.app-shell[data-theme='rosa'] .room-info-fact,
+.app-shell[data-theme='solarized'] .room-info-fact,
+.app-shell[data-theme='sepia'] .room-info-fact,
+.app-shell[data-theme='dracula'] .room-info-fact,
+.app-shell[data-theme='midnight'] .room-info-fact,
+.app-shell[data-theme='slate'] .room-info-fact,
+.app-shell[data-theme='bosco'] .room-member-row,
+.app-shell[data-theme='rosa'] .room-member-row,
+.app-shell[data-theme='solarized'] .room-member-row,
+.app-shell[data-theme='sepia'] .room-member-row,
+.app-shell[data-theme='dracula'] .room-member-row,
+.app-shell[data-theme='midnight'] .room-member-row,
+.app-shell[data-theme='slate'] .room-member-row,
+.app-shell[data-theme='bosco'] .setting-row,
+.app-shell[data-theme='rosa'] .setting-row,
+.app-shell[data-theme='solarized'] .setting-row,
+.app-shell[data-theme='sepia'] .setting-row,
+.app-shell[data-theme='dracula'] .setting-row,
+.app-shell[data-theme='midnight'] .setting-row,
+.app-shell[data-theme='slate'] .setting-row,
+.app-shell[data-theme='bosco'] .device-row,
+.app-shell[data-theme='rosa'] .device-row,
+.app-shell[data-theme='solarized'] .device-row,
+.app-shell[data-theme='sepia'] .device-row,
+.app-shell[data-theme='dracula'] .device-row,
+.app-shell[data-theme='midnight'] .device-row,
+.app-shell[data-theme='slate'] .device-row,
+.app-shell[data-theme='bosco'] .storage-summary>div,
+.app-shell[data-theme='rosa'] .storage-summary>div,
+.app-shell[data-theme='solarized'] .storage-summary>div,
+.app-shell[data-theme='sepia'] .storage-summary>div,
+.app-shell[data-theme='dracula'] .storage-summary>div,
+.app-shell[data-theme='midnight'] .storage-summary>div,
+.app-shell[data-theme='slate'] .storage-summary>div {
+  border-color: var(--line);
+}

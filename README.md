@@ -168,7 +168,7 @@ Single-key shortcuts (`R`, `J`, `K`, and the answered key) can be turned off in 
 
 ## Run locally
 
-Targets macOS 12+, Windows x64 (WebView2 Runtime), and Linux x64.
+Targets macOS 13+, Windows x64 (WebView2 Runtime), and Linux x64.
 
 ### Using with Beeper
 
@@ -182,7 +182,7 @@ Pinger connects directly to Beeper's Matrix homeserver at `https://matrix.beeper
 
 ### Prerequisites
 
-- [Go 1.26.10](https://go.dev/dl/); scripts and tasks explicitly select this patched compiler because Go 1.27 requires macOS 13 and cannot retain macOS 12 support
+- [Go 1.26.10](https://go.dev/dl/); scripts and tasks explicitly select this toolchain
 - [Node.js 22+](https://nodejs.org/) with npm
 - Wails CLI **v3.0.0-beta.30** (must match `go.mod`):
   `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30`
@@ -268,10 +268,10 @@ Workflow definitions and external actions are checked by pinned `actionlint`; th
 ```bash
 actionlint
 ruby scripts/ci/check-workflows.rb
-node --test scripts/release/release-assets.test.mjs
+node --test scripts/release/release-assets.test.mjs scripts/release/release-assets-downloads.test.mjs
 ```
 
-Windows and Linux PR jobs compile the package tests and native application using the release pipeline's CGO setup. They do not exercise native windows, notifications, or operating-system permissions. Production JavaScript and CSS explicitly target Safari 15 for macOS 12; current Playwright WebKit is not a substitute for testing that minimum operating system.
+Windows and Linux PR jobs compile the package tests and native application using the release pipeline's CGO setup. They do not exercise native windows, notifications, or operating-system permissions. Production JavaScript and CSS explicitly target Safari 16 for macOS 13; current Playwright WebKit is not a substitute for testing that minimum operating system.
 
 Frontend performance regressions cover render counts, including that composer typing does not rerender timeline Markdown, and per-render clock/relative formatter reuse. A local formatting microbenchmark measured roughly 311 ms versus 5 ms for 10,000 timestamps; this is not a whole-application frame-rate or memory benchmark. Large-history virtualization remains a separate measured change.
 

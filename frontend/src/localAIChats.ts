@@ -121,24 +121,30 @@ export function buildLocalAIModelMessages(history: LocalAIChatMessage[]): AIMess
     })
 }
 
-export function chatToMarkdown(title: string, messages: LocalAIChatMessage[]) {
-    const sections = messages.map((message) => {
+export function chatToText(messages: LocalAIChatMessage[]) {
+    return messages.map((message) => {
+        const time = message.createdAt > 0 ? `[${localTimestamp(message.createdAt)}] ` : ''
         const speaker = message.role === 'user' ? 'You' : 'Local AI'
-        const attachments = (message.attachments ?? []).map((attachment) => `_Attached: ${attachment.name}_`)
-        const stopped = message.status === 'stopped' ? '_Stopped before completion._' : ''
-        return [`## ${speaker}`, ...attachments, message.content, stopped].filter((part) => part !== '').join('\n\n')
-    })
-    return [`# ${title.trim() || 'Local AI chat'}`, ...sections].join('\n\n') + '\n'
+        const attachments = (message.attachments ?? []).map((attachment) => ` [attached: ${attachment.name}]`).join('')
+        const stopped = message.status === 'stopped' ? ' [stopped before completion]' : ''
+        return `${time}${speaker}: ${message.content}${attachments}${stopped}\n`
+    }).join('')
+}
+
+function localTimestamp(ms: number) {
+    const date = new Date(ms)
+    const pad = (value: number) => String(value).padStart(2, '0')
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 export function localAIChatExportName(title: string) {
     const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/, '')
-    return `${slug || 'local-ai-chat'}.md`
+    return `${slug || 'local-ai-chat'}.txt`
 }
 
 // Resolves to the saved path, or an empty string when the save dialog is cancelled.
 export function exportLocalAIChat(title: string, messages: LocalAIChatMessage[]) {
-    return AppService.ExportLocalAIChat(localAIChatExportName(title), chatToMarkdown(title, messages))
+    return AppService.ExportLocalAIChat(localAIChatExportName(title), chatToText(messages))
 }
 
 function isLocalAITextFile(file: File) {

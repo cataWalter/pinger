@@ -1,0 +1,252 @@
+
+.app-shell[data-ui='desktop'] .room-search input {
+  color: var(--sidebar-ink);
+}
+
+.app-shell[data-ui='desktop'] .room-search input::placeholder {
+  color: var(--sidebar-muted);
+  opacity: 1;
+}
+
+.app-shell[data-ui='desktop'] .room-search:focus-within {
+  outline: 2px solid var(--sidebar-accent);
+  outline-offset: 2px;
+}
+
+.app-shell[data-ui='desktop'] .room-button {
+  color: var(--sidebar-ink);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+
+.app-shell[data-ui='desktop'] .room-button:hover {
+  background: var(--sidebar-hover);
+}
+
+.app-shell[data-ui='desktop'] .room-button.is-muted {
+  opacity: 1;
+}
+
+.app-shell[data-ui='desktop'] :is(.room-preview-text, .room-preview-sent, .room-muted-mark, .room-meta time, .room-list-empty) {
+  color: var(--sidebar-muted);
+  opacity: 1;
+}
+
+.app-shell[data-ui='desktop'] .unread-count {
+  color: var(--on-signal);
+  background: var(--signal);
+}
+
+.app-shell[data-ui='desktop'] .room-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.app-shell[data-ui='desktop'] .room-preview {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.app-shell[data-ui='desktop'] .unread-dot {
+  background: var(--sidebar-accent);
+}
+
+.app-shell[data-ui='desktop'] .needs-reply-dot {
+  background: var(--sidebar-attention);
+}
+
+.app-shell[data-ui='desktop'] .room-section-count {
+  min-width: 22px;
+  padding: 1px 6px;
+  color: var(--sidebar-muted);
+  background: var(--sidebar-panel);
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-shell[data-ui='desktop'] .room-button.is-active {
+  background: var(--sidebar-active);
+  box-shadow: inset 3px 0 var(--sidebar-accent);
+}
+
+.app-shell[data-ui='desktop'] .room-button:focus-visible {
+  outline-color: var(--sidebar-accent);
+}
+
+.app-shell[data-ui='desktop'] :is(.scope-tab, .room-filter, .sidebar-icon-button, .sidebar-action) {
+  color: var(--sidebar-muted);
+  background: transparent;
+  border-color: var(--sidebar-border);
+  box-shadow: none;
+}
+
+.app-shell[data-ui='desktop'] :is(.scope-tab, .room-filter, .sidebar-icon-button, .sidebar-action):hover {
+  color: var(--sidebar-ink);
+  background: var(--sidebar-hover);
+}
+
+.app-shell[data-ui='desktop'] :is(.scope-tab.is-active, .room-filter.is-active) {
+  color: var(--sidebar-ink);
+  background: var(--sidebar-active);
+}
+
+.app-shell[data-ui='desktop'] .room-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.app-shell[data-ui='desktop'] .room-filters .room-account-filter {
+  flex: 1 1 100%;
+}
+
+.app-shell[data-ui='desktop'] .room-scope-filters,
+.app-shell[data-ui='desktop'] .room-refinement-filters {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+.app-shell[data-ui='desktop'] .room-refinement-filters {
+  padding-left: 4px;
+  border-left: 1px solid var(--sidebar-border);
+}
+
+.app-shell[data-ui='desktop'] .room-filters button {
+  color: var(--sidebar-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+}
+
+.app-shell[data-ui='desktop'] .room-filters button:hover {
+  color: var(--sidebar-ink);
+  background: var(--sidebar-hover);
+}
+
+.app-shell[data-ui='desktop'] .room-filters button.is-active {
+  color: var(--sidebar-ink);
+  background: var(--sidebar-active);
+  border-color: var(--sidebar-border);
+}
+
+/* Filters are one row of icon tabs; the text stays in the DOM as the accessible name, and the title attribute shows the label on hover. */
+.app-shell[data-ui='desktop'] .room-scope-filters>button,
+.app-shell[data-ui='desktop'] .room-refinement-filters>button {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  justify-content: center;
+}
+
+.app-shell[data-ui='desktop'] .room-filters .filter-label {
+  display: none;
+}
+
+.app-shell[data-ui='desktop'] .room-refinement-filters .filter-symbol {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-shell[data-ui='desktop'] .room-refinement-filters .filter-count {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  min-width: 15px;
+  padding: 0 4px;
+  font-size: 9px;
+  line-height: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-shell[data-ui='desktop'] .conversation-header {
+  min-height: 72px;
+  padding: 14px 24px;
+  color: var(--ink);
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.app-shell[data-ui='desktop'] .conversation-room-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.app-shell[data-ui='desktop'] .conversation-header .icon-button {
+  width: 36px;
+  height: 36px;
+}
+
+.app-shell[data-ui='desktop'] .room-title h2 {
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.app-shell[data-ui='desktop'] .room-title p {
+  color: var(--muted);
+}
+
+.app-shell[data-ui='desktop'] .timeline {
+  gap: 8px;
+  padding: 24px 20px;
+}
+
+.app-shell[data-ui='desktop'] .timeline .message-body {
+  max-width: min(640px, max(65%, 320px));
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  letter-spacing: 0;
+}
+
+.app-shell[data-ui='desktop'] .timeline .message-row.is-grouped {
+  margin-top: 0;
+}
+
+.app-shell[data-ui='desktop'][data-font-size='small'] .timeline .message-body {
+  font-size: 12px;
+}
+
+.app-shell[data-ui='desktop'][data-font-size='large'] .timeline .message-body {
+  font-size: 16px;
+}
+
+.app-shell[data-ui='desktop'] .timeline .message-body::after {
+  display: none;
+}
+
+.app-shell[data-ui='desktop'] .message-body {
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: none;
+  overflow-wrap: anywhere;
+}
+
+.app-shell[data-ui='desktop'] .message-row.is-own .message-body {
+  color: var(--on-bubble);
+  background: var(--own-bubble);
+  border-color: var(--own-bubble);
+  border-radius: var(--radius-md);
+}
+
+.app-shell[data-ui='desktop'] .message-body a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

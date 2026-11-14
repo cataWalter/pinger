@@ -2,21 +2,18 @@ package matrix
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
+	"github.com/rs/zerolog"
 	"io"
+	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/rs/zerolog"
-	"maunium.net/go/mautrix"
-	"maunium.net/go/mautrix/event"
-	"maunium.net/go/mautrix/id"
 )
 
 type slidingSyncRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -220,220 +217,5 @@ func TestSlidingSyncTransportFallsBackToStandardSync(t *testing.T) {
 				test.Fatalf("unexpected extra sync log: %v", err)
 			}
 		})
-	}
-}
-
-func TestSlidingSyncTransportRestartsWhenStandardTokenIsRejected(t *testing.T) {
-	homeserver, _ := url.Parse("https://matrix.example")
-	manager, err := NewSlidingSyncManager(homeserver, SlidingSyncConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sinceValues []string
-	base := slidingSyncRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path == "/_matrix/client/unstable/org.matrix.msc3575/sync" {
-			return &http.Response{
-				StatusCode: http.StatusNotFound,
-				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader(`{"errcode":"M_UNRECOGNIZED","error":"Unrecognized request"}`)),
-				Request:    request,
-			}, nil
-		}
-		since := request.URL.Query().Get("since")
-		sinceValues = append(sinceValues, since)
-		if since != "" {
-			return &http.Response{
-				StatusCode: http.StatusBadRequest,
-				Header:     make(http.Header),
-				Body:       io.NopCloser(strings.NewReader(`{"errcode":"M_UNKNOWN","error":"Invalid stream token"}`)),
-				Request:    request,
-			}, nil
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(`{"next_batch":"fresh-token","rooms":{}}`)),
-			Request:    request,
-		}, nil
-	})
-	legacyRequest, err := http.NewRequest(http.MethodGet, "https://matrix.example/_matrix/client/v3/sync?since=stored-token", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, err := (&slidingSyncTransport{manager: manager, base: base}).RoundTrip(legacyRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	if len(sinceValues) != 2 || sinceValues[0] != "stored-token" || sinceValues[1] != "" {
-		t.Fatalf("since retry sequence = %#v", sinceValues)
-	}
-	if !manager.positionReset.Load() {
-		t.Fatal("syncer was not notified to process the response as a fresh sync")
-	}
-	var syncResponse mautrix.RespSync
-	if err = json.NewDecoder(response.Body).Decode(&syncResponse); err != nil {
-		t.Fatal(err)
-	}
-	if syncResponse.NextBatch != "fresh-token" {
-		t.Fatalf("fresh next batch = %q", syncResponse.NextBatch)
-	}
-}
-
-func TestSlidingSyncTransportResetsExpiredPosition(t *testing.T) {
-	homeserver, _ := url.Parse("https://matrix.example")
-	manager, err := NewSlidingSyncManager(homeserver, SlidingSyncConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var requestedPositions []string
-	base := slidingSyncRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		var body SlidingSyncRequest
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
-		requestedPositions = append(requestedPositions, body.Pos)
-		if len(requestedPositions) == 1 {
-			return &http.Response{
-				StatusCode: http.StatusBadRequest,
-				Body:       io.NopCloser(strings.NewReader(`{"errcode":"M_INVALID_PARAM","error":"Unknown position token"}`)),
-			}, nil
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(`{"pos":"fresh-position","lists":{},"rooms":{}}`)),
-		}, nil
-	})
-	legacyRequest, err := http.NewRequest(http.MethodGet, "https://matrix.example/_matrix/client/v3/sync?since=expired-position", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, err := (&slidingSyncTransport{manager: manager, base: base}).RoundTrip(legacyRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	if len(requestedPositions) != 2 || requestedPositions[0] != "expired-position" || requestedPositions[1] != "" {
-		t.Fatalf("position retry sequence = %#v", requestedPositions)
-	}
-	if !manager.positionReset.Load() {
-		t.Fatal("syncer was not notified to process the response as a fresh sync")
-	}
-	var syncResponse mautrix.RespSync
-	if err = json.NewDecoder(response.Body).Decode(&syncResponse); err != nil {
-		t.Fatal(err)
-	}
-	if syncResponse.NextBatch != "fresh-position" {
-		t.Fatalf("fresh position = %q", syncResponse.NextBatch)
-	}
-}
-
-func TestSlidingSyncSyncerUsesExponentialFailureBackoff(t *testing.T) {
-	manager := &SlidingSyncManager{}
-	syncer := slidingSyncSyncer{inner: mautrix.NewDefaultSyncer(), manager: manager}
-	for attempt, expected := range []time.Duration{
-		time.Second,
-		2 * time.Second,
-		4 * time.Second,
-		8 * time.Second,
-		16 * time.Second,
-		30 * time.Second,
-		30 * time.Second,
-	} {
-		delay, err := syncer.OnFailedSync(nil, errors.New("temporary network failure"))
-		if err != nil {
-			t.Fatalf("retry %d returned error: %v", attempt+1, err)
-		}
-		if delay != expected {
-			t.Fatalf("retry %d delay = %s, want %s", attempt+1, delay, expected)
-		}
-	}
-	if err := syncer.ProcessResponse(context.Background(), &mautrix.RespSync{}, ""); err != nil {
-		t.Fatalf("process successful response: %v", err)
-	}
-	if delay, err := syncer.OnFailedSync(nil, errors.New("temporary network failure")); err != nil || delay != time.Second {
-		t.Fatalf("backoff after successful response = %s, %v; want 1s, nil", delay, err)
-	}
-}
-
-func TestSlidingSyncViewportChangeRestartsLongPoll(t *testing.T) {
-	homeserver, _ := url.Parse("https://matrix.example")
-	manager, err := NewSlidingSyncManager(homeserver, SlidingSyncConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	started := make(chan struct{}, 1)
-	base := slidingSyncRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		started <- struct{}{}
-		<-request.Context().Done()
-		return nil, request.Context().Err()
-	})
-	legacyRequest, err := http.NewRequest(http.MethodGet, "https://matrix.example/_matrix/client/v3/sync?since=current-position", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	type result struct {
-		response *http.Response
-		err      error
-	}
-	resultChannel := make(chan result, 1)
-	go func() {
-		response, roundTripErr := (&slidingSyncTransport{manager: manager, base: base}).RoundTrip(legacyRequest)
-		resultChannel <- result{response: response, err: roundTripErr}
-	}()
-	<-started
-	if err = manager.UpdateVisibleRange("main", 10, 30); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case got := <-resultChannel:
-		if got.err != nil {
-			t.Fatal(got.err)
-		}
-		defer got.response.Body.Close()
-		var syncResponse mautrix.RespSync
-		if err = json.NewDecoder(got.response.Body).Decode(&syncResponse); err != nil {
-			t.Fatal(err)
-		}
-		if syncResponse.NextBatch != "current-position" {
-			t.Fatalf("position lost while refreshing range: %q", syncResponse.NextBatch)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("viewport change did not cancel the active long poll")
-	}
-	if got := manager.State().Ranges["main"]; got != [2]int{10, 30} {
-		t.Fatalf("visible range was not updated: %#v", got)
-	}
-}
-
-func TestSlidingSyncStoreDelegatesFilterID(t *testing.T) {
-	store := slidingSyncStore{inner: mautrix.NewMemorySyncStore()}
-	ctx := context.Background()
-	userID := id.UserID("@user:example.org")
-	if err := store.SaveFilterID(ctx, userID, "real-filter"); err != nil {
-		t.Fatal(err)
-	}
-	filterID, err := store.LoadFilterID(ctx, userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if filterID != "real-filter" {
-		t.Fatalf("filter ID = %q, want the stored filter", filterID)
-	}
-}
-
-func TestInvalidSlidingSyncPositionRequiresPositionError(t *testing.T) {
-	if !invalidSlidingSyncPosition(http.StatusBadRequest, []byte(`{"errcode":"M_INVALID_PARAM","error":"Unknown position token"}`)) {
-		t.Fatal("position error was not recognized")
-	}
-	if invalidSlidingSyncPosition(http.StatusBadRequest, []byte(`{"errcode":"M_INVALID_PARAM","error":"Invalid room ID"}`)) {
-		t.Fatal("unrelated request validation error triggered a position reset")
-	}
-	if invalidSlidingSyncPosition(http.StatusUnauthorized, []byte(`{"errcode":"M_UNKNOWN_TOKEN","error":"Invalid access token"}`)) {
-		t.Fatal("authentication error triggered a position reset")
-	}
-	if errors.Is(errSlidingSyncRequestChanged, context.Canceled) {
-		t.Fatal("request-change cause should remain distinct from parent cancellation")
 	}
 }

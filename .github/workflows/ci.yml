@@ -21,9 +21,9 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 35
     env:
-      MACOSX_DEPLOYMENT_TARGET: "12.0"
-      CGO_CFLAGS: "-mmacosx-version-min=12.0"
-      CGO_LDFLAGS: "-mmacosx-version-min=12.0 -Wl,-no_warn_duplicate_libraries"
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+      CGO_CFLAGS: "-mmacosx-version-min=13.0"
+      CGO_LDFLAGS: "-mmacosx-version-min=13.0 -Wl,-no_warn_duplicate_libraries"
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -37,7 +37,7 @@ jobs:
         run: |
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           ruby scripts/ci/check-workflows.rb
-          node --test scripts/release/release-assets.test.mjs
+          node --test scripts/release/release-assets.test.mjs scripts/release/release-assets-downloads.test.mjs
 
       - name: Build frontend
         working-directory: frontend
@@ -113,7 +113,7 @@ jobs:
         uses: ./.github/actions/setup-build
 
       - name: Test release asset helpers
-        run: node --test scripts/release/release-assets.test.mjs
+        run: node --test scripts/release/release-assets.test.mjs scripts/release/release-assets-downloads.test.mjs
 
       - name: Build frontend
         working-directory: frontend
@@ -160,7 +160,7 @@ jobs:
         uses: ./.github/actions/setup-build
 
       - name: Test release asset helpers
-        run: node --test scripts/release/release-assets.test.mjs
+        run: node --test scripts/release/release-assets.test.mjs scripts/release/release-assets-downloads.test.mjs
 
       - name: Build frontend
         working-directory: frontend

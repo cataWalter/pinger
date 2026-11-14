@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,28 +14,18 @@ import (
 type fakeChatExportSource struct {
 	messages   []matrix.Message
 	historyErr error
-	files      map[string][]byte
-	// cancel is called on the first download to simulate the user cancelling mid-export.
+	// cancel is called while the history is read to simulate the user cancelling mid-export.
 	cancel context.CancelFunc
 }
 
 func (f *fakeChatExportSource) RoomHistory(ctx context.Context, roomID string) ([]matrix.Message, error) {
+	if f.cancel != nil {
+		f.cancel()
+	}
 	if f.historyErr != nil {
 		return nil, f.historyErr
 	}
 	return f.messages, nil
-}
-
-func (f *fakeChatExportSource) DownloadAttachment(ctx context.Context, attachment matrix.MediaAttachment) ([]byte, error) {
-	if f.cancel != nil {
-		f.cancel()
-		return nil, context.Canceled
-	}
-	data, ok := f.files[attachment.URI]
-	if !ok {
-		return nil, errors.New("download failed")
-	}
-	return data, nil
 }
 
 var chatExportTestTime = time.Date(2026, time.October, 25, 9, 30, 0, 0, time.UTC)
@@ -73,75 +62,58 @@ func chatExportTestMessages() []matrix.Message {
 	}
 }
 
-func TestExportRoomChatWritesTranscriptAndMedia(t *testing.T) {
+func TestExportRoomChatWritesTextFile(t *testing.T) {
 	parent := t.TempDir()
-	source := &fakeChatExportSource{
-		messages: chatExportTestMessages(),
-		files:    map[string][]byte{"mxc://example.org/photo": []byte("jpeg-bytes")},
-	}
+	source := &fakeChatExportSource{messages: chatExportTestMessages()}
 	var reports []ChatExportProgress
-	result, err := exportRoomChat(context.Background(), source, "!team:example.org", "Team", parent, chatExportTestTime, func(progress ChatExportProgress) {
+	result, err := exportRoomChat(context.Background(), source, "!team:example.org", "Team", false, parent, chatExportTestTime, func(progress ChatExportProgress) {
 		reports = append(reports, progress)
 	})
 	if err != nil {
 		t.Fatalf("exportRoomChat() error = %v", err)
 	}
-	if result.Messages != 3 || result.Media != 1 || result.MediaFailed != 1 {
-		t.Fatalf("result = %+v, want 3 messages, 1 media saved, 1 media failed", result)
+	if result.Messages != 3 {
+		t.Fatalf("result = %+v, want 3 messages", result)
 	}
-	if filepath.Base(result.Path) != chatExportTranscriptName {
-		t.Fatalf("transcript path = %q, want %s", result.Path, chatExportTranscriptName)
+	wantName := "Team chat " + chatExportTestTime.Format("2006-01-02 1504") + ".txt"
+	if filepath.Dir(result.Path) != parent || filepath.Base(result.Path) != wantName {
+		t.Fatalf("transcript path = %q, want %q inside %q", result.Path, wantName, parent)
 	}
-	dir := filepath.Dir(result.Path)
-	if filepath.Dir(dir) != parent || !strings.HasPrefix(filepath.Base(dir), "Team chat 2026-10-25 0930") {
-		t.Fatalf("export folder = %q, want a \"Team chat\" folder inside %q", dir, parent)
-	}
-
-	photo, err := os.ReadFile(filepath.Join(dir, "media", "0001-photo.jpg"))
-	if err != nil || string(photo) != "jpeg-bytes" {
-		t.Fatalf("saved photo = %q, %v", photo, err)
-	}
-	entries, err := os.ReadDir(filepath.Join(dir, "media"))
+	entries, err := os.ReadDir(parent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 {
-		t.Fatalf("media folder has %d files, want only the saved photo", len(entries))
+		t.Fatalf("export left %d entries, want only the text file", len(entries))
 	}
 
 	transcript, err := os.ReadFile(result.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := string(transcript)
-	for _, want := range []string{
-		"hello &lt;b&gt;team&lt;/b&gt;<br>",
-		`<img src="media/0001-photo.jpg" alt="photo.jpg">`,
-		"Media not saved: clip.mp4",
-		"Message deleted",
-		"👍 2",
-	} {
-		if !strings.Contains(page, want) {
-			t.Errorf("transcript missing %q", want)
-		}
+	want := "Ann: hello <b>team</b>\nsecond line\n" +
+		"Bob: Sent an album\n" +
+		"ann: Message deleted\n"
+	if string(transcript) != want {
+		t.Fatalf("transcript = %q, want %q", transcript, want)
 	}
 
 	if len(reports) == 0 {
 		t.Fatal("no progress reported")
 	}
 	last := reports[len(reports)-1]
-	if last.Stage != chatExportStageFinishing || last.MediaDone != 2 || last.MediaTotal != 2 {
-		t.Fatalf("last progress = %+v, want finishing with 2 of 2 media", last)
+	if last.Stage != chatExportStageFinishing || last.Messages != 3 {
+		t.Fatalf("last progress = %+v, want finishing with 3 messages", last)
 	}
 }
 
-func TestExportRoomChatRemovesPartialFolderWhenCancelled(t *testing.T) {
+func TestExportRoomChatWritesNothingWhenCancelled(t *testing.T) {
 	parent := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	source := &fakeChatExportSource{messages: chatExportTestMessages(), cancel: cancel}
 
-	_, err := exportRoomChat(ctx, source, "!team:example.org", "Team", parent, chatExportTestTime, func(ChatExportProgress) {})
+	_, err := exportRoomChat(ctx, source, "!team:example.org", "Team", false, parent, chatExportTestTime, func(ChatExportProgress) {})
 	if !errors.Is(err, errChatExportCancelled) {
 		t.Fatalf("exportRoomChat() error = %v, want errChatExportCancelled", err)
 	}
@@ -154,12 +126,12 @@ func TestExportRoomChatRemovesPartialFolderWhenCancelled(t *testing.T) {
 	}
 }
 
-func TestExportRoomChatReturnsHistoryErrorWithoutCreatingFolder(t *testing.T) {
+func TestExportRoomChatReturnsHistoryErrorWithoutWritingFile(t *testing.T) {
 	parent := t.TempDir()
 	historyErr := errors.New("timeline unavailable")
 	source := &fakeChatExportSource{historyErr: historyErr}
 
-	_, err := exportRoomChat(context.Background(), source, "!team:example.org", "Team", parent, chatExportTestTime, func(ChatExportProgress) {})
+	_, err := exportRoomChat(context.Background(), source, "!team:example.org", "Team", false, parent, chatExportTestTime, func(ChatExportProgress) {})
 	if !errors.Is(err, historyErr) {
 		t.Fatalf("exportRoomChat() error = %v, want %v", err, historyErr)
 	}
@@ -172,64 +144,44 @@ func TestExportRoomChatReturnsHistoryErrorWithoutCreatingFolder(t *testing.T) {
 	}
 }
 
-func TestCreateChatExportFolderAddsSuffixOnCollision(t *testing.T) {
+func TestUniqueExportFilePathAddsSuffixOnCollision(t *testing.T) {
 	parent := t.TempDir()
-	first, err := createChatExportFolder(parent, "Team/Ops", chatExportTestTime)
+	first, err := uniqueExportFilePath(parent, exportNameLabel("Team/Ops"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := createChatExportFolder(parent, "Team/Ops", chatExportTestTime)
+	if err := os.WriteFile(first, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := uniqueExportFilePath(parent, exportNameLabel("Team/Ops"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(first) != "Team-Ops chat 2026-10-25 0930" {
-		t.Fatalf("first folder = %q", filepath.Base(first))
+	if filepath.Base(first) != "Team-Ops.txt" {
+		t.Fatalf("first file = %q", filepath.Base(first))
 	}
-	if filepath.Base(second) != "Team-Ops chat 2026-10-25 0930 (1)" {
-		t.Fatalf("second folder = %q", filepath.Base(second))
-	}
-}
-
-func TestChatExportMediaFileName(t *testing.T) {
-	tests := []struct {
-		name     string
-		mimeType string
-		want     string
-	}{
-		{name: "photo.jpg", mimeType: "image/jpeg", want: "0003-photo.jpg"},
-		{name: "", mimeType: "image/png", want: "0003-media.png"},
-		{name: "a#b%c.pdf", mimeType: "application/pdf", want: "0003-a-b-c.pdf"},
-		{name: "notes", mimeType: "application/pdf", want: "0003-notes.pdf"},
-		{name: "clip", mimeType: "video/quicktime", want: "0003-clip.mov"},
-		{name: "readme", mimeType: "image/unknown", want: "0003-readme"},
-	}
-	for _, test := range tests {
-		if got := chatExportMediaFileName(3, test.name, test.mimeType); got != test.want {
-			t.Errorf("chatExportMediaFileName(3, %q, %q) = %q, want %q", test.name, test.mimeType, got, test.want)
-		}
+	if filepath.Base(second) != "Team-Ops (1).txt" {
+		t.Fatalf("second file = %q", filepath.Base(second))
 	}
 }
 
-func TestRenderChatExportHTMLEscapesNames(t *testing.T) {
-	entries := []chatExportEntry{{
-		Message: matrix.Message{
-			Sender:     "@x:example.org",
-			SenderName: `"Ann" & <Co>`,
-			Body:       "<script>alert(1)</script>",
-		},
-	}}
-	page := renderChatExportHTML("<Team>", chatExportTestTime, entries)
-	for _, want := range []string{
-		"&lt;Team&gt;",
-		"&#34;Ann&#34; &amp; &lt;Co&gt;",
-		"&lt;script&gt;alert(1)&lt;/script&gt;",
-	} {
-		if !strings.Contains(page, want) {
-			t.Errorf("page missing %q", want)
-		}
+func TestRenderChatExportTextFormatsLines(t *testing.T) {
+	messages := []matrix.Message{
+		{Sender: "@x:example.org", Body: "hi", Edited: true, Own: true},
+		{Sender: "@y:example.org", SenderName: "Yan", Body: "<script>", DecryptionError: "bad key"},
+		{Sender: "@z:example.org", Body: "no display name"},
 	}
-	if strings.Contains(page, "<script>") {
-		t.Fatal("page contains an unescaped script tag")
+	group := "me: hi\n" +
+		"Yan: Unable to decrypt message: bad key\n" +
+		"z: no display name\n"
+	if got := renderChatExportText(messages, false); got != group {
+		t.Fatalf("renderChatExportText(group) = %q, want %q", got, group)
+	}
+	direct := "me: hi\n" +
+		"them: Unable to decrypt message: bad key\n" +
+		"them: no display name\n"
+	if got := renderChatExportText(messages, true); got != direct {
+		t.Fatalf("renderChatExportText(direct) = %q, want %q", got, direct)
 	}
 }
 

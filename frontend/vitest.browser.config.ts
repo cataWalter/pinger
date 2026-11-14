@@ -8,7 +8,7 @@ export default defineConfig({
     include: ['react-virtuoso'],
   },
   test: {
-    include: ['src/App.browser.test.tsx'],
+    include: ['src/App.*.browser.test.tsx'],
     browser: {
       commands: {
         async setReducedMotion({ page }, reduced: boolean) {

@@ -73,7 +73,7 @@ func TestFindOwnReactionIDsPagesThroughRelations(t *testing.T) {
 	if len(missing) != 0 {
 		t.Fatalf("findOwnReactionID(missing) = %q, want empty", missing)
 	}
-	if err = redactOwnReactions(context.Background(), cli, roomID, eventID, me, "👍"); err != nil {
+	if _, err = redactReactionIDs(context.Background(), cli, roomID, want); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(redacted, want) {
@@ -105,7 +105,11 @@ func TestRemoveOwnReactionsReportsPartialRedactionFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = redactOwnReactions(context.Background(), cli, "!room:example.org", "$target", "@me:example.org", "eyes")
+	ids, err := findOwnReactionIDs(context.Background(), cli, "!room:example.org", "$target", "@me:example.org", "eyes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = redactReactionIDs(context.Background(), cli, "!room:example.org", ids)
 	if err == nil || redactions != 2 || !strings.Contains(err.Error(), "$second") {
 		t.Fatalf("partial removal = %d redactions, %v; want second redaction error", redactions, err)
 	}
@@ -122,7 +126,7 @@ func TestApplyOwnReactionsMarksOnlyCurrentUserEmoji(t *testing.T) {
 		}},
 	}
 
-	applyOwnReactions(messages, reactions, me)
+	applyOwnReactions(messages, reactions, me, nil)
 
 	if !messages[0].Reacted["👍"] {
 		t.Fatalf("own reaction not marked as reacted: %v", messages[0].Reacted)

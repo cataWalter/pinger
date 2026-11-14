@@ -57,38 +57,42 @@ func (c *Client) RoomHistory(ctx context.Context, roomID string) ([]Message, err
 	)
 }
 
+// RecentRoomMessages returns the newest limit messages in a room, oldest first.
+// It only walks further back when the first page holds fewer messages than
+// limit, so it is cheap enough to run across every room.
+func (c *Client) RecentRoomMessages(ctx context.Context, roomID string, limit int) ([]Message, error) {
+	ctx, finish, err := c.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	return collectRecentRoomHistory(
+		func(before int64) (HistoryPage, error) {
+			if before == 0 {
+				return c.HistoryPageWithLimit(ctx, roomID, 0, limit)
+			}
+			return c.HistoryPage(ctx, roomID, before)
+		},
+		func() error {
+			_, paginateErr := c.engine.Paginate(ctx, id.RoomID(roomID), 0, timelinePageSize, false)
+			return paginateErr
+		},
+		limit,
+	)
+}
+
 // collectRoomHistory walks pages from the newest message back to the start of
 // the room and returns the messages oldest first without duplicates. backfill
 // runs once when the local timeline is empty, because HistoryPage cannot reach
 // the server in that state.
 func collectRoomHistory(fetch func(before int64) (HistoryPage, error), backfill func() error) ([]Message, error) {
-	var pages [][]Message
-	seen := make(map[string]struct{})
-	var before int64
-	backfilled := false
-	for {
-		page, err := fetch(before)
-		if err != nil {
-			return nil, err
-		}
-		if before == 0 && page.Before == 0 && page.HasMore && !backfilled {
-			backfilled = true
-			if err := backfill(); err != nil {
-				return nil, fmt.Errorf("fetch room history from server: %w", err)
-			}
-			continue
-		}
-		pages = append(pages, page.Messages)
-		if !page.HasMore {
-			break
-		}
-		if page.Before == 0 || (before != 0 && page.Before >= before) {
-			return nil, errors.New("room history pagination did not advance")
-		}
-		before = page.Before
+	pages, err := fetchHistoryPages(fetch, backfill, func(int) bool { return false })
+	if err != nil {
+		return nil, err
 	}
 
 	var messages []Message
+	seen := make(map[string]struct{})
 	for i := len(pages) - 1; i >= 0; i-- {
 		for _, message := range pages[i] {
 			key := message.ID
@@ -105,4 +109,54 @@ func collectRoomHistory(fetch func(before int64) (HistoryPage, error), backfill 
 		}
 	}
 	return messages, nil
+}
+
+// collectRecentRoomHistory returns at most limit of the newest messages, oldest first.
+func collectRecentRoomHistory(fetch func(before int64) (HistoryPage, error), backfill func() error, limit int) ([]Message, error) {
+	pages, err := fetchHistoryPages(fetch, backfill, func(collected int) bool { return collected >= limit })
+	if err != nil {
+		return nil, err
+	}
+
+	var messages []Message
+	for i := len(pages) - 1; i >= 0; i-- {
+		messages = append(messages, pages[i]...)
+	}
+	if len(messages) > limit {
+		messages = messages[len(messages)-limit:]
+	}
+	return messages, nil
+}
+
+// fetchHistoryPages walks pages from the newest message backwards and returns
+// them newest page first. It stops at the start of the room or once enough
+// reports that the collected message count is sufficient.
+func fetchHistoryPages(fetch func(before int64) (HistoryPage, error), backfill func() error, enough func(collected int) bool) ([][]Message, error) {
+	var pages [][]Message
+	collected := 0
+	var before int64
+	backfilled := false
+	for !enough(collected) {
+		page, err := fetch(before)
+		if err != nil {
+			return nil, err
+		}
+		if before == 0 && page.Before == 0 && page.HasMore && !backfilled {
+			backfilled = true
+			if err := backfill(); err != nil {
+				return nil, fmt.Errorf("fetch room history from server: %w", err)
+			}
+			continue
+		}
+		pages = append(pages, page.Messages)
+		collected += len(page.Messages)
+		if !page.HasMore {
+			break
+		}
+		if page.Before == 0 || (before != 0 && page.Before >= before) {
+			return nil, errors.New("room history pagination did not advance")
+		}
+		before = page.Before
+	}
+	return pages, nil
 }
