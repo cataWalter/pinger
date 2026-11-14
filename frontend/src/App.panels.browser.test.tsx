@@ -25,7 +25,7 @@ describe('browser smoke: panels', () => {
     const user = userEvent.setup()
     await page.viewport(760, 600)
     renderApp()
-    await screen.findByText('Minimum desktop window')
+    await screen.findByRole('button', { name: 'Room actions' })
 
     await user.click(screen.getByRole('button', { name: 'Room actions' }))
     await user.click(screen.getByRole('menuitem', { name: 'Media gallery' }))

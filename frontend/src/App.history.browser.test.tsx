@@ -107,6 +107,15 @@ describe('browser smoke: history', () => {
     await waitFor(() => expect((document.activeElement as HTMLElement)?.dataset.eventId).toBe('$anchor-0'))
     await waitFor(() => expect(service.History).toHaveBeenCalledWith('!browser-smoke:example.org', -1000))
     const original = container.querySelector<HTMLElement>('[data-event-id="$anchor-0"]')!
+    let previousTop = original.getBoundingClientRect().top
+    let stableFrames = 0
+    for (let frame = 0; frame < 120 && stableFrames < 3; frame++) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      const currentTop = original.getBoundingClientRect().top
+      stableFrames = Math.abs(currentTop - previousTop) < 0.5 ? stableFrames + 1 : 0
+      previousTop = currentTop
+    }
+    expect(stableFrames).toBeGreaterThanOrEqual(3)
     const top = original.getBoundingClientRect().top
     resolveOlder({
       ...history, before: -1050, hasMore: true, messages: Array.from({ length: 50 }, (_, index) => ({
