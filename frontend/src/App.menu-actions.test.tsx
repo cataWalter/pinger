@@ -61,6 +61,7 @@ describe('native application menu actions', () => {
     harness.service.ScheduledJobs.mockResolvedValue([])
     harness.service.SetActiveRoom.mockResolvedValue(undefined)
     harness.service.MarkRead.mockResolvedValue(undefined)
+    harness.service.SetTyping.mockResolvedValue(undefined)
     harness.service.SetRoomUnanswered.mockResolvedValue(undefined)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.NativeNotificationsSupported.mockResolvedValue(false)

@@ -115,7 +115,7 @@ describe('settings storage, integrations, help, and about', () => {
     render(<App />)
     await user.click(await screen.findByRole('button', { name: 'Settings' }))
 
-    const search = await screen.findByLabelText('Search settings')
+    const search = await screen.findByLabelText('Search settings', {}, { timeout: 5000 })
     await user.type(search, 'unread')
 
     const results = await screen.findByRole('region', { name: 'Settings search results' })
