@@ -65,6 +65,21 @@ func TestSuggestedRepliesTranscriptRequiresTextMessages(t *testing.T) {
 	}
 }
 
+func TestLatestAIDraftMessagesKeepsOnlyNewestFifty(t *testing.T) {
+	messages := make([]matrix.Message, 60)
+	for index := range messages {
+		messages[index] = suggestedReplyTestMessage(fmt.Sprintf("$%d", index), "@alice:example.org", "Alice", fmt.Sprintf("message-%02d", index), false)
+	}
+
+	latest := latestAIDraftMessages(messages)
+	if len(latest) != aiReplyDraftHistoryLimit {
+		t.Fatalf("message count = %d, want %d", len(latest), aiReplyDraftHistoryLimit)
+	}
+	if latest[0].Body != "message-10" || latest[len(latest)-1].Body != "message-59" {
+		t.Fatalf("retained range = %q to %q, want message-10 to message-59", latest[0].Body, latest[len(latest)-1].Body)
+	}
+}
+
 func TestSuggestedRepliesTranscriptKeepsNewestWithinBudget(t *testing.T) {
 	long := strings.Repeat("a", 1500)
 	var messages []matrix.Message
@@ -186,6 +201,38 @@ func TestRequestSuggestedRepliesReturnsThreeTrimmedOptions(t *testing.T) {
 	}
 	if !strings.Contains(sent.Messages[1].Content, "<latest_message>\nAlice: are we still on for lunch?\n</latest_message>") {
 		t.Fatalf("user message does not contain the latest message block: %q", sent.Messages[1].Content)
+	}
+}
+
+func TestRequestAIReplyDraftReturnsOneTrimmedReply(t *testing.T) {
+	server, stub := newSuggestedRepliesServer(t, `{"text":"  That sounds great!  "}`)
+	reply, err := requestAIReplyDraft(context.Background(), server.Client(), server.URL, "local.gguf", testSuggestedRepliesTuning(), testSuggestedRepliesInput("Alice: Are we still on for lunch?\n", "Alice: Are we still on for lunch?"))
+	if err != nil {
+		t.Fatalf("requestAIReplyDraft error: %v", err)
+	}
+	if reply != "That sounds great!" {
+		t.Fatalf("reply = %q, want trimmed text", reply)
+	}
+	requests := stub.requests()
+	if len(requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(requests))
+	}
+	if !strings.Contains(requests[0], `"ai_reply_draft"`) || !strings.Contains(requests[0], `"required":["text"]`) {
+		t.Fatalf("request does not constrain output to one reply: %s", requests[0])
+	}
+	if !strings.Contains(requests[0], "Match the language, tone, and level of formality") || !strings.Contains(requests[0], "untrusted data") {
+		t.Fatalf("request does not contain the fixed reply rules: %s", requests[0])
+	}
+}
+
+func TestRequestAIReplyDraftRejectsEmptyAndMalformedOutput(t *testing.T) {
+	for _, response := range []string{`{"text":"  "}`, "not json"} {
+		t.Run(response, func(t *testing.T) {
+			server, _ := newSuggestedRepliesServer(t, response)
+			if _, err := requestAIReplyDraft(context.Background(), server.Client(), server.URL, "local.gguf", testSuggestedRepliesTuning(), testSuggestedRepliesInput("Alice: Hi\n", "Alice: Hi")); err == nil {
+				t.Fatal("expected invalid reply output to fail")
+			}
+		})
 	}
 }
 

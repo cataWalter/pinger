@@ -7,6 +7,21 @@ import type { AppState } from './appState'
 
 export function AppSidebar({ app }: { app: AppState }) {
   const { acceptInvite, activeListRoomID, answeredShortcut, applyBulkRoomAction, applyMenuFilter, archiveAllReadRooms, clearRoomSelection, connectionProblem, contextMenuChatID, contextMenuHasUnread, contextMenuIsBulk, contextMenuLocalAIFolderID, contextMenuLocalAIInAll, contextMenuLocalAIRoom, contextMenuNeedsArchive, contextMenuNeedsFavorite, contextMenuNeedsMute, contextMenuNeedsReplyAddCount, contextMenuNeedsReplyAddRooms, contextMenuRooms, declineInvite, deleteLocalAIChat, deleteLocalAIFolder, effectiveAccountScope, filteredRooms, handleMarkAnsweredKeyDown, inboxAccountCount, inviteBusyRoomID, isActiveAccountRoom, isLastMessageByCurrentUser, listRooms, localAIActiveFolder, localAIChatList, localAIDeleteArmedID, localAIFolderDeleteArmedID, localAIFolderDraft, localAIFolderFilter, localAIIconByRoomID, markRoomAnswered, markRoomRead, markRoomUnread, menuFilter, moveLocalAIChatToFolder, needsReplyCount, preferences, readRoomCount, roomButtonActionsRef, roomContextMenu, roomListRef, roomRefinements, roomScope, roomSearchInputRef, saveLocalAIFolderDraft, search, selectLocalAIChat, selectedRoomID, selectedRoomIDs, selectedRoomListIndex, setAccountError, setAccountManagerOpen, setAddingAccount, setInboxAccountScope, setLocalAIDeleteArmedID, setLocalAIFolderDeleteArmedID, setLocalAIFolderDraft, setLocalAIFolderFilter, setLocalAIRenameDraft, setNewRoomMode, setPreference, setRoomArchived, setRoomContextMenu, setRoomScope, setSearch, setSettingsOpen, snapshot, startLocalAIChat, toggleRoomRefinement } = app
+  const { aiEnabled, aiReplyDraftBatch, busy, cancelAIDraftBatch, editTarget, generateNeedsReplyDrafts } = app
+  const draftBatchLabel = aiReplyDraftBatch.status === 'running'
+    ? `${aiReplyDraftBatch.completed}/${aiReplyDraftBatch.total}`
+    : aiReplyDraftBatch.status === 'complete'
+      ? aiReplyDraftBatch.total === 0
+        ? 'No drafts'
+        : aiReplyDraftBatch.failures.length > 0
+          ? `${aiReplyDraftBatch.completed}/${aiReplyDraftBatch.total} · ${aiReplyDraftBatch.failures.length} failed`
+          : 'Drafts ready'
+      : 'Draft replies'
+  const draftBatchTitle = aiReplyDraftBatch.status === 'running'
+    ? `Generating AI drafts: ${aiReplyDraftBatch.completed} of ${aiReplyDraftBatch.total}`
+    : aiReplyDraftBatch.failures.length > 0
+      ? aiReplyDraftBatch.failures.join('\n')
+      : 'Generate a reply draft for each chat that needs a reply'
   return (
     <aside className="sidebar">
       {/* Empty drag strip under the macOS traffic lights; the window title bar is transparent. */}
@@ -38,6 +53,12 @@ export function AppSidebar({ app }: { app: AppState }) {
             <button type="button" className={roomRefinements.favorite ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={roomRefinements.favorite} aria-keyshortcuts="Control+Shift+F Meta+Shift+F" title="Favorites (Ctrl / ⌘ + Shift + F)" onClick={() => applyMenuFilter('favorites')}><span className="filter-symbol"><Star size={14} /></span><span className="filter-label">Favorites</span></button>
           </div>
         </div>
+        {roomScope === 'all' && <div className="room-refinement-filters" role="group" aria-label="AI reply drafts">
+          <button type="button" aria-label={aiReplyDraftBatch.status === 'running' ? `Generating AI reply drafts, ${aiReplyDraftBatch.completed} of ${aiReplyDraftBatch.total} complete` : 'Generate AI reply drafts'} title={draftBatchTitle} disabled={!aiEnabled || busy || Boolean(editTarget) || aiReplyDraftBatch.status === 'running'} onClick={() => void generateNeedsReplyDrafts()}>
+            <Sparkles size={14} /><span className="filter-label">{draftBatchLabel}</span>
+          </button>
+          {aiReplyDraftBatch.status === 'running' && <button type="button" aria-label="Cancel AI reply draft generation" title="Cancel AI reply draft generation" onClick={cancelAIDraftBatch}><X size={14} /></button>}
+        </div>}
         {roomScope === 'local-ai' && <div className="local-ai-folder-bar" role="group" aria-label="AI chat folders">
           <button type="button" className={localAIFolderFilter === null ? 'is-active' : ''} aria-label="All AI chats" aria-pressed={localAIFolderFilter === null} onClick={() => setLocalAIFolderFilter(null)}>All</button>
           <button type="button" className={localAIFolderFilter === '' ? 'is-active' : ''} aria-label="Unfiled AI chats" aria-pressed={localAIFolderFilter === ''} onClick={() => setLocalAIFolderFilter('')}>Unfiled</button>

@@ -1,14 +1,24 @@
 /* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useEffect, type FormEvent } from 'react'
+import { useRef, useState } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Room, type Snapshot } from '../bindings/mychat/desktop/models.js'
 import { useAccountSwitching } from './hooks/useAccountSwitching'
 import { isLocalAIRoomID, localAIChatIDFromRoomID } from './localAIChats'
 import { describeError, isNeedsReplyRoom } from './appShared'
+import { appendAIDraft, getVolatileAIDraft, setVolatileAIDraft } from './volatileAIDrafts'
 import type { useAIRequests } from './useAIRequests'
 
 export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
+  const { composeTextRef, roomDrafts, rooms, setVolatileAIDrafts, volatileAIDrafts } = app
   const { accountHomeserver, accountPassword, accountUsername, activeAIRequestRef, activeAccountID, aiEnabled, busy, cancelAIRequest, chatTranslationAIRequestRef, chatTranslationRequestRef, clearRoomSelection, closeLanguageTutor, editTarget, filteredRooms, forwardBusy, handleRoomKeyDown, historyRoomIDRef, imageSendRun, isActiveAccountRoom, languageTutorRequestRef, lastReadEventByRoom, leavingRoom, loadingOlderRef, newAIRequestID, openRoomContextMenu, pendingHistoryRefreshRoomIDRef, pendingSearchJumpRef, refreshScheduledJobs, roomButtonActionsRef, roomSelectionAnchorRef, scheduledBusyID, scheduledSaving, selectLocalAIChat, selectedRoomID, selectedRoomRef, setAIPanel, setAccountError, setAccountManagerOpen, setAccountPassword, setAccountUsername, setAddingAccount, setBusy, setChatTranslation, setComposeText, setEditTarget, setForwardingMessage, setGeneratedImageReview, setImageSendRun, setLanguageTutorState, setLeaveConfirmOpen, setLoadingOlder, setLocalAIChatOpen, setMediaApproval, setMentionBindings, setMessageContextMenu, setMessages, setMobilePane, setRedactTarget, setReplyTarget, setRoomContextMenu, setRoomInfoOpen, setRoomMembers, setScheduledDraft, setScheduledJobs, setScheduledJobsOpen, setScheduledTimes, setSearchNextBatch, setSearchOpen, setSearchResults, setSelectedRoomID, setSelectedRoomIDs, setSnapshot, setSuggestedReplies, setSummaryStatus, setTypingUsers, setUndoRoomID, showRoom, suggestedRepliesRequestRef, summaryLoadingRef, undoToastTimerRef, voiceCaptureStatus, workspaceGenerationRef } = app
+  const [aiReplyDraftBatch, setAIReplyDraftBatch] = useState({
+    status: 'idle' as 'idle' | 'running' | 'complete' | 'cancelled',
+    completed: 0,
+    total: 0,
+    failures: [] as string[],
+  })
+  const replyDraftBatchRef = useRef<{ accountID: string; requestIDs: Set<string>; cancelled: boolean } | null>(null)
 
   // suggestRepliesForRoom asks Local AI for three reply options based on the latest messages in roomID.
   async function suggestRepliesForRoom(roomID: string) {
@@ -36,6 +46,77 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
     setSuggestedReplies(null)
     cancelAIRequest(requestID)
   }
+
+  function cancelAIDraftBatch() {
+    const run = replyDraftBatchRef.current
+    if (!run) return
+    run.cancelled = true
+    for (const requestID of run.requestIDs) cancelAIRequest(requestID)
+    run.requestIDs.clear()
+    replyDraftBatchRef.current = null
+    setAIReplyDraftBatch((current) => current.status === 'running' ? { ...current, status: 'cancelled' } : current)
+  }
+
+  async function generateNeedsReplyDrafts() {
+    if (!aiEnabled || busy || editTarget || replyDraftBatchRef.current) return
+    const candidates = rooms.filter((room) => isActiveAccountRoom(room)
+      && isNeedsReplyRoom(room)
+      && !getVolatileAIDraft(volatileAIDrafts, activeAccountID, room.id))
+    if (candidates.length === 0) {
+      setAIReplyDraftBatch({ status: 'complete', completed: 0, total: 0, failures: [] })
+      return
+    }
+
+    const run = { accountID: activeAccountID, requestIDs: new Set<string>(), cancelled: false }
+    replyDraftBatchRef.current = run
+    setAIReplyDraftBatch({ status: 'running', completed: 0, total: candidates.length, failures: [] })
+    let nextIndex = 0
+    let completed = 0
+    const failures: string[] = []
+
+    const worker = async () => {
+      while (!run.cancelled) {
+        const room = candidates[nextIndex++]
+        if (!room) return
+        const requestID = newAIRequestID()
+        run.requestIDs.add(requestID)
+        try {
+          const reply = await AppService.AIGenerateReplyDraft(room.id, requestID)
+          if (run.cancelled || replyDraftBatchRef.current !== run) return
+          const baseText = roomDrafts.get(room.id) ?? (selectedRoomRef.current === room.id ? composeTextRef.current : '')
+          const draft = { baseText, text: appendAIDraft(baseText, reply) }
+          setVolatileAIDrafts((current) => setVolatileAIDraft(current, activeAccountID, room.id, draft))
+          if (selectedRoomRef.current === room.id) {
+            composeTextRef.current = draft.text
+            setComposeText(draft.text)
+          }
+        } catch (generationError) {
+          if (run.cancelled) return
+          failures.push(`${room.name || room.id}: ${describeError(generationError)}`)
+        } finally {
+          run.requestIDs.delete(requestID)
+          if (!run.cancelled && replyDraftBatchRef.current === run) {
+            completed++
+            setAIReplyDraftBatch({ status: 'running', completed, total: candidates.length, failures: [...failures] })
+          }
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(2, candidates.length) }, () => worker()))
+    if (replyDraftBatchRef.current === run) {
+      replyDraftBatchRef.current = null
+      setAIReplyDraftBatch({ status: 'complete', completed, total: candidates.length, failures })
+    }
+  }
+
+  useEffect(() => {
+    if (replyDraftBatchRef.current && replyDraftBatchRef.current.accountID !== activeAccountID) cancelAIDraftBatch()
+  }, [activeAccountID])
+
+  useEffect(() => {
+    if (app.snapshot && !app.snapshot.loggedIn) setVolatileAIDrafts(new Map())
+  }, [app.snapshot?.loggedIn])
 
   // Close the picker when the open room changes so its options never apply to another room.
   useEffect(() => {
@@ -188,5 +269,5 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
     if (accountID && accountID !== activeAccountID) void switchAccount(accountID, roomID)
     else showRoom(roomID)
   }
-  return { ...app, openInboxRoom, selectRoomByOffset, resetAccountWorkspace, switchAccount, submitAddAccount, openNotificationRoom, suggestRepliesForRoom, cancelSuggestedReplies, closeAIResult }
+  return { ...app, openInboxRoom, selectRoomByOffset, resetAccountWorkspace, switchAccount, submitAddAccount, openNotificationRoom, aiReplyDraftBatch, generateNeedsReplyDrafts, cancelAIDraftBatch, suggestRepliesForRoom, cancelSuggestedReplies, closeAIResult }
 }

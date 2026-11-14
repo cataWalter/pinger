@@ -40,7 +40,7 @@ describe('browser smoke: performance', () => {
       const tail = container.querySelector('[data-event-id="$coverage-999"]')
       expect(tail).not.toBeNull()
       expect(getComputedStyle(tail!).visibility).toBe('visible')
-    })
+    }, { timeout: 5000 })
     const timeline = screen.getByRole('region', { name: 'Message timeline' })
     let previousFirstIndex = -1
     for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {

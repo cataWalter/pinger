@@ -4,17 +4,32 @@ import { formatComposerText, insertEmoji, type ComposerFormat } from './composer
 import { saveSnippets, type Snippet } from './snippets'
 import { useSnippetExpander } from './useSnippetExpander'
 import { describeError } from './appShared'
+import { deleteVolatileAIDraft, getVolatileAIDraft, updateVolatileAIDraft } from './volatileAIDrafts'
 import type { useMessageAIActions } from './useMessageAIActions'
 
 export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>) {
-  const { activeAccountID, aiPanel, closeLanguageTutor, composeText, composeTextRef, composerEmojiSelectionRef, composerInputRef, editTarget, emojiMatch, emojiOptions, focusTimelineMessage, handleMessageDoubleClick, handleTimelineAudioEnded, inviteBusyRoomID, languageTutorState, mentionEnd, mentionOptions, mentionStart, openMessageContextMenu, openThreadPanel, removeReaction, roomDrafts, selectedRoomID, selectedRoomRef, sendReaction, setAIPanel, setComposeText, setEditTarget, setEmojiMatch, setEmojiPickerOpen, setError, setInviteBusyRoomID, setMentionBindings, setMentionQuery, setMentionStart, setNewRoomMode, setReplyTarget, setSnapshot, setSnippets, setSuggestedReplies, showRoom, snippets, startDirectChat, timelineMessageActionsRef, updateEmojiQuery, updateMentionQuery } = app
+  const { activeAccountID, aiPanel, closeLanguageTutor, composeText, composeTextRef, composerEmojiSelectionRef, composerInputRef, editTarget, emojiMatch, emojiOptions, focusTimelineMessage, handleMessageDoubleClick, handleTimelineAudioEnded, inviteBusyRoomID, languageTutorState, mentionEnd, mentionOptions, mentionStart, openMessageContextMenu, openThreadPanel, removeReaction, roomDrafts, selectedRoomID, selectedRoomRef, sendReaction, setAIPanel, setComposeText, setEditTarget, setEmojiMatch, setEmojiPickerOpen, setError, setInviteBusyRoomID, setMentionBindings, setMentionQuery, setMentionStart, setNewRoomMode, setReplyTarget, setSnapshot, setSnippets, setSuggestedReplies, setVolatileAIDrafts, showRoom, snippets, startDirectChat, timelineMessageActionsRef, updateEmojiQuery, updateMentionQuery, volatileAIDrafts } = app
 
   function setComposeDraft(text: string) {
     composeTextRef.current = text
     setComposeText(text)
     if (!editTarget && selectedRoomID) {
-      if (text) roomDrafts.set(selectedRoomID, text)
+      if (getVolatileAIDraft(volatileAIDrafts, activeAccountID, selectedRoomID)) {
+        setVolatileAIDrafts((current) => updateVolatileAIDraft(current, activeAccountID, selectedRoomID, text))
+      } else if (text) roomDrafts.set(selectedRoomID, text)
       else roomDrafts.delete(selectedRoomID)
+    }
+  }
+
+  function discardVolatileAIDraft(roomID = selectedRoomID) {
+    const draft = getVolatileAIDraft(volatileAIDrafts, activeAccountID, roomID)
+    if (!draft) return
+    setVolatileAIDrafts((current) => deleteVolatileAIDraft(current, activeAccountID, roomID))
+    if (selectedRoomRef.current === roomID) {
+      composeTextRef.current = draft.baseText
+      setComposeText(draft.baseText)
+      setMentionBindings([])
+      setMentionStart(-1)
     }
   }
   timelineMessageActionsRef.current = {
@@ -202,5 +217,5 @@ export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>)
   async function createGroupRoom(request: GroupRoomRequest) {
     await openNewRoom(await AppService.CreateGroupRoom(request))
   }
-  return { ...app, snippetExpander, snippetOptions, snippetMatch, snippetMenuVisible, applyMention, useLanguageTutorDraft, useSuggestedReply, acceptAIResult, setComposeDraft, updateSnippets, applyEmojiSuggestion, toggleComposerEmojiPicker, insertPickedEmoji, applyFormatting, acceptInvite, declineInvite, openNewRoom, joinRoomByAddress, createGroupRoom }
+  return { ...app, snippetExpander, snippetOptions, snippetMatch, snippetMenuVisible, applyMention, useLanguageTutorDraft, useSuggestedReply, acceptAIResult, setComposeDraft, discardVolatileAIDraft, updateSnippets, applyEmojiSuggestion, toggleComposerEmojiPicker, insertPickedEmoji, applyFormatting, acceptInvite, declineInvite, openNewRoom, joinRoomByAddress, createGroupRoom }
 }

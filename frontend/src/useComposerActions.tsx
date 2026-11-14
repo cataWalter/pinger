@@ -2,10 +2,11 @@ import { type FormEvent } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { parseCustomEmoticonReplacements, replaceEmoticons } from './composerText'
 import { describeError, preferenceBoolean, preferenceString, type CaptureKind, type StagedAttachment, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, encodeVoiceNoteWav } from './appShared'
+import { deleteVolatileAIDraft, getVolatileAIDraft } from './volatileAIDrafts'
 import type { useMessageDispatch } from './useMessageDispatch'
 
 export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
-  const { activeAccountID, busy, composeText, dispatchMessage, editTarget, mentionBindings, preferences, refreshRoomSnapshotAfterSend, replyTarget, roomDrafts, scrollTimelineToBottom, selectedAudioInputDeviceId, selectedRoomID, selectedRoomRef, sendAttachmentFiles, sendableStagedAttachments, setAudioInputDevices, setBusy, setCaptureKind, setComposeText, setEditTarget, setError, setHistoryRevision, setMediaApproval, setMentionBindings, setMentionStart, setReplyTarget, setStagedAttachments, setVoiceCaptureStatus, stickToBottomRef, uploadAttachmentFile, voiceCaptureStatus, voiceChunksRef, voiceRecorderRef, voiceRoomIDRef, voiceStreamRef, voiceTimeoutRef } = app
+  const { activeAccountID, busy, composeText, dispatchMessage, editTarget, mentionBindings, preferences, refreshRoomSnapshotAfterSend, replyTarget, roomDrafts, scrollTimelineToBottom, selectedAudioInputDeviceId, selectedRoomID, selectedRoomRef, sendAttachmentFiles, sendableStagedAttachments, setAudioInputDevices, setBusy, setCaptureKind, setComposeText, setEditTarget, setError, setHistoryRevision, setMediaApproval, setMentionBindings, setMentionStart, setReplyTarget, setStagedAttachments, setVoiceCaptureStatus, setVolatileAIDrafts, stickToBottomRef, uploadAttachmentFile, volatileAIDrafts, voiceCaptureStatus, voiceChunksRef, voiceRecorderRef, voiceRoomIDRef, voiceStreamRef, voiceTimeoutRef } = app
 
   function stageAttachmentFiles(files: File[]) {
     const roomID = selectedRoomID
@@ -58,7 +59,12 @@ export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
         await refreshRoomSnapshotAfterSend()
       }
       const nextDraft = editTarget ? roomDrafts.get(roomID) ?? '' : ''
-      if (!editTarget) roomDrafts.delete(roomID)
+      if (!editTarget) {
+        roomDrafts.delete(roomID)
+        if (getVolatileAIDraft(volatileAIDrafts, activeAccountID, roomID)) {
+          setVolatileAIDrafts((current) => deleteVolatileAIDraft(current, activeAccountID, roomID))
+        }
+      }
       if (selectedRoomRef.current === roomID) setComposeText(nextDraft)
       setMentionBindings([])
       setMentionStart(-1)

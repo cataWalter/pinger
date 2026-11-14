@@ -266,4 +266,28 @@ describe('room history updates', () => {
     expect(row?.querySelector('.message-body')).toBeNull()
     expect(row?.querySelector('.media-download')).toBeNull()
   })
+
+  it('saves an audio attachment and reveals the saved file', async () => {
+    const user = userEvent.setup()
+    const filename = 'audioclip-1794686133000-5807.ogg'
+    const savedPath = `/Users/test/Downloads/${filename}`
+    const audioMessage = { ...message('$audio-download', filename, 300), mediaUri: 'mxc://example.org/audio-download', mediaMime: 'audio/ogg', mediaSize: 12 }
+    harness.service.History.mockResolvedValueOnce({ messages: [audioMessage], before: 0, hasMore: false })
+    harness.service.SaveMedia.mockResolvedValueOnce(savedPath)
+    harness.service.RevealFile.mockClear()
+    const { container } = render(<App />)
+
+    const card = await waitFor(() => {
+      const element = container.querySelector<HTMLElement>('[data-event-id="$audio-download"] .audio-attachment')
+      if (!element) throw new Error('Audio card did not render')
+      return element
+    })
+    await user.click(within(card).getByRole('button', { name: `Download ${filename}` }))
+
+    expect(harness.service.SaveMedia).toHaveBeenCalledWith(audioMessage.mediaUri, filename)
+    expect(await within(card).findByRole('button', { name: savedPath })).toBeTruthy()
+    expect(within(card).getByRole('status').textContent).toContain(`Saved to ${savedPath}`)
+    await user.click(within(card).getByRole('button', { name: savedPath }))
+    expect(harness.service.RevealFile).toHaveBeenCalledWith(savedPath)
+  })
 })

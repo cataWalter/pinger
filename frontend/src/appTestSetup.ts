@@ -56,6 +56,7 @@ export const harness = {
     SendThreadReply: vi.fn(),
     AIComplete: vi.fn(),
     AICancel: vi.fn(),
+    AIGenerateReplyDraft: vi.fn(),
     AISuggestReplies: vi.fn(),
     GenerateRoomImage: vi.fn(),
     SendRoomImage: vi.fn(),

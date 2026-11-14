@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
-import { harness, message, openMessageMenu, menuCommand, suggestedReplyFixture, snapshot } from './appTestSetup'
+import { harness, message, openMessageMenu, menuCommand, room, secondRoom, suggestedReplyFixture, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
   const { clipboardSetText, harness } = await import('./appTestSetup')
@@ -90,6 +90,8 @@ describe('room history updates', () => {
     harness.service.RequestNotificationPermission.mockResolvedValue('granted')
     harness.service.SendNotification.mockResolvedValue(false)
     harness.service.AIComplete.mockResolvedValue('')
+    harness.service.AIGenerateReplyDraft.mockReset()
+    harness.service.AIGenerateReplyDraft.mockResolvedValue('')
     harness.service.ListLocalAIChats.mockResolvedValue([])
     harness.service.ListLocalAIChatFolders.mockResolvedValue([])
     harness.service.LoadLocalAIChatMessages.mockResolvedValue([])
@@ -124,6 +126,89 @@ describe('room history updates', () => {
         hasMore: true,
       }
     })
+  })
+
+  it('generates one unsent RAM-only reply for each Needs reply room in the active account', async () => {
+    const user = userEvent.setup()
+    const firstNeedsReplyRoom = { ...room, unanswered: true, needsReply: true }
+    const otherAccountRoom = { ...secondRoom, id: '!other:example.org', accountId: 'secondary', name: 'Other account' }
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [firstNeedsReplyRoom, secondRoom, otherAccountRoom],
+      preferences: { 'ai.endpoint': 'http://localhost:8080' },
+    })
+    harness.service.AIGenerateReplyDraft.mockImplementation(async (roomID: string) => `AI reply for ${roomID}`)
+    render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'My note' } })
+    await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
+
+    await waitFor(() => expect(harness.service.AIGenerateReplyDraft).toHaveBeenCalledTimes(2))
+    expect(harness.service.AIGenerateReplyDraft.mock.calls.map(([roomID]) => roomID).sort()).toEqual([room.id, secondRoom.id].sort())
+    expect(composer.value).toBe(`My note\n\nAI reply for ${room.id}`)
+    expect(window.localStorage.getItem(ROOM_DRAFTS_STORAGE_KEY) ?? '').not.toContain('AI reply for')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+    expect(harness.service.SendReply).not.toHaveBeenCalled()
+
+    fireEvent.change(composer, { target: { value: 'My note\n\nEdited AI reply' } })
+    expect(window.localStorage.getItem(ROOM_DRAFTS_STORAGE_KEY) ?? '').not.toContain('Edited AI reply')
+    await user.click(screen.getByRole('button', { name: 'Discard AI reply draft' }))
+    expect(composer.value).toBe('My note')
+
+    await user.click(screen.getByRole('button', { name: /Second room/ }))
+    await waitFor(() => expect(composer.value).toBe(`AI reply for ${secondRoom.id}`))
+    expect(window.localStorage.getItem(ROOM_DRAFTS_STORAGE_KEY) ?? '').not.toContain('AI reply for')
+  })
+
+  it('cancels a running reply batch without applying a late result', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [{ ...room, unanswered: true, needsReply: true }],
+      preferences: { 'ai.endpoint': 'http://localhost:8080' },
+    })
+    let resolveDraft: (reply: string) => void = () => { }
+    harness.service.AIGenerateReplyDraft.mockReturnValue(new Promise<string>((resolve) => { resolveDraft = resolve }))
+    render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
+    await waitFor(() => expect(harness.service.AIGenerateReplyDraft).toHaveBeenCalledTimes(1))
+    await user.click(screen.getByRole('button', { name: 'Cancel AI reply draft generation' }))
+    expect(harness.service.AICancel).toHaveBeenCalledWith(harness.service.AIGenerateReplyDraft.mock.calls[0][1])
+    resolveDraft('Late AI reply')
+
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    expect(composer.value).toBe('')
+    expect(screen.queryByText('AI reply draft')).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('keeps a generated reply after a failed send and clears it after a successful send', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [{ ...room, unanswered: true, needsReply: true }, { ...secondRoom, unanswered: false, needsReply: false }],
+      preferences: { 'ai.endpoint': 'http://localhost:8080' },
+    })
+    harness.service.AIGenerateReplyDraft.mockResolvedValue('AI reply')
+    render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
+    await waitFor(() => expect(composer.value).toBe('AI reply'))
+
+    harness.service.SendMessage.mockRejectedValueOnce(new Error('offline'))
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledTimes(1))
+    expect(composer.value).toBe('AI reply')
+
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(composer.value).toBe(''))
   })
 
   it('asks before replacing an existing draft with a suggested reply', async () => {

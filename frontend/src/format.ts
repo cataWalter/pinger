@@ -15,10 +15,16 @@ export function formatDayLabel(timestamp: number) {
   const today = new Date()
   const yesterday = new Date()
   yesterday.setDate(today.getDate() - 1)
+  const isPreviousYear = date.getFullYear() < today.getFullYear()
   const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
   if (sameDay(date, today)) return i18n.t('time.today')
-  if (sameDay(date, yesterday)) return i18n.t('time.yesterday')
-  return new Intl.DateTimeFormat(activeLocale(), { weekday: 'long', month: 'long', day: 'numeric' }).format(date)
+  if (!isPreviousYear && sameDay(date, yesterday)) return i18n.t('time.yesterday')
+  return new Intl.DateTimeFormat(activeLocale(), {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    ...(isPreviousYear ? { year: 'numeric' } : {}),
+  }).format(date)
 }
 
 export function localDateTimeInputValue(timestamp: number) {

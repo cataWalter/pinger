@@ -5,6 +5,7 @@ import { type Message } from '../bindings/mychat/desktop/models.js'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
 import { createTimelineTimeFormatter } from './appShared'
+import { formatDayLabel } from './format'
 import { harness, room, secondRoom, message, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
@@ -220,6 +221,7 @@ describe('room history updates', () => {
     try {
       vi.setSystemTime(new Date(2026, 0, 2, 12))
       const yesterday = new Date(2026, 0, 1, 13).getTime()
+      const previousYear = new Date(2025, 11, 31, 13).getTime()
       harness.service.Snapshot.mockResolvedValue({
         ...snapshot,
         rooms: [{ ...room, preview: 'message from yesterday', lastEventAt: yesterday }],
@@ -238,6 +240,7 @@ describe('room history updates', () => {
       expect(container.querySelector('.room-button[title="Test room"] .room-meta time')?.textContent).toBe(expectedDate)
       expect(timeline.querySelector('[data-event-id="$yesterday"] .message-meta time')?.textContent).toBe(expectedTime)
       expect(timeline.querySelector('.day-divider')?.textContent).toBe('Yesterday')
+      expect(formatDayLabel(previousYear)).toContain('2025')
     } finally {
       vi.useRealTimers()
     }

@@ -4,6 +4,7 @@ import { accentCssVariables } from './accent'
 import { SYSTEM_THEME_NAME, themeCssVariables, themeModeForPreference } from './themes'
 import { preferenceBoolean, preferenceString } from './appShared'
 import { useShellState } from './useShellState'
+import { useVolatileAIDraftState } from './volatileAIDrafts'
 import { useAuthFormState } from './useAuthFormState'
 import { useTimelineHistory } from './useTimelineHistory'
 import { useInboxState } from './useInboxState'
@@ -33,7 +34,7 @@ import { ConversationWorkspace } from './ConversationWorkspace'
 import { AppDialogs } from './AppDialogs'
 
 function AppBody() {
-  const part00 = useShellState()
+  const part00 = useVolatileAIDraftState(useShellState())
   const part01 = useAuthFormState(part00)
   const part02 = useTimelineHistory(part01)
   const part03 = useInboxState(part02)

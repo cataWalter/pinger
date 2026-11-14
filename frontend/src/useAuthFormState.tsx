@@ -6,8 +6,9 @@ import { type TimelineListHandle } from './appShared'
 import { type SuggestedRepliesState } from './SuggestedRepliesPicker'
 import { type MatrixNotification, type PreferenceValues, type AIPanel, type AIStreamHandler, type LanguageTutorState, type ChatTranslationState, type TimelineMessageActions, type RoomButtonActions, preferenceString } from './appShared'
 import type { useShellState } from './useShellState'
+import type { VolatileAIDraftState } from './volatileAIDrafts'
 
-export function useAuthFormState(app: ReturnType<typeof useShellState>) {
+export function useAuthFormState(app: ReturnType<typeof useShellState> & VolatileAIDraftState) {
   const { captureKind, scheduledNoticeTimerRef, selectedRoomID, snapshot, undoToastTimerRef, voiceCaptureStatus, workspaceGenerationRef } = app
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([])
   const [selectedAudioInputDeviceId, setSelectedAudioInputDeviceId] = useState<string>(preferenceString(snapshot?.preferences ?? {}, 'audio.input_device', ''))

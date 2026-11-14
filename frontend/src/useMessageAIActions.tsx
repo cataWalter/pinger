@@ -6,10 +6,12 @@ import { activeLocale } from './i18n'
 import { MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, buildExplainPrompt, buildReplyPrompt, serializeChatAgents, type ChatAgentCollection, type ChatAgentProfile } from './aiPrompts'
 import { AI_ACTION_SHORTCUTS, languageName, resolveChatLearningLanguage, resolveChatTutorLanguage, resolveLanguageRoles } from './aiSettings'
 import { type MessageMenuItem, describeError, displayMessageBody, preferenceBoolean, mergeTimelineMessages, timelineMessageID, incomingSinceOwnMessage } from './appShared'
+import { deleteVolatileAIDraft, getVolatileAIDraft } from './volatileAIDrafts'
 import type { useMenuActions } from './useMenuActions'
 
 export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
   const { agentEditor, aiEnabled, aiInstructions, analyzeWithLanguageTutor, cancelAIRequest, chatTranslationAIRequestRef, chatTranslationRequestRef, copyMessage, hasAIConversationContext, hasOlder, isActiveAccountRoom, loadingOlderRef, markRoomUnread, messages, newAIRequestID, olderCursor, openMessageForward, openReminder, openThreadPanel, preferences, preferencesRef, promptMessages, retryMessage, roomAgents, roomAgentsPreferenceKey, rooms, runAIRequest, selectedRoomID, selectedRoomRef, setAgentEditor, setAgentSettingsError, setChatTranslation, setComposeText, setEditTarget, setHasOlder, setLoadingOlder, setMentionBindings, setMentionStart, setMessages, setOlderCursor, setPreference, setRedactTarget, setReplyTarget, snapshot, startReaction, suggestRepliesForRoom, timelineHeightBeforePrepend, timelineRef, workspaceGenerationRef } = app
+  const { activeAccountID, setVolatileAIDrafts, volatileAIDrafts } = app
 
   async function translateRecentMessages() {
     if (!selectedRoomID || !aiEnabled || (!hasAIConversationContext && !hasOlder)) return
@@ -128,6 +130,17 @@ export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
     void runAIRequest('Explain message', buildExplainPrompt(promptMessages([message])[0], aiInstructions('explain')), 'explain')
   }
 
+  function editMessage(message: Message) {
+    if (getVolatileAIDraft(volatileAIDrafts, activeAccountID, selectedRoomID)) {
+      setVolatileAIDrafts((current) => deleteVolatileAIDraft(current, activeAccountID, selectedRoomID))
+    }
+    setReplyTarget(null)
+    setEditTarget(message)
+    setComposeText(message.body)
+    setMentionBindings([])
+    setMentionStart(-1)
+  }
+
   // The same eligibility rules the old inline action bar used, expressed once
   // so the menu can't drift from what the backend allows.
   function messageContextMenuItems(message: Message): MessageMenuItem[] {
@@ -159,7 +172,7 @@ export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
       { key: 'ai-explain', label: 'Explain message', ariaLabel: 'Explain message with local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.explainMessage.key, icon: <Sparkles size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => explainMessage(message) },
     ]
     if (message.own && manageable) {
-      items.push({ key: 'edit', label: 'Edit', ariaLabel: 'Edit message', icon: <Pencil size={13} />, run: () => { setReplyTarget(null); setEditTarget(message); setComposeText(message.body); setMentionBindings([]); setMentionStart(-1) } })
+      items.push({ key: 'edit', label: 'Edit', ariaLabel: 'Edit message', icon: <Pencil size={13} />, run: () => editMessage(message) })
       items.push({ key: 'delete', label: 'Delete', ariaLabel: 'Delete message', danger: true, icon: <Trash2 size={13} />, run: () => setRedactTarget(message) })
     }
     if (message.sendError && message.sendError !== 'not sent' && message.transactionId) {

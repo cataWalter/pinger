@@ -214,8 +214,9 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
       {isAudio && <VoiceMessagePlayer key={message.id} label={filename} waveformKey={message.mediaUri} durationMs={message.mediaDurationMs} sizeBytes={message.mediaSize} source={source} autoPlay={autoPlayNext} onRequestSource={prepareMedia} onEnded={onAudioEnded} />}
       {isAudio && <div className="audio-attachment-footer">
         <span className="audio-filename" title={filename}>{filename}</span>
-        <button className="icon-button audio-download" type="button" title={`Download ${filename}`} aria-label={`Download ${filename}`} disabled={loading} onClick={() => void downloadFile()}><Download size={15} /></button>
+        <button className="icon-button audio-download" type="button" title={loading ? `Saving ${filename}` : `Download ${filename}`} aria-label={loading ? `Saving ${filename}` : `Download ${filename}`} disabled={loading} onClick={() => void downloadFile()}>{loading ? <span className="loading-mark" /> : <Download size={15} />}</button>
       </div>}
+      {isAudio && savedPath && <small className="audio-download-status" role="status">{renderSavedFile()}</small>}
       {isAudio && <div className="audio-transcription-controls">
         <button className="audio-transcribe-button" type="button" aria-label={transcriptionLoading ? 'Transcribing audio' : 'Transcribe with AI'} aria-keyshortcuts={`Control+Shift+${AI_ACTION_SHORTCUTS.transcribeAudio.key} Meta+Shift+${AI_ACTION_SHORTCUTS.transcribeAudio.key}`} title={`${aiEnabled ? 'Upload this audio to the configured endpoint for transcription.' : 'Set an AI endpoint in Settings > AI.'} (${primaryShiftShortcutLabel(AI_ACTION_SHORTCUTS.transcribeAudio.key)})`} disabled={!aiEnabled || transcriptionLoading} onClick={() => void transcribeAudio()}>
           {transcriptionLoading ? <span className="loading-mark" /> : <Sparkles size={14} />}

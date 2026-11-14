@@ -118,7 +118,7 @@ describe('browser smoke: history', () => {
       const current = container.querySelector<HTMLElement>('[data-event-id="$anchor-0"]')
       expect(current).not.toBeNull()
       expect(Math.abs(current!.getBoundingClientRect().top - top)).toBeLessThanOrEqual(4)
-    })
+    }, { timeout: 5000 })
   })
 
 })

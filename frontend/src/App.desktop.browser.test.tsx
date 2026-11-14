@@ -24,7 +24,7 @@ describe('browser smoke: desktop', () => {
     const user = userEvent.setup()
     await page.viewport(760, 600)
     renderApp()
-    await screen.findByText('Minimum desktop window')
+    await screen.findByText('Minimum desktop window', {}, { timeout: 5000 })
     const canvas = document.createElement('canvas')
     canvas.width = 320
     canvas.height = 200

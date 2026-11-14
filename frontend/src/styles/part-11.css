@@ -44,6 +44,12 @@
   height: 28px;
 }
 
+.audio-download-status {
+  color: var(--forest);
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
 .audio-transcription-controls {
   display: flex;
   flex-wrap: wrap;

@@ -4,10 +4,11 @@ import { AppService } from '../bindings/mychat/desktop'
 import { useMediaGallery } from './hooks/useMediaGallery'
 import { useMatrixBatch } from './useMatrixBatch'
 import { type MatrixUpdate, describeError, isTextEntryTarget, preferenceBoolean } from './appShared'
+import { getVolatileAIDraft } from './volatileAIDrafts'
 import type { useTimelineScroll } from './useTimelineScroll'
 
 export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) {
-  const { activeAccountID, composeText, composerEmojiControlRef, composerInputRef, emojiPickerOpen, focusTimelineMessage, historyRoomIDRef, loadingHistory, messages, moveTimelineFocus, pendingSearchJumpRef, pinTimelineToBottom, pinnedScrollTopRef, preferences, quickSwitcherInputRef, quickSwitcherOpen, quickSwitcherQuery, roomDrafts, roomSwitchRef, roomsRef, selectedRoomID, selectedRoomRef, setAgentEditor, setAgentSettingsError, setComposeText, setEditTarget, setEmojiPickerOpen, setError, setHistoryRevision, setLeaveConfirmOpen, setMentionBindings, setMentionStart, setMessageSearch, setQuickSwitcherIndex, setReplyTarget, setRoomInfoOpen, setRoomMembers, setRoomMembersError, setRoomMembersLoading, setSearchOpen, setSearchResults, setSearchStatus, setTypingUsers, setUnreadMarker, singleKeyShortcuts, stickToBottomRef, timelineHeightBeforePrepend, timelineListRef, timelineRef, timelineResizeObserverRef, unreadMarkerID } = app
+  const { activeAccountID, composeText, composerEmojiControlRef, composerInputRef, emojiPickerOpen, focusTimelineMessage, historyRoomIDRef, loadingHistory, messages, moveTimelineFocus, pendingSearchJumpRef, pinTimelineToBottom, pinnedScrollTopRef, preferences, quickSwitcherInputRef, quickSwitcherOpen, quickSwitcherQuery, roomDrafts, roomSwitchRef, roomsRef, selectedRoomID, selectedRoomRef, setAgentEditor, setAgentSettingsError, setComposeText, setEditTarget, setEmojiPickerOpen, setError, setHistoryRevision, setLeaveConfirmOpen, setMentionBindings, setMentionStart, setMessageSearch, setQuickSwitcherIndex, setReplyTarget, setRoomInfoOpen, setRoomMembers, setRoomMembersError, setRoomMembersLoading, setSearchOpen, setSearchResults, setSearchStatus, setTypingUsers, setUnreadMarker, singleKeyShortcuts, stickToBottomRef, timelineHeightBeforePrepend, timelineListRef, timelineRef, timelineResizeObserverRef, unreadMarkerID, volatileAIDrafts } = app
 
   function handleTimelineKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.metaKey || event.ctrlKey || event.altKey || isTextEntryTarget(event.target)) return
@@ -93,7 +94,7 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
     setMentionStart(-1)
     setEmojiPickerOpen(false)
     setTypingUsers([])
-    setComposeText(roomDrafts.get(selectedRoomID) ?? '')
+    setComposeText(getVolatileAIDraft(volatileAIDrafts, activeAccountID, selectedRoomID)?.text ?? roomDrafts.get(selectedRoomID) ?? '')
     const openedRoom = roomsRef.current.find((room) => room.id === selectedRoomID)
     setUnreadMarker(openedRoom && openedRoom.unread > 0
       ? { scope: `${activeAccountID}:${selectedRoomID}`, count: openedRoom.unread, messageID: '', seen: false, offscreen: false }
