@@ -185,6 +185,12 @@ tasks:
 
   run:
     cmds:
+      # open --wait-apps only activates a running bundle, so stop the previous dev app first.
+      - |
+        EXE="{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS/[p]inger"
+        pkill -TERM -f "$EXE" || true
+        for _ in $(seq 1 50); do pgrep -f "$EXE" >/dev/null || exit 0; sleep 0.1; done
+        pkill -KILL -f "$EXE" || true
       - wails3 tool prepare-macos-output --dir "{{.BIN_DIR}}"
       - test -n "{{.BIN_DIR}}" && test -n "{{.APP_NAME}}" && rm -rf -- "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app"
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS"

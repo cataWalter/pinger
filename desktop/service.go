@@ -107,6 +107,7 @@ type Room struct {
 	LastEventID     string `json:"lastEventId"`
 	LastEventSender string `json:"lastEventSender"`
 	LastEventAt     int64  `json:"lastEventAt"`
+	LastEventSeenAt int64  `json:"lastEventSeenAt"`
 	Bridge          string `json:"bridge"`
 	AccountID       string `json:"accountId"`
 }

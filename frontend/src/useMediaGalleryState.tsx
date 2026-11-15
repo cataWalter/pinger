@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { useMediaGallery } from './hooks/useMediaGallery'
@@ -55,7 +54,8 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
       pinTimelineToBottom(timeline)
       if (!roomSwitchRef.current || historyRoomIDRef.current === selectedRoomID) roomSwitchRef.current = false
     }
-  }, [historyRoomIDRef, messages, selectedRoomID, unreadMarkerID])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pinTimelineToBottom is recreated each render; the pin should follow room and message changes only
+  }, [historyRoomIDRef, messages, selectedRoomID, unreadMarkerID, roomSwitchRef, stickToBottomRef, timelineHeightBeforePrepend, timelineListRef, timelineRef])
 
   // Media, fonts, and composer or banner changes resize the timeline without changing `messages`.
   // Re-pin to the newest message after each resize while the reader is following the conversation.
@@ -72,14 +72,15 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
     observer.disconnect()
     observer.observe(timeline)
     for (const child of Array.from(timeline.children)) observer.observe(child)
-  }, [messages, selectedRoomID])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pinTimelineToBottom is recreated each render; the observer follows room and messages only
+  }, [messages, selectedRoomID, stickToBottomRef, timelineRef, timelineResizeObserverRef])
 
   useEffect(() => {
     return () => {
       timelineResizeObserverRef.current?.disconnect()
       timelineResizeObserverRef.current = null
     }
-  }, [])
+  }, [timelineResizeObserverRef])
 
   useEffect(() => {
     setSearchOpen(false)
@@ -103,7 +104,8 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
     pinnedScrollTopRef.current = null
     setReplyTarget(null)
     setEditTarget(null)
-  }, [selectedRoomID, activeAccountID, roomDrafts])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- volatileAIDrafts must not reset the composer on each draft update; the effect follows the room and account
+  }, [selectedRoomID, activeAccountID, roomDrafts, pinnedScrollTopRef, roomsRef, stickToBottomRef, setAgentEditor, setAgentSettingsError, setComposeText, setEditTarget, setEmojiPickerOpen, setLeaveConfirmOpen, setMentionBindings, setMentionStart, setMessageSearch, setReplyTarget, setRoomInfoOpen, setSearchOpen, setSearchResults, setSearchStatus, setTypingUsers, setUnreadMarker])
 
   useEffect(() => {
     if (!emojiPickerOpen) return
@@ -122,17 +124,17 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleEscape)
     }
-  }, [emojiPickerOpen])
+  }, [emojiPickerOpen, composerEmojiControlRef, setEmojiPickerOpen])
 
   useEffect(() => {
     if (!quickSwitcherOpen) return
     const frame = window.requestAnimationFrame(() => quickSwitcherInputRef.current?.focus())
     return () => window.cancelAnimationFrame(frame)
-  }, [quickSwitcherOpen])
+  }, [quickSwitcherOpen, quickSwitcherInputRef])
 
   useEffect(() => {
     setQuickSwitcherIndex(0)
-  }, [quickSwitcherQuery])
+  }, [quickSwitcherQuery, setQuickSwitcherIndex])
 
   useEffect(() => {
     if (!selectedRoomID) {
@@ -150,7 +152,7 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
       .catch((membersError: unknown) => { if (active) setRoomMembersError(describeError(membersError)) })
       .finally(() => { if (active) setRoomMembersLoading(false) })
     return () => { active = false }
-  }, [selectedRoomID, activeAccountID])
+  }, [selectedRoomID, activeAccountID, setRoomMembers, setRoomMembersError, setRoomMembersLoading])
 
   useEffect(() => {
     if (!selectedRoomID || !preferenceBoolean(preferences, 'privacy.send_typing', true)) return
@@ -159,7 +161,7 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
       void AppService.SetTyping(selectedRoomID, timeoutMilliseconds).catch((typingError: unknown) => setError(describeError(typingError)))
     }, 350)
     return () => window.clearTimeout(timeout)
-  }, [composeText, selectedRoomID, preferences])
+  }, [composeText, selectedRoomID, preferences, setError])
 
   const matrixUpdateHandlerRef = useRef<((update: MatrixUpdate) => void) | null>(null)
 
@@ -197,6 +199,7 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
     if (!messages.some((message) => message.id === searchJump.eventID)) return
     pendingSearchJumpRef.current = null
     requestAnimationFrame(() => focusTimelineMessage(searchJump.eventID))
-  }, [historyRoomIDRef, loadingHistory, messages, selectedRoomID])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- focusTimelineMessage is recreated each render; the search jump follows room and messages only
+  }, [historyRoomIDRef, loadingHistory, messages, selectedRoomID, pendingSearchJumpRef])
   return { ...app, handleTimelineKeyDown, matrixUpdateHandlerRef, mediaGalleryOpen, mediaGalleryFilter, setMediaGalleryFilter, mediaGalleryItems, mediaGalleryLoading, mediaGalleryScanned, mediaGalleryError, closeMediaGallery, openMediaGallery }
 }

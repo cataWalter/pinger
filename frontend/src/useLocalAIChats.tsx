@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useEffect } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Message, type MessageSearchResult, type Room } from '../bindings/mychat/desktop/models.js'
@@ -184,7 +183,7 @@ export function useLocalAIChats(app: ReturnType<typeof useMessageSearch>) {
   useEffect(() => {
     if (!selectedRoomID || localAIChatOpen || selectedRoom) return
     showRoomRef.current('')
-  }, [selectedRoomID, localAIChatOpen, selectedRoom])
+  }, [selectedRoomID, localAIChatOpen, selectedRoom, showRoomRef])
 
   function isActiveAccountRoom(room: Room) {
     return !room.accountId || room.accountId === snapshot?.activeAccountId

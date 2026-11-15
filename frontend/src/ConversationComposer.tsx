@@ -7,19 +7,12 @@ import { ActionMenu } from './appShared'
 import { SuggestedRepliesPicker } from './SuggestedRepliesPicker'
 import { initials, preferenceBoolean, preferenceString, IconTooltip } from './appShared'
 import type { AppState } from './appState'
-import { getVolatileAIDraft } from './volatileAIDrafts'
 
 export function ConversationComposer({ app }: { app: AppState }) {
-  const { activeAccountID, applyEmojiSuggestion, applyFormatting, applyMention, attachmentInputRef, busy, cancelSuggestedReplies, captureNoun, chatLearningLanguage, chatTutorLanguage, composeText, composeTextRef, composerAIItems, composerContextMessage, composerEmojiControlRef, composerInputRef, discardVolatileAIDraft, editTarget, emojiActiveIndex, emojiOptions, emojiPickerOpen, focusTimelineMessage, handleAttachmentInput, handleComposerKeyDown, handleComposerPaste, imageRunHere, imageRunStatus, insertPickedEmoji, mentionActiveIndex, mentionOptions, openScheduleMessage, preferences, preferencesRef, removeStagedAttachment, replyTarget, roomDrafts, selectedRoom, selectedRoomID, sendableStagedAttachments, setComposeDraft, setComposeText, setEditTarget, setEmojiActiveIndex, setMentionActiveIndex, setMentionBindings, setMentionStart, setPreference, setReplyTarget, snippetExpander, snippetMatch, snippetMenuVisible, snippetOptions, stagedRoomAttachments, startRecording, stopImageGeneration, stopRecording, submitMessage, suggestRepliesForRoom, suggestedReplies, summaryStatus, systemPrefersDark, themePreference, toggleComposerEmojiPicker, updateEmojiQuery, updateMentionQuery, useSuggestedReply, videoPreviewRef, videoRecordingActive, voiceCaptureStatus, voiceRecordingActive, volatileAIDrafts } = app
-  const volatileAIDraft = getVolatileAIDraft(volatileAIDrafts, activeAccountID, selectedRoomID)
+  const { activeAccountID, applyEmojiSuggestion, applyFormatting, applyMention, attachmentInputRef, busy, cancelSuggestedReplies, captureNoun, chatTutorLanguage, composeText, composeTextRef, composerAIItems, composerContextMessage, composerEmojiControlRef, composerInputRef, editTarget, emojiActiveIndex, emojiOptions, emojiPickerOpen, focusTimelineMessage, handleAttachmentInput, handleComposerKeyDown, handleComposerPaste, imageRunHere, imageRunStatus, insertPickedEmoji, mentionActiveIndex, mentionOptions, openScheduleMessage, preferences, preferencesRef, removeStagedAttachment, replyTarget, roomDrafts, selectedRoom, selectedRoomID, sendableStagedAttachments, setComposeDraft, setComposeText, setEditTarget, setEmojiActiveIndex, setMentionActiveIndex, setMentionBindings, setMentionStart, setPreference, setReplyTarget, snippetExpander, snippetMatch, snippetMenuVisible, snippetOptions, stagedRoomAttachments, startRecording, stopImageGeneration, stopRecording, submitMessage, suggestRepliesForRoom, suggestedReplies, summaryStatus, systemPrefersDark, themePreference, toggleComposerEmojiPicker, updateEmojiQuery, updateMentionQuery, useSuggestedReply, videoPreviewRef, videoRecordingActive, voiceCaptureStatus, voiceRecordingActive } = app
   return (
     <form className="composer" onSubmit={submitMessage}>
       <input ref={attachmentInputRef} className="visually-hidden" type="file" aria-hidden="true" tabIndex={-1} onChange={handleAttachmentInput} />
-      {volatileAIDraft && <div className="composer-context is-replying" role="status">
-        <span className="composer-context-icon" aria-hidden="true"><Sparkles size={15} /></span>
-        <div className="composer-context-copy"><strong>AI reply draft</strong></div>
-        <IconTooltip label="Discard AI reply draft"><button type="button" className="icon-button" aria-label="Discard AI reply draft" disabled={busy} onClick={() => discardVolatileAIDraft()}><X size={14} /></button></IconTooltip>
-      </div>}
       {emojiOptions.length > 0 && <div className="mention-menu emoji-menu" role="listbox" aria-label="Emoji suggestions">
         {emojiOptions.map(([name, emoji], index) => <button key={name} className={`mention-option ${index === emojiActiveIndex ? 'is-active' : ''}`} type="button" role="option" aria-selected={index === emojiActiveIndex} onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setEmojiActiveIndex(index)} onClick={() => applyEmojiSuggestion(emoji)}><span aria-hidden="true">{emoji}</span> :{name}:</button>)}
       </div>}
@@ -175,7 +168,7 @@ export function ConversationComposer({ app }: { app: AppState }) {
           </div>
         </div>
         {suggestedReplies && suggestedReplies.roomId === selectedRoomID && (
-          <SuggestedRepliesPicker state={suggestedReplies} hasDraft={composeText.trim() !== ''} learningLanguage={chatLearningLanguage} explanationLanguage={chatTutorLanguage} onUse={useSuggestedReply} onRegenerate={() => void suggestRepliesForRoom(suggestedReplies.roomId)} onClose={cancelSuggestedReplies} />
+          <SuggestedRepliesPicker state={suggestedReplies} hasDraft={composeText.trim() !== ''} explanationLanguage={chatTutorLanguage} onUse={useSuggestedReply} onRegenerate={() => void suggestRepliesForRoom(suggestedReplies.roomId)} onClose={cancelSuggestedReplies} />
         )}
         {(voiceCaptureStatus !== null || busy || imageRunHere || summaryStatus) && <span className="composer-operation-status" role="status">{voiceCaptureStatus === 'recording' ? `Recording ${captureNoun}` : voiceCaptureStatus === 'processing' ? `Preparing ${captureNoun}…` : imageRunHere ? imageRunStatus : summaryStatus || 'Sending…'}</span>}
         <IconTooltip label={editTarget ? 'Save edit' : 'Send message'} className="send-tooltip">

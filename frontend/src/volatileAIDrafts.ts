@@ -45,6 +45,20 @@ export function deleteVolatileAIDraft(store: VolatileAIDraftStore, accountID: st
   return next
 }
 
+export function dropArchivedVolatileAIDrafts(store: VolatileAIDraftStore, isArchived: (accountID: string, roomID: string) => boolean): VolatileAIDraftStore {
+  let changed = false
+  const next: VolatileAIDraftStore = new Map()
+  for (const [accountID, accountDrafts] of store) {
+    const kept = new Map<string, VolatileAIDraft>()
+    for (const [roomID, draft] of accountDrafts) {
+      if (isArchived(accountID, roomID)) changed = true
+      else kept.set(roomID, draft)
+    }
+    if (kept.size > 0) next.set(accountID, kept)
+  }
+  return changed ? next : store
+}
+
 export function appendAIDraft(baseText: string, reply: string) {
   const base = baseText.trimEnd()
   return base ? `${base}\n\n${reply}` : reply

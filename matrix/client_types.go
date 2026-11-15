@@ -49,6 +49,8 @@ type Room struct {
 	LastEventID     string
 	LastEventSender string
 	LastEventAt     time.Time
+	// LastEventSeenAt is set when another user has read the room's latest message, which must be our own.
+	LastEventSeenAt time.Time
 	Bridge          string
 }
 

@@ -2,30 +2,9 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "Pinger: Hot reload",
-			"type": "process",
-			"command": "bash",
-			"args": [
-				"scripts/dev/dev.sh"
-			],
-			"options": {
-				"cwd": "${workspaceFolder}"
-			},
-			"problemMatcher": [],
-			"presentation": {
-				"panel": "dedicated",
-				"reveal": "always"
-			}
-		},
-		{
 			"label": "Pinger: Run normally",
-			"type": "process",
-			"command": "go",
-			"args": [
-				"run",
-				"-tags=sqlite_fts5,goolm",
-				"."
-			],
+			"type": "shell",
+			"command": "bash scripts/dev/run-normally.sh",
 			"options": {
 				"cwd": "${workspaceFolder}",
 				"env": {
@@ -37,29 +16,6 @@
 				"panel": "dedicated",
 				"reveal": "always"
 			}
-		},
-		{
-			"label": "Pinger: Install on macOS",
-			"type": "process",
-			"command": "bash",
-			"args": [
-				"scripts/macos/install-macos-app.sh"
-			],
-			"options": {
-				"cwd": "${workspaceFolder}"
-			},
-			"problemMatcher": [],
-			"presentation": {
-				"panel": "dedicated",
-				"reveal": "always"
-			}
-		},
-		{
-			"label": "Pinger: Check publication",
-			"type": "shell",
-			"command": "gh run list --repo cataWalter/pinger --workflow release.yml --branch main --limit 1 --json status,conclusion,url",
-			"isBackground": false,
-			"problemMatcher": []
 		}
 	]
 }

@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useEffect } from 'react'
 import { Events } from '@wailsio/runtime'
 import { sameInviteList } from './RoomMembership'
@@ -183,6 +182,7 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
       unsubscribeFilesDropped()
       unsubscribeScheduledReminder()
     }
-  }, [historyRoomIDRef, refreshScheduledJobs, setHistoryRevision, setScheduledJobsError, setScheduledJobsOpen, setSettingsOpen, setSettingsTab])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- showScheduledNotice is recreated each render; this subscription should not re-register on each render
+  }, [historyRoomIDRef, refreshScheduledJobs, setHistoryRevision, setScheduledJobsError, setScheduledJobsOpen, setSettingsOpen, setSettingsTab, matrixUpdateHandlerRef, matrixUpdateHandlersRef, menuActionRef, messagesRef, nativeNotificationsRef, preferencesRef, roomsRef, selectedRoomRef, setError, setOtherAccountRooms, setPreferenceRef, setSearchOpen, setSelectedRoomID, setSnapshot, setTypingUsers, stageDroppedFilesRef])
   return { ...app }
 }

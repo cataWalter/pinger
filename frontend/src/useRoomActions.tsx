@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useEffect, useRef } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Message } from '../bindings/mychat/desktop/models.js'
@@ -116,7 +115,7 @@ export function useRoomActions(app: ReturnType<typeof useLocalAIChats>) {
     runArchive()
     const timer = window.setInterval(runArchive, 60 * 60 * 1000)
     return () => window.clearInterval(timer)
-  }, [automaticArchiveEnabled, preferences, rooms, selectedRoomID, snapshot?.activeAccountId])
+  }, [automaticArchiveEnabled, preferences, rooms, selectedRoomID, snapshot?.activeAccountId, automaticArchiveInFlightRef])
 
   function openMessageForward(message: Message) {
     const destination = rooms.find((candidate) => candidate.id !== selectedRoomID && isActiveAccountRoom(candidate))

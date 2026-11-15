@@ -4,7 +4,7 @@ import { formatComposerText, insertEmoji, type ComposerFormat } from './composer
 import { saveSnippets, type Snippet } from './snippets'
 import { useSnippetExpander } from './useSnippetExpander'
 import { describeError } from './appShared'
-import { deleteVolatileAIDraft, getVolatileAIDraft, updateVolatileAIDraft } from './volatileAIDrafts'
+import { getVolatileAIDraft, updateVolatileAIDraft } from './volatileAIDrafts'
 import type { useMessageAIActions } from './useMessageAIActions'
 
 export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>) {
@@ -21,17 +21,6 @@ export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>)
     }
   }
 
-  function discardVolatileAIDraft(roomID = selectedRoomID) {
-    const draft = getVolatileAIDraft(volatileAIDrafts, activeAccountID, roomID)
-    if (!draft) return
-    setVolatileAIDrafts((current) => deleteVolatileAIDraft(current, activeAccountID, roomID))
-    if (selectedRoomRef.current === roomID) {
-      composeTextRef.current = draft.baseText
-      setComposeText(draft.baseText)
-      setMentionBindings([])
-      setMentionStart(-1)
-    }
-  }
   timelineMessageActionsRef.current = {
     onDoubleClick: handleMessageDoubleClick,
     onOpenContextMenu: openMessageContextMenu,
@@ -217,5 +206,5 @@ export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>)
   async function createGroupRoom(request: GroupRoomRequest) {
     await openNewRoom(await AppService.CreateGroupRoom(request))
   }
-  return { ...app, snippetExpander, snippetOptions, snippetMatch, snippetMenuVisible, applyMention, useLanguageTutorDraft, useSuggestedReply, acceptAIResult, setComposeDraft, discardVolatileAIDraft, updateSnippets, applyEmojiSuggestion, toggleComposerEmojiPicker, insertPickedEmoji, applyFormatting, acceptInvite, declineInvite, openNewRoom, joinRoomByAddress, createGroupRoom }
+  return { ...app, snippetExpander, snippetOptions, snippetMatch, snippetMenuVisible, applyMention, useLanguageTutorDraft, useSuggestedReply, acceptAIResult, setComposeDraft, updateSnippets, applyEmojiSuggestion, toggleComposerEmojiPicker, insertPickedEmoji, applyFormatting, acceptInvite, declineInvite, openNewRoom, joinRoomByAddress, createGroupRoom }
 }

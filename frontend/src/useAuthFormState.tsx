@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { type Message, type Room } from '../bindings/mychat/desktop/models.js'
 import { useScheduledJobs } from './hooks/useScheduledJobs'
@@ -90,7 +89,7 @@ export function useAuthFormState(app: ReturnType<typeof useShellState> & Volatil
     repeatRemindersRef.current.forEach((timer) => window.clearTimeout(timer))
     if (undoToastTimerRef.current !== null) window.clearTimeout(undoToastTimerRef.current)
     if (scheduledNoticeTimerRef.current !== null) window.clearTimeout(scheduledNoticeTimerRef.current)
-  }, [])
+  }, [scheduledNoticeTimerRef, undoToastTimerRef])
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const voiceRecorderRef = useRef<MediaRecorder | null>(null)
   const voiceChunksRef = useRef<Blob[]>([])

@@ -11,6 +11,7 @@ export type SuggestedRepliesState = {
   roomId: string
   requestId: string
   status: 'loading' | 'ready' | 'error'
+  language: string
   suggestions: SuggestedReplyOption[]
   error: string
 }
@@ -18,12 +19,13 @@ export type SuggestedRepliesState = {
 type SuggestedRepliesPickerProps = {
   state: SuggestedRepliesState
   hasDraft: boolean
-  learningLanguage: string
   explanationLanguage: string
   onUse: (text: string) => void
   onRegenerate: () => void
   onClose: () => void
 }
+
+const skeletonRows = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 // isEditableTarget reports whether a key press belongs to a text field, so typing a digit there never chooses a reply.
 function isEditableTarget(target: EventTarget | null) {
@@ -32,7 +34,7 @@ function isEditableTarget(target: EventTarget | null) {
 }
 
 // SuggestedRepliesPicker lists AI reply options above the composer. Choosing one fills the draft and never sends it.
-export function SuggestedRepliesPicker({ state, hasDraft, learningLanguage, explanationLanguage, onUse, onRegenerate, onClose }: SuggestedRepliesPickerProps) {
+export function SuggestedRepliesPicker({ state, hasDraft, explanationLanguage, onUse, onRegenerate, onClose }: SuggestedRepliesPickerProps) {
   const [pending, setPending] = useState<string | null>(null)
   const loading = state.status === 'loading'
   const ready = state.status === 'ready'
@@ -58,7 +60,8 @@ export function SuggestedRepliesPicker({ state, hasDraft, learningLanguage, expl
         return
       }
       if (!ready || pending !== null || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) return
-      const index = Number(event.key) - 1
+      const digit = /^[0-9]$/.test(event.key) ? Number(event.key) : Number.NaN
+      const index = digit === 0 ? 9 : digit - 1
       if (Number.isInteger(index) && index >= 0 && index < options.length) {
         event.preventDefault()
         choose(options[index].text)
@@ -90,7 +93,7 @@ export function SuggestedRepliesPicker({ state, hasDraft, learningLanguage, expl
       )}
       {loading && options.length === 0 && (
         <ul className="suggested-replies-list suggested-replies-skeleton" aria-hidden="true">
-          {[0, 1, 2].map((index) => (
+          {skeletonRows.map((index) => (
             <li key={index}><span className="suggested-reply-skeleton-line" /></li>
           ))}
         </ul>
@@ -102,10 +105,10 @@ export function SuggestedRepliesPicker({ state, hasDraft, learningLanguage, expl
               <button type="button" className="suggested-reply-option" disabled={loading} onClick={() => choose(option.text)}>
                 <span className="suggested-reply-tone">{option.tone}</span>
                 <span className="suggested-reply-content">
-                  <span className="suggested-reply-text" lang={learningLanguage}>{option.text}</span>
-                  <span className="suggested-reply-translation" lang={explanationLanguage}>{option.translation}</span>
+                  <span className="suggested-reply-text" lang={state.language || undefined}>{option.text}</span>
+                  {option.translation && <span className="suggested-reply-translation" lang={explanationLanguage}>{option.translation}</span>}
                 </span>
-                <kbd className="suggested-reply-key" aria-hidden="true">{index + 1}</kbd>
+                <kbd className="suggested-reply-key" aria-hidden="true">{index === 9 ? 0 : index + 1}</kbd>
               </button>
             </li>
           ))}

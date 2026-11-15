@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useEffect, useMemo, type FormEvent } from 'react'
 import { AppService, LanguageTutorService } from '../bindings/mychat/desktop'
 import { type AIMessage, type Message } from '../bindings/mychat/desktop/models.js'
@@ -46,7 +45,7 @@ export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
     cancelAIRequest(chatTranslationAIRequestRef.current)
     chatTranslationAIRequestRef.current = ''
     setChatTranslation(null)
-  }, [selectedRoomID, activeAccountID])
+  }, [selectedRoomID, activeAccountID, chatTranslationAIRequestRef, chatTranslationRequestRef, setChatTranslation])
 
   // aiInstructions returns the tunable prompt for a feature. Built-in defaults are returned when no override is saved.
   function aiInstructions(featureID: AIFeatureID) {

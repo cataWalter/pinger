@@ -187,7 +187,7 @@ export function VoiceMessagePlayer({ label, waveformKey, durationMs, sizeBytes, 
           {loading ? <Loader2 className="audio-loading-icon" size={15} /> : playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
         </button>
         <div
-          className="voice-waveform"
+          className={peaks ? 'voice-waveform' : 'voice-waveform is-placeholder'}
           role="slider"
           tabIndex={canSeek ? 0 : -1}
           aria-label={`Seek ${label}`}

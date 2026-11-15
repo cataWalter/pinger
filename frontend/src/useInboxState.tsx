@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useCallback, useEffect, useMemo } from 'react'
 import { Events } from '@wailsio/runtime'
 import { AppService } from '../bindings/mychat/desktop'
@@ -22,7 +21,7 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
         ? { ...current, stage: update.stage ?? current.stage, step: update.step ?? current.step, totalSteps: update.totalSteps ?? current.totalSteps }
         : current)
     })
-  }, [imageRunRequestID])
+  }, [imageRunRequestID, setImageSendRun])
   // Export progress is only listened to while a room export is running.
   const runningChatExportRoomID = chatExport?.phase === 'running' ? chatExport.roomID : ''
   const chatExportForSelectedRoom = chatExport && chatExport.roomID === selectedRoom?.id ? chatExport : null
@@ -35,12 +34,12 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
         ? { ...current, stage: update.stage }
         : current)
     })
-  }, [runningChatExportRoomID])
+  }, [runningChatExportRoomID, setChatExport])
 
   const audioInputDevicePreference = preferenceString(preferences, 'audio.input_device', '')
   useEffect(() => {
     setSelectedAudioInputDeviceId(audioInputDevicePreference)
-  }, [audioInputDevicePreference])
+  }, [audioInputDevicePreference, setSelectedAudioInputDeviceId])
 
   useEffect(() => {
     let active = true
@@ -58,7 +57,7 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
       active = false
       mediaDevices.removeEventListener?.('devicechange', refreshAudioInputDevices)
     }
-  }, [])
+  }, [setAudioInputDevices])
   editTargetRef.current = editTarget
   const inboxAccountCount = snapshot?.accounts?.length ?? 0
   const archivedPreferenceKey = useCallback((roomID: string, accountID = '') => `room.archived.${accountID || activeAccountID || 'primary'}.${roomID}`, [activeAccountID])
@@ -76,7 +75,7 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
       active = false
       window.clearInterval(timer)
     }
-  }, [inboxAccountCount, activeAccountID])
+  }, [inboxAccountCount, activeAccountID, setOtherAccountRooms])
   // Rooms of signed-in accounts other than the active one are cached and refreshed on an interval.
   const effectiveAccountScope = inboxAccountCount > 1 ? inboxAccountScope : 'all'
   const crossAccountRooms = inboxAccountCount > 1 ? otherAccountRooms : EMPTY_ROOMS
@@ -141,7 +140,7 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
   useEffect(() => {
     setSelectedRoomIDs([])
     roomSelectionAnchorRef.current = ''
-  }, [effectiveAccountScope, roomScope, roomRefinements.unanswered, roomRefinements.needsReply, roomRefinements.favorite, search])
+  }, [effectiveAccountScope, roomScope, roomRefinements.unanswered, roomRefinements.needsReply, roomRefinements.favorite, search, roomSelectionAnchorRef, setSelectedRoomIDs])
   const mentionOptions = mentionStart < 0 ? [] : roomMembers.filter((member) => {
     const query = mentionQuery.toLowerCase()
     return `${member.displayName} ${member.id}`.toLowerCase().includes(query)
@@ -160,7 +159,7 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
     setSystemPrefersDark(mediaQuery.matches)
     mediaQuery.addEventListener('change', updateSystemTheme)
     return () => mediaQuery.removeEventListener('change', updateSystemTheme)
-  }, [])
+  }, [setSystemPrefersDark])
 
   function defaultScheduleDelayMinutes(key: string, fallback: number) {
     const minutes = Number(preferenceString(preferences, key, String(fallback)))

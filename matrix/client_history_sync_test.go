@@ -39,6 +39,97 @@ func TestHistoryPageReportsServerBackfill(t *testing.T) {
 	}
 }
 
+func TestOwnMessageForRoomRecognizesBridgedDirectChatSenders(t *testing.T) {
+	bridgePeerID := id.UserID("@contact:whatsapp")
+	bridgeRoom := &database.Room{DMUserID: &bridgePeerID}
+	matrixPeerID := id.UserID("@contact:example.org")
+	matrixRoom := &database.Room{DMUserID: &matrixPeerID}
+
+	tests := []struct {
+		name    string
+		message Message
+		userID  string
+		room    *database.Room
+		want    bool
+	}{
+		{name: "account sender", message: Message{Sender: "@me:example.org"}, userID: "@me:example.org", want: true},
+		{name: "bridged own puppet", message: Message{Sender: "@self:whatsapp"}, userID: "@me:example.org", room: bridgeRoom, want: true},
+		{name: "bridged peer", message: Message{Sender: bridgePeerID.String()}, userID: "@me:example.org", room: bridgeRoom, want: false},
+		{name: "ordinary direct peer", message: Message{Sender: "@other:example.org"}, userID: "@me:example.org", room: matrixRoom, want: false},
+		{name: "missing sender", message: Message{}, userID: "@me:example.org", room: bridgeRoom, want: false},
+		{name: "existing own flag", message: Message{Sender: "@self:whatsapp", Own: true}, room: matrixRoom, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isOwnMessageForRoom(test.message, test.userID, test.room); got != test.want {
+				t.Fatalf("isOwnMessageForRoom() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestHistoryPageMarksBridgedPuppetMessagesAsOwn(t *testing.T) {
+	client, err := New(filepath.Join(t.TempDir(), "profile", "matrix.db"))
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	roomID := id.RoomID("!bridged-history:example.org")
+	if err = client.engine.DB.Room.CreateRow(ctx, roomID); err != nil {
+		t.Fatalf("create room row: %v", err)
+	}
+	peerID := id.UserID("@contact:whatsapp")
+	if err = client.engine.DB.Room.Update(ctx, &database.Room{ID: roomID, DMUserID: &peerID}); err != nil {
+		t.Fatalf("store bridged direct-chat peer: %v", err)
+	}
+	client.engine.Account = &database.Account{UserID: id.UserID("@me:example.org")}
+
+	base := time.Date(2026, time.September, 2, 9, 0, 0, 0, time.UTC)
+	messages := []struct {
+		id     id.EventID
+		sender id.UserID
+		own    bool
+	}{
+		{id: "$own-puppet", sender: "@self:whatsapp", own: true},
+		{id: "$bridge-peer", sender: peerID, own: false},
+	}
+	rowIDs := make([]database.EventRowID, 0, len(messages))
+	for index, message := range messages {
+		rowID, insertErr := client.engine.DB.Event.Insert(ctx, &database.Event{
+			RoomID:    roomID,
+			ID:        message.id,
+			Sender:    message.sender,
+			Type:      event.EventMessage.Type,
+			Timestamp: jsontime.UM(base.Add(time.Duration(index) * time.Minute)),
+			Content:   json.RawMessage(`{"msgtype":"m.text","body":"history message"}`),
+			Unsigned:  json.RawMessage(`{}`),
+		})
+		if insertErr != nil {
+			t.Fatalf("insert message %s: %v", message.id, insertErr)
+		}
+		rowIDs = append(rowIDs, rowID)
+	}
+	if _, err = client.engine.DB.Timeline.Append(ctx, roomID, rowIDs); err != nil {
+		t.Fatalf("append room timeline: %v", err)
+	}
+
+	page, err := client.HistoryPageWithLimit(ctx, roomID.String(), 0, len(messages))
+	if err != nil {
+		t.Fatalf("load history page: %v", err)
+	}
+	if len(page.Messages) != len(messages) {
+		t.Fatalf("loaded %d messages, want %d", len(page.Messages), len(messages))
+	}
+	for index, want := range messages {
+		if got := page.Messages[index]; got.ID != string(want.id) || got.Own != want.own {
+			t.Errorf("message %q own=%t, want own=%t", got.ID, got.Own, want.own)
+		}
+	}
+}
+
 func BenchmarkHistoryPageWithLimit(b *testing.B) {
 	for _, messageCount := range []int{100, 250} {
 		b.Run(fmt.Sprintf("messages-%d", messageCount), func(b *testing.B) {

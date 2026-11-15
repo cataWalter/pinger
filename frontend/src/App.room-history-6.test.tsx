@@ -143,19 +143,19 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
     const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
     fireEvent.change(composer, { target: { value: 'My note' } })
+    await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
     await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
 
     await waitFor(() => expect(harness.service.AIGenerateReplyDraft).toHaveBeenCalledTimes(2))
     expect(harness.service.AIGenerateReplyDraft.mock.calls.map(([roomID]) => roomID).sort()).toEqual([room.id, secondRoom.id].sort())
     expect(composer.value).toBe(`My note\n\nAI reply for ${room.id}`)
+    expect(screen.getAllByTitle('AI reply draft').map((el) => el.textContent).join('\n')).toContain(`AI reply for ${room.id}`)
     expect(window.localStorage.getItem(ROOM_DRAFTS_STORAGE_KEY) ?? '').not.toContain('AI reply for')
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
     expect(harness.service.SendReply).not.toHaveBeenCalled()
 
     fireEvent.change(composer, { target: { value: 'My note\n\nEdited AI reply' } })
     expect(window.localStorage.getItem(ROOM_DRAFTS_STORAGE_KEY) ?? '').not.toContain('Edited AI reply')
-    await user.click(screen.getByRole('button', { name: 'Discard AI reply draft' }))
-    expect(composer.value).toBe('My note')
 
     await user.click(screen.getByRole('button', { name: /Second room/ }))
     await waitFor(() => expect(composer.value).toBe(`AI reply for ${secondRoom.id}`))
@@ -174,6 +174,7 @@ describe('room history updates', () => {
     render(<App />)
 
     expect(await screen.findByText('latest message')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
     await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
     await waitFor(() => expect(harness.service.AIGenerateReplyDraft).toHaveBeenCalledTimes(1))
     await user.click(screen.getByRole('button', { name: 'Cancel AI reply draft generation' }))
@@ -184,6 +185,25 @@ describe('room history updates', () => {
     expect(composer.value).toBe('')
     expect(screen.queryByText('AI reply draft')).toBeNull()
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('shows the AI reply draft control only with the Unanswered or Needs reply filter', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [{ ...room, unanswered: true, needsReply: true }],
+      preferences: { 'ai.endpoint': 'http://localhost:8080' },
+    })
+    render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Generate AI reply drafts' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
+    expect(screen.getByRole('button', { name: 'Generate AI reply drafts' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
+    expect(screen.getByRole('button', { name: 'Generate AI reply drafts' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
+    expect(screen.queryByRole('button', { name: 'Generate AI reply drafts' })).toBeNull()
   })
 
   it('keeps a generated reply after a failed send and clears it after a successful send', async () => {
@@ -198,6 +218,7 @@ describe('room history updates', () => {
 
     expect(await screen.findByText('latest message')).toBeTruthy()
     const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
     await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
     await waitFor(() => expect(composer.value).toBe('AI reply'))
 
@@ -243,7 +264,7 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     openMessageMenu(container)
-    await user.click(await screen.findByRole('menuitem', { name: 'Suggest three replies with local AI' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Suggest ten replies with local AI' }))
 
     const picker = await screen.findByRole('group', { name: 'Suggested replies' })
     expect(within(picker).getByRole('button', { name: /Maybe later\?/ })).toBeTruthy()
@@ -259,10 +280,30 @@ describe('room history updates', () => {
 
     await user.click(menuCommand('Suggest replies'))
     const picker = await screen.findByRole('group', { name: 'Suggested replies' })
-    expect(within(picker).getByText('Warm')).toBeTruthy()
-    expect(within(picker).getByText('Brief')).toBeTruthy()
     expect(within(picker).getByText('Direct')).toBeTruthy()
+    expect(within(picker).getByText('Playful')).toBeTruthy()
+    expect(within(picker).getByText('Formal')).toBeTruthy()
+    expect(within(picker).getByText('Confrontational')).toBeTruthy()
     expect(within(picker).getByText('3')).toBeTruthy()
+    expect(within(picker).getByText('0')).toBeTruthy()
+    expect(within(picker).getAllByRole('button').filter((button) => button.classList.contains('suggested-reply-option'))).toHaveLength(10)
+  })
+
+  it('chooses the tenth suggested reply with the 0 key', async () => {
+    const user = userEvent.setup()
+    harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+
+    await user.click(menuCommand('Suggest replies'))
+    await screen.findByRole('group', { name: 'Suggested replies' })
+    await user.keyboard('0')
+
+    expect(composer.value).toBe('Then stop talking and do it.')
+    expect(screen.queryByRole('group', { name: 'Suggested replies' })).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
   it('chooses a suggested reply with its number key without sending', async () => {

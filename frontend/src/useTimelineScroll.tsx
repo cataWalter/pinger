@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useEffect } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Message } from '../bindings/mychat/desktop/models.js'
@@ -33,7 +32,7 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
   useEffect(() => {
     selectedRoomRef.current = selectedRoomID
     void AppService.SetActiveRoom(selectedRoomID)
-  }, [selectedRoomID, snapshot?.activeAccountId])
+  }, [selectedRoomID, snapshot?.activeAccountId, selectedRoomRef])
 
   useEffect(() => {
     const handleContentBlurShortcut = (event: globalThis.KeyboardEvent) => {
@@ -57,7 +56,7 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
       window.removeEventListener('keydown', handleContentBlurShortcut)
       window.removeEventListener('keydown', handleHideImagesShortcut)
     }
-  }, [])
+  }, [preferencesRef, setPreferenceRef])
 
   useEffect(() => {
     const handleGlobalAnsweredShortcut = (event: globalThis.KeyboardEvent) => {
@@ -73,7 +72,7 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
     }
     window.addEventListener('keydown', handleGlobalAnsweredShortcut)
     return () => window.removeEventListener('keydown', handleGlobalAnsweredShortcut)
-  }, [activeThread, answeredShortcut, singleKeyShortcuts, leaveConfirmOpen, newRoomMode, quickSwitcherOpen, roomContextMenu, roomInfoOpen, redactTarget, selectedRoomID, settingsOpen])
+  }, [activeThread, answeredShortcut, singleKeyShortcuts, leaveConfirmOpen, newRoomMode, quickSwitcherOpen, roomContextMenu, roomInfoOpen, redactTarget, selectedRoomID, settingsOpen, markRoomAnsweredRef, roomsRef])
 
   useEffect(() => {
     if (!roomContextMenu && !messageContextMenu) return
@@ -99,7 +98,7 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
       document.removeEventListener('pointerdown', dismissOnOutsideClick)
       window.removeEventListener('keydown', dismissOnEscape)
     }
-  }, [roomContextMenu, messageContextMenu])
+  }, [roomContextMenu, messageContextMenu, setMessageContextMenu, setRoomContextMenu])
 
   // The reaction picker used to be toggled off by its own toolbar button, which
   // now lives in the right-click menu. Give it a dismissal path of its own.
@@ -118,7 +117,7 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
       document.removeEventListener('pointerdown', dismissOnOutsideClick)
       window.removeEventListener('keydown', dismissOnEscape)
     }
-  }, [reactingMessageID])
+  }, [reactingMessageID, setReactingMessageID])
 
   function isNearBottom(element: HTMLElement, tolerance = 96) {
     return element.scrollHeight - element.scrollTop - element.clientHeight <= tolerance

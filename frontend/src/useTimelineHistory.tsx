@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useEffect, useMemo } from 'react'
 import { Events } from '@wailsio/runtime'
 import { mainTimelineMessages, summarizeThreads } from './threads'
@@ -56,7 +55,7 @@ export function useTimelineHistory(app: ReturnType<typeof useAuthFormState>) {
       })
       .catch(() => { })
     return () => { active = false }
-  }, [])
+  }, [nativeNotificationsRef])
 
   const preferences = useMemo(() => snapshot?.preferences ?? {}, [snapshot?.preferences])
   const languagePreference = preferenceString(preferences, 'general.language', 'system')
@@ -70,11 +69,12 @@ export function useTimelineHistory(app: ReturnType<typeof useAuthFormState>) {
   const translateRecentLabel = `Translate messages received since your last message to ${languageName(chatTutorLanguage, languageRoles.languages)}`
   const rooms = snapshot?.rooms ?? EMPTY_ROOMS
   const selectedRoom = useMemo(() => rooms.find((room) => room.id === selectedRoomID), [rooms, selectedRoomID])
+  const currentUserID = snapshot?.profile.userId ?? ''
   const selectedRoomAvatar = useMemo(() => selectedRoom?.avatar || (
     historyRoomIDRef.current === selectedRoomID
-      ? newestOtherAvatar(messages)
+      ? newestOtherAvatar(messages, currentUserID)
       : ''
-  ), [historyRoomIDRef, messages, selectedRoom?.avatar, selectedRoomID])
+  ), [currentUserID, historyRoomIDRef, messages, selectedRoom?.avatar, selectedRoomID])
   const selectedRoomAvatarSource = useMemo(() => matrixMXCMediaURL(selectedRoomAvatar), [selectedRoomAvatar])
   const typingStatus = formatTypingStatus(typingUsers, roomMembers, messages, selectedRoom?.direct ? selectedRoom.name : '')
   const imageEngineReady = preferenceString(preferences, 'ai.image.binary_path', '') !== '' && preferenceString(preferences, 'ai.image.model_path', '') !== ''
@@ -176,6 +176,6 @@ export function useTimelineHistory(app: ReturnType<typeof useAuthFormState>) {
     const chunk = event.data as AIStreamChunk | undefined
     if (!chunk?.requestId) return
     aiStreamHandlersRef.current.get(chunk.requestId)?.(chunk)
-  }), [])
+  }), [aiStreamHandlersRef])
   return { ...app, loadingHistory, setLoadingHistory, historyRevision, setHistoryRevision, setHistoryPageRevision, historyRoomIDRef, pendingHistoryRefreshRoomIDRef, olderCursor, setOlderCursor, hasOlder, setHasOlder, hasOlderRef, loadingOlder, setLoadingOlder, loadingOlderRef, loadOlderMessages, preferences, languagePreference, roomDrafts, chatTutorLanguage, chatLearningLanguage, languageRoles, translateRecentLabel, rooms, selectedRoom, selectedRoomAvatar, selectedRoomAvatarSource, typingStatus, imageEngineReady, imageRunHere, imageRunStatus, imageButtonTooltip, roomAgentsPreferenceKey, roomAgents, localAIAgents, localAIActiveChat, localAIAgentCandidate, localAIAgentId, saveLocalAIRename, renameLocalAIChat, deleteLocalAIChat, saveLocalAIFolderDraft, deleteLocalAIFolder, moveLocalAIChatToFolder, appZoom, scheduleTimeSuggestions, answeredShortcut, singleKeyShortcuts, hideDeletedMessages, automaticArchiveEnabled, timelineMessages, threadSummaries, visibleMessages, activeThread, activeUnreadMarker, unreadMarkerID, unreadMarkerSeen }
 }

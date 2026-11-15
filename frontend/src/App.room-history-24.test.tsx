@@ -221,6 +221,33 @@ describe('room history updates', () => {
     expect(previews[1].querySelector('.room-preview-text')?.classList.contains('is-received')).toBe(true)
   })
 
+  it('shows a seen icon for own latest messages that another user has read', async () => {
+    const seenRoom: Room = {
+      ...room,
+      id: '!seen-message:example.org',
+      name: 'Seen by them',
+      preview: 'Seen message',
+      lastEventSender: snapshot.profile.userId,
+      lastEventSeenAt: 1793447100000,
+    }
+    const unseenRoom: Room = {
+      ...room,
+      id: '!unseen-message:example.org',
+      name: 'Not seen yet',
+      preview: 'Unseen message',
+      lastEventSender: snapshot.profile.userId,
+      lastEventSeenAt: 0,
+    }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [seenRoom, unseenRoom] })
+    const { container } = render(<App />)
+    expect(await screen.findByText('Seen message')).toBeTruthy()
+
+    const previews = container.querySelectorAll('.room-preview')
+    expect(previews[0].querySelector('.room-preview-sent.is-seen[aria-label="Seen"]')).toBeTruthy()
+    expect(previews[1].querySelector('.room-preview-sent.is-seen')).toBeNull()
+    expect(previews[1].querySelector('.room-preview-sent[aria-label="Sent by you"]')).toBeTruthy()
+  })
+
   it('shows the time for rooms active today and the date for rooms active on earlier days', async () => {
     const today = new Date()
     today.setHours(12, 0, 0, 0)

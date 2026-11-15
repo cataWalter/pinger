@@ -78,6 +78,9 @@ func (s *AppService) ensureNotificationPermission() (bool, error) {
 func (s *AppService) Logout() error {
 	accountID := s.currentAccountID()
 	client := s.currentClient()
+	if client == nil {
+		return errors.New("no active account to log out")
+	}
 	if err := client.Logout(s.ctx); err != nil {
 		return err
 	}
@@ -250,6 +253,10 @@ func (s *AppService) close() {
 func mapRooms(rooms []matrix.Room) []Room {
 	mapped := make([]Room, 0, len(rooms))
 	for _, room := range rooms {
+		lastEventSeenAt := int64(0)
+		if !room.LastEventSeenAt.IsZero() {
+			lastEventSeenAt = room.LastEventSeenAt.UnixMilli()
+		}
 		mapped = append(mapped, Room{
 			ID:              room.ID,
 			Name:            room.Name,
@@ -268,6 +275,7 @@ func mapRooms(rooms []matrix.Room) []Room {
 			LastEventID:     room.LastEventID,
 			LastEventSender: room.LastEventSender,
 			LastEventAt:     room.LastEventAt.UnixMilli(),
+			LastEventSeenAt: lastEventSeenAt,
 			Bridge:          room.Bridge,
 		})
 	}

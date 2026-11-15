@@ -27,10 +27,10 @@ export function formatTypingStatus(userIDs: string[], members: Member[], message
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} are typing`
 }
 
-export function newestOtherAvatar(messages: Message[]) {
+export function newestOtherAvatar(messages: Message[], currentUserID: string) {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]
-    if (!message.own && message.avatar) return message.avatar
+    if (!isOwnMessage(message, currentUserID) && message.avatar) return message.avatar
   }
   return ''
 }

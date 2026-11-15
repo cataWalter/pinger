@@ -1,16 +1,19 @@
-/* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useEffect, type FormEvent } from 'react'
 import { useRef, useState } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Room, type Snapshot } from '../bindings/mychat/desktop/models.js'
 import { useAccountSwitching } from './hooks/useAccountSwitching'
 import { isLocalAIRoomID, localAIChatIDFromRoomID } from './localAIChats'
-import { describeError, isNeedsReplyRoom } from './appShared'
-import { appendAIDraft, getVolatileAIDraft, setVolatileAIDraft } from './volatileAIDrafts'
+import { describeError, isNeedsReplyRoom, preferenceBoolean } from './appShared'
+import { roomActivityAt } from './rooms'
+import { appendAIDraft, dropArchivedVolatileAIDrafts, getVolatileAIDraft, setVolatileAIDraft } from './volatileAIDrafts'
 import type { useAIRequests } from './useAIRequests'
 
+// AI_DRAFT_REQUEST_TIMEOUT_MS is slightly above the backend's 10 minute completion limit.
+const AI_DRAFT_REQUEST_TIMEOUT_MS = 11 * 60 * 1000
+
 export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
-  const { composeTextRef, roomDrafts, rooms, setVolatileAIDrafts, volatileAIDrafts } = app
+  const { archivedPreferenceKey, composeTextRef, preferences, roomDrafts, rooms, setVolatileAIDrafts, volatileAIDrafts } = app
   const { accountHomeserver, accountPassword, accountUsername, activeAIRequestRef, activeAccountID, aiEnabled, busy, cancelAIRequest, chatTranslationAIRequestRef, chatTranslationRequestRef, clearRoomSelection, closeLanguageTutor, editTarget, filteredRooms, forwardBusy, handleRoomKeyDown, historyRoomIDRef, imageSendRun, isActiveAccountRoom, languageTutorRequestRef, lastReadEventByRoom, leavingRoom, loadingOlderRef, newAIRequestID, openRoomContextMenu, pendingHistoryRefreshRoomIDRef, pendingSearchJumpRef, refreshScheduledJobs, roomButtonActionsRef, roomSelectionAnchorRef, scheduledBusyID, scheduledSaving, selectLocalAIChat, selectedRoomID, selectedRoomRef, setAIPanel, setAccountError, setAccountManagerOpen, setAccountPassword, setAccountUsername, setAddingAccount, setBusy, setChatTranslation, setComposeText, setEditTarget, setForwardingMessage, setGeneratedImageReview, setImageSendRun, setLanguageTutorState, setLeaveConfirmOpen, setLoadingOlder, setLocalAIChatOpen, setMediaApproval, setMentionBindings, setMessageContextMenu, setMessages, setMobilePane, setRedactTarget, setReplyTarget, setRoomContextMenu, setRoomInfoOpen, setRoomMembers, setScheduledDraft, setScheduledJobs, setScheduledJobsOpen, setScheduledTimes, setSearchNextBatch, setSearchOpen, setSearchResults, setSelectedRoomID, setSelectedRoomIDs, setSnapshot, setSuggestedReplies, setSummaryStatus, setTypingUsers, setUndoRoomID, showRoom, suggestedRepliesRequestRef, summaryLoadingRef, undoToastTimerRef, voiceCaptureStatus, workspaceGenerationRef } = app
   const [aiReplyDraftBatch, setAIReplyDraftBatch] = useState({
     status: 'idle' as 'idle' | 'running' | 'complete' | 'cancelled',
@@ -20,20 +23,20 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
   })
   const replyDraftBatchRef = useRef<{ accountID: string; requestIDs: Set<string>; cancelled: boolean } | null>(null)
 
-  // suggestRepliesForRoom asks Local AI for three reply options based on the latest messages in roomID.
+  // suggestRepliesForRoom asks Local AI for ten reply options, each in a different style, based on the latest messages in roomID.
   async function suggestRepliesForRoom(roomID: string) {
     if (!roomID || !aiEnabled || editTarget) return
     cancelAIRequest(suggestedRepliesRequestRef.current)
     const requestID = newAIRequestID()
     suggestedRepliesRequestRef.current = requestID
-    setSuggestedReplies((previous) => ({ roomId: roomID, requestId: requestID, status: 'loading', suggestions: previous?.roomId === roomID ? previous.suggestions : [], error: '' }))
+    setSuggestedReplies((previous) => ({ roomId: roomID, requestId: requestID, status: 'loading', language: previous?.roomId === roomID ? previous.language : '', suggestions: previous?.roomId === roomID ? previous.suggestions : [], error: '' }))
     try {
       const result = await AppService.AISuggestReplies(roomID, requestID)
       if (suggestedRepliesRequestRef.current !== requestID) return
-      setSuggestedReplies({ roomId: roomID, requestId: requestID, status: 'ready', suggestions: result.suggestions ?? [], error: '' })
+      setSuggestedReplies({ roomId: roomID, requestId: requestID, status: 'ready', language: result.language ?? '', suggestions: result.suggestions ?? [], error: '' })
     } catch (suggestError) {
       if (suggestedRepliesRequestRef.current !== requestID) return
-      setSuggestedReplies({ roomId: roomID, requestId: requestID, status: 'error', suggestions: [], error: describeError(suggestError) })
+      setSuggestedReplies({ roomId: roomID, requestId: requestID, status: 'error', language: '', suggestions: [], error: describeError(suggestError) })
     } finally {
       if (suggestedRepliesRequestRef.current === requestID) suggestedRepliesRequestRef.current = ''
     }
@@ -57,11 +60,31 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
     setAIReplyDraftBatch((current) => current.status === 'running' ? { ...current, status: 'cancelled' } : current)
   }
 
+  // withDraftTimeout stops a draft request that never settles, so one hung call cannot keep the batch running.
+  // The limit is slightly above the backend's longest completion timeout.
+  function withDraftTimeout<T>(request: Promise<T>, requestID: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        cancelAIRequest(requestID)
+        reject(new Error('The reply draft took too long'))
+      }, AI_DRAFT_REQUEST_TIMEOUT_MS)
+    })
+    return Promise.race([request, timeout]).finally(() => clearTimeout(timer))
+  }
+
+  // isArchivedRoom reports whether the room is archived. Archived rooms never get AI drafts.
+  function isArchivedRoom(accountID: string, roomID: string) {
+    return preferenceBoolean(preferences, archivedPreferenceKey(roomID, accountID))
+  }
+
   async function generateNeedsReplyDrafts() {
     if (!aiEnabled || busy || editTarget || replyDraftBatchRef.current) return
     const candidates = rooms.filter((room) => isActiveAccountRoom(room)
       && isNeedsReplyRoom(room)
+      && !isArchivedRoom(room.accountId, room.id)
       && !getVolatileAIDraft(volatileAIDrafts, activeAccountID, room.id))
+      .sort((left, right) => roomActivityAt(left) - roomActivityAt(right))
     if (candidates.length === 0) {
       setAIReplyDraftBatch({ status: 'complete', completed: 0, total: 0, failures: [] })
       return
@@ -81,8 +104,9 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
         const requestID = newAIRequestID()
         run.requestIDs.add(requestID)
         try {
-          const reply = await AppService.AIGenerateReplyDraft(room.id, requestID)
+          const reply = await withDraftTimeout(AppService.AIGenerateReplyDraft(room.id, requestID), requestID)
           if (run.cancelled || replyDraftBatchRef.current !== run) return
+          if (isArchivedRoom(room.accountId, room.id)) continue
           const baseText = roomDrafts.get(room.id) ?? (selectedRoomRef.current === room.id ? composeTextRef.current : '')
           const draft = { baseText, text: appendAIDraft(baseText, reply) }
           setVolatileAIDrafts((current) => setVolatileAIDraft(current, activeAccountID, room.id, draft))
@@ -112,11 +136,19 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
 
   useEffect(() => {
     if (replyDraftBatchRef.current && replyDraftBatchRef.current.accountID !== activeAccountID) cancelAIDraftBatch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelAIDraftBatch is recreated each render; the effect follows only the account
   }, [activeAccountID])
 
   useEffect(() => {
     if (app.snapshot && !app.snapshot.loggedIn) setVolatileAIDrafts(new Map())
-  }, [app.snapshot?.loggedIn])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only loggedIn is read; re-running on every snapshot change is not wanted
+  }, [app.snapshot?.loggedIn, setVolatileAIDrafts])
+
+  // Discard unsent AI drafts for rooms that are archived, including rooms archived while a draft was waiting.
+  useEffect(() => {
+    setVolatileAIDrafts((current) => dropArchivedVolatileAIDrafts(current, isArchivedRoom))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isArchivedRoom is recreated each render; the prune follows preferences and rooms
+  }, [preferences, rooms, setVolatileAIDrafts])
 
   // Close the picker when the open room changes so its options never apply to another room.
   useEffect(() => {
@@ -124,14 +156,16 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
     suggestedRepliesRequestRef.current = ''
     setSuggestedReplies(null)
     cancelAIRequest(requestID)
-  }, [selectedRoomID, activeAccountID])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelAIRequest only calls AppService; it is recreated each render
+  }, [selectedRoomID, activeAccountID, setSuggestedReplies, suggestedRepliesRequestRef])
 
   useEffect(() => {
     const requestID = languageTutorRequestRef.current
     languageTutorRequestRef.current = ''
     setLanguageTutorState(null)
     cancelAIRequest(requestID)
-  }, [selectedRoomID, activeAccountID])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelAIRequest only calls AppService; it is recreated each render
+  }, [selectedRoomID, activeAccountID, languageTutorRequestRef, setLanguageTutorState])
 
   function closeAIResult() {
     cancelAIRequest(activeAIRequestRef.current)

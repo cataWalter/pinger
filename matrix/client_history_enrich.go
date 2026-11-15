@@ -140,6 +140,17 @@ func (c *Client) isOwnMessage(message Message) bool {
 	return c.engine.Account != nil && message.Sender == c.engine.Account.UserID.String()
 }
 
+func isOwnMessageForRoom(message Message, ownUserID string, room *database.Room) bool {
+	if message.Own || (ownUserID != "" && message.Sender == ownUserID) {
+		return true
+	}
+	bridge := bridgeLabel(room)
+	if message.Sender == "" || room == nil || room.DMUserID == nil || bridge == "" || bridge == "BR" {
+		return false
+	}
+	return message.Sender != room.DMUserID.String()
+}
+
 func (c *Client) enrichOwnMessage(ctx context.Context, roomID string, message Message) Message {
 	profile := c.Profile()
 	if message.Sender == "" {

@@ -125,6 +125,7 @@ export const room: Room = {
   lastEventId: '',
   lastEventSender: '',
   lastEventAt: 0,
+  lastEventSeenAt: 0,
   accountId: 'primary',
   bridge: '',
 }
@@ -186,9 +187,16 @@ export function menuCommand(label: string) {
 }
 
 export const suggestedReplyFixture = [
-  { tone: 'Warm', text: 'Sounds good!', translation: 'Sounds good!' },
-  { tone: 'Brief', text: 'Maybe later?', translation: 'Maybe later?' },
-  { tone: 'Direct', text: 'Let me check and tell you.', translation: 'Let me check and tell you.' },
+  { tone: 'Direct', text: 'Sounds good!', translation: 'Sounds good!' },
+  { tone: 'Playful', text: 'Maybe later?', translation: 'Maybe later?' },
+  { tone: 'Formal', text: 'Let me check and tell you.', translation: 'Let me check and tell you.' },
+  { tone: 'Curious', text: 'What time works for you?', translation: 'What time works for you?' },
+  { tone: 'Empathetic', text: 'That sounds tough. Want to talk?', translation: 'That sounds tough. Want to talk?' },
+  { tone: 'Humorous', text: 'Coffee first, then everything else.', translation: 'Coffee first, then everything else.' },
+  { tone: 'Follow-up', text: 'Did you ever finish that?', translation: 'Did you ever finish that?' },
+  { tone: 'Flirty medium', text: 'Hope your day is going well.', translation: 'Hope your day is going well.' },
+  { tone: 'Flirty hard', text: 'Careful, you are making me blush.', translation: 'Careful, you are making me blush.' },
+  { tone: 'Confrontational', text: 'Then stop talking and do it.', translation: 'Then stop talking and do it.' },
 ]
 
 export const snapshot: Snapshot = {

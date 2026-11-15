@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps -- deps mirror the original component closure; setters and refs come from other hooks */
 import { useEffect, type FormEvent } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type MessageSearchRequest } from '../bindings/mychat/desktop/models.js'
@@ -33,14 +32,14 @@ export function useMessageSearch(app: ReturnType<typeof useMediaGalleryState>) {
         if (lastReadEventByRoom.current.get(selectedRoomID) === eventID) lastReadEventByRoom.current.delete(selectedRoomID)
         setError(describeError(readError))
       })
-  }, [activeAccountID, historyRoomIDRef, loadingHistory, messages, selectedRoom?.lastEventId, selectedRoom?.mentions, selectedRoom?.unread, selectedRoomID])
+  }, [activeAccountID, historyRoomIDRef, loadingHistory, messages, selectedRoom?.lastEventId, selectedRoom?.mentions, selectedRoom?.unread, selectedRoomID, lastReadEventByRoom, setError, setSnapshot, workspaceGenerationRef])
 
   useEffect(() => {
     if (!activeUnreadMarker || activeUnreadMarker.messageID) return
     if (loadingHistory || historyRoomIDRef.current !== selectedRoomID || visibleMessages.length === 0) return
     const messageID = firstUnreadMessageID(visibleMessages, activeUnreadMarker.count, currentUserIDRef.current)
     setUnreadMarker(messageID ? { ...activeUnreadMarker, messageID } : null)
-  }, [activeUnreadMarker, historyRoomIDRef, loadingHistory, selectedRoomID, visibleMessages])
+  }, [activeUnreadMarker, historyRoomIDRef, loadingHistory, selectedRoomID, visibleMessages, currentUserIDRef, setUnreadMarker])
 
   // The jump pill shows only while the divider is out of view; seeing it once hides the pill for good.
   useEffect(() => {
@@ -60,7 +59,7 @@ export function useMessageSearch(app: ReturnType<typeof useMediaGalleryState>) {
       observer.disconnect()
       unreadObserverRef.current = null
     }
-  }, [unreadMarkerID, unreadMarkerSeen])
+  }, [unreadMarkerID, unreadMarkerSeen, setUnreadMarker, timelineRef, unreadObserverRef])
 
   function messageSearchRequest(nextBatch = ''): MessageSearchRequest | null {
     const query = messageSearch.trim()

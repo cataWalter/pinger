@@ -137,6 +137,7 @@ describe('browser smoke: performance', () => {
       name: `Room ${index + 1}`,
       preview: `Preview ${index + 1}`,
       lastEventAt: 1793447100000 + index * 1000,
+      lastEventSeenAt: 0,
     }))
     service.Snapshot.mockResolvedValueOnce({ ...snapshot, accounts, rooms: rooms.filter((room) => room.accountId === 'primary') })
     const accountRoomsImplementation = service.AccountRooms.getMockImplementation()!

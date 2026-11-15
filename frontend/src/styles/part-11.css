@@ -193,6 +193,12 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .audio-loading-icon {
+    animation: none;
+  }
+}
+
 .audio-play-button:focus-visible,
 .voice-waveform:focus-visible,
 .voice-speed:focus-visible {
@@ -205,7 +211,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 2px;
-  height: 34px;
+  height: 36px;
   padding: 0 3px;
   min-width: 0;
   cursor: pointer;
@@ -217,13 +223,21 @@
   cursor: default;
 }
 
+.voice-waveform.is-placeholder {
+  opacity: .55;
+}
+
 .voice-waveform-bar {
   flex: 1 1 0;
   min-width: 1px;
   max-width: 3px;
   border-radius: var(--radius-xs);
   background: var(--faint);
-  transition: background-color var(--motion-fast) linear;
+  transition: background-color var(--motion-fast) linear, height var(--motion-fast) var(--ease-out);
+}
+
+.voice-waveform:not([aria-disabled='true']):hover .voice-waveform-bar:not(.is-played) {
+  background: var(--muted);
 }
 
 .voice-waveform-bar.is-played {

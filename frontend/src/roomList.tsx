@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowUpRight, Bot, FileText, MessageSquare, Star } from 'lucide-react'
+import { ArrowUpRight, Bot, CheckCheck, FileText, MessageSquare, Sparkles, Star } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Room } from '../bindings/mychat/desktop/models.js'
 import { isLocalAIRoomID, type LocalAIChatIcon } from './localAIChats'
@@ -11,7 +11,7 @@ import { roomActivityAt } from './rooms'
 
 export const LOCAL_AI_ROW_ICONS: Record<LocalAIChatIcon, typeof MessageSquare> = { agent: Bot, chat: MessageSquare, summary: FileText }
 
-export const RoomButton = memo(function RoomButton({ room, index, active, needsReply, multiSelected, lastMessageByMe, use24Hour, showNetwork, showUnreadCounts, aiIcon, actionsRef }: { room: Room; index: number; active: boolean; needsReply: boolean; multiSelected: boolean; lastMessageByMe: boolean; use24Hour: boolean; showNetwork: boolean; showUnreadCounts: boolean; aiIcon?: LocalAIChatIcon; actionsRef: { current: RoomButtonActions } }) {
+export const RoomButton = memo(function RoomButton({ room, index, active, needsReply, multiSelected, lastMessageByMe, use24Hour, showNetwork, showUnreadCounts, aiIcon, aiDraft, actionsRef }: { room: Room; index: number; active: boolean; needsReply: boolean; multiSelected: boolean; lastMessageByMe: boolean; use24Hour: boolean; showNetwork: boolean; showUnreadCounts: boolean; aiIcon?: LocalAIChatIcon; aiDraft?: string; actionsRef: { current: RoomButtonActions } }) {
   const RowIcon = LOCAL_AI_ROW_ICONS[aiIcon ?? 'chat']
   const hasUnread = room.unread > 0 || room.markedUnread
   // Rooms without a message time show their sorting time, which the sidebar is already ordered by.
@@ -24,8 +24,14 @@ export const RoomButton = memo(function RoomButton({ room, index, active, needsR
       <span className="room-copy">
         <span className="room-name">{room.favorite && <Star size={10} fill="currentColor" aria-label="Favorite" />}<span className="room-name-text">{room.name || room.id}</span>{room.muted && <span className="room-muted-mark" title="Muted">· muted</span>}{showNetwork && room.bridge && <span className="room-network" style={{ '--network-hue': networkHue(room.bridge) } as React.CSSProperties}>{room.bridge}</span>}</span>
         <span className="room-preview">
-          {lastMessageByMe && room.preview && <span className="room-preview-sent" role="img" aria-label="Sent by you" title="Sent by you"><ArrowUpRight size={11} /></span>}
-          <span className={`room-preview-text ${room.preview && room.lastEventSender && !lastMessageByMe ? 'is-received' : ''}`}>{room.preview || room.topic}</span>
+          {aiDraft
+            ? <span className="room-preview-text" title="AI reply draft"><Sparkles size={11} aria-hidden="true" /> {aiDraft}</span>
+            : <>
+              {lastMessageByMe && room.preview && (room.lastEventSeenAt > 0
+                ? <span className="room-preview-sent is-seen" role="img" aria-label="Seen" title="Seen"><CheckCheck size={11} /></span>
+                : <span className="room-preview-sent" role="img" aria-label="Sent by you" title="Sent by you"><ArrowUpRight size={11} /></span>)}
+              <span className={`room-preview-text ${room.preview && room.lastEventSender && !lastMessageByMe ? 'is-received' : ''}`}>{room.preview || room.topic}</span>
+            </>}
         </span>
       </span>
       <span className="room-meta">

@@ -152,19 +152,74 @@ func testSuggestedRepliesTuning() aiFeatureTuning {
 }
 
 func testSuggestedRepliesInput(transcript, latest string) suggestedRepliesInput {
-	languages := testLanguageTutorLanguages()
-	languages.Names["es"] = "Spanish"
-	return suggestedRepliesInput{Transcript: transcript, Latest: latest, LearningLanguage: "es", ExplanationLanguage: "en", Languages: languages}
+	return suggestedRepliesInput{Transcript: transcript, Latest: latest, ExplanationLanguage: "en", Languages: testLanguageTutorLanguages()}
 }
 
-func TestRequestSuggestedRepliesReturnsThreeTrimmedOptions(t *testing.T) {
-	server, stub := newSuggestedRepliesServer(t, `{"suggestions":[{"tone":" Warm ","text":"  Claro, me gusta  ","translation":"  Sure, sounds good  "},{"tone":"Brief","text":"Quizás luego?","translation":"Maybe later?"},{"tone":"Direct","text":"Hablemos mañana.","translation":"Let's talk tomorrow."}]}`)
+// testSuggestedReplyOptions returns one valid option for every tone, in tone order.
+func testSuggestedReplyOptions() []SuggestedReply {
+	texts := []string{"one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"}
+	options := make([]SuggestedReply, 0, len(suggestedRepliesTones))
+	for index, tone := range suggestedRepliesTones {
+		options = append(options, SuggestedReply{Tone: tone, Text: "Reply " + texts[index], Translation: "Translation " + texts[index]})
+	}
+	return options
+}
+
+func testSuggestedRepliesResponse(t *testing.T, language string, options []SuggestedReply) string {
+	t.Helper()
+	data, err := json.Marshal(SuggestedReplies{Language: language, Suggestions: options})
+	if err != nil {
+		t.Fatalf("marshal suggestions: %v", err)
+	}
+	return string(data)
+}
+
+func TestSuggestedRepliesSchemaMatchesTones(t *testing.T) {
+	var schema struct {
+		Properties struct {
+			Suggestions struct {
+				MinItems int `json:"minItems"`
+				MaxItems int `json:"maxItems"`
+				Items    struct {
+					Properties struct {
+						Tone struct {
+							Enum []string `json:"enum"`
+						} `json:"tone"`
+					} `json:"properties"`
+				} `json:"items"`
+			} `json:"suggestions"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(suggestedRepliesSchema, &schema); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	suggestions := schema.Properties.Suggestions
+	if suggestions.MinItems != suggestedRepliesCount || suggestions.MaxItems != suggestedRepliesCount {
+		t.Fatalf("schema item bounds = %d..%d, want %d", suggestions.MinItems, suggestions.MaxItems, suggestedRepliesCount)
+	}
+	if strings.Join(suggestions.Items.Properties.Tone.Enum, "|") != strings.Join(suggestedRepliesTones, "|") {
+		t.Fatalf("schema tones = %v, want %v", suggestions.Items.Properties.Tone.Enum, suggestedRepliesTones)
+	}
+}
+
+func TestRequestSuggestedRepliesReturnsTrimmedOptions(t *testing.T) {
+	options := testSuggestedReplyOptions()
+	options[0].Tone = " Direct "
+	options[0].Text = "  Claro, me gusta  "
+	options[0].Translation = "  Sure, sounds good  "
+	server, stub := newSuggestedRepliesServer(t, testSuggestedRepliesResponse(t, " ES ", options))
 
 	replies, err := requestSuggestedReplies(context.Background(), server.Client(), server.URL, "local.gguf", testSuggestedRepliesTuning(), testSuggestedRepliesInput("Alice: are we still on for lunch?\n", "Alice: are we still on for lunch?"))
 	if err != nil {
 		t.Fatalf("requestSuggestedReplies error: %v", err)
 	}
-	if got := suggestedReplyKeys(replies.Suggestions); got != "Warm:Claro, me gusta|Brief:Quizás luego?|Direct:Hablemos mañana." {
+	if replies.Language != "es" {
+		t.Fatalf("language = %q, want es", replies.Language)
+	}
+	if len(replies.Suggestions) != suggestedRepliesCount {
+		t.Fatalf("suggestions = %d, want %d", len(replies.Suggestions), suggestedRepliesCount)
+	}
+	if got := suggestedReplyKeys(replies.Suggestions[:2]); got != "Direct:Claro, me gusta|Playful:Reply two" {
 		t.Fatalf("suggestions = %q", got)
 	}
 	if replies.Suggestions[0].Translation != "Sure, sounds good" {
@@ -178,7 +233,7 @@ func TestRequestSuggestedRepliesReturnsThreeTrimmedOptions(t *testing.T) {
 	if !strings.Contains(requests[0], `"enable_thinking":false`) {
 		t.Fatalf("request does not disable thinking: %s", requests[0])
 	}
-	if !strings.Contains(requests[0], `"maxItems":3`) || !strings.Contains(requests[0], "suggested_replies") {
+	if !strings.Contains(requests[0], `"maxItems":10`) || !strings.Contains(requests[0], "suggested_replies") {
 		t.Fatalf("request does not constrain output with the suggestions schema: %s", requests[0])
 	}
 	var sent struct {
@@ -193,7 +248,7 @@ func TestRequestSuggestedRepliesReturnsThreeTrimmedOptions(t *testing.T) {
 	if len(sent.Messages) != 2 || !strings.Contains(sent.Messages[0].Content, "Suggest replies.") || !strings.Contains(sent.Messages[0].Content, "untrusted data") {
 		t.Fatalf("system message = %+v, want the feature prompt and fixed rules", sent.Messages)
 	}
-	if !strings.Contains(sent.Messages[1].Content, "Learning language: Spanish (es). Explanation language: English (en).") {
+	if !strings.Contains(sent.Messages[1].Content, "Explanation language: English (en).") {
 		t.Fatalf("user message does not contain the room languages: %q", sent.Messages[1].Content)
 	}
 	if !strings.Contains(sent.Messages[1].Content, "<chat_transcript>\nAlice: are we still on for lunch?\n</chat_transcript>") {
@@ -220,8 +275,22 @@ func TestRequestAIReplyDraftReturnsOneTrimmedReply(t *testing.T) {
 	if !strings.Contains(requests[0], `"ai_reply_draft"`) || !strings.Contains(requests[0], `"required":["text"]`) {
 		t.Fatalf("request does not constrain output to one reply: %s", requests[0])
 	}
-	if !strings.Contains(requests[0], "Match the language, tone, and level of formality") || !strings.Contains(requests[0], "untrusted data") {
+	if !strings.Contains(requests[0], "Write the reply in the chat's target language") || !strings.Contains(requests[0], "untrusted data") {
 		t.Fatalf("request does not contain the fixed reply rules: %s", requests[0])
+	}
+}
+
+func TestReplyDraftLanguageUsesChatLearningLanguage(t *testing.T) {
+	const roomID = "!chat:example.org"
+	preferences := map[string]any{
+		tutorLearningLanguagePreference:               "tr",
+		roomLearningLanguagePreferencePrefix + roomID: "es",
+	}
+	if got := replyDraftLanguage(preferences, roomID); !strings.Contains(got, "(es)") {
+		t.Fatalf("replyDraftLanguage = %q, want the chat learning language es", got)
+	}
+	if got := replyDraftLanguage(preferences, "!other:example.org"); !strings.Contains(got, "(tr)") {
+		t.Fatalf("replyDraftLanguage without a chat setting = %q, want the global learning language tr", got)
 	}
 }
 
@@ -237,13 +306,14 @@ func TestRequestAIReplyDraftRejectsEmptyAndMalformedOutput(t *testing.T) {
 }
 
 func TestRequestSuggestedRepliesRetriesUnusableOutputOnce(t *testing.T) {
-	server, stub := newSuggestedRepliesServer(t, "not json at all", "```json\n{\"suggestions\":[{\"tone\":\"Warm\",\"text\":\"Uno\",\"translation\":\"One\"},{\"tone\":\"Brief\",\"text\":\"Dos\",\"translation\":\"Two\"},{\"tone\":\"Direct\",\"text\":\"Tres\",\"translation\":\"Three\"}]}\n```")
+	valid := testSuggestedRepliesResponse(t, "en", testSuggestedReplyOptions())
+	server, stub := newSuggestedRepliesServer(t, "not json at all", "```json\n"+valid+"\n```")
 
 	replies, err := requestSuggestedReplies(context.Background(), server.Client(), server.URL, "local.gguf", testSuggestedRepliesTuning(), testSuggestedRepliesInput("Alice: hi\n", "Alice: hi"))
 	if err != nil {
 		t.Fatalf("requestSuggestedReplies error: %v", err)
 	}
-	if got := suggestedReplyKeys(replies.Suggestions); got != "Warm:Uno|Brief:Dos|Direct:Tres" {
+	if got := suggestedReplyKeys(replies.Suggestions[:2]); got != "Direct:Reply one|Playful:Reply two" {
 		t.Fatalf("suggestions = %q", got)
 	}
 	requests := stub.requests()
@@ -255,12 +325,12 @@ func TestRequestSuggestedRepliesRetriesUnusableOutputOnce(t *testing.T) {
 	}
 }
 
-func TestRequestSuggestedRepliesFailsWhenCountIsNotThree(t *testing.T) {
-	server, stub := newSuggestedRepliesServer(t, `{"suggestions":[{"tone":"Warm","text":"Only one"},{"tone":"Brief","text":""}]}`)
+func TestRequestSuggestedRepliesFailsWhenCountIsWrong(t *testing.T) {
+	server, stub := newSuggestedRepliesServer(t, `{"language":"en","suggestions":[{"tone":"Direct","text":"Only one"},{"tone":"Playful","text":""}]}`)
 
 	_, err := requestSuggestedReplies(context.Background(), server.Client(), server.URL, "local.gguf", testSuggestedRepliesTuning(), testSuggestedRepliesInput("Alice: hi\n", "Alice: hi"))
 	if err == nil {
-		t.Fatal("expected an error for fewer than three suggestions")
+		t.Fatal("expected an error for a wrong suggestion count")
 	}
 	if got := len(stub.requests()); got != suggestedRepliesRetryCount {
 		t.Fatalf("requests = %d, want %d", got, suggestedRepliesRetryCount)
@@ -318,11 +388,36 @@ func TestSuggestedRepliesTranscriptHasNoLatestWithoutOtherSender(t *testing.T) {
 }
 
 func TestParseSuggestedRepliesKeepsTonesTrimmed(t *testing.T) {
-	replies, err := parseSuggestedReplies(`{"suggestions":[{"tone":" Warm ","text":" Hi there ","translation":" Hello there "},{"tone":"Brief","text":"Hi","translation":"Ciao"},{"tone":"Direct","text":"Are you free at noon?","translation":"Sei libero a mezzogiorno?"}]}`)
+	options := testSuggestedReplyOptions()
+	options[0].Tone = " Direct "
+	options[0].Text = " Hi there "
+	options[0].Translation = " Hello there "
+	replies, err := parseSuggestedReplies(testSuggestedRepliesResponse(t, "it", options), "en")
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	if got := suggestedReplyKeys(replies); got != "Warm:Hi there|Brief:Hi|Direct:Are you free at noon?" {
+	if replies.Language != "it" {
+		t.Fatalf("language = %q, want it", replies.Language)
+	}
+	if got := suggestedReplyKeys(replies.Suggestions[:2]); got != "Direct:Hi there|Playful:Reply two" {
 		t.Fatalf("suggestions = %q", got)
+	}
+	if replies.Suggestions[0].Translation != "Hello there" {
+		t.Fatalf("translation = %q", replies.Suggestions[0].Translation)
+	}
+}
+
+func TestParseSuggestedRepliesClearsTranslationInExplanationLanguage(t *testing.T) {
+	replies, err := parseSuggestedReplies(testSuggestedRepliesResponse(t, "EN-us", testSuggestedReplyOptions()), "en")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if replies.Language != "en-us" {
+		t.Fatalf("language = %q, want en-us", replies.Language)
+	}
+	for _, option := range replies.Suggestions {
+		if option.Translation != "" {
+			t.Fatalf("%s translation = %q, want empty in the explanation language", option.Tone, option.Translation)
+		}
 	}
 }

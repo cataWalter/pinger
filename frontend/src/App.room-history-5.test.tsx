@@ -263,9 +263,9 @@ describe('room history updates', () => {
     expect(composer.value).toBe('hello')
   })
 
-  it('suggests three replies and fills the draft with the chosen one without sending', async () => {
+  it('suggests ten replies and fills the draft with the chosen one without sending', async () => {
     const user = userEvent.setup()
-    harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture })
+    harness.service.AISuggestReplies.mockResolvedValue({ language: 'tr', suggestions: suggestedReplyFixture })
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()

@@ -78,6 +78,7 @@ export function localAIChatToRoom(chat: LocalAIChatSummary, favorite: boolean): 
         lastEventId: '',
         lastEventSender: '',
         lastEventAt: chat.updatedAt,
+        lastEventSeenAt: 0,
         bridge: '',
         accountId: '',
     }

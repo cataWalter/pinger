@@ -67,10 +67,13 @@ func (c *Client) SetRoomUnanswered(ctx context.Context, roomID string, unanswere
 
 func (c *Client) Rooms() []Room {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	rooms := make([]Room, 0, len(c.rooms))
 	for _, room := range c.rooms {
 		rooms = append(rooms, room)
+	}
+	c.mu.RUnlock()
+	for i := range rooms {
+		rooms[i].LastEventSeenAt = c.lastEventSeenAt(rooms[i])
 	}
 	sort.Slice(rooms, func(i, j int) bool {
 		if rooms[i].LastSeen.Equal(rooms[j].LastSeen) {

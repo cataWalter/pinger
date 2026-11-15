@@ -9,7 +9,11 @@ import (
 	_ "image/png"
 	"log"
 	"maunium.net/go/mautrix/id"
+	"time"
 )
+
+// unreadReactionCountTimeout bounds each per-room reaction count so a slow DB cannot stall sync.
+const unreadReactionCountTimeout = 2 * time.Second
 
 func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 	roomAvatars := c.directRoomAvatars(syncEvent)
@@ -21,7 +25,9 @@ func (c *Client) applySync(syncEvent *jsoncmd.SyncComplete, notify bool) {
 			if syncRoom == nil || syncRoom.Meta == nil || syncRoom.Meta.UnreadCounts.IsZero() {
 				continue
 			}
-			counts, err := c.unreadReactionCounts(context.Background(), roomID, self)
+			ctx, cancel := context.WithTimeout(context.Background(), unreadReactionCountTimeout)
+			counts, err := c.unreadReactionCounts(ctx, roomID, self)
+			cancel()
 			if err != nil {
 				log.Printf("count unread reactions in room %s: %v", roomID, err)
 				continue

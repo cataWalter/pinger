@@ -176,7 +176,7 @@ func (c *Client) HistoryPageWithLimit(ctx context.Context, roomID string, before
 	c.populateMessageProfiles(ctx, roomID, messages)
 	c.enrichReplyPreviews(ctx, roomID, messages)
 	for i := range messages {
-		messages[i].Own = c.isOwnMessage(messages[i])
+		messages[i].Own = isOwnMessageForRoom(messages[i], c.currentUserID(), room)
 	}
 	sort.SliceStable(messages, func(i, j int) bool {
 		if messages[i].Timestamp.Equal(messages[j].Timestamp) {

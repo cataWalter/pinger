@@ -131,6 +131,24 @@ describe('room history updates', () => {
 
   const teamRoom: Room = { ...room, id: '!team:example.org', name: 'Team', direct: false }
 
+  it('does not use an unflagged own message avatar as the direct-room avatar', async () => {
+    const incomingMessage = {
+      ...message('$alice-1', 'from Alice', 100),
+      sender: '@alice:example.org',
+      avatar: 'mxc://example.org/alice-avatar',
+    }
+    const ownMessage = {
+      ...message('$own-1', 'sent by me', 200),
+      sender: snapshot.profile.userId,
+      avatar: 'mxc://example.org/me-avatar',
+    }
+    harness.service.History.mockResolvedValueOnce({ messages: [incomingMessage, ownMessage], before: 0, hasMore: false })
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('from Alice')).toBeTruthy()
+    await waitFor(() => expect(container.querySelector('.conversation-room-avatar img')?.getAttribute('src')).toBe('/media/mxc/example.org/alice-avatar'))
+  })
+
   it('shows the sender on the first incoming message of each run in group rooms', async () => {
     const groupMessages = [
       { ...message('$alice-1', 'first from alice', 100), avatar: 'mxc://example.org/alice-avatar' },
