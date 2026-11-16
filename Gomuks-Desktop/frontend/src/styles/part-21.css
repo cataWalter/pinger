@@ -1,0 +1,254 @@
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .media-load:hover:not(:disabled),
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .media-download:hover,
+.app-shell[data-theme='oled-black'] .media-load:hover:not(:disabled),
+.app-shell[data-theme='dracula'] .media-load:hover:not(:disabled),
+.app-shell[data-theme='midnight'] .media-load:hover:not(:disabled),
+.app-shell[data-theme='slate'] .media-load:hover:not(:disabled),
+.app-shell[data-theme='oled-black'] .media-download:hover,
+.app-shell[data-theme='dracula'] .media-download:hover,
+.app-shell[data-theme='midnight'] .media-download:hover,
+.app-shell[data-theme='slate'] .media-download:hover {
+  background: #2a352e;
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .media-preview-button,
+.app-shell[data-theme='oled-black'] .media-preview-button,
+.app-shell[data-theme='dracula'] .media-preview-button,
+.app-shell[data-theme='midnight'] .media-preview-button,
+.app-shell[data-theme='slate'] .media-preview-button {
+  background: #101713;
+  border-color: var(--line);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .media-viewer,
+.app-shell[data-theme='oled-black'] .media-viewer,
+.app-shell[data-theme='dracula'] .media-viewer,
+.app-shell[data-theme='midnight'] .media-viewer,
+.app-shell[data-theme='slate'] .media-viewer {
+  border-color: var(--line);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .reaction-chip,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .reaction-picker button,
+.app-shell[data-theme='oled-black'] .reaction-chip,
+.app-shell[data-theme='dracula'] .reaction-chip,
+.app-shell[data-theme='midnight'] .reaction-chip,
+.app-shell[data-theme='slate'] .reaction-chip,
+.app-shell[data-theme='oled-black'] .reaction-picker button,
+.app-shell[data-theme='dracula'] .reaction-picker button,
+.app-shell[data-theme='midnight'] .reaction-picker button,
+.app-shell[data-theme='slate'] .reaction-picker button {
+  color: var(--ink);
+  background: #202a24;
+  border-color: var(--line);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .reaction-chip.is-reacted,
+.app-shell[data-theme='oled-black'] .reaction-chip.is-reacted,
+.app-shell[data-theme='dracula'] .reaction-chip.is-reacted,
+.app-shell[data-theme='midnight'] .reaction-chip.is-reacted,
+.app-shell[data-theme='slate'] .reaction-chip.is-reacted {
+  color: #b8e3cf;
+  background: #24382e;
+  border-color: #416850;
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .composer-context,
+.app-shell[data-theme='oled-black'] .composer-context,
+.app-shell[data-theme='dracula'] .composer-context,
+.app-shell[data-theme='midnight'] .composer-context,
+.app-shell[data-theme='slate'] .composer-context {
+  background: #202a24;
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .composer-context strong,
+.app-shell[data-theme='oled-black'] .composer-context strong,
+.app-shell[data-theme='dracula'] .composer-context strong,
+.app-shell[data-theme='midnight'] .composer-context strong,
+.app-shell[data-theme='slate'] .composer-context strong {
+  color: var(--ink);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .mention-option strong,
+.app-shell[data-theme='oled-black'] .mention-option strong,
+.app-shell[data-theme='dracula'] .mention-option strong,
+.app-shell[data-theme='midnight'] .mention-option strong,
+.app-shell[data-theme='slate'] .mention-option strong {
+  color: var(--ink);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .mention-option:hover,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .mention-option.is-active,
+.app-shell[data-theme='oled-black'] .mention-option:hover,
+.app-shell[data-theme='dracula'] .mention-option:hover,
+.app-shell[data-theme='midnight'] .mention-option:hover,
+.app-shell[data-theme='slate'] .mention-option:hover,
+.app-shell[data-theme='oled-black'] .mention-option.is-active,
+.app-shell[data-theme='dracula'] .mention-option.is-active,
+.app-shell[data-theme='midnight'] .mention-option.is-active,
+.app-shell[data-theme='slate'] .mention-option.is-active {
+  background: #2a352e;
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .message-action:hover:not(:disabled),
+.app-shell[data-theme='oled-black'] .message-action:hover:not(:disabled),
+.app-shell[data-theme='dracula'] .message-action:hover:not(:disabled),
+.app-shell[data-theme='midnight'] .message-action:hover:not(:disabled),
+.app-shell[data-theme='slate'] .message-action:hover:not(:disabled) {
+  color: var(--ink);
+  background: #2a352e;
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .confirm-dialog button,
+.app-shell[data-theme='oled-black'] .confirm-dialog button,
+.app-shell[data-theme='dracula'] .confirm-dialog button,
+.app-shell[data-theme='midnight'] .confirm-dialog button,
+.app-shell[data-theme='slate'] .confirm-dialog button {
+  color: var(--ink);
+  background: #202a24;
+  border-color: var(--line);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .confirm-dialog button.is-danger,
+.app-shell[data-theme='oled-black'] .confirm-dialog button.is-danger,
+.app-shell[data-theme='dracula'] .confirm-dialog button.is-danger,
+.app-shell[data-theme='midnight'] .confirm-dialog button.is-danger,
+.app-shell[data-theme='slate'] .confirm-dialog button.is-danger {
+  color: #efaa98;
+  background: #382b27;
+  border-color: #5c3d34;
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .room-info-dialog,
+.app-shell[data-theme='oled-black'] .room-info-dialog,
+.app-shell[data-theme='dracula'] .room-info-dialog,
+.app-shell[data-theme='midnight'] .room-info-dialog,
+.app-shell[data-theme='slate'] .room-info-dialog {
+  border-color: var(--line);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .room-info-header,
+.app-shell[data-theme='oled-black'] .room-info-header,
+.app-shell[data-theme='dracula'] .room-info-header,
+.app-shell[data-theme='midnight'] .room-info-header,
+.app-shell[data-theme='slate'] .room-info-header,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .room-info-footer,
+.app-shell[data-theme='oled-black'] .room-info-footer,
+.app-shell[data-theme='dracula'] .room-info-footer,
+.app-shell[data-theme='midnight'] .room-info-footer,
+.app-shell[data-theme='slate'] .room-info-footer,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .room-member-row,
+.app-shell[data-theme='oled-black'] .room-member-row,
+.app-shell[data-theme='dracula'] .room-member-row,
+.app-shell[data-theme='midnight'] .room-member-row,
+.app-shell[data-theme='slate'] .room-member-row,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .room-info-fact,
+.app-shell[data-theme='oled-black'] .room-info-fact,
+.app-shell[data-theme='dracula'] .room-info-fact,
+.app-shell[data-theme='midnight'] .room-info-fact,
+.app-shell[data-theme='slate'] .room-info-fact {
+  border-color: var(--line);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .room-member-row strong,
+.app-shell[data-theme='oled-black'] .room-member-row strong,
+.app-shell[data-theme='dracula'] .room-member-row strong,
+.app-shell[data-theme='midnight'] .room-member-row strong,
+.app-shell[data-theme='slate'] .room-member-row strong {
+  color: var(--ink);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .room-member-avatar,
+.app-shell[data-theme='oled-black'] .room-member-avatar,
+.app-shell[data-theme='dracula'] .room-member-avatar,
+.app-shell[data-theme='midnight'] .room-member-avatar,
+.app-shell[data-theme='slate'] .room-member-avatar {
+  color: #c4d9cb;
+  background: #2a352e;
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .settings-dialog,
+.app-shell[data-theme='oled-black'] .settings-dialog,
+.app-shell[data-theme='dracula'] .settings-dialog,
+.app-shell[data-theme='midnight'] .settings-dialog,
+.app-shell[data-theme='slate'] .settings-dialog {
+  border-color: var(--line);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .setting-row strong,
+.app-shell[data-theme='oled-black'] .setting-row strong,
+.app-shell[data-theme='dracula'] .setting-row strong,
+.app-shell[data-theme='midnight'] .setting-row strong,
+.app-shell[data-theme='slate'] .setting-row strong,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .setting-toggle,
+.app-shell[data-theme='oled-black'] .setting-toggle,
+.app-shell[data-theme='dracula'] .setting-toggle,
+.app-shell[data-theme='midnight'] .setting-toggle,
+.app-shell[data-theme='slate'] .setting-toggle,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .account-summary strong,
+.app-shell[data-theme='oled-black'] .account-summary strong,
+.app-shell[data-theme='dracula'] .account-summary strong,
+.app-shell[data-theme='midnight'] .account-summary strong,
+.app-shell[data-theme='slate'] .account-summary strong,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .account-details strong,
+.app-shell[data-theme='oled-black'] .account-details strong,
+.app-shell[data-theme='dracula'] .account-details strong,
+.app-shell[data-theme='midnight'] .account-details strong,
+.app-shell[data-theme='slate'] .account-details strong,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .device-row strong,
+.app-shell[data-theme='oled-black'] .device-row strong,
+.app-shell[data-theme='dracula'] .device-row strong,
+.app-shell[data-theme='midnight'] .device-row strong,
+.app-shell[data-theme='slate'] .device-row strong,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .storage-summary strong,
+.app-shell[data-theme='oled-black'] .storage-summary strong,
+.app-shell[data-theme='dracula'] .storage-summary strong,
+.app-shell[data-theme='midnight'] .storage-summary strong,
+.app-shell[data-theme='slate'] .storage-summary strong {
+  color: var(--ink);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .setting-row,
+.app-shell[data-theme='oled-black'] .setting-row,
+.app-shell[data-theme='dracula'] .setting-row,
+.app-shell[data-theme='midnight'] .setting-row,
+.app-shell[data-theme='slate'] .setting-row,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .device-row,
+.app-shell[data-theme='oled-black'] .device-row,
+.app-shell[data-theme='dracula'] .device-row,
+.app-shell[data-theme='midnight'] .device-row,
+.app-shell[data-theme='slate'] .device-row,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .storage-summary>div,
+.app-shell[data-theme='oled-black'] .storage-summary>div,
+.app-shell[data-theme='dracula'] .storage-summary>div,
+.app-shell[data-theme='midnight'] .storage-summary>div,
+.app-shell[data-theme='slate'] .storage-summary>div {
+  border-color: var(--line);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .setting-row select,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .shortcut-input,
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .security-field input,
+.app-shell[data-theme='oled-black'] .setting-row select,
+.app-shell[data-theme='dracula'] .setting-row select,
+.app-shell[data-theme='midnight'] .setting-row select,
+.app-shell[data-theme='slate'] .setting-row select,
+.app-shell[data-theme='oled-black'] .shortcut-input,
+.app-shell[data-theme='dracula'] .shortcut-input,
+.app-shell[data-theme='midnight'] .shortcut-input,
+.app-shell[data-theme='slate'] .shortcut-input,
+.app-shell[data-theme='oled-black'] .security-field input,
+.app-shell[data-theme='dracula'] .security-field input,
+.app-shell[data-theme='midnight'] .security-field input,
+.app-shell[data-theme='slate'] .security-field input {
+  color: var(--ink);
+  background: #151c18;
+  border-color: var(--line);
+}
+
+.app-shell[data-theme='oled-black'] .setting-row select,
+.app-shell[data-theme='oled-black'] .shortcut-input,
+.app-shell[data-theme='oled-black'] .security-field input {
+  background: #080b09;
+}

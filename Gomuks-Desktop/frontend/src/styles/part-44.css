@@ -1,0 +1,254 @@
+
+.app-shell[data-ui='desktop'] .message-row.is-own .message-body a {
+  color: inherit;
+}
+
+.app-shell[data-ui='desktop'] :is(.message-meta, .message-time, .message-edited, .day-divider, .timeline-status) {
+  color: var(--muted);
+}
+
+.app-shell[data-ui='desktop'] .message-row.is-own :is(.message-meta, .message-time, .message-edited) {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.app-shell[data-ui='desktop'] .message-body :is(ul, ol) {
+  margin: 8px 0;
+  padding-left: 22px;
+}
+
+.app-shell[data-ui='desktop'] .message-body li {
+  display: list-item;
+  margin: 3px 0;
+  line-height: 1.6;
+}
+
+.app-shell[data-ui='desktop'] .message-body li p {
+  margin: 0;
+}
+
+.app-shell[data-ui='desktop'] .markdown-message {
+  white-space: normal;
+}
+
+.app-shell[data-ui='desktop'] .markdown-message p {
+  white-space: pre-wrap;
+}
+
+.app-shell[data-ui='desktop'] .reply-preview {
+  color: var(--ink);
+  background: var(--canvas-warm);
+  border-left: 3px solid var(--accent-text);
+  border-radius: var(--radius-xs);
+}
+
+.app-shell[data-ui='desktop'] :is(.reply-preview-sender, .reply-preview-text) {
+  color: var(--ink-soft);
+}
+
+.app-shell[data-ui='desktop'] :is(.reaction-chip, .message-action-button, .media-load, .media-download) {
+  color: var(--ink);
+  background: var(--paper);
+  border-color: var(--line);
+}
+
+.app-shell[data-ui='desktop'] .reaction-chip.is-reacted {
+  color: var(--accent-text);
+  background: var(--surface-selected);
+  border-color: var(--accent-text);
+}
+
+.app-shell[data-ui='desktop'] .composer-area {
+  padding: 0 20px 14px;
+  background: var(--canvas);
+}
+
+.app-shell[data-ui='desktop'] .composer {
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+}
+
+.app-shell[data-ui='desktop'] .composer:focus-within {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 12%, transparent);
+}
+
+.app-shell[data-ui='desktop'] .composer textarea {
+  color: var(--ink);
+  background: transparent;
+}
+
+.app-shell[data-ui='desktop'] .composer textarea::placeholder {
+  color: var(--muted);
+}
+
+.app-shell[data-ui='desktop'] .composer-context {
+  color: var(--ink);
+  background: var(--canvas-warm);
+  border-color: var(--line);
+}
+
+.app-shell[data-ui='desktop'] :is(.icon-button, .composer-tool-button, .format-button, .composer-ai-button) {
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  transition: color var(--motion-fast), background-color var(--motion-fast), border-color var(--motion-fast);
+}
+
+.app-shell[data-ui='desktop'] :is(.icon-button, .composer-tool-button, .format-button, .composer-ai-button):hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+  transform: none;
+}
+
+.app-shell[data-ui='desktop'] :is(.icon-button, .composer-tool-button) {
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.app-shell[data-ui='desktop'] :is(.primary-button, .send-button) {
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+
+.app-shell[data-ui='desktop'] :is(.primary-button, .send-button):hover {
+  color: var(--on-accent);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  filter: none;
+  transform: none;
+}
+
+.app-shell[data-ui='desktop'] button:disabled {
+  opacity: 0.5;
+  cursor: default;
+  filter: none;
+  transform: none;
+}
+
+.app-shell[data-ui='desktop'] :is(.settings-dialog, .confirm-dialog, .quick-switcher, .room-info-dialog, .schedule-dialog, .ai-result-dialog, .room-dialog) {
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+}
+
+.app-shell[data-ui='desktop'] :is(.settings-header, .settings-footer, .dialog-header, .dialog-footer) {
+  color: var(--ink);
+  background: var(--paper);
+  border-color: var(--line);
+}
+
+.app-shell[data-ui='desktop'] .settings-sidebar {
+  background: var(--canvas-warm);
+  border-color: var(--line);
+}
+
+.app-shell[data-ui='desktop'] .settings-content {
+  background: var(--paper);
+}
+
+.app-shell[data-ui='desktop'] .settings-section h3 {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.app-shell[data-ui='desktop'] .setting-row {
+  align-items: center;
+  padding: 14px 0;
+  border-color: var(--line);
+  gap: 16px;
+}
+
+.app-shell[data-ui='desktop'] .setting-row strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.app-shell[data-ui='desktop'] .setting-row small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.app-shell[data-ui='desktop'] :is(.setting-row input:not([type='checkbox']):not([type='range']):not([type='color']), .setting-row select, .settings-search, .settings-input, .dialog-input) {
+  color: var(--ink);
+  background: var(--canvas-warm);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  min-height: 32px;
+}
+
+.app-shell[data-ui='desktop'] :is(.settings-nav-button, .settings-tab) {
+  color: var(--muted);
+  background: transparent;
+}
+
+.app-shell[data-ui='desktop'] :is(.settings-nav-button, .settings-tab).is-active {
+  color: var(--accent-text);
+  background: var(--surface-selected);
+}
+
+.app-shell[data-ui='desktop'] .toggle-track {
+  background: var(--muted);
+  box-shadow: none;
+}
+
+.app-shell[data-ui='desktop'] .toggle-input:checked+.toggle-track {
+  background: var(--accent);
+}
+
+.app-shell[data-ui='desktop'] .secondary-button {
+  color: var(--ink);
+  background: var(--canvas-warm);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+}
+
+.app-shell[data-ui='desktop'] :is(.local-ai-chat, .local-ai-chat-panel) {
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+.app-shell[data-ui='desktop'] :is(.local-ai-message, .local-ai-composer) {
+  color: var(--ink);
+  background: var(--paper);
+  border-color: var(--line);
+  border-radius: var(--radius-md);
+}
+
+.app-shell[data-ui='desktop'] .room-filters button {
+  color: var(--sidebar-muted);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.app-shell[data-ui='desktop'] .room-filters button:hover {
+  color: var(--sidebar-ink);
+  background: var(--sidebar-hover);
+}
+
+.app-shell[data-ui='desktop'] .room-filters button.is-active {
+  color: var(--sidebar-ink);
+  background: var(--sidebar-active);
+  box-shadow: inset 0 -2px var(--sidebar-accent);
+}
+
+.app-shell[data-ui='desktop'] .local-ai-folder-bar button {
+  color: var(--sidebar-muted);
+  background: var(--sidebar-panel);
+}

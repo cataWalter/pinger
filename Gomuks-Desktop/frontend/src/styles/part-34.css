@@ -1,0 +1,251 @@
+
+.app-shell[data-theme='slate'] {
+  color-scheme: dark;
+}
+
+.app-shell[data-theme='solarized'] {
+  color-scheme: light;
+}
+
+.app-shell[data-theme='sepia'] {
+  color-scheme: light;
+}
+
+.app-shell[data-theme='bosco'] .sidebar,
+.app-shell[data-theme='rosa'] .sidebar,
+.app-shell[data-theme='solarized'] .sidebar,
+.app-shell[data-theme='sepia'] .sidebar,
+.app-shell[data-theme='dracula'] .sidebar,
+.app-shell[data-theme='midnight'] .sidebar,
+.app-shell[data-theme='slate'] .sidebar {
+  color: var(--sidebar-ink);
+  background: var(--sidebar-bg);
+  border-right-color: var(--sidebar-border);
+}
+
+.app-shell[data-theme='bosco'] .room-section-label,
+.app-shell[data-theme='rosa'] .room-section-label,
+.app-shell[data-theme='solarized'] .room-section-label,
+.app-shell[data-theme='sepia'] .room-section-label,
+.app-shell[data-theme='dracula'] .room-section-label,
+.app-shell[data-theme='midnight'] .room-section-label,
+.app-shell[data-theme='slate'] .room-section-label {
+  color: var(--sidebar-muted);
+}
+
+.app-shell[data-theme='bosco'] .profile-copy strong,
+.app-shell[data-theme='rosa'] .profile-copy strong,
+.app-shell[data-theme='solarized'] .profile-copy strong,
+.app-shell[data-theme='sepia'] .profile-copy strong,
+.app-shell[data-theme='dracula'] .profile-copy strong,
+.app-shell[data-theme='midnight'] .profile-copy strong,
+.app-shell[data-theme='slate'] .profile-copy strong {
+  color: var(--sidebar-ink);
+}
+
+.app-shell[data-theme='bosco'] .room-search,
+.app-shell[data-theme='rosa'] .room-search,
+.app-shell[data-theme='solarized'] .room-search,
+.app-shell[data-theme='sepia'] .room-search,
+.app-shell[data-theme='dracula'] .room-search,
+.app-shell[data-theme='midnight'] .room-search,
+.app-shell[data-theme='slate'] .room-search {
+  color: var(--sidebar-muted);
+  background: var(--sidebar-panel);
+  border-color: var(--sidebar-border);
+}
+
+.app-shell[data-theme='bosco'] .room-search input,
+.app-shell[data-theme='rosa'] .room-search input,
+.app-shell[data-theme='solarized'] .room-search input,
+.app-shell[data-theme='sepia'] .room-search input,
+.app-shell[data-theme='dracula'] .room-search input,
+.app-shell[data-theme='midnight'] .room-search input,
+.app-shell[data-theme='slate'] .room-search input {
+  color: var(--sidebar-ink);
+}
+
+.app-shell[data-theme='bosco'] .room-search input::placeholder,
+.app-shell[data-theme='rosa'] .room-search input::placeholder,
+.app-shell[data-theme='solarized'] .room-search input::placeholder,
+.app-shell[data-theme='sepia'] .room-search input::placeholder,
+.app-shell[data-theme='dracula'] .room-search input::placeholder,
+.app-shell[data-theme='midnight'] .room-search input::placeholder,
+.app-shell[data-theme='slate'] .room-search input::placeholder {
+  color: var(--sidebar-muted);
+}
+
+.app-shell[data-theme='bosco'] .room-filters button,
+.app-shell[data-theme='rosa'] .room-filters button,
+.app-shell[data-theme='solarized'] .room-filters button,
+.app-shell[data-theme='sepia'] .room-filters button,
+.app-shell[data-theme='dracula'] .room-filters button,
+.app-shell[data-theme='midnight'] .room-filters button,
+.app-shell[data-theme='slate'] .room-filters button {
+  color: var(--sidebar-muted);
+}
+
+.app-shell[data-theme='bosco'] .room-filters button.is-active,
+.app-shell[data-theme='rosa'] .room-filters button.is-active,
+.app-shell[data-theme='solarized'] .room-filters button.is-active,
+.app-shell[data-theme='sepia'] .room-filters button.is-active,
+.app-shell[data-theme='dracula'] .room-filters button.is-active,
+.app-shell[data-theme='midnight'] .room-filters button.is-active,
+.app-shell[data-theme='slate'] .room-filters button.is-active {
+  color: var(--sidebar-bg);
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.app-shell[data-theme='bosco'] .room-filters button .filter-count,
+.app-shell[data-theme='rosa'] .room-filters button .filter-count,
+.app-shell[data-theme='solarized'] .room-filters button .filter-count,
+.app-shell[data-theme='sepia'] .room-filters button .filter-count,
+.app-shell[data-theme='dracula'] .room-filters button .filter-count,
+.app-shell[data-theme='midnight'] .room-filters button .filter-count,
+.app-shell[data-theme='slate'] .room-filters button .filter-count,
+.app-shell[data-theme='bosco'] .unread-count,
+.app-shell[data-theme='rosa'] .unread-count,
+.app-shell[data-theme='solarized'] .unread-count,
+.app-shell[data-theme='sepia'] .unread-count,
+.app-shell[data-theme='dracula'] .unread-count,
+.app-shell[data-theme='midnight'] .unread-count,
+.app-shell[data-theme='slate'] .unread-count {
+  color: var(--sidebar-bg);
+  background: var(--signal);
+}
+
+.app-shell[data-theme='bosco'] .room-button:hover,
+.app-shell[data-theme='rosa'] .room-button:hover,
+.app-shell[data-theme='solarized'] .room-button:hover,
+.app-shell[data-theme='sepia'] .room-button:hover,
+.app-shell[data-theme='dracula'] .room-button:hover,
+.app-shell[data-theme='midnight'] .room-button:hover,
+.app-shell[data-theme='slate'] .room-button:hover {
+  background: var(--sidebar-hover);
+}
+
+.app-shell[data-theme='bosco'] .room-button.is-active,
+.app-shell[data-theme='rosa'] .room-button.is-active,
+.app-shell[data-theme='solarized'] .room-button.is-active,
+.app-shell[data-theme='sepia'] .room-button.is-active,
+.app-shell[data-theme='dracula'] .room-button.is-active,
+.app-shell[data-theme='midnight'] .room-button.is-active,
+.app-shell[data-theme='slate'] .room-button.is-active {
+  color: var(--sidebar-ink);
+  background: var(--sidebar-active);
+  border-color: var(--sidebar-border);
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+
+.app-shell[data-theme='bosco'] .room-preview,
+.app-shell[data-theme='rosa'] .room-preview,
+.app-shell[data-theme='solarized'] .room-preview,
+.app-shell[data-theme='sepia'] .room-preview,
+.app-shell[data-theme='dracula'] .room-preview,
+.app-shell[data-theme='midnight'] .room-preview,
+.app-shell[data-theme='slate'] .room-preview,
+.app-shell[data-theme='bosco'] .room-button.is-active .room-preview,
+.app-shell[data-theme='rosa'] .room-button.is-active .room-preview,
+.app-shell[data-theme='solarized'] .room-button.is-active .room-preview,
+.app-shell[data-theme='sepia'] .room-button.is-active .room-preview,
+.app-shell[data-theme='dracula'] .room-button.is-active .room-preview,
+.app-shell[data-theme='midnight'] .room-button.is-active .room-preview,
+.app-shell[data-theme='slate'] .room-button.is-active .room-preview {
+  color: var(--sidebar-muted);
+}
+
+.app-shell[data-theme='bosco'] .sidebar-profile,
+.app-shell[data-theme='rosa'] .sidebar-profile,
+.app-shell[data-theme='solarized'] .sidebar-profile,
+.app-shell[data-theme='sepia'] .sidebar-profile,
+.app-shell[data-theme='dracula'] .sidebar-profile,
+.app-shell[data-theme='midnight'] .sidebar-profile,
+.app-shell[data-theme='slate'] .sidebar-profile {
+  background: var(--sidebar-panel);
+  border-top-color: var(--sidebar-border);
+}
+
+.app-shell[data-theme='bosco'] .profile-copy span,
+.app-shell[data-theme='rosa'] .profile-copy span,
+.app-shell[data-theme='solarized'] .profile-copy span,
+.app-shell[data-theme='sepia'] .profile-copy span,
+.app-shell[data-theme='dracula'] .profile-copy span,
+.app-shell[data-theme='midnight'] .profile-copy span,
+.app-shell[data-theme='slate'] .profile-copy span {
+  color: var(--sidebar-muted);
+}
+
+.app-shell[data-theme='bosco'] .sidebar-icon,
+.app-shell[data-theme='rosa'] .sidebar-icon,
+.app-shell[data-theme='solarized'] .sidebar-icon,
+.app-shell[data-theme='sepia'] .sidebar-icon,
+.app-shell[data-theme='dracula'] .sidebar-icon,
+.app-shell[data-theme='midnight'] .sidebar-icon,
+.app-shell[data-theme='slate'] .sidebar-icon {
+  color: var(--sidebar-muted);
+  border-color: var(--sidebar-border);
+}
+
+.app-shell[data-theme='bosco'] .sidebar-icon:hover,
+.app-shell[data-theme='rosa'] .sidebar-icon:hover,
+.app-shell[data-theme='solarized'] .sidebar-icon:hover,
+.app-shell[data-theme='sepia'] .sidebar-icon:hover,
+.app-shell[data-theme='dracula'] .sidebar-icon:hover,
+.app-shell[data-theme='midnight'] .sidebar-icon:hover,
+.app-shell[data-theme='slate'] .sidebar-icon:hover {
+  color: var(--signal);
+  background: var(--sidebar-hover);
+}
+
+.app-shell[data-theme='bosco'] .conversation,
+.app-shell[data-theme='rosa'] .conversation,
+.app-shell[data-theme='solarized'] .conversation,
+.app-shell[data-theme='sepia'] .conversation,
+.app-shell[data-theme='dracula'] .conversation,
+.app-shell[data-theme='midnight'] .conversation,
+.app-shell[data-theme='slate'] .conversation {
+  background: var(--canvas);
+}
+
+.app-shell[data-theme='bosco'] .conversation-header,
+.app-shell[data-theme='rosa'] .conversation-header,
+.app-shell[data-theme='solarized'] .conversation-header,
+.app-shell[data-theme='sepia'] .conversation-header,
+.app-shell[data-theme='dracula'] .conversation-header,
+.app-shell[data-theme='midnight'] .conversation-header,
+.app-shell[data-theme='slate'] .conversation-header,
+.app-shell[data-theme='bosco'] .composer,
+.app-shell[data-theme='rosa'] .composer,
+.app-shell[data-theme='solarized'] .composer,
+.app-shell[data-theme='sepia'] .composer,
+.app-shell[data-theme='dracula'] .composer,
+.app-shell[data-theme='midnight'] .composer,
+.app-shell[data-theme='slate'] .composer {
+  background: var(--paper);
+  border-color: var(--line);
+}
+
+.app-shell[data-theme='bosco'] .message-body,
+.app-shell[data-theme='rosa'] .message-body,
+.app-shell[data-theme='solarized'] .message-body,
+.app-shell[data-theme='sepia'] .message-body,
+.app-shell[data-theme='dracula'] .message-body,
+.app-shell[data-theme='midnight'] .message-body,
+.app-shell[data-theme='slate'] .message-body {
+  color: var(--ink);
+  background: var(--paper);
+  border-color: var(--line);
+}
+
+.app-shell[data-theme='bosco'] .message-row.is-own .message-body,
+.app-shell[data-theme='rosa'] .message-row.is-own .message-body,
+.app-shell[data-theme='solarized'] .message-row.is-own .message-body,
+.app-shell[data-theme='sepia'] .message-row.is-own .message-body,
+.app-shell[data-theme='dracula'] .message-row.is-own .message-body,
+.app-shell[data-theme='midnight'] .message-row.is-own .message-body,
+.app-shell[data-theme='slate'] .message-row.is-own .message-body {
+  color: #fff;
+  background: var(--own-bubble, var(--accent));
+  border-color: var(--own-bubble, var(--accent));
+}

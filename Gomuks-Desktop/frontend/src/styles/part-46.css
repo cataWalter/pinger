@@ -1,0 +1,254 @@
+
+.app-shell[data-ui='desktop'] :is(.confirm-dialog p, .confirm-dialog small) {
+  color: var(--muted);
+}
+
+.app-shell[data-ui='desktop'] .confirm-dialog {
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.app-shell[data-ui='desktop'] :is(.media-approval-dialog, .generated-image-dialog) img {
+  max-height: 40vh;
+  object-fit: contain;
+}
+
+.app-shell[data-ui='desktop'] .ai-result-dialog .message-body {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.app-shell[data-ui='desktop'] :is(.confirm-scrim, .quick-switcher-scrim, .ai-result-scrim, .media-gallery-scrim) {
+  padding: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell[data-ui='desktop'] .loading-mark {
+    animation: none;
+    border-style: dotted;
+  }
+
+  .app-shell[data-ui='desktop'] .message-row[data-live-message='true'] {
+    animation: none;
+  }
+}
+
+.theme-previews {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 0 20px;
+}
+
+.theme-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.theme-preview.is-selected {
+  color: var(--accent-text);
+}
+
+.theme-preview-art {
+  display: flex;
+  height: 48px;
+  width: 100%;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--preview-canvas);
+}
+
+.theme-preview.is-selected .theme-preview-art {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.theme-preview-sidebar {
+  width: 27%;
+  background: var(--preview-sidebar);
+  border-right: 1px solid var(--preview-border);
+}
+
+.theme-preview-conversation {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 9px;
+}
+
+.theme-preview-conversation::before,
+.theme-preview-conversation::after {
+  content: '';
+  height: 9px;
+  width: 64%;
+  background: var(--preview-surface);
+  border: 1px solid var(--preview-border);
+  border-radius: var(--radius-xs);
+}
+
+.theme-preview-conversation::after {
+  align-self: flex-end;
+  width: 52%;
+  background: var(--preview-bubble);
+  border-color: var(--preview-bubble);
+}
+
+.action-menu-control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.conversation-language-control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.action-menu.conversation-language-menu {
+  display: grid;
+  gap: 12px;
+  width: min(320px, calc(100vw - 32px));
+  min-width: 0;
+  padding: 14px;
+}
+
+.conversation-language-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.conversation-language-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  color: var(--ink);
+  background: var(--paper);
+  font: inherit;
+  font-size: 12px;
+}
+
+.app-shell[data-ui='desktop'] .action-menu-trigger.has-label {
+  display: inline-flex;
+  width: auto;
+  padding: 0 8px;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.action-menu-trigger[aria-expanded='true'] {
+  color: var(--accent-text);
+  background: var(--surface-selected);
+}
+
+.action-menu-count {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: var(--radius-pill);
+  color: var(--on-accent);
+  background: var(--accent);
+  font-size: 9px;
+  display: grid;
+  place-items: center;
+}
+
+.action-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: calc(0px - var(--menu-shift, 0px));
+  z-index: 12;
+  min-width: 232px;
+  max-width: min(320px, calc(100vw - 32px));
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  background: var(--paper);
+  box-shadow: var(--shadow-md);
+  animation: surface-enter var(--motion-fast) var(--ease-out) both;
+}
+
+.action-menu-control[data-side='top'] .action-menu {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 8px);
+  left: var(--menu-shift, 0px);
+}
+
+.action-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.action-menu button>svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.action-menu button>span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.action-menu.has-shortcuts {
+  width: min(320px, calc(100vw - 32px));
+}
+
+.action-menu kbd,
+.message-context-menu kbd,
+.audio-transcribe-button kbd {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.message-context-menu button>span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.action-menu button:hover:not(:disabled),
+.action-menu button:focus-visible {
+  outline: 0;
+  color: var(--selected-text);
+  background: var(--surface-selected);
+}

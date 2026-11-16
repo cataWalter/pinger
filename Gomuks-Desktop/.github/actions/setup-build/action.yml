@@ -1,0 +1,54 @@
+name: Set up Pinger build dependencies
+description: Installs Go, the Windows C toolchain, Wails bindings, Node.js, and frontend packages.
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version-file: go.mod
+        cache: true
+        cache-dependency-path: go.sum
+
+    - name: Set up MinGW-w64
+      if: runner.os == 'Windows'
+      uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e
+      with:
+        msystem: UCRT64
+        update: true
+        install: mingw-w64-ucrt-x86_64-gcc
+        path-type: inherit
+
+    - name: Generate Wails bindings
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        GOBIN="${RUNNER_TEMP}/wails-bin" go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
+        "${RUNNER_TEMP}/wails-bin/wails3" generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
+        echo "WAILS_COMMAND=${RUNNER_TEMP}/wails-bin/wails3" >> "$GITHUB_ENV"
+
+    - name: Generate Wails bindings
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $env:GOBIN = Join-Path $env:RUNNER_TEMP "wails-bin"
+        go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30
+        if ($LASTEXITCODE -ne 0) { throw "wails3 install failed" }
+        $wails = Join-Path $env:GOBIN "wails3.exe"
+        & $wails generate bindings -f "-tags sqlite_fts5,goolm" -clean=true -ts -i
+        if ($LASTEXITCODE -ne 0) { throw "Wails binding generation failed" }
+        "WAILS_COMMAND=$wails" >> $env:GITHUB_ENV
+
+    - name: Set up Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+      with:
+        node-version: "22"
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install frontend packages
+      shell: bash
+      working-directory: frontend
+      run: npm ci

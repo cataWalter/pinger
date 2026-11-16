@@ -1,0 +1,252 @@
+
+.scheduled-editor-content .scheduled-archive-toggle input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.scheduled-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scheduled-job-actions .settings-command {
+  min-height: 29px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+.ai-settings-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ai-settings-form h4 {
+  margin: 0;
+  font-size: 11px;
+}
+
+.ai-settings-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.ai-settings-form input {
+  min-height: 30px;
+  padding: 0 8px;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #dce6de;
+  border-radius: var(--radius-xs);
+  font: inherit;
+  font-size: 11px;
+}
+
+.ai-settings-form select {
+  min-height: 30px;
+  padding: 0 8px;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  font: inherit;
+  font-size: 11px;
+}
+
+.ai-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-settings-actions .settings-command {
+  margin-top: 0;
+}
+
+.ai-prompts-settings {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ai-prompts-settings h4 {
+  margin: 0;
+  font-size: 11px;
+}
+
+.ai-prompt-group {
+  display: grid;
+  gap: 6px;
+}
+
+.ai-prompt-group h5 {
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+
+.ai-prompt-card {
+  background: var(--canvas-warm);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+}
+
+.ai-prompt-card>summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ai-prompt-card>summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-prompt-card-title {
+  font-weight: 600;
+}
+
+.ai-prompt-card-badge {
+  padding: 1px 7px;
+  color: var(--accent);
+  background: var(--green-soft);
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ai-prompt-card-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.ai-prompt-card-body label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.ai-prompt-card-body textarea {
+  min-height: 96px;
+  padding: 8px 10px;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.ai-prompt-card-body input {
+  min-height: 30px;
+  padding: 0 8px;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  font: inherit;
+  font-size: 11px;
+}
+
+.ai-prompt-card-numbers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-prompt-fixed-rules {
+  overflow-wrap: anywhere;
+}
+
+.chat-storage,
+.integration-status {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.chat-storage h4 {
+  margin: 0;
+  font-size: 11px;
+}
+
+.storage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.storage-table th,
+.storage-table td {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+}
+
+.storage-table thead th {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.storage-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-table .settings-command {
+  min-height: 26px;
+  margin-top: 0;
+  font-size: 10px;
+}
+
+.storage-cleanup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.storage-cleanup label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.storage-cleanup select {
+  min-height: 30px;
+  padding: 0 8px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid rgba(127, 127, 127, 0.4);
+  border-radius: var(--radius-xs);
+  font: inherit;
+  font-size: 11px;
+}
+
+.storage-cleanup .settings-command {
+  margin-top: 0;
+}
+
+.help-item {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+}

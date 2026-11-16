@@ -1,0 +1,253 @@
+
+.status-dot.is-offline {
+  box-shadow: 0 0 0 3px rgba(168, 71, 49, 0.12);
+}
+
+.timeline {
+  gap: 18px;
+  padding: 26px clamp(20px, 4vw, 44px) 20px;
+}
+
+.day-divider span,
+.timeline-new-divider span,
+.timeline-loading span {
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-xs);
+  font-weight: 600;
+}
+
+.day-divider::before,
+day-divider::after,
+.timeline-new-divider::before,
+.timeline-new-divider::after {
+  opacity: 0.7;
+}
+
+.message-row {
+  animation: none;
+}
+
+.message-meta time {
+  font-variant-numeric: tabular-nums;
+}
+
+.message-body {
+  border-radius: 4px 14px 14px 14px;
+  box-shadow: var(--shadow-xs);
+  line-height: 1.55;
+  transition: box-shadow var(--motion-standard) var(--ease-out);
+}
+
+.message-row:hover .message-body {
+  box-shadow: var(--shadow-sm);
+}
+
+.message-row.is-own .message-body {
+  border-radius: 14px 4px 14px 14px;
+  background: linear-gradient(180deg, #2a6a55 0%, #234f40 100%);
+  border-color: rgba(20, 69, 58, 0.4);
+  box-shadow: var(--shadow-sm);
+}
+
+.message-row.is-own.is-first .message-body {
+  border-radius: 14px 4px 14px 14px;
+}
+
+.message-row.is-first .message-body {
+  border-radius: 4px 14px 14px 14px;
+}
+
+.message-actions {
+  gap: 3px;
+  background: var(--paper);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-pill);
+  padding: 3px;
+  box-shadow: var(--shadow-md);
+}
+
+.message-action {
+  border-radius: var(--radius-pill);
+}
+
+.message-action:hover:not(:disabled) {
+  background: var(--mint-soft);
+}
+
+.reaction-chip {
+  border-radius: var(--radius-pill);
+  transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+
+.reaction-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-xs);
+}
+
+.reaction-chip.is-reacted {
+  background: #dff0e6;
+  border-color: #9cc7ae;
+  box-shadow: inset 0 0 0 1px rgba(47, 110, 88, 0.12);
+}
+
+.reaction-picker {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--line-soft);
+  padding: 8px;
+}
+
+.reaction-picker button {
+  border-radius: var(--radius-lg);
+}
+
+.reaction-picker button:hover {
+  background: var(--mint-soft);
+  transform: scale(1.08);
+}
+
+.composer {
+  margin: 0 22px 18px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
+  transition: box-shadow var(--motion-standard) var(--ease-out), border-color var(--motion-standard);
+}
+
+.composer:focus-within {
+  border-color: rgba(30, 99, 83, 0.45);
+  box-shadow: var(--shadow-lg), 0 0 0 4px rgba(47, 110, 88, 0.10);
+}
+
+.composer textarea {
+  line-height: 1.55;
+}
+
+.composer textarea::placeholder {
+  color: var(--faint);
+}
+
+.composer-context {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-soft);
+}
+
+.send-button {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--forest) 78%, #000), var(--forest));
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+
+.send-button:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: var(--shadow-md);
+  filter: brightness(1.07);
+}
+
+.send-button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.send-button:disabled {
+  opacity: 0.45;
+}
+
+.composer .icon-button {
+  color: var(--muted);
+}
+
+.composer .icon-button:hover:not(:disabled) {
+  color: var(--forest);
+  background: var(--green-soft);
+}
+
+.mention-list {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.mention-option {
+  transition: background var(--motion-fast);
+}
+
+.mention-avatar {
+  border-radius: var(--radius-lg);
+}
+
+.emoji-picker {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.emoji-picker button {
+  border-radius: var(--radius-lg);
+  transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+
+.emoji-picker button:hover {
+  background: var(--mint-soft);
+  transform: scale(1.12);
+}
+
+.media-preview-button {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--motion-standard) var(--ease-out), box-shadow var(--motion-standard);
+}
+
+.media-preview-button:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.media-viewer {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.media-download,
+.media-load {
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+
+.markdown-message pre {
+  border-radius: var(--radius-lg);
+}
+
+.markdown-code {
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+
+.markdown-code-toolbar {
+  font-weight: 600;
+}
+
+.code-copy {
+  border-radius: var(--radius-md);
+  transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+
+.code-copy:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.link-preview {
+  border-radius: var(--radius-md);
+  transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+
+.link-preview:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: #c8d5cc;
+}

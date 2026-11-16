@@ -1,0 +1,252 @@
+
+.thread-peek {
+  border-radius: 0 10px 10px 0;
+}
+
+.message-search-panel,
+.room-info-dialog,
+.settings-dialog,
+.confirm-dialog {
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--line-soft);
+}
+
+.settings-scrim,
+.room-info-scrim {
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  background: rgba(14, 47, 40, 0.36);
+  animation: scrim-enter var(--motion-surface) var(--ease-out) both;
+}
+
+.media-viewer-scrim {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.settings-dialog,
+.room-info-dialog {
+  animation: dialog-enter var(--motion-deliberate) var(--ease-out) both;
+}
+
+.settings-tab {
+  border-radius: var(--radius-lg);
+  transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+
+.settings-tab.is-active {
+  box-shadow: var(--shadow-xs);
+}
+
+.setting-row,
+.device-row,
+.storage-summary>div {
+  border-radius: var(--radius-md);
+}
+
+.setting-row select,
+.shortcut-input,
+.security-field input {
+  border-radius: var(--radius-lg);
+  border: 1.5px solid var(--line);
+  transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+
+.setting-row select:focus,
+.shortcut-input:focus,
+.security-field input:focus {
+  border-color: var(--forest-bright);
+  box-shadow: 0 0 0 3px rgba(47, 110, 88, 0.12);
+  outline: none;
+}
+
+.settings-command {
+  border-radius: var(--radius-lg);
+  font-weight: 600;
+  transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
+}
+
+.settings-command:hover:not(:disabled) {
+  transform: translateY(-0.5px);
+  box-shadow: var(--shadow-xs);
+}
+
+.quick-switcher {
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  animation: dialog-enter var(--motion-surface) var(--ease-out) both;
+  overflow: hidden;
+}
+
+.quick-switcher input {
+  font-size: 15px;
+}
+
+.quick-switcher-option.is-active {
+  background: var(--mint-soft);
+}
+
+.toast {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(12px);
+  animation: toast-enter var(--motion-deliberate) var(--ease-out) both;
+}
+
+.toast button {
+  border-radius: var(--radius-md);
+  font-weight: 700;
+}
+
+.drop-overlay {
+  backdrop-filter: blur(4px);
+  border-radius: var(--radius-xl);
+}
+
+.empty-timeline {
+  gap: 14px;
+  padding: 48px 20px;
+}
+
+.empty-art {
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--mint-soft), #fff);
+  border: 1px solid var(--line-soft);
+  box-shadow: var(--shadow-sm);
+  font-size: 26px;
+}
+
+.shortcut-hint kbd {
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 0 rgba(16, 45, 39, 0.12);
+}
+
+/* Fix dark-mode message contrast (later rules win over earlier duplicates) */
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .conversation,
+.app-shell[data-theme='oled-black'] .conversation {
+  background: var(--paper);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .message-body,
+.app-shell[data-theme='oled-black'] .message-body {
+  color: #dde7e1;
+  background: #26312b;
+  border-color: #35443b;
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .message-row.is-own .message-body,
+.app-shell[data-theme='oled-black'] .message-row.is-own .message-body {
+  color: #f2f8f4;
+  background: linear-gradient(180deg, #2c6a55, #234f40);
+  border-color: rgba(184, 227, 207, 0.18);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .conversation-header,
+.app-shell[data-theme='oled-black'] .conversation-header {
+  background: rgba(26, 35, 30, 0.92);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .composer,
+.app-shell[data-theme='oled-black'] .composer {
+  background: rgba(30, 40, 35, 0.96);
+  border-color: var(--line);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .room-button.is-active,
+.app-shell[data-theme='oled-black'] .room-button.is-active {
+  background: color-mix(in srgb, var(--accent-bright) 14%, transparent);
+}
+
+:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .auth-form input,
+.app-shell[data-theme='oled-black'] .auth-form input {
+  background: #151c18;
+}
+
+@keyframes float-soft {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes scrim-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Exit animations for DialogPresence and the connection banner. The element stays mounted until the exit finishes. */
+.dialog-presence {
+  display: contents;
+}
+
+.dialog-presence[data-closing='true'] > * {
+  animation: fade-out var(--motion-fast) var(--ease-out) both;
+  pointer-events: none;
+}
+
+.dialog-presence[data-closing='true'] > * > [aria-modal='true'] {
+  animation: dialog-exit var(--motion-fast) var(--ease-out) both;
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+.connection-banner {
+  animation: connection-banner-enter var(--motion-standard) var(--ease-out) both;
+}

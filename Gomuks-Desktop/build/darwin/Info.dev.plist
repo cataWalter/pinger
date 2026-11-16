@@ -1,0 +1,38 @@
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+    <dict>
+        <key>CFBundlePackageType</key>
+            <string>APPL</string>
+        <key>CFBundleName</key>
+            <string>Pinger</string>
+        <key>CFBundleDisplayName</key>
+            <string>Pinger</string>
+        <key>CFBundleExecutable</key>
+            <string>pinger</string>
+        <key>CFBundleIdentifier</key>
+            <string>fi.mau.pinger</string>
+        <key>CFBundleVersion</key>
+            <string>0.1.0</string>
+        <key>CFBundleGetInfoString</key>
+            <string>Pinger Matrix client</string>
+        <key>CFBundleShortVersionString</key>
+            <string>0.1.0</string>
+        <key>CFBundleIconFile</key>
+            <string>icons</string>
+        <key>LSMinimumSystemVersion</key>
+            <string>13.0.0</string>
+        <key>NSHighResolutionCapable</key>
+            <string>true</string>
+        <key>NSMicrophoneUsageDescription</key>
+            <string>Pinger uses the microphone to record voice messages.</string>
+        <key>NSCameraUsageDescription</key>
+            <string>Pinger uses the camera to record video messages.</string>
+        <key>NSHumanReadableCopyright</key>
+            <string>© 2026, Pinger</string>
+        <key>NSAppTransportSecurity</key>
+        <dict>
+            <key>NSAllowsLocalNetworking</key>
+            <true/>
+        </dict>
+    </dict>
+</plist>

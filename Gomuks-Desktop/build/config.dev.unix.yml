@@ -1,0 +1,39 @@
+version: '3'
+
+info:
+  companyName: "Pinger"
+  productName: "Pinger"
+  productIdentifier: "fi.mau.pinger"
+  description: "A Matrix desktop client"
+  version: "0.1.0"
+
+dev_mode:
+  root_path: .
+  log_level: info
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - frontend
+      - bin
+    file:
+      - .DS_Store
+      - .gitignore
+      - .gitkeep
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+      - "*.js"
+      - "*.ts"
+    git_ignore: true
+  executes:
+    - cmd: wails3 task common:build:frontend DEV=true
+      type: blocking
+    - cmd: go build -tags=sqlite_fts5,goolm -o bin/pinger .
+      type: blocking
+    - cmd: wails3 task common:dev:frontend
+      type: background
+    - cmd: ./bin/pinger
+      type: primary
+      exit_policy: shutdown

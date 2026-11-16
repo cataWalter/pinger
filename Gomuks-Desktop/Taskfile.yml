@@ -1,0 +1,93 @@
+version: '3'
+
+env:
+  GOTOOLCHAIN: go1.26.11
+
+vars:
+  APP_NAME: "pinger"
+  BIN_DIR: "bin"
+  PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
+  VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
+  EXTRA_TAGS: "sqlite_fts5,goolm"
+
+includes:
+  common: ./build/Taskfile.yml
+  darwin: ./build/darwin/Taskfile.yml
+
+tasks:
+  build:
+    summary: Builds the macOS application
+    cmds:
+      - task: "darwin:build"
+
+  package:
+    summary: Packages a production macOS build of the application
+    cmds:
+      - task: "darwin:package"
+
+  package:go:
+    summary: Builds a named macOS app bundle from the Go binary
+    platforms: [darwin]
+    cmds:
+      - sh scripts/macos/build-macos-app.sh
+
+  run:
+    summary: Runs the macOS application
+    cmds:
+      - task: "darwin:run"
+
+  build:linux:
+    summary: Builds the Linux executable on Linux
+    platforms: [linux]
+    deps:
+      - task: common:build:frontend
+    cmds:
+      - mkdir -p bin
+      - go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o bin/pinger .
+
+  build:windows:
+    summary: Builds the Windows executable on Windows
+    platforms: [windows]
+    deps:
+      - task: common:build:frontend
+      - task: generate:windows:resources
+    cmds:
+      - powershell -NoProfile -Command "New-Item -ItemType Directory -Force bin | Out-Null"
+      - go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o bin/pinger.exe .
+
+  build:qt6:
+    summary: Builds the native Qt 6 client and its Go backend
+    cmds:
+      - cmake -S qt6 -B qt6/build -DCMAKE_BUILD_TYPE=Release
+      - cmake --build qt6/build --config Release
+      - cmd: go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o qt6/build/pinger .
+        platforms: [linux, darwin]
+      - cmd: go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o qt6/build/pinger.exe .
+        platforms: [windows]
+
+  generate:windows:resources:
+    summary: Embeds the native icon and application manifest in Windows builds
+    platforms: [windows]
+    vars:
+      ARCH: '{{.ARCH | default ARCH}}'
+    deps:
+      - task: common:generate:icons
+    sources:
+      - build/windows/icon.ico
+      - build/windows/pinger.exe.manifest
+      - scripts/windows/generate-windows-resources.go
+      - go.mod
+    generates:
+      - rsrc_windows_{{.ARCH}}.syso
+    cmds:
+      - go run scripts/windows/generate-windows-resources.go -arch {{.ARCH}} -icon build/windows/icon.ico -manifest build/windows/pinger.exe.manifest -out rsrc_windows_{{.ARCH}}.syso
+
+  dev:
+    summary: Runs the application in development mode
+    cmds:
+      - cmd: bash scripts/dev/dev.sh
+        platforms: [darwin]
+      - cmd: node scripts/dev/dev.mjs
+        platforms: [linux, windows]
+    env:
+      WAILS_VITE_PORT: "{{.VITE_PORT}}"

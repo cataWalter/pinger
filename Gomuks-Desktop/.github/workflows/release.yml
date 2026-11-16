@@ -1,0 +1,505 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish release and update distribution repositories.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Run 47 continues at v0.25 after the existing v0.24 release.
+  RELEASE_VERSION_OFFSET: "22"
+  GOTOOLCHAIN: go1.26.11
+
+jobs:
+  test:
+    name: Test and vet
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build macOS universal DMGs
+    runs-on: macos-latest
+    timeout-minutes: 30
+    needs: [test]
+    env:
+      # Matches the deployment target in build/darwin/Taskfile.yml and the
+      # "macOS 13 or newer" support statement in the README.
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+      CGO_CFLAGS: "-mmacosx-version-min=13.0"
+      CGO_LDFLAGS: "-mmacosx-version-min=13.0 -Wl,-no_warn_duplicate_libraries"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm run icons
+          npm run icons:check
+          npm run build
+
+      - name: Prepare build metadata
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME}"
+          else
+            version="0.$((GITHUB_RUN_NUMBER - RELEASE_VERSION_OFFSET))"
+          fi
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          mkdir -p dist
+
+      - name: Build universal macOS app
+        shell: bash
+        run: |
+          mkdir -p "dist/Pinger.app/Contents/MacOS" "dist/Pinger.app/Contents/Resources"
+          cp build/darwin/icons.icns "dist/Pinger.app/Contents/Resources/icons.icns"
+          for arch in amd64 arm64; do
+            clang_arch="$arch"
+            if [ "$arch" = amd64 ]; then clang_arch=x86_64; fi
+            CC="clang -arch $clang_arch" CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" go build \
+              -tags "sqlite_fts5 goolm" \
+              -ldflags "-s -w -X main.Version=${VERSION} -X main.Commit=${GITHUB_SHA} -X main.BuildDate=${BUILD_DATE}" \
+              -o "dist/pinger-${arch}" .
+          done
+          lipo -create dist/pinger-amd64 dist/pinger-arm64 \
+            -output "dist/Pinger.app/Contents/MacOS/pinger"
+          rm dist/pinger-amd64 dist/pinger-arm64
+          lipo -info "dist/Pinger.app/Contents/MacOS/pinger"
+          plist="dist/Pinger.app/Contents/Info.plist"
+          cp build/darwin/Info.plist "$plist"
+          /usr/bin/plutil -replace CFBundleShortVersionString -string "${VERSION}" "$plist"
+          /usr/bin/plutil -replace CFBundleVersion -string "${GITHUB_RUN_NUMBER}" "$plist"
+          /usr/bin/plutil -replace LSMinimumSystemVersion -string "${MACOSX_DEPLOYMENT_TARGET}" "$plist"
+          /usr/bin/plutil -lint "$plist"
+          test -n "$(/usr/bin/plutil -extract NSMicrophoneUsageDescription raw -o - "$plist")"
+          test -n "$(/usr/bin/plutil -extract NSCameraUsageDescription raw -o - "$plist")"
+          codesign --force --deep --sign - "dist/Pinger.app"
+          codesign --verify --deep --strict "dist/Pinger.app"
+
+      - name: Create macOS DMGs
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="dist/Pinger-${VERSION}-macos-universal.dmg"
+          workspace="$(mktemp -d)"
+          work="$workspace/source"
+          rw_dmg="$workspace/rw.dmg"
+          mount_point="$workspace/mount"
+          mkdir -p "$work" "$mount_point"
+          cleanup() {
+            hdiutil detach "$mount_point" -quiet >/dev/null 2>&1 || true
+            rm -rf "$workspace"
+          }
+          trap cleanup EXIT
+
+          # Signed app, /Applications symlink for drag-install, and the hidden volume icon.
+          cp -R "dist/Pinger.app" "$work/"
+          ln -s /Applications "$work/Applications"
+          cp build/darwin/icons.icns "$work/.VolumeIcon.icns"
+          SetFile -c icnC "$work/.VolumeIcon.icns"
+
+          hdiutil create -volname "Pinger" -srcfolder "$work" -ov -format UDRW "$rw_dmg"
+          hdiutil attach "$rw_dmg" -readwrite -noverify -noautoopen -nobrowse -mountpoint "$mount_point"
+          SetFile -a C "$mount_point"
+          hdiutil detach "$mount_point" -quiet
+          hdiutil convert "$rw_dmg" -format UDZO -imagekey zlib-level=9 -o "$dmg"
+
+          hdiutil verify "$dmg"
+          hdiutil attach "$dmg" -readonly -noautoopen -nobrowse -mountpoint "$mount_point" >/dev/null
+          test -f "$mount_point/.VolumeIcon.icns"
+          [[ "$(GetFileInfo -a "$mount_point")" == *C* ]]
+          hdiutil detach "$mount_point" -quiet
+          ls -lh dist/*.dmg
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: macos-dmgs
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows x64 ZIPs
+    runs-on: windows-latest
+    timeout-minutes: 25
+    needs: [test]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm run icons
+          npm run icons:check
+          npm run build
+
+      - name: Prepare build metadata
+        shell: pwsh
+        run: |
+          $buildDate = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME
+          } else {
+            $version = "0.$([int]$env:GITHUB_RUN_NUMBER - [int]$env:RELEASE_VERSION_OFFSET)"
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+          "BUILD_DATE=$buildDate" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force dist | Out-Null
+
+      - name: Generate Windows application resources
+        shell: pwsh
+        run: |
+          go run scripts/windows/generate-windows-resources.go `
+            -arch amd64 `
+            -icon build/windows/icon.ico `
+            -manifest build/windows/pinger.exe.manifest `
+            -out rsrc_windows_amd64.syso
+
+      - name: Build Windows x64 binaries
+        shell: pwsh
+        env:
+          CGO_ENABLED: "1"
+          GOARCH: amd64
+          GOOS: windows
+          CC: gcc
+        run: |
+          $ldflags = "-s -w -H windowsgui -X main.Version=$env:VERSION -X main.Commit=$env:GITHUB_SHA -X main.BuildDate=$env:BUILD_DATE"
+          go build -tags "sqlite_fts5 goolm" -trimpath -buildvcs=false "-ldflags=$ldflags" -o dist/pinger.exe .
+          if ($LASTEXITCODE -ne 0) { throw "Windows build failed" }
+          Remove-Item rsrc_windows_amd64.syso
+          Compress-Archive -LiteralPath dist/pinger.exe -DestinationPath "dist/Pinger-$($env:VERSION)-windows-amd64.zip"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Get-ChildItem dist/*.zip).FullName)
+          try {
+            if ($zip.Entries.Count -ne 1 -or $zip.Entries[0].FullName -ne "pinger.exe") {
+              throw "Windows package must contain exactly pinger.exe"
+            }
+          } finally { $zip.Dispose() }
+
+      - name: Verify Windows icon is embedded
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $icon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path dist/pinger.exe).Path)
+          if ($null -eq $icon) { throw "dist/pinger.exe has no embedded icon" }
+          Write-Host "Embedded icon size: $($icon.Width)x$($icon.Height)"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: windows-zips
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  build-linux:
+    name: Build Linux x64 deb and AppImage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    needs: [test]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo -n apt-get update -y
+          sudo -n apt-get install -y --no-install-recommends \
+            libgtk-4-dev libwebkitgtk-6.0-dev libsqlite3-dev imagemagick libfuse2
+
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm run icons
+          npm run icons:check
+          npm run build
+
+      - name: Prepare build metadata
+        shell: bash
+        run: |
+          # Debian versions must start with a digit.
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME}"
+            deb_version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.$((GITHUB_RUN_NUMBER - RELEASE_VERSION_OFFSET))"
+            deb_version="${version}"
+          fi
+          {
+            echo "VERSION=${version}"
+            echo "DEB_VERSION=${deb_version}"
+            echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_ENV"
+          mkdir -p dist
+
+      - name: Render application icons
+        shell: bash
+        run: |
+          mkdir -p dist/icons
+          for size in 16 24 32 48 64 128 256 512 1024; do
+            cp "build/linux/icons/${size}x${size}/pinger.png" "dist/icons/${size}.png"
+          done
+
+      - name: Build Linux x64 binaries
+        shell: bash
+        env:
+          CGO_ENABLED: 1
+          GOARCH: amd64
+          GOOS: linux
+          CC: gcc
+        run: |
+          go build -tags "sqlite_fts5 goolm" -trimpath -buildvcs=false \
+            -ldflags "-s -w -X main.Version=${VERSION} -X main.Commit=${GITHUB_SHA} -X main.BuildDate=${BUILD_DATE}" \
+            -o dist/pinger .
+          chmod 755 dist/pinger
+
+      - name: Build DEB package
+        shell: bash
+        run: |
+          stage="$(mktemp -d)/pinger"
+          mkdir -p "$stage/DEBIAN" \
+            "$stage/usr/bin" \
+            "$stage/usr/share/applications" \
+            "$stage/usr/share/icons/hicolor" \
+            "$stage/usr/share/pixmaps" \
+            "$stage/usr/share/doc/pinger"
+
+          cat > "$stage/DEBIAN/control" <<EOF
+          Package: pinger
+          Version: ${DEB_VERSION}
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Pinger <pinger@localhost>
+          Depends: libgtk-4-1, libwebkitgtk-6.0-4
+          Description: Desktop client for gomuks -- a Matrix client
+           Pinger is a desktop client for gomuks, a Matrix client with
+           SQLite caching and media storage.
+          EOF
+
+          cp dist/pinger "$stage/usr/bin/pinger"
+          chmod 755 "$stage/usr/bin/pinger"
+
+          cat > "$stage/usr/share/applications/fi.mau.pinger.desktop" <<EOF
+          [Desktop Entry]
+          Name=Pinger
+          Comment=Desktop client for gomuks -- a Matrix client
+          Exec=pinger
+          Icon=pinger
+          StartupWMClass=fi.mau.pinger
+          Type=Application
+          Categories=Network;InstantMessaging;
+          Terminal=false
+          EOF
+
+          for size in 16 24 32 48 64 128 256 512 1024; do
+            dir="$stage/usr/share/icons/hicolor/${size}x${size}/apps"
+            mkdir -p "$dir"
+            cp "dist/icons/${size}.png" "$dir/pinger.png"
+          done
+          cp dist/icons/1024.png "$stage/usr/share/pixmaps/pinger.png"
+
+          cp README.md "$stage/usr/share/doc/pinger/"
+
+          dpkg-deb --root-owner-group --build "$stage" \
+            "dist/Pinger-${VERSION}-linux-amd64.deb"
+          # Fail the build if the package does not carry the application icon.
+          dpkg-deb -c "dist/Pinger-${VERSION}-linux-amd64.deb" \
+            | grep 'usr/share/icons/hicolor/256x256/apps/pinger.png'
+          ls -lh dist/*.deb
+
+      - name: Build AppImage
+        shell: bash
+        run: |
+          appdir="$(mktemp -d)/pinger.AppDir"
+          mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" \
+            "$appdir/usr/share/icons/hicolor" "$appdir/usr/share/pixmaps"
+
+          cat > "$appdir/AppRun" <<'EOF'
+          #!/bin/sh
+          SELF="$(readlink -f "$0")"
+          DIR="$(dirname "$SELF")"
+          exec "$DIR/usr/bin/pinger" "$@"
+          EOF
+          chmod 755 "$appdir/AppRun"
+
+          cp dist/pinger "$appdir/usr/bin/pinger"
+          chmod 755 "$appdir/usr/bin/pinger"
+
+          cat > "$appdir/fi.mau.pinger.desktop" <<EOF
+          [Desktop Entry]
+          Name=Pinger
+          Comment=Desktop client for gomuks -- a Matrix client
+          Exec=pinger
+          Icon=pinger
+          StartupWMClass=fi.mau.pinger
+          Type=Application
+          Categories=Network;InstantMessaging;
+          Terminal=false
+          EOF
+          cp "$appdir/fi.mau.pinger.desktop" "$appdir/usr/share/applications/fi.mau.pinger.desktop"
+
+          # AppStream metadata keeps appimagetool from warning about missing upstream metadata.
+          mkdir -p "$appdir/usr/share/metainfo"
+          cat > "$appdir/usr/share/metainfo/fi.mau.pinger.appdata.xml" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <component type="desktop-application">
+            <id>fi.mau.pinger</id>
+            <name>Pinger</name>
+            <summary>Desktop client for gomuks, a Matrix client</summary>
+            <description>
+              <p>Pinger is a desktop Matrix chat client built on gomuks.</p>
+            </description>
+            <url type="homepage">https://github.com/cataWalter/pinger</url>
+            <metadata_license>CC0-1.0</metadata_license>
+            <project_license>AGPL-3.0-or-later</project_license>
+            <launchable type="desktop-id">fi.mau.pinger.desktop</launchable>
+          </component>
+          EOF
+
+          for size in 16 24 32 48 64 128 256 512 1024; do
+            dir="$appdir/usr/share/icons/hicolor/${size}x${size}/apps"
+            mkdir -p "$dir"
+            cp "dist/icons/${size}.png" "$dir/pinger.png"
+          done
+          cp dist/icons/1024.png "$appdir/usr/share/pixmaps/pinger.png"
+          cp dist/icons/1024.png "$appdir/pinger.png"
+
+          curl --fail --location --retry 3 \
+            "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage" \
+            -o dist/appimagetool
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  dist/appimagetool" \
+            | sha256sum --check --status
+          chmod +x dist/appimagetool
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 dist/appimagetool "$appdir" \
+            "dist/Pinger-${VERSION}-linux-amd64.AppImage"
+          APPIMAGE_EXTRACT_AND_RUN=1 "dist/Pinger-${VERSION}-linux-amd64.AppImage" --appimage-version
+          ls -lh dist/*.AppImage
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: linux-packages
+          path: |
+            dist/*.deb
+            dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    needs: [build, build-windows, build-linux]
+    if: github.event_name != 'workflow_dispatch' || inputs.publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+
+      - name: Download platform artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v0.$((GITHUB_RUN_NUMBER - RELEASE_VERSION_OFFSET))"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SHA-256 checksums
+        run: |
+          node scripts/release/release-assets.mjs checksums dist
+          node scripts/release/release-assets.mjs verify dist
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          prerelease: false
+          make_latest: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.deb
+            dist/*.AppImage
+            dist/checksums.txt
+
+  update-tap:
+    name: Update Homebrew cask
+    needs: [publish]
+    uses: ./.github/workflows/update-tap.yml
+    with:
+      tag: ${{ needs.publish.outputs.tag }}
+      dry_run: false
+    secrets: inherit
+
+  update-apt:
+    name: Update APT repository
+    needs: [publish]
+    uses: ./.github/workflows/update-deb-repo.yml
+    with:
+      tag: ${{ needs.publish.outputs.tag }}
+      dry_run: false
+    secrets: inherit
+
+  update-winget:
+    name: Submit WinGet package
+    needs: [publish]
+    uses: ./.github/workflows/winget-submission.yml
+    with:
+      tag: ${{ needs.publish.outputs.tag }}
+      dry_run: false
+    secrets: inherit

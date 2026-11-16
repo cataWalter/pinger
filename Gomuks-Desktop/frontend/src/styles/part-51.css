@@ -1,0 +1,31 @@
+.reaction-picker {
+  position: relative;
+}
+
+.reaction-picker-more[aria-expanded='true'] {
+  background: var(--mint-soft);
+}
+
+.reaction-more-popover {
+  position: absolute;
+  z-index: var(--z-notice);
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(360px, calc(100vw - 32px));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.reaction-emoji-picker {
+  width: 100%;
+  --epr-bg-color: var(--paper);
+  --epr-category-label-bg-color: var(--paper);
+  --epr-search-input-bg-color: var(--paper);
+  --epr-search-input-bg-color-active: var(--paper);
+  --epr-picker-border-color: var(--line);
+  --epr-text-color: var(--ink);
+  --epr-highlight-color: var(--accent);
+  --epr-hover-bg-color: var(--green-soft);
+  --epr-focus-bg-color: var(--green-soft);
+}

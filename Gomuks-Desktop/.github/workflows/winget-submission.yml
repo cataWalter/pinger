@@ -1,0 +1,191 @@
+name: Submit to Windows Package Manager (Winget)
+
+on:
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to submit.
+        required: true
+        type: string
+      dry_run:
+        description: Validate manifests without opening a Microsoft PR.
+        type: boolean
+        default: true
+    secrets:
+      WINGET_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to validate or submit.
+        required: true
+        type: string
+      dry_run:
+        description: Validate manifests without opening a Microsoft PR.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: winget-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  winget-pr:
+    if: github.event_name != 'release' || (!github.event.release.draft && !github.event.release.prerelease)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Check publication credentials
+        if: '!inputs.dry_run'
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: test -n "$GH_TOKEN" || { echo "::error::WINGET_TOKEN is required for submission."; exit 1; }
+
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+
+      - name: Download and verify Windows package
+        id: asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/release-assets.mjs download windows "$RUNNER_TEMP/windows"
+
+      - name: Install manifest validators
+        run: |
+          sudo -n apt-get update
+          sudo -n apt-get install -y --no-install-recommends python3-jsonschema python3-yaml unzip
+
+      - name: Generate and validate WinGet manifests
+        env:
+          VERSION: ${{ steps.asset.outputs.version }}
+        run: |
+          set -euo pipefail
+          manifest_dir="winget-manifests/cataWalter/Pinger/$VERSION"
+          node scripts/release/release-assets.mjs winget "$manifest_dir" "$RUNNER_TEMP/windows/release-asset.json"
+          mkdir -p "$RUNNER_TEMP/winget-schemas"
+          schema_root="https://raw.githubusercontent.com/microsoft/winget-cli/c608376673762a10971e6bf2cbeedb6b6a7cae88/schemas/JSON/manifests/v1.6.0"
+          for kind in version defaultLocale installer; do
+            curl --fail --location --retry 3 "$schema_root/manifest.$kind.1.6.0.json" -o "$RUNNER_TEMP/winget-schemas/$kind.json"
+          done
+          /usr/bin/python3 - "$manifest_dir" "$RUNNER_TEMP/winget-schemas" <<'PY'
+          import json
+          import pathlib
+          import sys
+          import jsonschema
+          import yaml
+
+          manifests = pathlib.Path(sys.argv[1])
+          schemas = pathlib.Path(sys.argv[2])
+          for filename in sorted(manifests.glob("*.yaml")):
+              manifest = json.loads(filename.read_text())
+              schema = json.loads((schemas / (manifest["ManifestType"] + ".json")).read_text())
+              jsonschema.Draft7Validator(schema).validate(manifest)
+              filename.write_text(yaml.safe_dump(manifest, sort_keys=False, allow_unicode=False))
+              print("Validated " + filename.name)
+          PY
+          echo "Validated all three WinGet manifests and the Windows ZIP checksum for $TAG." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload validated manifests
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: winget-manifests-${{ github.run_id }}
+          path: winget-manifests/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Submit or update the WinGet PR
+        if: '!inputs.dry_run'
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          VERSION: ${{ steps.asset.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh_user="$(gh api user --jq .login)"
+          manifest_dir="manifests/c/cataWalter/Pinger/$VERSION"
+          branch="pinger-$VERSION"
+          if gh api "repos/microsoft/winget-pkgs/contents/$manifest_dir" >/dev/null 2>&1; then
+            echo "Version $VERSION is already present in WinGet."
+            exit 0
+          fi
+          if ! gh repo view "$gh_user/winget-pkgs" >/dev/null 2>&1; then
+            gh repo fork microsoft/winget-pkgs --clone=false
+          fi
+          gh repo sync "$gh_user/winget-pkgs" --source microsoft/winget-pkgs
+          base="$(gh api "repos/$gh_user/winget-pkgs/git/ref/heads/master" --jq '.object.sha')"
+          base_tree="$(gh api "repos/$gh_user/winget-pkgs/git/commits/$base" --jq '.tree.sha')"
+          manifest_source="winget-manifests/cataWalter/Pinger/$VERSION"
+          test -d "$manifest_source" || { echo "::error::WinGet manifest directory not found: $manifest_source"; exit 1; }
+          version_blob=''
+          locale_blob=''
+          installer_blob=''
+          for file in "$manifest_source"/*.yaml; do
+            name="$(basename "$file")"
+            blob="$(jq -n --rawfile content "$file" '{content:$content,encoding:"utf-8"}' \
+              | gh api --method POST "repos/$gh_user/winget-pkgs/git/blobs" --input - --jq '.sha')"
+            case "$name" in
+              cataWalter.Pinger.yaml) version_blob="$blob" ;;
+              cataWalter.Pinger.locale.en-US.yaml) locale_blob="$blob" ;;
+              cataWalter.Pinger.installer.yaml) installer_blob="$blob" ;;
+              *) echo "::error::Unexpected WinGet manifest: $name"; exit 1 ;;
+            esac
+          done
+          if [[ -z "$version_blob" || -z "$locale_blob" || -z "$installer_blob" ]]; then
+            echo "::error::Expected all three WinGet manifests."
+            exit 1
+          fi
+
+          tree_data="$(jq -n \
+            --arg base_tree "$base_tree" \
+            --arg version_path "$manifest_dir/cataWalter.Pinger.yaml" --arg version_sha "$version_blob" \
+            --arg locale_path "$manifest_dir/cataWalter.Pinger.locale.en-US.yaml" --arg locale_sha "$locale_blob" \
+            --arg installer_path "$manifest_dir/cataWalter.Pinger.installer.yaml" --arg installer_sha "$installer_blob" \
+            '{base_tree:$base_tree,tree:[
+              {path:$version_path,mode:"100644",type:"blob",sha:$version_sha},
+              {path:$locale_path,mode:"100644",type:"blob",sha:$locale_sha},
+              {path:$installer_path,mode:"100644",type:"blob",sha:$installer_sha}
+            ]}')"
+          tree="$(printf '%s' "$tree_data" | gh api --method POST "repos/$gh_user/winget-pkgs/git/trees" --input - --jq '.sha')"
+          commit_data="$(jq -n --arg message "New package: cataWalter.Pinger version $VERSION" --arg tree "$tree" --arg parent "$base" \
+            '{message:$message,tree:$tree,parents:[$parent]}')"
+          commit="$(printf '%s' "$commit_data" | gh api --method POST "repos/$gh_user/winget-pkgs/git/commits" --input - --jq '.sha')"
+
+          ref="repos/$gh_user/winget-pkgs/git/refs/heads/$branch"
+          if gh api "repos/$gh_user/winget-pkgs/git/ref/heads/$branch" >/dev/null 2>&1; then
+            jq -n --arg sha "$commit" '{sha:$sha,force:true}' | gh api --method PATCH "$ref" --input - >/dev/null
+          else
+            jq -n --arg ref "refs/heads/$branch" --arg sha "$commit" '{ref:$ref,sha:$sha}' \
+              | gh api --method POST "repos/$gh_user/winget-pkgs/git/refs" --input - >/dev/null
+          fi
+          published="$(gh api "repos/$gh_user/winget-pkgs/git/ref/heads/$branch" --jq '.object.sha')"
+          test "$published" = "$commit"
+
+          pull_url="$(gh api "repos/microsoft/winget-pkgs/pulls?state=open&head=$gh_user%3A$branch&base=master" --jq '.[0].html_url // ""')"
+          if [[ -z "$pull_url" ]]; then
+            pull_url="$(gh api --method POST repos/microsoft/winget-pkgs/pulls \
+              -f title="New package: cataWalter.Pinger version $VERSION" \
+              -f head="$gh_user:$branch" \
+              -f base=master \
+              -f body="Verified release $TAG from https://github.com/$GITHUB_REPOSITORY. Includes validated nested-portable ZIP manifests." \
+              --jq '.html_url')"
+          else
+            echo "Updated existing WinGet PR for $VERSION: $pull_url"
+          fi
+          echo "WinGet PR: $pull_url" >> "$GITHUB_STEP_SUMMARY"

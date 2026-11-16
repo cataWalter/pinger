@@ -1,0 +1,53 @@
+/bin/
+/qt6/build/
+/.task/
+/mychat
+/dist/
+/frontend/node_modules/
+/node_modules/
+/node_modules/.vite/
+/node_modules/.vitest-cache/
+/frontend/bindings/
+/frontend/dist/
+/build/linux/appimage/build/
+/toolchain/
+/tools/msys64/
+/.kilo/
+/.playwright-mcp/
+/build/bin/
+/coverage/
+/frontend/coverage/
+/frontend/playwright-report/
+/frontend/test-results/
+
+
+# Logs & environment
+*.log
+# Vitest artifacts
+/frontend/.vitest/
+/frontend/src/artifacts/
+
+.env*
+
+# Go workspace & test artifacts
+go.work
+go.work.sum
+*.test
+*.out
+coverage.out
+*.coverprofile
+
+# IDE & editors
+.vscode/
+!.vscode/
+.vscode/*
+!.vscode/tasks.json
+.idea/
+*.swp
+.*.swp
+*~
+*.swo
+
+# macOS / Windows
+.DS_Store
+Thumbs.db

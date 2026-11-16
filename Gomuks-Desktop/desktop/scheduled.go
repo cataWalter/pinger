@@ -1,0 +1,271 @@
+package desktop
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+const (
+	scheduledMessageKind  = "message"
+	scheduledReminderKind = "reminder"
+
+	scheduledPending   = "pending"
+	scheduledSending   = "sending"
+	scheduledSent      = "sent"
+	scheduledSentLate  = "sent-late"
+	scheduledFailed    = "failed"
+	scheduledFired     = "fired"
+	scheduledCancelled = "cancelled"
+	scheduledDismissed = "dismissed"
+)
+
+type ScheduledJob struct {
+	ID             string `json:"id"`
+	AccountID      string `json:"accountId"`
+	Kind           string `json:"kind"`
+	RoomID         string `json:"roomId"`
+	Text           string `json:"text"`
+	EventID        string `json:"eventId"`
+	ReplyToEventID string `json:"replyToEventId,omitempty"`
+	TransactionID  string `json:"transactionId,omitempty"`
+	DueAt          int64  `json:"dueAt"`
+	CreatedAt      int64  `json:"createdAt"`
+	Status         string `json:"status"`
+	Error          string `json:"error"`
+	RepeatWeekly   bool   `json:"repeatWeekly,omitempty"`
+	RepeatWeekday  int    `json:"repeatWeekday,omitempty"`
+	RepeatHour     int    `json:"repeatHour,omitempty"`
+	RepeatMinute   int    `json:"repeatMinute,omitempty"`
+}
+
+type scheduledJobStore struct {
+	mu                           sync.Mutex
+	path                         string
+	jobs                         []ScheduledJob
+	completionPersistencePending bool
+}
+
+func newScheduledJobStore(path string) (*scheduledJobStore, error) {
+	if path == "" {
+		return nil, errors.New("scheduled jobs path is empty")
+	}
+	store := &scheduledJobStore{path: path, jobs: []ScheduledJob{}}
+	contents, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return store, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read scheduled jobs: %w", err)
+	}
+	if err = json.Unmarshal(contents, &store.jobs); err != nil {
+		return nil, fmt.Errorf("decode scheduled jobs: %w", err)
+	}
+	if store.jobs == nil {
+		store.jobs = []ScheduledJob{}
+	}
+	if err = os.Chmod(path, 0o600); err != nil && runtime.GOOS != "windows" {
+		return nil, fmt.Errorf("secure scheduled jobs file: %w", err)
+	}
+	for index := range store.jobs {
+		if store.jobs[index].AccountID == "" {
+			store.jobs[index].AccountID = primaryAccountID
+		}
+		if store.jobs[index].Status == scheduledSending {
+			store.jobs[index].Status = scheduledFailed
+			store.jobs[index].Error = "The app closed while sending. Check the room before retrying."
+		}
+	}
+	if err = store.saveLocked(); err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
+func (s *scheduledJobStore) scheduleMessage(accountID, roomID, text string, dueAt int64) (ScheduledJob, error) {
+	return s.create(scheduledMessageKind, accountID, roomID, strings.TrimSpace(text), "", "", dueAt, false)
+}
+
+func (s *scheduledJobStore) scheduleRecurringMessage(accountID, roomID, text string, dueAt int64) (ScheduledJob, error) {
+	return s.create(scheduledMessageKind, accountID, roomID, strings.TrimSpace(text), "", "", dueAt, true)
+}
+
+func (s *scheduledJobStore) scheduleReminder(accountID, roomID, eventID, text string, dueAt int64) (ScheduledJob, error) {
+	return s.create(scheduledReminderKind, accountID, roomID, strings.TrimSpace(text), eventID, "", dueAt, false)
+}
+
+func (s *scheduledJobStore) scheduleReply(accountID, roomID, text, replyToEventID string, dueAt int64) (ScheduledJob, error) {
+	replyToEventID = strings.TrimSpace(replyToEventID)
+	if replyToEventID == "" {
+		return ScheduledJob{}, errors.New("scheduled reply requires a target event ID")
+	}
+	return s.create(scheduledMessageKind, accountID, roomID, strings.TrimSpace(text), "", replyToEventID, dueAt, false)
+}
+
+func (s *scheduledJobStore) create(kind, accountID, roomID, text, eventID, replyToEventID string, dueAt int64, repeatWeekly bool) (ScheduledJob, error) {
+	if kind != scheduledMessageKind && kind != scheduledReminderKind {
+		return ScheduledJob{}, errors.New("unsupported scheduled job kind")
+	}
+	if strings.TrimSpace(accountID) == "" {
+		return ScheduledJob{}, errors.New("scheduled job requires an account ID")
+	}
+	if strings.TrimSpace(roomID) == "" {
+		return ScheduledJob{}, errors.New("scheduled job requires a room ID")
+	}
+	if kind == scheduledMessageKind && text == "" {
+		return ScheduledJob{}, errors.New("scheduled message cannot be empty")
+	}
+	if dueAt <= time.Now().UnixMilli() {
+		return ScheduledJob{}, errors.New("scheduled time must be in the future")
+	}
+	var randomID [16]byte
+	if _, err := rand.Read(randomID[:]); err != nil {
+		return ScheduledJob{}, fmt.Errorf("generate scheduled job ID: %w", err)
+	}
+	job := ScheduledJob{
+		ID:             hex.EncodeToString(randomID[:]),
+		AccountID:      accountID,
+		Kind:           kind,
+		RoomID:         roomID,
+		Text:           text,
+		EventID:        eventID,
+		ReplyToEventID: replyToEventID,
+		DueAt:          dueAt,
+		CreatedAt:      time.Now().UnixMilli(),
+		Status:         scheduledPending,
+		RepeatWeekly:   repeatWeekly,
+	}
+	if repeatWeekly {
+		scheduleAt := time.UnixMilli(dueAt).In(time.Local)
+		job.RepeatWeekday = int(scheduleAt.Weekday())
+		job.RepeatHour = scheduleAt.Hour()
+		job.RepeatMinute = scheduleAt.Minute()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jobs = append(s.jobs, job)
+	if err := s.saveLocked(); err != nil {
+		s.jobs = s.jobs[:len(s.jobs)-1]
+		return ScheduledJob{}, err
+	}
+	return job, nil
+}
+
+func (s *scheduledJobStore) list() []ScheduledJob {
+	return s.listForAccount("")
+}
+
+func (s *scheduledJobStore) listForAccount(accountID string) []ScheduledJob {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	jobs := make([]ScheduledJob, 0, len(s.jobs))
+	for _, job := range s.jobs {
+		if accountID != "" && job.AccountID != accountID {
+			continue
+		}
+		if job.Status == scheduledSent || job.Status == scheduledCancelled || job.Status == scheduledDismissed {
+			continue
+		}
+		jobs = append(jobs, job)
+	}
+	sort.SliceStable(jobs, func(left, right int) bool {
+		return jobs[left].DueAt < jobs[right].DueAt
+	})
+	return jobs
+}
+
+func (s *scheduledJobStore) claimDue(kind string, now int64) ([]ScheduledJob, error) {
+	return s.claimDueForAccount(kind, now, "")
+}
+
+func (s *scheduledJobStore) claimDueForAccount(kind string, now int64, accountID string) ([]ScheduledJob, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous := append([]ScheduledJob(nil), s.jobs...)
+	claimed := make([]ScheduledJob, 0)
+	for index := range s.jobs {
+		job := &s.jobs[index]
+		if job.Kind != kind || job.Status != scheduledPending || job.DueAt > now || accountID != "" && job.AccountID != accountID {
+			continue
+		}
+		if kind == scheduledMessageKind {
+			job.Status = scheduledSending
+		} else {
+			job.Status = scheduledFired
+		}
+		claimed = append(claimed, *job)
+	}
+	if len(claimed) == 0 {
+		return nil, nil
+	}
+	if err := s.saveLocked(); err != nil {
+		s.jobs = previous
+		return nil, err
+	}
+	return claimed, nil
+}
+
+func (s *scheduledJobStore) finishMessage(id string, sendErr error, startedAt, finishedAt int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.jobs {
+		job := &s.jobs[index]
+		if job.ID != id || job.Status != scheduledSending {
+			continue
+		}
+		if sendErr != nil {
+			job.Status = scheduledFailed
+			job.Error = sendErr.Error()
+		} else {
+			job.Status = scheduledSent
+			if startedAt > job.DueAt+10_000 {
+				job.Status = scheduledSentLate
+			}
+			job.Error = ""
+			if job.RepeatWeekly {
+				job.DueAt = nextWeeklyOccurrence(finishedAt, job.RepeatWeekday, job.RepeatHour, job.RepeatMinute)
+				job.Status = scheduledPending
+				job.TransactionID = ""
+			}
+		}
+		if err := s.saveLocked(); err != nil {
+			s.completionPersistencePending = true
+			return err
+		}
+		return nil
+	}
+	return errors.New("scheduled message is no longer being sent")
+}
+
+func (s *scheduledJobStore) flushPendingCompletions() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.completionPersistencePending {
+		return nil
+	}
+	if err := s.saveLocked(); err != nil {
+		return err
+	}
+	s.completionPersistencePending = false
+	return nil
+}
+
+func (s *scheduledJobStore) recordTransaction(id, transactionID string) error {
+	return s.updateJob(id, func(job *ScheduledJob) error {
+		if job.Status != scheduledSending {
+			return errors.New("scheduled message is no longer being sent")
+		}
+		job.TransactionID = transactionID
+		return nil
+	})
+}

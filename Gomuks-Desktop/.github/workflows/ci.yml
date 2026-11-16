@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  # Main pushes run CI through release.yml, so there is no separate push trigger.
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GOTOOLCHAIN: go1.26.11
+
+jobs:
+  checks:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+      CGO_CFLAGS: "-mmacosx-version-min=13.0"
+      CGO_LDFLAGS: "-mmacosx-version-min=13.0 -Wl,-no_warn_duplicate_libraries"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
+
+      - name: Validate workflow definitions
+        run: |
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          ruby scripts/ci/check-workflows.rb
+          node --test scripts/release/release-assets.test.mjs scripts/release/release-assets-downloads.test.mjs
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm run icons
+          npm run icons:check
+          npm run test
+          npm run bench
+          npm run lint
+          npm run build
+          npm run check:bundle
+
+      - name: Install desktop browser engines
+        working-directory: frontend
+        run: npx playwright install chromium webkit
+
+      - name: Desktop UI browser tests
+        working-directory: frontend
+        run: npm run test:browser
+
+      - name: Frontend dependency audit
+        working-directory: frontend
+        run: npm audit --audit-level=moderate
+
+      - name: Test
+        run: go test -tags "sqlite_fts5 goolm" ./...
+
+      - name: Stateful package race tests
+        timeout-minutes: 10
+        run: go test -race -count=1 -tags "sqlite_fts5 goolm" ./desktop ./matrix ./preferences
+
+      - name: Vet
+        run: go vet -tags "sqlite_fts5 goolm" ./...
+
+      - name: Correctness static analysis
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks='SA*' -tags sqlite_fts5,goolm ./...
+
+      - name: Reachable Go vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -tags sqlite_fts5,goolm ./...
+
+      - name: Boundary fuzz tests
+        timeout-minutes: 5
+        run: |
+          go test -tags sqlite_fts5,goolm ./preferences -run '^$' -fuzz '^FuzzValidateLocalHTTPEndpoint$' -fuzztime=30s -parallel=2
+          go test -tags sqlite_fts5,goolm ./desktop -run '^$' -fuzz '^FuzzParseMediaAssetPath$' -fuzztime=30s -parallel=2
+          go test -tags sqlite_fts5,goolm ./matrix -run '^$' -fuzz '^FuzzMessageFromEvent$' -fuzztime=30s -parallel=2
+
+      - name: Build
+        run: go build -tags "sqlite_fts5 goolm" .
+
+      - name: Upload browser failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: browser-failure-screenshots
+          path: frontend/.vitest/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  windows-checks:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      CGO_ENABLED: "1"
+      CC: gcc
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
+
+      - name: Test release asset helpers
+        run: node --test scripts/release/release-assets.test.mjs scripts/release/release-assets-downloads.test.mjs
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm run icons
+          npm run icons:check
+          npm run build
+
+      - name: Generate Windows application resources
+        shell: pwsh
+        run: |
+          go run scripts/windows/generate-windows-resources.go `
+            -arch amd64 `
+            -icon build/windows/icon.ico `
+            -manifest build/windows/pinger.exe.manifest `
+            -out rsrc_windows_amd64.syso
+
+      - name: Compile package tests
+        run: go test -run '^$' -tags "sqlite_fts5 goolm" ./...
+
+      - name: Test notification icon selection
+        run: go test -tags "sqlite_fts5 goolm" ./notifications -run 'TestNotificationAttachments|TestNotificationIconCache' -count=1
+
+      - name: Build Windows application
+        run: go build -tags "sqlite_fts5 goolm" -o bin/pinger-ci.exe .
+
+  linux-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install native build dependencies
+        run: |
+          sudo -n apt-get update
+          sudo -n apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsqlite3-dev
+
+      - name: Set up build dependencies
+        uses: ./.github/actions/setup-build
+
+      - name: Test release asset helpers
+        run: node --test scripts/release/release-assets.test.mjs scripts/release/release-assets-downloads.test.mjs
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm run icons
+          npm run icons:check
+          npm run build
+
+      - name: Compile package tests
+        run: go test -run '^$' -tags "sqlite_fts5 goolm" ./...
+
+      - name: Test notification icon selection
+        run: go test -tags "sqlite_fts5 goolm" ./notifications -run 'TestNotificationAttachments|TestNotificationIconCache' -count=1
+
+      - name: Build Linux application
+        run: go build -tags "sqlite_fts5 goolm" -o bin/pinger-ci .

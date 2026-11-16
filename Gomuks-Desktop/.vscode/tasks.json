@@ -1,0 +1,21 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Pinger: Run normally",
+			"type": "shell",
+			"command": "bash scripts/dev/run-normally.sh",
+			"options": {
+				"cwd": "${workspaceFolder}",
+				"env": {
+					"GOTOOLCHAIN": "go1.26.11"
+				}
+			},
+			"problemMatcher": [],
+			"presentation": {
+				"panel": "dedicated",
+				"reveal": "always"
+			}
+		}
+	]
+}
