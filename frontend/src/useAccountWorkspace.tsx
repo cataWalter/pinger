@@ -23,7 +23,7 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
   })
   const replyDraftBatchRef = useRef<{ accountID: string; requestIDs: Set<string>; cancelled: boolean } | null>(null)
 
-  // suggestRepliesForRoom asks Local AI for ten reply options, each in a different style, based on the latest messages in roomID.
+  // suggestRepliesForRoom asks Local AI for five reply options, each in a different style, based on the latest messages in roomID.
   async function suggestRepliesForRoom(roomID: string) {
     if (!roomID || !aiEnabled || editTarget) return
     cancelAIRequest(suggestedRepliesRequestRef.current)

@@ -25,7 +25,7 @@ type SuggestedRepliesPickerProps = {
   onClose: () => void
 }
 
-const skeletonRows = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+const skeletonRows = [0, 1, 2, 3, 4]
 
 // isEditableTarget reports whether a key press belongs to a text field, so typing a digit there never chooses a reply.
 function isEditableTarget(target: EventTarget | null) {
@@ -61,7 +61,7 @@ export function SuggestedRepliesPicker({ state, hasDraft, explanationLanguage, o
       }
       if (!ready || pending !== null || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) return
       const digit = /^[0-9]$/.test(event.key) ? Number(event.key) : Number.NaN
-      const index = digit === 0 ? 9 : digit - 1
+      const index = digit - 1
       if (Number.isInteger(index) && index >= 0 && index < options.length) {
         event.preventDefault()
         choose(options[index].text)
@@ -108,7 +108,7 @@ export function SuggestedRepliesPicker({ state, hasDraft, explanationLanguage, o
                   <span className="suggested-reply-text" lang={state.language || undefined}>{option.text}</span>
                   {option.translation && <span className="suggested-reply-translation" lang={explanationLanguage}>{option.translation}</span>}
                 </span>
-                <kbd className="suggested-reply-key" aria-hidden="true">{index === 9 ? 0 : index + 1}</kbd>
+                <kbd className="suggested-reply-key" aria-hidden="true">{index + 1}</kbd>
               </button>
             </li>
           ))}

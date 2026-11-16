@@ -1,13 +1,13 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Room } from '../bindings/mychat/desktop/models.js'
-import { describeError, preferenceString, type PreferenceValues } from './appShared'
+import { describeError, preferenceBoolean, preferenceString, type PreferenceValues } from './appShared'
 import { EMPTY_CHAT_AGENTS, parseChatAgents, serializeChatAgents, type ChatAgentCollection } from './aiPrompts'
 import { resolveLanguageRoles } from './aiSettings'
 import { LanguageSettings } from './LanguageSettings'
 import { AIPromptSettings } from './AIPromptSettings'
 import LocalAIAgentSettings from './LocalAIAgentSettings'
-import { SettingsSection } from './SettingsControls'
+import { PreferenceToggle, SettingsSection } from './SettingsControls'
 
 type AISettingsTabProps = {
   preferences: PreferenceValues
@@ -43,6 +43,7 @@ export function AISettingsTab({ preferences, rooms, onPreferenceChange, onPrefer
         onSave={onPreferenceChange}
       />
       <LocalAIAgentSettings agents={localAIAgents} onSave={(collection) => onPreferenceChange('ai.local_agents', serializeChatAgents(collection))} />
+      <PreferenceToggle label="Detect the learning language of unarchived chats automatically" checked={preferenceBoolean(preferences, 'ai.detect_chat_language')} onChange={(value) => onPreferenceChange('ai.detect_chat_language', value)} />
       <LanguageSettings roles={resolveLanguageRoles(preferences)} preferences={preferences} rooms={rooms} onPreferencesChange={onPreferencesChange} />
       <AIPromptSettings preferences={preferences} onSave={onPreferenceChange} />
     </SettingsSection>

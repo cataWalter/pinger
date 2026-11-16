@@ -146,6 +146,22 @@ export function roomLearningLanguageKey(roomID: string): string {
   return `room.learning_language.${roomID}`
 }
 
+// detectedChatLanguageKey stores the language detected automatically for a chat the last time it was written to roomLearningLanguageKey.
+export function detectedChatLanguageKey(roomID: string): string {
+  return `room.detected_language.${roomID}`
+}
+
+// chatLanguageChange decides whether an automatic detection should replace a chat's learning language. It returns null when
+// nothing should change. A learning language the user chose, which differs from the last automatic value, is never replaced.
+// A chat written in the default language has no learning language, so the automatic value is cleared.
+export function chatLanguageChange(state: { current: string; detectedBefore: string; detected: string; defaultLanguage: string }): { learning: string; detected: string } | null {
+  if (!state.detected) return null
+  if (state.current !== '' && state.current !== state.detectedBefore) return null
+  const learning = state.detected === state.defaultLanguage ? '' : state.detected
+  if (state.current === learning && state.detectedBefore === learning) return null
+  return { learning, detected: learning }
+}
+
 // roomTutorLanguageChoice returns the language a chat chose for its tutor, or an empty string for the default.
 export function roomTutorLanguageChoice(preferences: Readonly<Record<string, unknown>>, roomID: string): string {
   const roles = resolveLanguageRoles(preferences)

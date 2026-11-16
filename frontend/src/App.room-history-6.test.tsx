@@ -264,7 +264,7 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     openMessageMenu(container)
-    await user.click(await screen.findByRole('menuitem', { name: 'Suggest ten replies with local AI' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Suggest five replies with local AI' }))
 
     const picker = await screen.findByRole('group', { name: 'Suggested replies' })
     expect(within(picker).getByRole('button', { name: /Maybe later\?/ })).toBeTruthy()
@@ -283,13 +283,13 @@ describe('room history updates', () => {
     expect(within(picker).getByText('Direct')).toBeTruthy()
     expect(within(picker).getByText('Playful')).toBeTruthy()
     expect(within(picker).getByText('Formal')).toBeTruthy()
-    expect(within(picker).getByText('Confrontational')).toBeTruthy()
+    expect(within(picker).getByText('Empathetic')).toBeTruthy()
     expect(within(picker).getByText('3')).toBeTruthy()
-    expect(within(picker).getByText('0')).toBeTruthy()
-    expect(within(picker).getAllByRole('button').filter((button) => button.classList.contains('suggested-reply-option'))).toHaveLength(10)
+    expect(within(picker).getByText('5')).toBeTruthy()
+    expect(within(picker).getAllByRole('button').filter((button) => button.classList.contains('suggested-reply-option'))).toHaveLength(5)
   })
 
-  it('chooses the tenth suggested reply with the 0 key', async () => {
+  it('chooses the fifth suggested reply with the 5 key', async () => {
     const user = userEvent.setup()
     harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture })
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
@@ -299,9 +299,9 @@ describe('room history updates', () => {
 
     await user.click(menuCommand('Suggest replies'))
     await screen.findByRole('group', { name: 'Suggested replies' })
-    await user.keyboard('0')
+    await user.keyboard('5')
 
-    expect(composer.value).toBe('Then stop talking and do it.')
+    expect(composer.value).toBe('That sounds tough. Want to talk?')
     expect(screen.queryByRole('group', { name: 'Suggested replies' })).toBeNull()
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })

@@ -21,6 +21,7 @@ import { useAIRequests } from './useAIRequests'
 import { useAccountWorkspace } from './useAccountWorkspace'
 import { useNotificationDelivery } from './useNotificationDelivery'
 import { useWorkspaceEffects } from './useWorkspaceEffects'
+import { useChatLanguageDetection } from './useChatLanguageDetection'
 import { useMenuActions } from './useMenuActions'
 import { useMessageAIActions } from './useMessageAIActions'
 import { useComposerSnippets } from './useComposerSnippets'
@@ -51,7 +52,8 @@ function AppBody() {
   const part14 = useAccountWorkspace(part13)
   const part15 = useNotificationDelivery(part14)
   const part16 = useWorkspaceEffects(part15)
-  const part17 = useMenuActions(part16)
+  const part16a = useChatLanguageDetection(part16)
+  const part17 = useMenuActions(part16a)
   const part18 = useMessageAIActions(part17)
   const part19 = useComposerSnippets(part18)
   const part20 = useRoomChatExport(part19)

@@ -57,6 +57,7 @@ export const harness = {
     AIComplete: vi.fn(),
     AICancel: vi.fn(),
     AIGenerateReplyDraft: vi.fn(),
+    AIDetectChatLanguage: vi.fn(),
     AISuggestReplies: vi.fn(),
     GenerateRoomImage: vi.fn(),
     SendRoomImage: vi.fn(),
@@ -192,11 +193,6 @@ export const suggestedReplyFixture = [
   { tone: 'Formal', text: 'Let me check and tell you.', translation: 'Let me check and tell you.' },
   { tone: 'Curious', text: 'What time works for you?', translation: 'What time works for you?' },
   { tone: 'Empathetic', text: 'That sounds tough. Want to talk?', translation: 'That sounds tough. Want to talk?' },
-  { tone: 'Humorous', text: 'Coffee first, then everything else.', translation: 'Coffee first, then everything else.' },
-  { tone: 'Follow-up', text: 'Did you ever finish that?', translation: 'Did you ever finish that?' },
-  { tone: 'Flirty medium', text: 'Hope your day is going well.', translation: 'Hope your day is going well.' },
-  { tone: 'Flirty hard', text: 'Careful, you are making me blush.', translation: 'Careful, you are making me blush.' },
-  { tone: 'Confrontational', text: 'Then stop talking and do it.', translation: 'Then stop talking and do it.' },
 ]
 
 export const snapshot: Snapshot = {

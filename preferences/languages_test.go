@@ -209,6 +209,24 @@ func TestRoomLanguageOverridesAllowAllSupportedLanguages(t *testing.T) {
 	}
 }
 
+func TestRoomDetectedLanguageAcceptsOnlySupportedLanguages(t *testing.T) {
+	store := openLanguageTestStore(t)
+	if err := store.SetMany("", map[string]any{
+		"ai.default_language": "en",
+		"ai.known_languages":  `["en","it"]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	roomKey := "room.detected_language.!room:example.org"
+	if err := store.Set(AccountScope, "acct", roomKey, "it"); err != nil {
+		t.Errorf("Set(%q, \"it\") error = %v", roomKey, err)
+	}
+	if err := store.Set(AccountScope, "acct", roomKey, "xx"); err == nil {
+		t.Errorf("Set(%q) accepted an unsupported language", roomKey)
+	}
+}
+
 func TestCustomLanguageRemovalChecksRoomOverrides(t *testing.T) {
 	store := openLanguageTestStore(t)
 	roomKeys := []string{"room.tutor_language.!room:example.org", "room.learning_language.!room:example.org"}

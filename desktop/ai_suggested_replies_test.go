@@ -233,7 +233,7 @@ func TestRequestSuggestedRepliesReturnsTrimmedOptions(t *testing.T) {
 	if !strings.Contains(requests[0], `"enable_thinking":false`) {
 		t.Fatalf("request does not disable thinking: %s", requests[0])
 	}
-	if !strings.Contains(requests[0], `"maxItems":10`) || !strings.Contains(requests[0], "suggested_replies") {
+	if !strings.Contains(requests[0], `"maxItems":5`) || !strings.Contains(requests[0], "suggested_replies") {
 		t.Fatalf("request does not constrain output with the suggestions schema: %s", requests[0])
 	}
 	var sent struct {
