@@ -11,6 +11,34 @@ import (
 	"sort"
 )
 
+// addEditTargets loads originals for edits in events that fall outside the page, so their edited body reaches the client.
+func (c *Client) addEditTargets(ctx context.Context, roomID id.RoomID, events []*database.Event, messages []Message) ([]*database.Event, []Message) {
+	present := make(map[id.EventID]struct{}, len(messages))
+	for _, message := range messages {
+		present[id.EventID(message.ID)] = struct{}{}
+	}
+	for _, evt := range events {
+		if evt == nil || evt.RelationType != event.RelReplace || evt.RedactedBy != "" || evt.RelatesTo == "" {
+			continue
+		}
+		if _, ok := present[evt.RelatesTo]; ok {
+			continue
+		}
+		present[evt.RelatesTo] = struct{}{}
+		original, err := c.engine.DB.Event.GetByID(ctx, roomID, evt.RelatesTo)
+		if err != nil || original == nil {
+			continue
+		}
+		message, ok := messageFromEvent(original)
+		if !ok {
+			continue
+		}
+		events = append(events, original)
+		messages = append(messages, message)
+	}
+	return events, messages
+}
+
 func (c *Client) populateEditHistories(ctx context.Context, roomID string, events []*database.Event, messages []Message) error {
 	originals := make(map[id.EventID]*database.Event)
 	eventIDs := make([]id.EventID, 0, len(events))

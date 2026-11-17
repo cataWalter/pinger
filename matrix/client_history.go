@@ -143,6 +143,9 @@ func (c *Client) HistoryPageWithLimit(ctx context.Context, roomID string, before
 			}
 		}
 	}
+	if before == 0 {
+		events, messages = c.addEditTargets(ctx, id.RoomID(roomID), events, messages)
+	}
 	if err := c.populateEditHistories(ctx, roomID, events, messages); err != nil {
 		log.Printf("read Matrix edit history for room %s: %v", roomID, err)
 	}

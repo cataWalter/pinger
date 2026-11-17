@@ -40,6 +40,7 @@ export const harness = {
     SendNotification: vi.fn(),
     SendMessage: vi.fn(),
     SendReply: vi.fn(),
+    EditMessage: vi.fn(),
     SendMessageWithMentions: vi.fn(),
     SaveMedia: vi.fn(),
     RevealFile: vi.fn(),
