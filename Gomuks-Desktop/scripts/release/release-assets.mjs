@@ -13,6 +13,8 @@ const RELEASE_FILE = /\.(dmg|zip|deb|AppImage)$/
 const REQUIRED_KINDS = ['dmg', 'zip', 'deb', 'AppImage']
 const TAG = /^v\d+(?:\.\d+){1,2}(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$/
 const REPOSITORY = /^[A-Za-z0-9-]+\/[A-Za-z0-9_-][A-Za-z0-9_.-]*$/
+const WINDOWS_GUI_EXECUTABLE = 'pinger-qt.exe'
+const WINDOWS_BACKEND_EXECUTABLE = 'pinger.exe'
 const WINGET_ID = 'cataWalter.Pinger'
 const WINGET_MANIFEST_VERSION = '1.6.0'
 
@@ -155,9 +157,12 @@ export async function downloadRelease(platform, dir, { fetchImpl = fetch, token 
     releaseDate: String(release.published_at ?? release.created_at ?? '').slice(0, 10),
   }
   if (platform === 'windows') {
-    const executables = listZipEntries(data).filter((name) => /\.exe$/i.test(name))
-    if (executables.length !== 1) throw new Error(`${asset.name} must contain exactly one executable`)
-    metadata.nestedFile = executables[0]
+    const executables = listZipEntries(data).filter((name) => /\.exe$/i.test(name)).sort()
+    const expected = [WINDOWS_GUI_EXECUTABLE, WINDOWS_BACKEND_EXECUTABLE].sort()
+    if (executables.length !== expected.length || executables.some((name, index) => name !== expected[index])) {
+      throw new Error(`${asset.name} must contain exactly ${WINDOWS_GUI_EXECUTABLE} and ${WINDOWS_BACKEND_EXECUTABLE} at the archive root`)
+    }
+    metadata.nestedFile = WINDOWS_GUI_EXECUTABLE
   }
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, asset.name), data)

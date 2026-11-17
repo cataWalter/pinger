@@ -75,6 +75,20 @@ QString languageLabel(const QString &code) {
     return code.isEmpty() ? QStringLiteral("Default") : QStringLiteral("%1 (%2)").arg(languageName(code), code);
 }
 
+void writeAutostartEntry(const QString &path, bool enabled, const QString &contents) {
+    if (!enabled) {
+        QFile::remove(path);
+        return;
+    }
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return;
+    }
+    file.write(contents.toUtf8());
+    file.close();
+}
+
 void setLaunchAtStartup(bool enabled) {
 #ifdef Q_OS_WIN
     QSettings settings(QStringLiteral("HKEY_CURRENT_USER/Software/Microsoft/Windows/CurrentVersion/Run"),
@@ -85,30 +99,32 @@ void setLaunchAtStartup(bool enabled) {
         settings.remove(QStringLiteral("Pinger"));
     }
     settings.sync();
-#elif defined(Q_OS_MAC)
-    Q_UNUSED(enabled);
 #else
-    const QString directory = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
-                              + QStringLiteral("/autostart");
-    const QString path = directory + QStringLiteral("/pinger.desktop");
-    if (!enabled) {
-        QFile::remove(path);
-        return;
-    }
-    QDir().mkpath(directory);
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        return;
-    }
+    const QString appPath = QCoreApplication::applicationFilePath();
+#ifdef Q_OS_MACOS
+    const QString path = QDir::homePath() + QStringLiteral("/Library/LaunchAgents/com.pinger.desktop.plist");
+    const QString contents = QStringLiteral(
+                                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                                 "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+                                 "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+                                 "<plist version=\"1.0\"><dict>\n"
+                                 "  <key>Label</key><string>com.pinger.desktop</string>\n"
+                                 "  <key>ProgramArguments</key><array><string>%1</string></array>\n"
+                                 "  <key>RunAtLoad</key><true/>\n"
+                                 "</dict></plist>\n")
+                                 .arg(appPath.toHtmlEscaped());
+#else
+    const QString path = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+                         + QStringLiteral("/autostart/pinger.desktop");
     const QString contents = QStringLiteral(
                                  "[Desktop Entry]\n"
                                  "Type=Application\n"
                                  "Name=Pinger\n"
                                  "Exec=\"%1\"\n"
                                  "X-GNOME-Autostart-enabled=true\n")
-                                 .arg(QCoreApplication::applicationFilePath());
-    file.write(contents.toUtf8());
-    file.close();
+                                 .arg(appPath);
+#endif
+    writeAutostartEntry(path, enabled, contents);
 #endif
 }
 
@@ -745,7 +761,7 @@ void SettingsDialog::buildKeyboard() {
     auto *layout = qobject_cast<QVBoxLayout *>(page->layout());
     auto *form = new QFormLayout;
     addBool(page, form, QStringLiteral("shortcuts.single_keys"),
-            QStringLiteral("Enable single-key room shortcuts"), true);
+            QStringLiteral("Enable single-key shortcuts (N, U, A, F, R, J, K and answered key)"), true);
     addBool(page, form, QStringLiteral("composer.ctrl_enter"),
             QStringLiteral("Use Ctrl + Enter to send"));
     addBool(page, form, QStringLiteral("composer.spellcheck"),
@@ -776,24 +792,52 @@ void SettingsDialog::buildKeyboard() {
         {QStringLiteral("Search messages"), QStringLiteral("Ctrl / ⌘ + F")},
         {QStringLiteral("Open settings"), QStringLiteral("Ctrl / ⌘ + ,")},
         {QStringLiteral("Focus room search"), QStringLiteral("/ or Ctrl / ⌘ + Shift + S")},
-        {QStringLiteral("Switch rooms"), QStringLiteral("Alt + ↑ / ↓")},
+        {QStringLiteral("Cycle rooms"), QStringLiteral("Alt + ↑ / ↓")},
+        {QStringLiteral("Switch rooms"), QStringLiteral("Ctrl / ⌘ + ↑ / ↓")},
         {QStringLiteral("Switch needs-reply rooms"), QStringLiteral("Ctrl / ⌘ + Shift + ↑ / ↓")},
+        {QStringLiteral("Adjust app zoom"), QStringLiteral("Ctrl / ⌘ + + / -")},
+        {QStringLiteral("Reset app zoom"), QStringLiteral("Ctrl / ⌘ + 0")},
         {QStringLiteral("Show all rooms"), QStringLiteral("Ctrl / ⌘ + Shift + A")},
         {QStringLiteral("Show archived rooms"), QStringLiteral("Ctrl / ⌘ + Shift + H")},
         {QStringLiteral("Show unanswered rooms"), QStringLiteral("Ctrl / ⌘ + Shift + R")},
         {QStringLiteral("Show needs-reply rooms"), QStringLiteral("Ctrl / ⌘ + Shift + U")},
         {QStringLiteral("Show favorite rooms"), QStringLiteral("Ctrl / ⌘ + Shift + F")},
+        {QStringLiteral("Toggle content blur"), QStringLiteral("Ctrl / ⌘ + Shift + P")},
         {QStringLiteral("Toggle hiding images and videos"), QStringLiteral("Ctrl / ⌘ + Shift + I")},
         {QStringLiteral("Start a private model chat"), QStringLiteral("Ctrl / ⌘ + Shift + M")},
         {QStringLiteral("Jump to latest messages"), QStringLiteral("Ctrl / ⌘ + Shift + L")},
         {QStringLiteral("Switch to a visible room"), QStringLiteral("Ctrl / ⌘ + 1–9")},
         {QStringLiteral("Switch Matrix accounts"), QStringLiteral("Ctrl / ⌘ + Alt + 1–9")},
+        {QStringLiteral("Analyze draft with Language Tutor"), QStringLiteral("Ctrl / ⌘ + Shift + T")},
+        {QStringLiteral("Suggest replies with AI"), QStringLiteral("Ctrl / ⌘ + Shift + B")},
+        {QStringLiteral("Generate image from draft"), QStringLiteral("Ctrl / ⌘ + Shift + J")},
+        {QStringLiteral("Analyze focused message with Language Tutor"),
+         QStringLiteral("Ctrl / ⌘ + Shift + C")},
+        {QStringLiteral("Draft reply to focused message with AI"),
+         QStringLiteral("Ctrl / ⌘ + Shift + D")},
+        {QStringLiteral("Explain focused message with AI"), QStringLiteral("Ctrl / ⌘ + Shift + E")},
+        {QStringLiteral("Transcribe focused audio message with AI"),
+         QStringLiteral("Ctrl / ⌘ + Shift + V")},
+        {QStringLiteral("Navigate the room list"), QStringLiteral("↑ / ↓ / Home / End")},
+        {QStringLiteral("Open room actions"), QStringLiteral("Shift + F10")},
+        {QStringLiteral("Navigate the focused timeline"), QStringLiteral("↑ / ↓ or J / K")},
+        {QStringLiteral("Focus first / latest message"), QStringLiteral("Home / End")},
+        {QStringLiteral("Reply to the focused message"), QStringLiteral("R")},
         {QStringLiteral("Open keyboard shortcuts"), QStringLiteral("?")},
         {QStringLiteral("Add room to Needs reply"), QStringLiteral("N")},
         {QStringLiteral("Toggle room unread"), QStringLiteral("U")},
         {QStringLiteral("Archive or restore room"), QStringLiteral("A")},
         {QStringLiteral("Toggle room favorite"), QStringLiteral("F")},
         {QStringLiteral("Mute or unmute room"), QStringLiteral("M")},
+        {QStringLiteral("Mark room answered"), preferences_.value(QStringLiteral("shortcuts.mark_answered"))
+                                                   .toString(QStringLiteral("E")).trimmed().toUpper()},
+        {QStringLiteral("Undo mark answered"), QStringLiteral("Ctrl / ⌘ + Z")},
+        {QStringLiteral("Close or clear"), QStringLiteral("Escape")},
+        {QStringLiteral("Move between controls"), QStringLiteral("Tab / Shift + Tab")},
+        {QStringLiteral("Send message"), preferences_.value(QStringLiteral("composer.ctrl_enter")).toBool()
+                                             ? QStringLiteral("Ctrl + Enter")
+                                             : QStringLiteral("Enter")},
+        {QStringLiteral("Insert a line in the composer"), QStringLiteral("Shift + Enter")},
     };
     for (const auto &shortcut : shortcuts) {
         auto *item = new QListWidgetItem(
@@ -830,6 +874,33 @@ void SettingsDialog::buildHistory() {
 void SettingsDialog::buildDevices() {
     auto *page = newPage(QStringLiteral("Devices"));
     auto *layout = qobject_cast<QVBoxLayout *>(page->layout());
+    const bool verified = qtutil::boolValue(
+        snapshot_.value(QStringLiteral("profile")).toObject(), "verified");
+    if (verified) {
+        auto *verifySession = new QPushButton(QStringLiteral("Verify another session"), page);
+        layout->addWidget(verifySession);
+        connect(verifySession, &QPushButton::clicked, this, [this, verifySession] {
+            verifySession->setEnabled(false);
+            backend_->call(this, QStringLiteral("StartSessionVerification"), {},
+                           [this, verifySession](QJsonValue, const QString &error) {
+                if (!error.isEmpty()) {
+                    verifySession->setEnabled(true);
+                    QMessageBox::warning(this, QStringLiteral("Session verification"), error);
+                    return;
+                }
+                accept();
+                if (onChanged_) {
+                    onChanged_();
+                }
+            });
+        });
+    } else {
+        auto *verificationNote = new QLabel(
+            QStringLiteral("Verify this device before starting verification with another session."),
+            page);
+        verificationNote->setWordWrap(true);
+        layout->addWidget(verificationNote);
+    }
     deviceStatus_ = new QLabel(QStringLiteral("Loading devices…"), page);
     layout->addWidget(deviceStatus_);
     deviceList_ = new QListWidget(page);

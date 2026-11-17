@@ -22,6 +22,7 @@ class AIToolsDialog final : public QDialog {
 public:
     AIToolsDialog(BackendClient *backend, MediaClient *media, const QString &roomId,
                   const QString &roomName, QPlainTextEdit *composer, QWidget *parent = nullptr);
+    void runKeyboardShortcut(const QString &key, const QString &text);
 
 private:
     void buildSuggestions();
@@ -33,6 +34,10 @@ private:
     void generateDraft();
     void detectLanguage();
     void analyzeDraft();
+    void analyzeMessage(const QString &text);
+    void analyzeText(const QString &text, const QString &mode);
+    void explainMessage(const QString &text);
+    void draftReplyToMessage(const QString &text);
     void generateImage();
     void sendGeneratedImage();
     void checkTone();

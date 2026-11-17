@@ -1,0 +1,8 @@
+# Build output created when commands are run from the repository root
+/bin/
+/frontend/
+/desktop/
+/node_modules/
+/.task/
+
+.DS_Store

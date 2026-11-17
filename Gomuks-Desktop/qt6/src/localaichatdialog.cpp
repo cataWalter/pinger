@@ -1,6 +1,7 @@
 #include "localaichatdialog.h"
 
 #include "backendclient.h"
+#include "chatitemdelegate.h"
 #include "qtutil.h"
 #include "stylesheet.h"
 
@@ -30,11 +31,23 @@
 #include <QVBoxLayout>
 
 LocalAIChatDialog::LocalAIChatDialog(BackendClient *backend, const QString &defaultAgentId,
-                                     QWidget *parent)
+                                     QWidget *parent, bool contentBlur)
     : QDialog(parent), backend_(backend), defaultAgentId_(defaultAgentId) {
     setWindowTitle(QStringLiteral("Private model chat"));
     resize(900, 660);
     buildUi();
+    if (contentBlur) {
+        auto *chatListDelegate = new PrivacyBlurDelegate(chatList_);
+        chatListDelegate->setContentBlur(true);
+        chatList_->setItemDelegate(chatListDelegate);
+        auto *transcriptDelegate = new PrivacyBlurDelegate(transcript_);
+        transcriptDelegate->setContentBlur(true);
+        transcript_->setItemDelegate(transcriptDelegate);
+        chatList_->setMouseTracking(true);
+        chatList_->viewport()->setMouseTracking(true);
+        transcript_->setMouseTracking(true);
+        transcript_->viewport()->setMouseTracking(true);
+    }
     configureListViews(this);
     loadFolders();
     loadChats();

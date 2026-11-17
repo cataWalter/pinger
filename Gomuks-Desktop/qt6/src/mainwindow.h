@@ -7,25 +7,35 @@
 #include <QJsonObject>
 #include <QMainWindow>
 #include <QPoint>
+#include <QSet>
 #include <QString>
 
 class BackendClient;
+class MessageBubbleDelegate;
+class PrivacyBlurDelegate;
+class RoomListDelegate;
 class MediaClient;
+class QAction;
 class QCloseEvent;
 class QKeyEvent;
 class QMenu;
 class QSystemTrayIcon;
 class QComboBox;
 class QDialog;
+class QFrame;
+class QHBoxLayout;
 class QLineEdit;
 class QLabel;
 class QListWidget;
+class QListWidgetItem;
 class QPlainTextEdit;
 class QPushButton;
 class QStackedWidget;
 class QTimer;
+class QToolButton;
 class QWidget;
 
+class QMimeData;
 class MainWindow final : public QMainWindow {
     Q_OBJECT
 
@@ -35,6 +45,9 @@ public:
 protected:
     void closeEvent(QCloseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void buildLoginPage();
@@ -42,14 +55,33 @@ private:
     void buildChatPage();
     void loadSnapshot();
     void applySnapshot(const QJsonObject &snapshot);
+    void refreshAccountRooms();
+    void updateSessionVerification(const QJsonObject &verification);
+    void runSessionVerificationAction(const QString &method, const QJsonArray &params);
     void filterRooms();
+    void updateRoomHeader(const QJsonObject &room);
+    void updateContentBlur();
+    void installPrivacyBlurDelegate(QListWidget *list);
+    void requestAvatar(const QString &uri);
+    void requestVisibleRoomAvatars();
+    void setAvatarLabel(QLabel *label, const QString &uri, const QString &name);
     void switchRoom(const QString &roomID);
     void updateActiveRoom(const QString &roomID);
     void loadHistory(const QString &roomID, qint64 before = 0);
     void sendMessage();
+    void applyComposerFormatting(const QString &format);
+    void loadComposerMembers(const QString &roomID);
+    void refreshComposerSuggestions();
+    void chooseComposerSuggestion(QListWidgetItem *item);
+    void hideComposerSuggestions();
     void attachFile();
+    void recordMedia(bool videoMessage);
+    void attachPath(const QString &path, bool voiceNote = false, bool videoMessage = false,
+                    qint64 durationMs = 0);
+    bool canAcceptFileDrop(const QMimeData *mime) const;
     void showMessageContextMenu(const QPoint &position);
     void runMessageAction(const QString &method, const QJsonArray &params);
+    void transcribeMessage(const QJsonObject &message);
     void openMediaPreview(const QString &eventID);
     void setComposeContext(const QString &label);
     void clearComposeContext();
@@ -80,11 +112,22 @@ private:
     void showScheduledDialog();
     void showLocalAIChatDialog();
     void showExportDialog();
+    void archiveAllReadRooms();
+    void archiveNextReadRoom();
     void updateTrayIcon();
     void showQuickSwitcher();
     bool handleApplicationKey(QKeyEvent *event);
     void selectRoomByOffset(int direction, bool needsReplyOnly = false);
     void applyRoomShortcut(const QString &key);
+    void markRoomAnswered(const QString &roomID);
+    void undoMarkAnswered();
+    void buildMenuBar();
+    void updateMenuState();
+    void showSettings(const QString &tab = QString());
+    void showAITools(const QString &tab = QString(), const QString &shortcut = QString(),
+                     const QString &text = QString());
+    void setZoomPercent(int percent);
+    void setRoomArchived(const QJsonObject &room, bool archive);
 
     // ---- Backend call wrappers (part 1) ----
     void callSnapshot();
@@ -201,13 +244,28 @@ private:
     QLineEdit *recoveryKey_ = nullptr;
     QLineEdit *roomFilter_ = nullptr;
     QComboBox *roomScope_ = nullptr;
+    QComboBox *accountScope_ = nullptr;
     QLabel *inviteLabel_ = nullptr;
+    QLabel *roomsCount_ = nullptr;
+    QLabel *roomsSectionLabel_ = nullptr;
+    QLabel *needsReplyCountLabel_ = nullptr;
     QListWidget *rooms_ = nullptr;
     QListWidget *invites_ = nullptr;
     QListWidget *messages_ = nullptr;
     QPlainTextEdit *composer_ = nullptr;
+    QFrame *composerSuggestions_ = nullptr;
+    QListWidget *composerSuggestionList_ = nullptr;
+    QWidget *formattingToolbar_ = nullptr;
     QLabel *roomTitle_ = nullptr;
+    QLabel *roomSubtitle_ = nullptr;
+    QLabel *roomAvatar_ = nullptr;
+    QToolButton *contentBlurIndicator_ = nullptr;
+    QLabel *profileAvatar_ = nullptr;
+    QLabel *profileName_ = nullptr;
+    QLabel *profileID_ = nullptr;
     QLabel *composeContext_ = nullptr;
+    RoomListDelegate *roomDelegate_ = nullptr;
+    MessageBubbleDelegate *messageDelegate_ = nullptr;
     QPushButton *loginButton_ = nullptr;
     QPushButton *verifyButton_ = nullptr;
     QPushButton *logoutButton_ = nullptr;
@@ -222,17 +280,47 @@ private:
     QPushButton *searchMessagesButton_ = nullptr;
     QPushButton *sendButton_ = nullptr;
     QPushButton *attachButton_ = nullptr;
+    QPushButton *recordButton_ = nullptr;
     QPushButton *scheduleMessageButton_ = nullptr;
     QPushButton *cancelComposeContextButton_ = nullptr;
     QPushButton *acceptInviteButton_ = nullptr;
     QPushButton *declineInviteButton_ = nullptr;
     QPushButton *addAccountButton_ = nullptr;
     QPushButton *devicesButton_ = nullptr;
+    QToolButton *allRoomsFilterButton_ = nullptr;
+    QToolButton *archivedRoomsFilterButton_ = nullptr;
+    QToolButton *unansweredFilterButton_ = nullptr;
+    QToolButton *needsReplyFilterButton_ = nullptr;
+    QToolButton *favoriteFilterButton_ = nullptr;
+    QToolButton *joinRoomQuickButton_ = nullptr;
+    QToolButton *archiveAllReadButton_ = nullptr;
     QComboBox *accountSwitcher_ = nullptr;
+    QDialog *sessionVerificationDialog_ = nullptr;
+    QLabel *sessionVerificationMessage_ = nullptr;
+    QLabel *sessionVerificationSAS_ = nullptr;
+    QLabel *sessionVerificationError_ = nullptr;
+    QHBoxLayout *sessionVerificationActions_ = nullptr;
     QSystemTrayIcon *trayIcon_ = nullptr;
+    QIcon trayBaseIcon_;
     QMenu *trayMenu_ = nullptr;
+    QMenu *messagesMenu_ = nullptr;
+    QMenu *roomMenu_ = nullptr;
+    QMenu *switchAccountMenu_ = nullptr;
+    QHash<QString, QAction *> filterActions_;
+    QAction *contentBlurAction_ = nullptr;
+    QAction *hideMediaAction_ = nullptr;
+    QAction *markReadAction_ = nullptr;
+    QAction *markUnreadAction_ = nullptr;
+    QAction *markAnsweredAction_ = nullptr;
+    QAction *addNeedsReplyAction_ = nullptr;
+    QAction *favoriteAction_ = nullptr;
+    QAction *muteAction_ = nullptr;
+    QAction *archiveAction_ = nullptr;
     QJsonObject snapshot_;
     QJsonObject preferences_;
+    QJsonArray otherAccountRooms_;
+    QJsonArray composerMembers_;
+    QHash<QString, QString> composerMentionBindings_;
     QString currentRoomID_;
     QString replyToEventID_;
     QString editEventID_;
@@ -240,11 +328,35 @@ private:
     QString pendingRoomID_;
     QString pendingNotificationRoomID_;
     QString pendingNotificationAccountID_;
+    QString undoAnsweredRoomID_;
+    QString activeRoomAvatarUri_;
+    QString profileAvatarUri_;
+    QString composerSuggestionKind_;
+    int composerSuggestionStart_ = -1;
+    int composerSuggestionEnd_ = -1;
     QHash<QString, QJsonObject> messagesByID_;
+    QHash<QString, QIcon> avatarIcons_;
+    QSet<QString> avatarRequests_;
+    QSet<QString> avatarFailures_;
+    QSet<QWidget *> contentBlurWidgets_;
+    QSet<PrivacyBlurDelegate *> privacyBlurDelegates_;
     QHash<QString, QString> readRequests_;
     QHash<QString, QString> roomDrafts_;
+    QStringList archiveReadRoomQueue_;
+    qsizetype archiveReadRoomTotal_ = 0;
     quint64 historyRequestID_ = 0;
+    quint64 composerMembersRequestID_ = 0;
     qint64 historyBefore_ = 0;
     QTimer *refreshTimer_ = nullptr;
+    QTimer *accountRoomsTimer_ = nullptr;
+    QTimer *avatarLoadTimer_ = nullptr;
+    QTimer *undoAnsweredTimer_ = nullptr;
+    bool unansweredOnly_ = false;
+    bool needsReplyOnly_ = false;
+    bool favoritesOnly_ = false;
+    bool archivingReadRooms_ = false;
+    bool contentBlurEnabled_ = false;
     bool initialWindowStateApplied_ = false;
+    bool accountRoomsRequestInFlight_ = false;
+    bool sessionVerificationActionInFlight_ = false;
 };

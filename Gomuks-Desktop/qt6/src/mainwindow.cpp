@@ -2,15 +2,20 @@
 
 #include "backendclient.h"
 #include "aitoolsdialog.h"
+#include "animations.h"
 #include "chatitemdelegate.h"
 #include "localaichatdialog.h"
 #include "mediaclient.h"
+#include "mediadialogs.h"
 #include "qtutil.h"
 #include "settingsdialog.h"
 #include "stylesheet.h"
 
 #include <QAction>
+#include <QActionGroup>
+#include <QAbstractItemView>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QComboBox>
 #include <QClipboard>
 #include <QCheckBox>
@@ -25,11 +30,18 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFrame>
 #include <QGuiApplication>
+#include <QGraphicsBlurEffect>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QImage>
 #include <QKeyEvent>
+#include <QKeySequence>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QUrl>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonValue>
@@ -51,8 +63,11 @@
 #include <QStatusBar>
 #include <QStyle>
 #include <QSystemTrayIcon>
+#include <QStyleHints>
 #include <QStringList>
 #include <QTabWidget>
+#include <QTextCursor>
+#include <QToolButton>
 #include <QTimer>
 #include <QUrl>
 #include <QVector>
@@ -63,11 +78,348 @@
 #include <functional>
 #include <memory>
 #include <QColor>
+#include <QFontMetrics>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPalette>
+#include <QScrollBar>
+
+namespace {
+
+QKeySequence primaryShortcut(const QString &key) {
+#if defined(Q_OS_MACOS)
+    return QKeySequence(QStringLiteral("Meta+%1").arg(key));
+#else
+    return QKeySequence(QStringLiteral("Ctrl+%1").arg(key));
+#endif
+}
+
+QString roomDraftKey(const QString &accountID, const QString &roomID) {
+    return accountID + QChar(0x1f) + roomID;
+}
+
+void drawLucideIcon(QPainter &painter, const QString &name, const QColor &color) {
+    QPen pen(color, 2.0);
+    pen.setCapStyle(Qt::RoundCap);
+    pen.setJoinStyle(Qt::RoundJoin);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+
+    if (name == QStringLiteral("search")) {
+        painter.drawEllipse(QRectF(3, 3, 14, 14));
+        painter.drawLine(QPointF(16.5, 16.5), QPointF(21, 21));
+    } else if (name == QStringLiteral("eye-off")) {
+        QPainterPath eye;
+        eye.moveTo(2.5, 12);
+        eye.cubicTo(5, 7.5, 8.5, 5, 12, 5);
+        eye.cubicTo(16.5, 5, 20, 8.5, 21.5, 12);
+        eye.cubicTo(20, 15.5, 16.5, 19, 12, 19);
+        eye.cubicTo(8.5, 19, 5, 16.5, 2.5, 12);
+        painter.drawPath(eye);
+        painter.drawEllipse(QRectF(9, 9, 6, 6));
+        painter.drawLine(QPointF(4, 4), QPointF(20, 20));
+    } else if (name == QStringLiteral("all") || name == QStringLiteral("rooms")) {
+        QPainterPath bubble;
+        bubble.moveTo(7.5, 20.2);
+        bubble.cubicTo(4.5, 18.7, 2.5, 15.6, 2.5, 12);
+        bubble.cubicTo(2.5, 6.8, 6.8, 2.5, 12, 2.5);
+        bubble.cubicTo(17.2, 2.5, 21.5, 6.8, 21.5, 12);
+        bubble.cubicTo(21.5, 17.2, 17.2, 21.5, 12, 21.5);
+        bubble.cubicTo(10.4, 21.5, 8.9, 21.1, 7.5, 20.2);
+        painter.drawPath(bubble);
+        painter.drawLine(QPointF(7.5, 20.2), QPointF(3.2, 21.2));
+        painter.drawLine(QPointF(3.2, 21.2), QPointF(4.2, 17));
+        painter.setBrush(color);
+        painter.drawEllipse(QRectF(7, 10.5, 2, 2));
+        painter.drawEllipse(QRectF(11, 10.5, 2, 2));
+        painter.drawEllipse(QRectF(15, 10.5, 2, 2));
+    } else if (name == QStringLiteral("unread") || name == QStringLiteral("needs-reply")) {
+        painter.drawEllipse(QRectF(3, 3, 18, 18));
+        painter.setBrush(color);
+        painter.drawEllipse(QRectF(10, 10, 4, 4));
+    } else if (name == QStringLiteral("mention")) {
+        painter.drawEllipse(QRectF(3, 3, 18, 18));
+        painter.drawEllipse(QRectF(8, 8, 8, 8));
+        painter.drawLine(QPointF(16, 11), QPointF(16, 15));
+        painter.drawLine(QPointF(16, 15), QPointF(19, 15));
+    } else if (name == QStringLiteral("unanswered")) {
+        QPainterPath reply;
+        reply.moveTo(9, 17);
+        reply.lineTo(4, 12);
+        reply.lineTo(9, 7);
+        reply.moveTo(4, 12);
+        reply.lineTo(14, 12);
+        reply.cubicTo(18, 12, 20, 14, 20, 18);
+        painter.drawPath(reply);
+    } else if (name == QStringLiteral("star")) {
+        QPainterPath path;
+        path.moveTo(12, 3);
+        path.lineTo(14.8, 9);
+        path.lineTo(21.3, 9.7);
+        path.lineTo(16.5, 14);
+        path.lineTo(17.8, 20.5);
+        path.lineTo(12, 17.2);
+        path.lineTo(6.2, 20.5);
+        path.lineTo(7.5, 14);
+        path.lineTo(2.7, 9.7);
+        path.lineTo(9.2, 9);
+        path.closeSubpath();
+        painter.drawPath(path);
+    } else if (name == QStringLiteral("archive")) {
+        painter.drawRoundedRect(QRectF(3, 4, 18, 4), 1, 1);
+        painter.drawLine(QPointF(5, 8), QPointF(5, 19));
+        painter.drawLine(QPointF(19, 8), QPointF(19, 19));
+        painter.drawLine(QPointF(5, 19), QPointF(19, 19));
+        painter.drawLine(QPointF(9, 12), QPointF(15, 12));
+    } else if (name == QStringLiteral("more")) {
+        painter.setBrush(color);
+        painter.drawEllipse(QRectF(4, 10, 2, 2));
+        painter.drawEllipse(QRectF(11, 10, 2, 2));
+        painter.drawEllipse(QRectF(18, 10, 2, 2));
+    } else if (name == QStringLiteral("add")) {
+        painter.drawLine(QPointF(12, 5), QPointF(12, 19));
+        painter.drawLine(QPointF(5, 12), QPointF(19, 12));
+    } else if (name == QStringLiteral("people")) {
+        painter.drawEllipse(QRectF(8, 3, 8, 8));
+        QPainterPath people;
+        people.moveTo(3, 21);
+        people.cubicTo(3, 16.5, 6, 14, 12, 14);
+        people.cubicTo(18, 14, 21, 16.5, 21, 21);
+        people.moveTo(17, 5);
+        people.cubicTo(20, 5, 21, 7, 21, 10);
+        people.moveTo(19, 14);
+        people.cubicTo(21, 14.5, 22, 16.5, 22, 19);
+        painter.drawPath(people);
+    } else if (name == QStringLiteral("info")) {
+        painter.drawEllipse(QRectF(3, 3, 18, 18));
+        painter.drawLine(QPointF(12, 11), QPointF(12, 16));
+        painter.setBrush(color);
+        painter.drawEllipse(QRectF(11, 7, 2, 2));
+    } else if (name == QStringLiteral("schedule")) {
+        painter.drawEllipse(QRectF(3, 3, 18, 18));
+        painter.drawLine(QPointF(12, 7), QPointF(12, 12));
+        painter.drawLine(QPointF(12, 12), QPointF(16, 14));
+    } else if (name == QStringLiteral("attach")) {
+        QPainterPath path;
+        path.moveTo(8, 12);
+        path.lineTo(15, 5);
+        path.cubicTo(19, 1, 24, 6, 20, 10);
+        path.lineTo(10, 20);
+        path.cubicTo(5, 25, -1, 19, 4, 14);
+        path.lineTo(14, 4);
+        painter.drawPath(path);
+    } else if (name == QStringLiteral("mic")) {
+        painter.drawRoundedRect(QRectF(9, 2, 6, 13), 3, 3);
+        painter.drawArc(QRectF(5, 7, 14, 12), 180 * 16, 180 * 16);
+        painter.drawLine(QPointF(12, 19), QPointF(12, 22));
+        painter.drawLine(QPointF(8, 22), QPointF(16, 22));
+    } else if (name == QStringLiteral("send")) {
+        QPainterPath path;
+        path.moveTo(22, 2);
+        path.lineTo(15, 22);
+        path.lineTo(11, 13);
+        path.lineTo(2, 9);
+        path.closeSubpath();
+        painter.drawPath(path);
+        painter.drawLine(QPointF(22, 2), QPointF(11, 13));
+    } else if (name == QStringLiteral("sparkle")) {
+        QPainterPath sparkle;
+        sparkle.moveTo(12, 2);
+        sparkle.cubicTo(12.3, 8.5, 14.5, 10.8, 22, 12);
+        sparkle.cubicTo(14.5, 13.2, 12.3, 15.5, 12, 22);
+        sparkle.cubicTo(11.7, 15.5, 9.5, 13.2, 2, 12);
+        sparkle.cubicTo(9.5, 10.8, 11.7, 8.5, 12, 2);
+        sparkle.closeSubpath();
+        painter.drawPath(sparkle);
+        painter.drawLine(QPointF(19, 3), QPointF(19, 7));
+        painter.drawLine(QPointF(17, 5), QPointF(21, 5));
+        painter.drawLine(QPointF(5, 17), QPointF(5, 21));
+        painter.drawLine(QPointF(3, 19), QPointF(7, 19));
+    } else if (name == QStringLiteral("smile")) {
+        painter.drawEllipse(QRectF(3, 3, 18, 18));
+        painter.setBrush(color);
+        painter.drawEllipse(QRectF(8, 9, 2, 2));
+        painter.drawEllipse(QRectF(14, 9, 2, 2));
+        QPainterPath smile;
+        smile.moveTo(7, 14);
+        smile.cubicTo(9, 18, 15, 18, 17, 14);
+        painter.drawPath(smile);
+    } else if (name == QStringLiteral("settings")) {
+        painter.drawEllipse(QRectF(6, 6, 12, 12));
+        painter.drawEllipse(QRectF(9, 9, 6, 6));
+        for (int angle = 0; angle < 360; angle += 45) {
+            painter.save();
+            painter.translate(12, 12);
+            painter.rotate(angle);
+            painter.drawLine(QPointF(0, -10), QPointF(0, -8));
+            painter.restore();
+        }
+    } else if (name == QStringLiteral("images")) {
+        painter.drawRoundedRect(QRectF(4, 4, 16, 16), 2, 2);
+        painter.drawEllipse(QRectF(8, 8, 3, 3));
+        QPainterPath mountains;
+        mountains.moveTo(5, 18);
+        mountains.lineTo(10, 13);
+        mountains.lineTo(13, 16);
+        mountains.lineTo(16, 12);
+        mountains.lineTo(19, 15);
+        painter.drawPath(mountains);
+    } else if (name == QStringLiteral("bold") || name == QStringLiteral("italic")
+               || name == QStringLiteral("strikethrough")) {
+        QFont font = painter.font();
+        font.setPixelSize(16);
+        font.setBold(name != QStringLiteral("italic"));
+        font.setItalic(name == QStringLiteral("italic"));
+        painter.setFont(font);
+        painter.drawText(QRectF(2, 2, 20, 20), Qt::AlignCenter,
+                         name == QStringLiteral("strikethrough")
+                             ? QStringLiteral("S") : QStringLiteral("B"));
+        if (name == QStringLiteral("strikethrough")) {
+            painter.drawLine(QPointF(4, 12), QPointF(20, 12));
+        }
+    } else if (name == QStringLiteral("code") || name == QStringLiteral("code-block")) {
+        QPainterPath brackets;
+        brackets.moveTo(9, 6);
+        brackets.lineTo(4, 12);
+        brackets.lineTo(9, 18);
+        brackets.moveTo(15, 6);
+        brackets.lineTo(20, 12);
+        brackets.lineTo(15, 18);
+        if (name == QStringLiteral("code-block")) {
+            painter.drawRoundedRect(QRectF(2, 3, 20, 18), 2, 2);
+            painter.save();
+            painter.translate(-1, 0);
+            painter.drawPath(brackets);
+            painter.restore();
+        } else {
+            painter.drawPath(brackets);
+        }
+    } else if (name == QStringLiteral("link")) {
+        painter.drawRoundedRect(QRectF(2.5, 8, 11, 7), 3.5, 3.5);
+        painter.drawRoundedRect(QRectF(10.5, 9, 11, 7), 3.5, 3.5);
+        painter.drawLine(QPointF(9, 12), QPointF(15, 12));
+    } else if (name == QStringLiteral("heading")) {
+        QFont font = painter.font();
+        font.setPixelSize(14);
+        font.setBold(true);
+        painter.setFont(font);
+        painter.drawText(QRectF(2, 2, 20, 17), Qt::AlignCenter, QStringLiteral("H"));
+        painter.drawLine(QPointF(5, 20), QPointF(19, 20));
+    } else if (name == QStringLiteral("list") || name == QStringLiteral("list-ordered")) {
+        QFont font = painter.font();
+        font.setPixelSize(8);
+        font.setBold(true);
+        painter.setFont(font);
+        for (int row = 0; row < 2; ++row) {
+            const int y = 7 + row * 8;
+            if (name == QStringLiteral("list")) {
+                painter.setBrush(color);
+                painter.drawEllipse(QRectF(3, y, 2, 2));
+            } else {
+                painter.drawText(QRectF(1, y - 4, 7, 8), Qt::AlignCenter,
+                                 QString::number(row + 1));
+            }
+            painter.drawLine(QPointF(9, y + 1), QPointF(21, y + 1));
+        }
+    } else if (name == QStringLiteral("quote")) {
+        QFont font = painter.font();
+        font.setPixelSize(19);
+        font.setBold(true);
+        painter.setFont(font);
+        painter.drawText(QRectF(2, 1, 20, 20), Qt::AlignCenter, QStringLiteral("\""));
+    }
+}
+
+QIcon uiIcon(const QString &name) {
+    constexpr int logicalSize = 18;
+    QIcon icon;
+    for (qreal dpr : {1.0, 2.0, 3.0}) {
+        for (QIcon::State state : {QIcon::Off, QIcon::On}) {
+            const int pixelSize = qRound(logicalSize * dpr);
+            QPixmap pixmap(pixelSize, pixelSize);
+            pixmap.setDevicePixelRatio(dpr);
+            pixmap.fill(Qt::transparent);
+            QPainter painter(&pixmap);
+            painter.setRenderHint(QPainter::Antialiasing);
+            painter.setRenderHint(QPainter::TextAntialiasing);
+            painter.scale(logicalSize / 24.0, logicalSize / 24.0);
+            const QColor color = state == QIcon::On
+                ? QColor(QStringLiteral("#F0A5BC"))
+                : QColor(QStringLiteral("#91A3BB"));
+            drawLucideIcon(painter, name, color);
+            painter.end();
+            icon.addPixmap(pixmap, QIcon::Normal, state);
+            icon.addPixmap(pixmap, QIcon::Selected, state);
+        }
+    }
+    return icon;
+}
+
+QString avatarInitials(const QString &name) {
+    const QStringList words = name.trimmed().split(
+        QRegularExpression(QStringLiteral("[\\s_.@-]+")), Qt::SkipEmptyParts);
+    if (words.isEmpty()) {
+        return QStringLiteral("?");
+    }
+    QString result = words.first().left(1).toUpper();
+    if (words.size() > 1) {
+        result += words.at(1).left(1).toUpper();
+    }
+    return result;
+}
+
+QIcon trayIconWithBadge(const QIcon &base, int unread) {
+    if (unread <= 0) {
+        return base;
+    }
+    constexpr int size = 22;
+    constexpr int badgeHeight = 10;
+    QPixmap pixmap = base.pixmap(QSize(size, size), 2.0);
+    if (pixmap.isNull()) {
+        return base;
+    }
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QFont font = painter.font();
+    font.setBold(true);
+    font.setPixelSize(9);
+    painter.setFont(font);
+    const QString label = unread > 99 ? QStringLiteral("99+") : QString::number(unread);
+    const int badgeWidth = qMax(badgeHeight, QFontMetrics(font).horizontalAdvance(label) + 4);
+    const QRect badge(size - badgeWidth, size - badgeHeight, badgeWidth, badgeHeight);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(QStringLiteral("#e0245e")));
+    painter.drawRoundedRect(badge, badgeHeight / 2, badgeHeight / 2);
+    painter.setPen(Qt::white);
+    painter.drawText(badge, Qt::AlignCenter, label);
+    painter.end();
+    return QIcon(pixmap);
+}
+
+void preparePopupMenu(QMenu *menu) {
+    menu->setAttribute(Qt::WA_TranslucentBackground);
+    menu->setWindowFlags(menu->windowFlags() | Qt::FramelessWindowHint);
+}
+
+void setContextShortcut(QAction *action, const QKeySequence &shortcut) {
+    if (!action || shortcut.isEmpty()) {
+        return;
+    }
+    action->setShortcut(shortcut);
+    action->setShortcutContext(Qt::WidgetShortcut);
+    const QString label = action->text().section(QLatin1Char('\t'), 0, 0);
+    action->setText(label + QLatin1Char('\t')
+                    + shortcut.toString(QKeySequence::NativeText));
+}
+
+} // namespace
 
 MainWindow::MainWindow(BackendClient *backend, QWidget *parent)
     : QMainWindow(parent), backend_(backend), media_(new MediaClient(this)) {
     setWindowTitle(QStringLiteral("Pinger"));
+    const QIcon appIcon = qtutil::applicationIcon();
+    QApplication::setWindowIcon(appIcon);
+    setWindowIcon(appIcon);
     resize(1100, 720);
 
     pages_ = new QStackedWidget(this);
@@ -75,8 +427,23 @@ MainWindow::MainWindow(BackendClient *backend, QWidget *parent)
     buildLoginPage();
     buildVerificationPage();
     buildChatPage();
+    buildMenuBar();
+    qApp->installEventFilter(this);
+    setAcceptDrops(true);
     configureListViews(this);
-    trayIcon_ = new QSystemTrayIcon(style()->standardIcon(QStyle::SP_ComputerIcon), this);
+#if defined(Q_OS_MACOS)
+    QStyleHints *styleHints = QGuiApplication::styleHints();
+    trayBaseIcon_ = qtutil::menuBarIcon(
+        styleHints->colorScheme() == Qt::ColorScheme::Dark);
+    connect(styleHints, &QStyleHints::colorSchemeChanged, this,
+            [this](Qt::ColorScheme scheme) {
+                trayBaseIcon_ = qtutil::menuBarIcon(scheme == Qt::ColorScheme::Dark);
+                updateTrayIcon();
+            });
+#else
+    trayBaseIcon_ = appIcon;
+#endif
+    trayIcon_ = new QSystemTrayIcon(trayBaseIcon_, this);
     trayIcon_->setToolTip(QStringLiteral("Pinger"));
     trayMenu_ = new QMenu(this);
     auto *showAction = trayMenu_->addAction(QStringLiteral("Show Pinger"));
@@ -131,6 +498,15 @@ MainWindow::MainWindow(BackendClient *backend, QWidget *parent)
             loadHistory(currentRoomID_);
         }
     });
+    accountRoomsTimer_ = new QTimer(this);
+    accountRoomsTimer_->setInterval(15000);
+    connect(accountRoomsTimer_, &QTimer::timeout, this, &MainWindow::refreshAccountRooms);
+    undoAnsweredTimer_ = new QTimer(this);
+    undoAnsweredTimer_->setSingleShot(true);
+    undoAnsweredTimer_->setInterval(10000);
+    connect(undoAnsweredTimer_, &QTimer::timeout, this, [this] {
+        undoAnsweredRoomID_.clear();
+    });
     connect(backend_, &BackendClient::eventReceived, this,
             [this](const QString &event, const QJsonValue &data) {
                 if (event == QStringLiteral("quit")) {
@@ -157,6 +533,14 @@ MainWindow::MainWindow(BackendClient *backend, QWidget *parent)
                 }
                 if (event == QStringLiteral("media-ready")) {
                     media_->setBaseUrl(data.toObject().value(QStringLiteral("url")).toString());
+                    requestVisibleRoomAvatars();
+                    requestAvatar(profileAvatarUri_);
+                    requestAvatar(activeRoomAvatarUri_);
+                    for (int index = 0; index < messages_->count(); ++index) {
+                        const auto message = QJsonObject::fromVariantMap(
+                            messages_->item(index)->data(Qt::UserRole + 1).toMap());
+                        requestAvatar(message.value(QStringLiteral("avatar")).toString());
+                    }
                     return;
                 }
                 if (event == QStringLiteral("update")) {
@@ -224,6 +608,7 @@ void MainWindow::updateTrayIcon() {
     for (const auto &entry : snapshot_.value(QStringLiteral("rooms")).toArray()) {
         unread += entry.toObject().value(QStringLiteral("unread")).toInt();
     }
+    trayIcon_->setIcon(trayIconWithBadge(trayBaseIcon_, unread));
     trayIcon_->setToolTip(unread > 0
         ? QStringLiteral("Pinger · %1 unread").arg(unread)
         : QStringLiteral("Pinger"));
@@ -252,6 +637,47 @@ bool MainWindow::handleApplicationKey(QKeyEvent *event) {
     const bool shift = modifiers.testFlag(Qt::ShiftModifier);
     const bool alt = modifiers.testFlag(Qt::AltModifier);
     const int key = event->key();
+    const bool timelineFocus = focus == messages_ || focus == messages_->viewport();
+
+    if (primary && shift && !alt && key == Qt::Key_P) {
+        contentBlurAction_->trigger();
+        return true;
+    }
+
+    if (primary && shift && !alt && textEntry && focus != composer_
+        && (key == Qt::Key_T || key == Qt::Key_B || key == Qt::Key_J)) {
+        return true;
+    }
+
+    if (primary && shift && !alt && (!textEntry || focus == composer_)) {
+        if (key == Qt::Key_T || key == Qt::Key_B || key == Qt::Key_J) {
+            const QString shortcut = QString(QChar(key));
+            const QString tab = key == Qt::Key_T ? QStringLiteral("Language Tutor")
+                              : key == Qt::Key_B ? QStringLiteral("Suggestions")
+                                                 : QStringLiteral("Image");
+            showAITools(tab, shortcut, composer_->toPlainText());
+            return true;
+        }
+        if (timelineFocus && messages_->currentItem()) {
+            const QJsonObject message = messagesByID_.value(
+                messages_->currentItem()->data(Qt::UserRole).toString());
+            const QString body = message.value(QStringLiteral("body")).toString();
+            if (key == Qt::Key_C || key == Qt::Key_D || key == Qt::Key_E) {
+                const QString shortcut = QString(QChar(key));
+                const QString tab = key == Qt::Key_D ? QStringLiteral("Suggestions")
+                                                     : QStringLiteral("Language Tutor");
+                showAITools(tab, shortcut, body);
+                return true;
+            }
+            if (key == Qt::Key_V
+                && (message.value(QStringLiteral("mediaType")).toString() == QStringLiteral("m.audio")
+                    || message.value(QStringLiteral("mediaMime")).toString()
+                           .startsWith(QStringLiteral("audio/")))) {
+                transcribeMessage(message);
+                return true;
+            }
+        }
+    }
 
     if (!textEntry && focus == rooms_ && shift
         && (key == Qt::Key_F10 || key == Qt::Key_Menu)) {
@@ -264,7 +690,9 @@ bool MainWindow::handleApplicationKey(QKeyEvent *event) {
         }
     }
     if (!textEntry && (focus == messages_ || focus == messages_->viewport())) {
-        if (key == Qt::Key_J || key == Qt::Key_K) {
+        const bool singleKeyShortcuts =
+            preferences_.value(QStringLiteral("shortcuts.single_keys")).toBool(true);
+        if (singleKeyShortcuts && (key == Qt::Key_J || key == Qt::Key_K)) {
             const int direction = key == Qt::Key_J ? 1 : -1;
             if (messages_->count() > 0) {
                 messages_->setCurrentRow(qBound(0, messages_->currentRow() + direction,
@@ -278,7 +706,8 @@ bool MainWindow::handleApplicationKey(QKeyEvent *event) {
             }
             return true;
         }
-        if (key == Qt::Key_R && !primary && !shift && !alt && messages_->currentItem()) {
+        if (singleKeyShortcuts && key == Qt::Key_R && !primary && !shift && !alt
+            && messages_->currentItem()) {
             const QString eventID = messages_->currentItem()->data(Qt::UserRole).toString();
             const QJsonObject message = messagesByID_.value(eventID);
             if (!eventID.isEmpty() && !message.value(QStringLiteral("sending")).toBool()) {
@@ -294,28 +723,27 @@ bool MainWindow::handleApplicationKey(QKeyEvent *event) {
         }
     }
 
-    if (key == Qt::Key_Escape && !textEntry) {
+    if (key == Qt::Key_Escape) {
         if (roomFilter_->hasFocus() && !roomFilter_->text().isEmpty()) {
             roomFilter_->clear();
             return true;
         }
-        return false;
+        if (!textEntry) {
+            return false;
+        }
     }
     if (!textEntry && !primary && !alt && key == Qt::Key_Slash) {
         roomFilter_->setFocus();
         return true;
     }
     if (!textEntry && !primary && !alt && key == Qt::Key_Question) {
-        SettingsDialog dialog(backend_, snapshot_, media_, [this] { loadSnapshot(); }, this);
-        if (auto *tabs = dialog.findChild<QTabWidget *>()) {
-            for (int tab = 0; tab < tabs->count(); ++tab) {
-                if (tabs->tabText(tab) == QStringLiteral("Keyboard")) {
-                    tabs->setCurrentIndex(tab);
-                    break;
-                }
-            }
-        }
-        dialog.exec();
+        showSettings(QStringLiteral("Keyboard"));
+        return true;
+    }
+
+    if (!textEntry && primary && !shift && !alt && key == Qt::Key_Z
+        && !undoAnsweredRoomID_.isEmpty()) {
+        undoMarkAnswered();
         return true;
     }
 
@@ -336,67 +764,9 @@ bool MainWindow::handleApplicationKey(QKeyEvent *event) {
             selectRoomByOffset(key == Qt::Key_Down ? 1 : -1, true);
             return true;
         }
-        if (key == Qt::Key_A) {
-            roomScope_->setCurrentIndex(roomScope_->findData(QStringLiteral("all")));
-            return true;
-        }
-        if (key == Qt::Key_H) {
-            roomScope_->setCurrentIndex(roomScope_->findData(QStringLiteral("archived")));
-            return true;
-        }
-        if (key == Qt::Key_R) {
-            roomScope_->setCurrentIndex(roomScope_->findData(QStringLiteral("unanswered")));
-            return true;
-        }
-        if (key == Qt::Key_U) {
-            roomScope_->setCurrentIndex(roomScope_->findData(QStringLiteral("needs-reply")));
-            return true;
-        }
-        if (key == Qt::Key_F) {
-            roomScope_->setCurrentIndex(roomScope_->findData(QStringLiteral("favorites")));
-            return true;
-        }
-        if (key == Qt::Key_M) {
-            showLocalAIChatDialog();
-            return true;
-        }
-        if (key == Qt::Key_L) {
-            if (!currentRoomID_.isEmpty()) {
-                loadHistory(currentRoomID_);
-            }
-            return true;
-        }
-        if (key == Qt::Key_S) {
-            roomFilter_->setFocus();
-            return true;
-        }
-        if (key == Qt::Key_P) {
-            callSetBooleanPreference(
-                QStringLiteral("privacy.incognito"),
-                !preferences_.value(QStringLiteral("privacy.incognito")).toBool());
-            return true;
-        }
-        if (key == Qt::Key_I) {
-            callSetBooleanPreference(
-                QStringLiteral("appearance.hide_images_and_videos"),
-                !preferences_.value(QStringLiteral("appearance.hide_images_and_videos")).toBool());
-            return true;
-        }
     }
 
     if (!textEntry && primary && !shift && !alt) {
-        if (key == Qt::Key_K) {
-            showQuickSwitcher();
-            return true;
-        }
-        if (key == Qt::Key_F) {
-            searchMessages();
-            return true;
-        }
-        if (key == Qt::Key_Comma) {
-            preferencesButton_->click();
-            return true;
-        }
         if (key == Qt::Key_Up || key == Qt::Key_Down) {
             selectRoomByOffset(key == Qt::Key_Down ? 1 : -1);
             return true;
@@ -407,20 +777,6 @@ bool MainWindow::handleApplicationKey(QKeyEvent *event) {
                 rooms_->setCurrentRow(row);
                 return true;
             }
-        }
-        if (key == Qt::Key_Plus || key == Qt::Key_Equal || key == Qt::Key_Minus
-            || key == Qt::Key_0) {
-            bool ok = false;
-            const int current = preferences_.value(QStringLiteral("appearance.zoom"))
-                                    .toString(QStringLiteral("100")).toInt(&ok);
-            const int zoom = ok ? current : 100;
-            const int next = key == Qt::Key_0 ? 100
-                : qBound(75, zoom + (key == Qt::Key_Minus ? -5 : 5), 125);
-            callSetStringPreference(QStringLiteral("appearance.zoom"), QString::number(next));
-            QFont font = QApplication::font();
-            font.setPointSizeF(10.0 * next / 100.0);
-            QApplication::setFont(font);
-            return true;
         }
     }
 
@@ -443,8 +799,7 @@ bool MainWindow::handleApplicationKey(QKeyEvent *event) {
         if (!answered.isEmpty() && event->text().compare(answered, Qt::CaseInsensitive) == 0) {
             const QJsonObject room = roomByID(currentRoomID_);
             if (room.value(QStringLiteral("needsReply")).toBool()) {
-                runRoomAction(QStringLiteral("SetRoomUnanswered"),
-                              {currentRoomID_, false});
+                markRoomAnswered(currentRoomID_);
                 return true;
             }
         }
@@ -503,6 +858,46 @@ void MainWindow::applyRoomShortcut(const QString &key) {
     }
 }
 
+void MainWindow::markRoomAnswered(const QString &roomID) {
+    if (roomID.isEmpty()) {
+        return;
+    }
+    backend_->call(QStringLiteral("SetRoomUnanswered"), {roomID, false},
+                   [this, roomID](QJsonValue, const QString &error) {
+        if (!error.isEmpty()) {
+            showError(error);
+            return;
+        }
+        undoAnsweredRoomID_ = roomID;
+        undoAnsweredTimer_->start();
+        statusBar()->showMessage(
+            QStringLiteral("Marked answered · %1 to undo")
+                .arg(QKeySequence(QKeySequence::Undo).toString(QKeySequence::NativeText)),
+            10000);
+        loadSnapshot();
+    });
+}
+
+void MainWindow::undoMarkAnswered() {
+    const QString roomID = undoAnsweredRoomID_;
+    if (roomID.isEmpty()) {
+        return;
+    }
+    undoAnsweredRoomID_.clear();
+    undoAnsweredTimer_->stop();
+    backend_->call(QStringLiteral("SetRoomUnanswered"), {roomID, true},
+                   [this, roomID](QJsonValue, const QString &error) {
+        if (!error.isEmpty()) {
+            undoAnsweredRoomID_ = roomID;
+            undoAnsweredTimer_->start();
+            showError(error);
+            return;
+        }
+        statusBar()->showMessage(QStringLiteral("Needs reply restored."), 5000);
+        loadSnapshot();
+    });
+}
+
 void MainWindow::showQuickSwitcher() {
     auto *dialog = new QDialog(this);
     dialog->setWindowTitle(QStringLiteral("Quick switch"));
@@ -512,7 +907,9 @@ void MainWindow::showQuickSwitcher() {
     auto *query = new QLineEdit(dialog);
     query->setPlaceholderText(QStringLiteral("Search rooms…"));
     auto *list = new QListWidget(dialog);
-    list->setItemDelegate(new RoomListDelegate(list));
+    auto *roomDelegate = new RoomListDelegate(list);
+    roomDelegate->setContentBlur(contentBlurEnabled_);
+    list->setItemDelegate(roomDelegate);
     layout->addWidget(query);
     layout->addWidget(list, 1);
     for (int index = 0; index < rooms_->count(); ++index) {
@@ -571,31 +968,61 @@ void MainWindow::showQuickSwitcher() {
 
 void MainWindow::buildLoginPage() {
     loginPage_ = new QWidget(this);
+    loginPage_->setObjectName(QStringLiteral("loginPage"));
     auto *outer = new QVBoxLayout(loginPage_);
     outer->addStretch();
-    auto *form = new QFormLayout;
-    homeserver_ = new QLineEdit(QStringLiteral("https://matrix.org"), loginPage_);
-    username_ = new QLineEdit(loginPage_);
-    password_ = new QLineEdit(loginPage_);
+    auto *card = new QFrame(loginPage_);
+    card->setObjectName(QStringLiteral("loginCard"));
+    card->setFixedWidth(400);
+    auto *cardLayout = new QVBoxLayout(card);
+    cardLayout->setContentsMargins(36, 36, 36, 32);
+    cardLayout->setSpacing(6);
+
+    auto *title = new QLabel(QStringLiteral("Pinger"), card);
+    title->setObjectName(QStringLiteral("loginTitle"));
+    auto *subtitle = new QLabel(QStringLiteral("Sign in to your Matrix account"), card);
+    subtitle->setObjectName(QStringLiteral("loginSubtitle"));
+    cardLayout->addWidget(title);
+    cardLayout->addWidget(subtitle);
+    cardLayout->addSpacing(18);
+
+    homeserver_ = new QLineEdit(QStringLiteral("https://matrix.org"), card);
+    homeserver_->setPlaceholderText(QStringLiteral("https://matrix.example.org"));
+    username_ = new QLineEdit(card);
+    username_->setPlaceholderText(QStringLiteral("@you:matrix.org or you"));
+    password_ = new QLineEdit(card);
     password_->setEchoMode(QLineEdit::Password);
-    form->addRow(QStringLiteral("Homeserver"), homeserver_);
-    form->addRow(QStringLiteral("Username"), username_);
-    form->addRow(QStringLiteral("Password"), password_);
-    auto *panel = new QWidget(loginPage_);
-    panel->setMaximumWidth(420);
-    panel->setLayout(form);
-    outer->addWidget(new QLabel(QStringLiteral("Sign in to Matrix"), loginPage_), 0, Qt::AlignHCenter);
-    outer->addWidget(panel, 0, Qt::AlignHCenter);
-    loginButton_ = new QPushButton(QStringLiteral("Sign in"), loginPage_);
+    password_->setPlaceholderText(QStringLiteral("Password"));
+    const auto addField = [cardLayout, card](const QString &caption, QWidget *field) {
+        auto *label = new QLabel(caption, card);
+        label->setObjectName(QStringLiteral("fieldCaption"));
+        cardLayout->addWidget(label);
+        cardLayout->addWidget(field);
+        cardLayout->addSpacing(8);
+    };
+    addField(QStringLiteral("Homeserver"), homeserver_);
+    addField(QStringLiteral("Username"), username_);
+    addField(QStringLiteral("Password"), password_);
+
+    loginButton_ = new QPushButton(QStringLiteral("Sign in"), card);
+    loginButton_->setObjectName(QStringLiteral("primaryButton"));
     loginButton_->setDefault(true);
-    outer->addWidget(loginButton_, 0, Qt::AlignHCenter);
-    auto *error = new QLabel(loginPage_);
+    loginButton_->setCursor(Qt::PointingHandCursor);
+    cardLayout->addSpacing(6);
+    cardLayout->addWidget(loginButton_);
+
+    auto *error = new QLabel(card);
     error->setObjectName(QStringLiteral("loginError"));
     error->setWordWrap(true);
     error->setAlignment(Qt::AlignCenter);
-    outer->addWidget(error, 0, Qt::AlignHCenter);
+    cardLayout->addWidget(error);
+
+    outer->addWidget(card, 0, Qt::AlignHCenter);
     outer->addStretch();
     pages_->addWidget(loginPage_);
+
+    connect(username_, &QLineEdit::returnPressed, password_, qOverload<>(&QLineEdit::setFocus));
+    connect(password_, &QLineEdit::returnPressed, loginButton_, &QPushButton::click);
 
     connect(loginButton_, &QPushButton::clicked, this, [this, error] {
         loginButton_->setEnabled(false);
@@ -616,12 +1043,17 @@ void MainWindow::buildLoginPage() {
 
 void MainWindow::buildChatPage() {
     chatPage_ = new QWidget(this);
+    chatPage_->setObjectName(QStringLiteral("chatPage"));
     auto *layout = new QHBoxLayout(chatPage_);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
     auto *sidebar = new QWidget(chatPage_);
     sidebar->setObjectName(QStringLiteral("sidebar"));
-    sidebar->setMinimumWidth(240);
-    sidebar->setMaximumWidth(360);
+    sidebar->setMinimumWidth(250);
+    sidebar->setMaximumWidth(340);
     auto *sidebarLayout = new QVBoxLayout(sidebar);
+    sidebarLayout->setContentsMargins(10, 12, 10, 12);
+    sidebarLayout->setSpacing(10);
     accountSwitcher_ = new QComboBox(sidebar);
     addAccountButton_ = new QPushButton(QStringLiteral("Add account"), sidebar);
     devicesButton_ = new QPushButton(QStringLiteral("Manage devices"), sidebar);
@@ -637,19 +1069,36 @@ void MainWindow::buildChatPage() {
     logoutButton_ = new QPushButton(QStringLiteral("Log out"), sidebar);
     roomScope_ = new QComboBox(sidebar);
     roomScope_->addItem(QStringLiteral("All rooms"), QStringLiteral("all"));
+    roomScope_->addItem(QStringLiteral("Unread"), QStringLiteral("unread"));
+    roomScope_->addItem(QStringLiteral("Mentions"), QStringLiteral("mentions"));
     roomScope_->addItem(QStringLiteral("Unanswered"), QStringLiteral("unanswered"));
     roomScope_->addItem(QStringLiteral("Needs reply"), QStringLiteral("needs-reply"));
     roomScope_->addItem(QStringLiteral("Favorites"), QStringLiteral("favorites"));
     roomScope_->addItem(QStringLiteral("Archived"), QStringLiteral("archived"));
+    roomScope_->hide();
     roomFilter_ = new QLineEdit(sidebar);
+    roomFilter_->setObjectName(QStringLiteral("roomSearchField"));
     roomFilter_->setPlaceholderText(QStringLiteral("Search rooms"));
+    roomFilter_->setClearButtonEnabled(true);
+    roomFilter_->addAction(uiIcon(QStringLiteral("search")), QLineEdit::LeadingPosition);
+    accountScope_ = new QComboBox(sidebar);
+    accountScope_->setObjectName(QStringLiteral("accountScope"));
+    accountScope_->setMinimumWidth(94);
+    accountScope_->setMaximumWidth(140);
+    accountScope_->setToolTip(QStringLiteral("Filter rooms by account"));
     rooms_ = new QListWidget(sidebar);
     rooms_->setObjectName(QStringLiteral("roomsList"));
-    rooms_->setItemDelegate(new RoomListDelegate(rooms_));
+    roomDelegate_ = new RoomListDelegate(rooms_);
+    roomDelegate_->setContentBlur(contentBlurEnabled_);
+    rooms_->setItemDelegate(roomDelegate_);
     rooms_->setSpacing(0);
     rooms_->setContextMenuPolicy(Qt::CustomContextMenu);
+    rooms_->setMouseTracking(true);
+    rooms_->viewport()->setMouseTracking(true);
+    rooms_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     inviteLabel_ = new QLabel(QStringLiteral("Invitations"), sidebar);
     invites_ = new QListWidget(sidebar);
+    installPrivacyBlurDelegate(invites_);
     invites_->setMaximumHeight(120);
     auto *inviteActions = new QHBoxLayout;
     acceptInviteButton_ = new QPushButton(QStringLiteral("Accept"), sidebar);
@@ -660,39 +1109,251 @@ void MainWindow::buildChatPage() {
     invites_->hide();
     acceptInviteButton_->hide();
     declineInviteButton_->hide();
-    sidebarLayout->addWidget(accountSwitcher_);
-    sidebarLayout->addWidget(addAccountButton_);
-    sidebarLayout->addWidget(devicesButton_);
-    sidebarLayout->addWidget(searchMessagesButton_);
-    sidebarLayout->addWidget(joinRoomButton_);
-    sidebarLayout->addWidget(directChatButton_);
-    sidebarLayout->addWidget(createGroupButton_);
-    sidebarLayout->addWidget(scheduledJobsButton_);
-    sidebarLayout->addWidget(preferencesButton_);
-    sidebarLayout->addWidget(aiButton_);
-    sidebarLayout->addWidget(localAIButton_);
-    sidebarLayout->addWidget(exportButton_);
-    sidebarLayout->addWidget(logoutButton_);
-    sidebarLayout->addWidget(roomScope_);
-    sidebarLayout->addWidget(roomFilter_);
+    const QList<QPushButton *> secondaryActions = {
+        addAccountButton_, devicesButton_, searchMessagesButton_, joinRoomButton_,
+        directChatButton_, createGroupButton_, scheduledJobsButton_, preferencesButton_,
+        aiButton_, localAIButton_, exportButton_, logoutButton_,
+    };
+    for (QPushButton *button : secondaryActions) {
+        button->hide();
+    }
+
+    auto makeIconButton = [](QWidget *parent, const QString &icon,
+                             const QString &toolTip) {
+        auto *button = new QToolButton(parent);
+        button->setObjectName(QStringLiteral("iconButton"));
+        button->setIcon(uiIcon(icon));
+        button->setIconSize(QSize(18, 18));
+        button->setToolTip(toolTip);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setFixedSize(34, 34);
+        return button;
+    };
+
+    auto *navigationRow = new QHBoxLayout;
+    navigationRow->setContentsMargins(0, 0, 0, 0);
+    navigationRow->setSpacing(4);
+    allRoomsFilterButton_ = makeIconButton(sidebar, QStringLiteral("all"),
+                                           QStringLiteral("All rooms"));
+    allRoomsFilterButton_->setCheckable(true);
+    archivedRoomsFilterButton_ = makeIconButton(sidebar, QStringLiteral("archive"),
+                                                QStringLiteral("Archived rooms"));
+    archivedRoomsFilterButton_->setCheckable(true);
+    auto *localAIQuickButton = makeIconButton(sidebar, QStringLiteral("sparkle"),
+                                              QStringLiteral("Local AI chats"));
+    navigationRow->addWidget(allRoomsFilterButton_);
+    navigationRow->addWidget(archivedRoomsFilterButton_);
+    navigationRow->addWidget(localAIQuickButton);
+
+    auto *moreButton = new QToolButton(sidebar);
+    moreButton->setObjectName(QStringLiteral("sidebarMoreButton"));
+    moreButton->setIcon(uiIcon(QStringLiteral("more")));
+    moreButton->setIconSize(QSize(18, 18));
+    moreButton->setToolTip(QStringLiteral("More actions"));
+    moreButton->setCursor(Qt::PointingHandCursor);
+    moreButton->setPopupMode(QToolButton::InstantPopup);
+    moreButton->setFixedSize(34, 34);
+    auto *moreMenu = new QMenu(moreButton);
+    preparePopupMenu(moreMenu);
+    QList<QAction *> secondaryMenuActions;
+    for (QPushButton *button : secondaryActions) {
+        auto *action = moreMenu->addAction(button->text());
+        connect(action, &QAction::triggered, button, &QPushButton::click);
+        secondaryMenuActions.append(action);
+    }
+    moreMenu->addSeparator();
+    QMenu *filtersMenu = moreMenu->addMenu(QStringLiteral("Room filters"));
+    preparePopupMenu(filtersMenu);
+    auto *filterActionGroup = new QActionGroup(filtersMenu);
+    filterActionGroup->setExclusive(true);
+    QList<QAction *> filterMenuActions;
+    for (int index = 0; index < roomScope_->count(); ++index) {
+        auto *action = filtersMenu->addAction(roomScope_->itemText(index));
+        action->setCheckable(true);
+        action->setData(index);
+        filterActionGroup->addAction(action);
+        filterMenuActions.append(action);
+        connect(action, &QAction::triggered, this, [this, index] {
+            roomScope_->setCurrentIndex(index);
+        });
+    }
+    connect(moreMenu, &QMenu::aboutToShow, moreMenu, [secondaryActions, secondaryMenuActions] {
+        for (qsizetype i = 0; i < secondaryActions.size(); ++i) {
+            secondaryMenuActions[i]->setEnabled(secondaryActions[i]->isEnabled());
+        }
+    });
+    connect(moreMenu, &QMenu::aboutToShow, this, [this, filterMenuActions] {
+        for (QAction *action : filterMenuActions) {
+            action->setChecked(action->data().toInt() == roomScope_->currentIndex());
+        }
+    });
+    moreButton->setMenu(moreMenu);
+    navigationRow->addWidget(moreButton);
+
+    auto *refinementRow = new QHBoxLayout;
+    refinementRow->setContentsMargins(0, 0, 0, 0);
+    refinementRow->setSpacing(4);
+    unansweredFilterButton_ = makeIconButton(sidebar, QStringLiteral("unanswered"),
+                                             QStringLiteral("Unanswered rooms"));
+    unansweredFilterButton_->setCheckable(true);
+    needsReplyFilterButton_ = makeIconButton(sidebar, QStringLiteral("needs-reply"),
+                                             QStringLiteral("Needs reply"));
+    needsReplyFilterButton_->setCheckable(true);
+    needsReplyCountLabel_ = new QLabel(needsReplyFilterButton_);
+    needsReplyCountLabel_->setObjectName(QStringLiteral("filterCountBadge"));
+    needsReplyCountLabel_->setAlignment(Qt::AlignCenter);
+    needsReplyCountLabel_->setFixedSize(20, 14);
+    needsReplyCountLabel_->move(13, 1);
+    needsReplyCountLabel_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    needsReplyCountLabel_->hide();
+    favoriteFilterButton_ = makeIconButton(sidebar, QStringLiteral("star"),
+                                           QStringLiteral("Favorite rooms"));
+    favoriteFilterButton_->setCheckable(true);
+    refinementRow->addWidget(unansweredFilterButton_);
+    refinementRow->addWidget(needsReplyFilterButton_);
+    refinementRow->addWidget(favoriteFilterButton_);
+
+    auto *roomSearchRow = new QHBoxLayout;
+    roomSearchRow->setContentsMargins(0, 0, 0, 0);
+    roomSearchRow->setSpacing(6);
+    roomSearchRow->addWidget(roomFilter_, 1);
+    roomSearchRow->addWidget(accountScope_);
+    sidebarLayout->addLayout(roomSearchRow);
+    sidebarLayout->addLayout(navigationRow);
+    sidebarLayout->addLayout(refinementRow);
+
+    auto *roomsSection = new QHBoxLayout;
+    roomsSection->setContentsMargins(2, 4, 2, 0);
+    roomsSection->setSpacing(6);
+    roomsSectionLabel_ = new QLabel(QStringLiteral("ROOMS"), sidebar);
+    roomsSectionLabel_->setObjectName(QStringLiteral("roomsSectionLabel"));
+    roomsCount_ = new QLabel(QStringLiteral("0"), sidebar);
+    roomsCount_->setObjectName(QStringLiteral("roomsCount"));
+    joinRoomQuickButton_ = makeIconButton(sidebar, QStringLiteral("add"),
+                                          QStringLiteral("Join a room"));
+    joinRoomQuickButton_->setFixedSize(30, 30);
+    archiveAllReadButton_ = makeIconButton(sidebar, QStringLiteral("archive"),
+                                           QStringLiteral("Archive all read rooms"));
+    archiveAllReadButton_->setFixedSize(30, 30);
+    roomsSection->addWidget(roomsSectionLabel_);
+    roomsSection->addWidget(roomsCount_);
+    roomsSection->addStretch(1);
+    roomsSection->addWidget(joinRoomQuickButton_);
+    roomsSection->addWidget(archiveAllReadButton_);
+    sidebarLayout->addLayout(roomsSection);
+
     sidebarLayout->addWidget(inviteLabel_);
     sidebarLayout->addWidget(invites_);
     sidebarLayout->addLayout(inviteActions);
-    sidebarLayout->addWidget(rooms_);
+    sidebarLayout->addWidget(rooms_, 1);
+    sidebarLayout->addWidget(accountSwitcher_);
+
+    auto *profileFooter = new QFrame(sidebar);
+    profileFooter->setObjectName(QStringLiteral("profileFooter"));
+    auto *profileLayout = new QHBoxLayout(profileFooter);
+    profileLayout->setContentsMargins(9, 8, 8, 8);
+    profileLayout->setSpacing(10);
+    profileAvatar_ = new QLabel(profileFooter);
+    profileAvatar_->setObjectName(QStringLiteral("profileAvatar"));
+    profileAvatar_->setAlignment(Qt::AlignCenter);
+    profileAvatar_->setFixedSize(36, 36);
+    auto *profileCopy = new QVBoxLayout;
+    profileCopy->setContentsMargins(0, 0, 0, 0);
+    profileCopy->setSpacing(1);
+    profileName_ = new QLabel(QStringLiteral("Pinger account"), profileFooter);
+    profileName_->setObjectName(QStringLiteral("profileName"));
+    profileID_ = new QLabel(QString(), profileFooter);
+    profileID_->setObjectName(QStringLiteral("profileID"));
+    profileCopy->addWidget(profileName_);
+    profileCopy->addWidget(profileID_);
+    auto *profileSettings = makeIconButton(profileFooter, QStringLiteral("settings"),
+                                           QStringLiteral("Settings"));
+    profileSettings->setFixedSize(32, 32);
+    profileLayout->addWidget(profileAvatar_);
+    profileLayout->addLayout(profileCopy, 1);
+    profileLayout->addWidget(profileSettings);
+    sidebarLayout->addWidget(profileFooter);
     layout->addWidget(sidebar);
 
     auto *conversation = new QWidget(chatPage_);
+    conversation->setObjectName(QStringLiteral("conversation"));
     auto *conversationLayout = new QVBoxLayout(conversation);
-    roomTitle_ = new QLabel(QStringLiteral("Select a room"), conversation);
+    conversationLayout->setContentsMargins(0, 0, 0, 0);
+    conversationLayout->setSpacing(0);
+
+    auto *roomHeader = new QFrame(conversation);
+    roomHeader->setObjectName(QStringLiteral("conversationHeader"));
+    auto *roomHeaderLayout = new QHBoxLayout(roomHeader);
+    roomHeaderLayout->setContentsMargins(20, 10, 18, 10);
+    roomHeaderLayout->setSpacing(12);
+    roomAvatar_ = new QLabel(roomHeader);
+    roomAvatar_->setObjectName(QStringLiteral("roomAvatar"));
+    roomAvatar_->setAlignment(Qt::AlignCenter);
+    roomAvatar_->setFixedSize(40, 40);
+    auto *roomCopy = new QVBoxLayout;
+    roomCopy->setContentsMargins(0, 0, 0, 0);
+    roomCopy->setSpacing(2);
+    roomTitle_ = new QLabel(QStringLiteral("Select a room"), roomHeader);
+    roomTitle_->setObjectName(QStringLiteral("roomTitle"));
+    roomSubtitle_ = new QLabel(QString(), roomHeader);
+    roomSubtitle_->setObjectName(QStringLiteral("roomSubtitle"));
+    roomCopy->addWidget(roomTitle_);
+    roomCopy->addWidget(roomSubtitle_);
+    roomHeaderLayout->addWidget(roomAvatar_);
+    roomHeaderLayout->addLayout(roomCopy, 1);
+    contentBlurIndicator_ = makeIconButton(roomHeader, QStringLiteral("eye-off"),
+                                           QStringLiteral("Content blur is on · click to turn off"));
+    contentBlurIndicator_->setObjectName(QStringLiteral("contentBlurIndicator"));
+    contentBlurIndicator_->setFixedSize(30, 30);
+    contentBlurIndicator_->hide();
+    roomHeaderLayout->addWidget(contentBlurIndicator_);
+    auto *roomSearch = makeIconButton(roomHeader, QStringLiteral("search"),
+                                      QStringLiteral("Search messages"));
+    auto *roomMedia = makeIconButton(roomHeader, QStringLiteral("images"),
+                                     QStringLiteral("Room media"));
+    auto *roomInfo = makeIconButton(roomHeader, QStringLiteral("info"),
+                                    QStringLiteral("Room details"));
+    roomHeaderLayout->addWidget(roomSearch);
+    roomHeaderLayout->addWidget(roomMedia);
+    roomHeaderLayout->addWidget(roomInfo);
+
     messages_ = new QListWidget(conversation);
     messages_->setObjectName(QStringLiteral("messagesList"));
-    messages_->setItemDelegate(new MessageBubbleDelegate(messages_));
+    messageDelegate_ = new MessageBubbleDelegate(messages_);
+    messageDelegate_->setContentBlur(contentBlurEnabled_);
+    messages_->setItemDelegate(messageDelegate_);
     messages_->setSpacing(2);
     messages_->setWordWrap(true);
+    messages_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    messages_->setMouseTracking(true);
     messages_->setContextMenuPolicy(Qt::CustomContextMenu);
+
     composer_ = new QPlainTextEdit(conversation);
-    composer_->setPlaceholderText(QStringLiteral("Write a message"));
-    composer_->setMaximumHeight(120);
+    composer_->setPlaceholderText(QStringLiteral("Message"));
+    composer_->setObjectName(QStringLiteral("composerInput"));
+    composer_->setMinimumHeight(42);
+    composer_->setMaximumHeight(100);
+    composer_->installEventFilter(this);
+    composerSuggestions_ = new QFrame(chatPage_);
+    composerSuggestions_->setObjectName(QStringLiteral("composerSuggestions"));
+    composerSuggestions_->setFrameShape(QFrame::StyledPanel);
+    composerSuggestions_->setAttribute(Qt::WA_StyledBackground, true);
+    auto *suggestionsLayout = new QVBoxLayout(composerSuggestions_);
+    suggestionsLayout->setContentsMargins(4, 4, 4, 4);
+    suggestionsLayout->setSpacing(0);
+    composerSuggestionList_ = new QListWidget(composerSuggestions_);
+    composerSuggestionList_->setObjectName(QStringLiteral("composerSuggestionList"));
+    composerSuggestionList_->setFrameShape(QFrame::NoFrame);
+    composerSuggestionList_->setFocusPolicy(Qt::NoFocus);
+    composerSuggestionList_->setSelectionMode(QAbstractItemView::SingleSelection);
+    composerSuggestionList_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    composerSuggestionList_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    composerSuggestionList_->setUniformItemSizes(true);
+    suggestionsLayout->addWidget(composerSuggestionList_);
+    installPrivacyBlurDelegate(composerSuggestionList_);
+    composerSuggestions_->hide();
+    connect(composerSuggestionList_, &QListWidget::itemClicked, this,
+            &MainWindow::chooseComposerSuggestion);
     auto *composeContextRow = new QHBoxLayout;
     composeContext_ = new QLabel(conversation);
     composeContext_->setWordWrap(true);
@@ -701,44 +1362,219 @@ void MainWindow::buildChatPage() {
     composeContextRow->addWidget(cancelComposeContextButton_);
     composeContext_->hide();
     cancelComposeContextButton_->hide();
-    auto *composerRow = new QHBoxLayout;
-    attachButton_ = new QPushButton(QStringLiteral("Attach…"), conversation);
-    scheduleMessageButton_ = new QPushButton(QStringLiteral("Schedule…"), conversation);
-    sendButton_ = new QPushButton(QStringLiteral("Send"), conversation);
-    composerRow->addWidget(composer_, 1);
-    composerRow->addWidget(attachButton_);
-    composerRow->addWidget(scheduleMessageButton_);
-    composerRow->addWidget(sendButton_);
-    conversationLayout->addWidget(roomTitle_);
+    auto *composerPanel = new QFrame(conversation);
+    composerPanel->setObjectName(QStringLiteral("composerPanel"));
+    auto *composerPanelLayout = new QVBoxLayout(composerPanel);
+    composerPanelLayout->setContentsMargins(12, 8, 12, 9);
+    composerPanelLayout->setSpacing(5);
+    composerPanelLayout->addWidget(composer_);
+    formattingToolbar_ = new QWidget(composerPanel);
+    formattingToolbar_->setObjectName(QStringLiteral("formattingToolbar"));
+    auto *formattingLayout = new QHBoxLayout(formattingToolbar_);
+    formattingLayout->setContentsMargins(0, 0, 0, 0);
+    formattingLayout->setSpacing(2);
+    const QStringList formatKeys{
+        QStringLiteral("bold"), QStringLiteral("italic"), QStringLiteral("strikethrough"),
+        QStringLiteral("inlineCode"), QStringLiteral("link"), QStringLiteral("heading"),
+        QStringLiteral("bulletList"), QStringLiteral("numberedList"), QStringLiteral("quote"),
+        QStringLiteral("codeBlock"),
+    };
+    const QStringList formatLabels{
+        QStringLiteral("Bold"), QStringLiteral("Italic"), QStringLiteral("Strikethrough"),
+        QStringLiteral("Inline code"), QStringLiteral("Insert link"), QStringLiteral("Heading"),
+        QStringLiteral("Bulleted list"), QStringLiteral("Numbered list"), QStringLiteral("Quote"),
+        QStringLiteral("Code block"),
+    };
+    const QStringList formatIcons{
+        QStringLiteral("bold"), QStringLiteral("italic"), QStringLiteral("strikethrough"),
+        QStringLiteral("code"), QStringLiteral("link"), QStringLiteral("heading"),
+        QStringLiteral("list"), QStringLiteral("list-ordered"), QStringLiteral("quote"),
+        QStringLiteral("code-block"),
+    };
+    for (qsizetype index = 0; index < formatKeys.size(); ++index) {
+        auto *button = new QToolButton(formattingToolbar_);
+        button->setObjectName(QStringLiteral("composerToolButton"));
+        button->setIcon(uiIcon(formatIcons[index]));
+        button->setIconSize(QSize(16, 16));
+        button->setFixedSize(30, 30);
+        button->setToolTip(formatLabels[index]);
+        button->setAccessibleName(formatLabels[index]);
+        button->setAutoRaise(true);
+        button->setFocusPolicy(Qt::NoFocus);
+        formattingLayout->addWidget(button);
+        connect(button, &QToolButton::clicked, this, [this, format = formatKeys[index]] {
+            applyComposerFormatting(format);
+        });
+    }
+    formattingLayout->addStretch(1);
+    formattingToolbar_->hide();
+    composerPanelLayout->addWidget(formattingToolbar_);
+    auto *composerDivider = new QFrame(composerPanel);
+    composerDivider->setObjectName(QStringLiteral("composerDivider"));
+    composerDivider->setFixedHeight(1);
+    composerPanelLayout->addWidget(composerDivider);
+    auto *composerBar = new QFrame(composerPanel);
+    composerBar->setObjectName(QStringLiteral("composerTools"));
+    auto *composerBarLayout = new QHBoxLayout(composerBar);
+    composerBarLayout->setContentsMargins(0, 0, 0, 0);
+    composerBarLayout->setSpacing(4);
+    attachButton_ = new QPushButton(QStringLiteral("Attach"), composerBar);
+    recordButton_ = new QPushButton(QStringLiteral("Record"), composerBar);
+    attachButton_->setText(QString());
+    recordButton_->setText(QString());
+    attachButton_->setIcon(uiIcon(QStringLiteral("attach")));
+    recordButton_->setIcon(uiIcon(QStringLiteral("mic")));
+    attachButton_->setToolTip(QStringLiteral("Attach a file"));
+    recordButton_->setToolTip(QStringLiteral("Record a voice or video message"));
+    attachButton_->setIconSize(QSize(18, 18));
+    recordButton_->setIconSize(QSize(18, 18));
+    auto *recordMenu = new QMenu(recordButton_);
+    preparePopupMenu(recordMenu);
+    recordMenu->addAction(QStringLiteral("Voice note…"), this, [this] { recordMedia(false); });
+    recordMenu->addAction(QStringLiteral("Video message…"), this, [this] { recordMedia(true); });
+    recordButton_->setMenu(recordMenu);
+    scheduleMessageButton_ = new QPushButton(QStringLiteral("Schedule"), composerBar);
+    scheduleMessageButton_->setText(QString());
+    scheduleMessageButton_->setIcon(uiIcon(QStringLiteral("schedule")));
+    scheduleMessageButton_->setIconSize(QSize(18, 18));
+    scheduleMessageButton_->setToolTip(QStringLiteral("Schedule message"));
+    auto *formatMenuButton = new QToolButton(composerBar);
+    formatMenuButton->setObjectName(QStringLiteral("composerToolButton"));
+    formatMenuButton->setFixedSize(32, 32);
+    formatMenuButton->setIcon(uiIcon(QStringLiteral("bold")));
+    formatMenuButton->setIconSize(QSize(18, 18));
+    formatMenuButton->setToolTip(QStringLiteral("Format message"));
+    formatMenuButton->setPopupMode(QToolButton::InstantPopup);
+    auto *formatMenu = new QMenu(formatMenuButton);
+    preparePopupMenu(formatMenu);
+    for (qsizetype index = 0; index < formatKeys.size(); ++index) {
+        QAction *action = formatMenu->addAction(formatLabels[index]);
+        connect(action, &QAction::triggered, this, [this, format = formatKeys[index]] {
+            applyComposerFormatting(format);
+        });
+    }
+    formatMenuButton->setMenu(formatMenu);
+    sendButton_ = new QPushButton(QStringLiteral("Send"), composerBar);
+    sendButton_->setText(QString());
+    sendButton_->setIcon(uiIcon(QStringLiteral("send")));
+    sendButton_->setIconSize(QSize(18, 18));
+    sendButton_->setToolTip(QStringLiteral("Send message"));
+    for (QPushButton *button : {attachButton_, recordButton_, scheduleMessageButton_}) {
+        button->setObjectName(QStringLiteral("composerToolButton"));
+        button->setCursor(Qt::PointingHandCursor);
+        button->setFixedSize(32, 32);
+    }
+    sendButton_->setObjectName(QStringLiteral("sendButton"));
+    sendButton_->setCursor(Qt::PointingHandCursor);
+    sendButton_->setFixedSize(38, 38);
+    auto *emojiButton = makeIconButton(composerBar, QStringLiteral("smile"),
+                                       QStringLiteral("Insert emoji"));
+    auto *emojiMenu = new QMenu(emojiButton);
+    preparePopupMenu(emojiMenu);
+    const QStringList emojiList = {
+        QStringLiteral("😀"), QStringLiteral("😂"), QStringLiteral("😍"),
+        QStringLiteral("👍"), QStringLiteral("❤️"), QStringLiteral("🎉"),
+        QStringLiteral("🙏"), QStringLiteral("✨"),
+    };
+    for (const QString &emoji : emojiList) {
+        QAction *action = emojiMenu->addAction(emoji);
+        connect(action, &QAction::triggered, this, [this, emoji] {
+            composer_->insertPlainText(emoji);
+            composer_->setFocus();
+        });
+    }
+    emojiButton->setMenu(emojiMenu);
+    emojiButton->setPopupMode(QToolButton::InstantPopup);
+    auto *aiComposerButton = makeIconButton(composerBar, QStringLiteral("sparkle"),
+                                            QStringLiteral("AI tools"));
+    composerBarLayout->addWidget(formatMenuButton);
+    composerBarLayout->addWidget(attachButton_);
+    composerBarLayout->addWidget(emojiButton);
+    composerBarLayout->addWidget(aiComposerButton);
+    composerBarLayout->addWidget(recordButton_);
+    composerBarLayout->addWidget(scheduleMessageButton_);
+    composerBarLayout->addStretch(1);
+    composerBarLayout->addWidget(sendButton_);
+    composerPanelLayout->addWidget(composerBar);
+
+    conversationLayout->addWidget(roomHeader);
     conversationLayout->addWidget(messages_, 1);
     conversationLayout->addLayout(composeContextRow);
-    conversationLayout->addLayout(composerRow);
+    conversationLayout->addWidget(composerPanel);
     layout->addWidget(conversation, 1);
     pages_->addWidget(chatPage_);
 
     connect(roomFilter_, &QLineEdit::textChanged, this, &MainWindow::updateRoomFilter);
+    connect(accountScope_, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, [this](int) { filterRooms(); });
     connect(roomScope_, qOverload<int>(&QComboBox::currentIndexChanged),
-            this, [this] { filterRooms(); });
+            this, [this](int) { filterRooms(); });
+    connect(allRoomsFilterButton_, &QToolButton::clicked, this, [this] {
+        roomScope_->setCurrentIndex(roomScope_->findData(QStringLiteral("all")));
+        filterRooms();
+    });
+    connect(archivedRoomsFilterButton_, &QToolButton::clicked, this, [this] {
+        roomScope_->setCurrentIndex(roomScope_->findData(QStringLiteral("archived")));
+        filterRooms();
+    });
+    connect(localAIQuickButton, &QToolButton::clicked, localAIButton_, &QPushButton::click);
+    connect(unansweredFilterButton_, &QToolButton::clicked, this, [this] {
+        unansweredOnly_ = unansweredFilterButton_->isChecked();
+        if (roomScope_->currentData().toString() == QStringLiteral("unanswered")) {
+            const QSignalBlocker blocker(roomScope_);
+            roomScope_->setCurrentIndex(roomScope_->findData(QStringLiteral("all")));
+        }
+        filterRooms();
+    });
+    connect(needsReplyFilterButton_, &QToolButton::clicked, this, [this] {
+        needsReplyOnly_ = needsReplyFilterButton_->isChecked();
+        if (roomScope_->currentData().toString() == QStringLiteral("needs-reply")) {
+            const QSignalBlocker blocker(roomScope_);
+            roomScope_->setCurrentIndex(roomScope_->findData(QStringLiteral("all")));
+        }
+        filterRooms();
+    });
+    connect(favoriteFilterButton_, &QToolButton::clicked, this, [this] {
+        favoritesOnly_ = favoriteFilterButton_->isChecked();
+        if (roomScope_->currentData().toString() == QStringLiteral("favorites")) {
+            const QSignalBlocker blocker(roomScope_);
+            roomScope_->setCurrentIndex(roomScope_->findData(QStringLiteral("all")));
+        }
+        filterRooms();
+    });
+    connect(joinRoomQuickButton_, &QToolButton::clicked, joinRoomButton_, &QPushButton::click);
+    connect(archiveAllReadButton_, &QToolButton::clicked,
+            this, &MainWindow::archiveAllReadRooms);
+    connect(profileSettings, &QToolButton::clicked, this, [this] { showSettings(); });
+    connect(aiComposerButton, &QToolButton::clicked, this, [this] { showAITools(); });
+    connect(roomSearch, &QToolButton::clicked, searchMessagesButton_, &QPushButton::click);
+    connect(roomMedia, &QToolButton::clicked, this, [this] {
+        if (!currentRoomID_.isEmpty()) {
+            showMediaGallery(currentRoomID_);
+        }
+    });
+    connect(roomInfo, &QToolButton::clicked, this, [this] {
+        if (!currentRoomID_.isEmpty()) {
+            showRoomDetails(currentRoomID_);
+        }
+    });
     connect(joinRoomButton_, &QPushButton::clicked, this, &MainWindow::joinRoom);
     connect(directChatButton_, &QPushButton::clicked, this, &MainWindow::startDirectChat);
     connect(createGroupButton_, &QPushButton::clicked, this, &MainWindow::createGroupRoom);
     connect(scheduledJobsButton_, &QPushButton::clicked, this, &MainWindow::openScheduledJobs);
-    connect(preferencesButton_, &QPushButton::clicked, this, [this] {
-        SettingsDialog dialog(backend_, snapshot_, media_,
-                              [this] { loadSnapshot(); }, this);
-        dialog.exec();
-    });
-    connect(aiButton_, &QPushButton::clicked, this, [this] {
-        const QJsonObject room = roomByID(currentRoomID_);
-        const QString roomName = room.value(QStringLiteral("name")).toString(currentRoomID_);
-        AIToolsDialog dialog(backend_, media_, currentRoomID_, roomName, composer_, this);
-        dialog.exec();
-    });
+    connect(preferencesButton_, &QPushButton::clicked, this, [this] { showSettings(); });
+    connect(aiButton_, &QPushButton::clicked, this, [this] { showAITools(); });
     connect(localAIButton_, &QPushButton::clicked, this, &MainWindow::showLocalAIChatDialog);
     connect(exportButton_, &QPushButton::clicked, this, &MainWindow::showExportDialog);
     connect(addAccountButton_, &QPushButton::clicked, this, &MainWindow::addAccount);
     connect(devicesButton_, &QPushButton::clicked, this, &MainWindow::showDevices);
     connect(searchMessagesButton_, &QPushButton::clicked, this, &MainWindow::searchMessages);
+    avatarLoadTimer_ = new QTimer(this);
+    avatarLoadTimer_->setSingleShot(true);
+    avatarLoadTimer_->setInterval(80);
+    connect(avatarLoadTimer_, &QTimer::timeout, this, &MainWindow::requestVisibleRoomAvatars);
+    connect(rooms_->verticalScrollBar(), &QScrollBar::valueChanged, this,
+            [this] { avatarLoadTimer_->start(); });
     connect(accountSwitcher_, qOverload<int>(&QComboBox::currentIndexChanged),
             this, [this](int index) {
                 if (index >= 0) {
@@ -811,9 +1647,25 @@ void MainWindow::buildChatPage() {
     });
     connect(rooms_, &QListWidget::currentItemChanged, this,
             [this](QListWidgetItem *item, QListWidgetItem *) {
+                if (item) {
+                    const QJsonObject room =
+                        QJsonObject::fromVariantMap(item->data(Qt::UserRole + 1).toMap());
+                    const QString roomAccountID =
+                        room.value(QStringLiteral("accountId")).toString();
+                    const QString activeAccountID =
+                        snapshot_.value(QStringLiteral("activeAccountId")).toString();
+                    if (!roomAccountID.isEmpty() && roomAccountID != activeAccountID) {
+                        pendingRoomID_ = item->data(Qt::UserRole).toString();
+                        switchAccount(roomAccountID);
+                        return;
+                    }
+                }
                 switchRoom(item ? item->data(Qt::UserRole).toString() : QString());
-                roomTitle_->setText(item ? item->text() : QStringLiteral("Select a room"));
+                updateRoomHeader(item
+                    ? QJsonObject::fromVariantMap(item->data(Qt::UserRole + 1).toMap())
+                    : QJsonObject());
                 messages_->clear();
+                fadeIn(messages_, 150);
                 updateActiveRoom(currentRoomID_);
                 if (!currentRoomID_.isEmpty()) {
                     loadHistory(currentRoomID_);
@@ -825,7 +1677,18 @@ void MainWindow::buildChatPage() {
         const bool ready = !currentRoomID_.isEmpty() && !composer_->toPlainText().trimmed().isEmpty();
         sendButton_->setEnabled(ready);
         scheduleMessageButton_->setEnabled(ready && editEventID_.isEmpty());
+        const QString text = composer_->toPlainText();
+        for (auto it = composerMentionBindings_.begin(); it != composerMentionBindings_.end();) {
+            if (!text.contains(it.key())) {
+                it = composerMentionBindings_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        refreshComposerSuggestions();
     });
+    connect(composer_, &QPlainTextEdit::cursorPositionChanged, this,
+            &MainWindow::refreshComposerSuggestions);
     sendButton_->setEnabled(false);
 }
 
@@ -881,6 +1744,11 @@ void MainWindow::loadSnapshot() {
 void MainWindow::applySnapshot(const QJsonObject &snapshot) {
     snapshot_ = snapshot;
     preferences_ = snapshot.value(QStringLiteral("preferences")).toObject();
+    updateSessionVerification(snapshot.value(QStringLiteral("verification")).toObject());
+    updateContentBlur();
+    formattingToolbar_->setVisible(
+        preferences_.value(QStringLiteral("composer.formatting_toolbar")).toBool());
+    refreshComposerSuggestions();
     bool zoomOk = false;
     const int zoom = preferences_.value(QStringLiteral("appearance.zoom"))
                          .toString(QStringLiteral("100")).toInt(&zoomOk);
@@ -895,17 +1763,32 @@ void MainWindow::applySnapshot(const QJsonObject &snapshot) {
         }
     }
     if (snapshot.value(QStringLiteral("needsVerification")).toBool()) {
-        pages_->setCurrentWidget(verificationPage_);
+        accountRoomsTimer_->stop();
+        otherAccountRooms_ = {};
+        if (pages_->currentWidget() != verificationPage_) {
+            pages_->setCurrentWidget(verificationPage_);
+            fadeIn(verificationPage_);
+        }
+        updateMenuState();
         return;
     }
     if (!snapshot.value(QStringLiteral("loggedIn")).toBool()) {
-        pages_->setCurrentWidget(loginPage_);
+        accountRoomsTimer_->stop();
+        otherAccountRooms_ = {};
+        if (pages_->currentWidget() != loginPage_) {
+            pages_->setCurrentWidget(loginPage_);
+            fadeIn(loginPage_);
+        }
+        updateMenuState();
         return;
     }
-    pages_->setCurrentWidget(chatPage_);
+    if (pages_->currentWidget() != chatPage_) {
+        pages_->setCurrentWidget(chatPage_);
+        fadeIn(chatPage_);
+    }
+    const QJsonArray accounts = snapshot.value(QStringLiteral("accounts")).toArray();
     {
         const QSignalBlocker accountBlocker(accountSwitcher_);
-        const auto accounts = snapshot.value(QStringLiteral("accounts")).toArray();
         accountSwitcher_->clear();
         for (const auto &value : accounts) {
             const auto account = value.toObject();
@@ -922,6 +1805,48 @@ void MainWindow::applySnapshot(const QJsonObject &snapshot) {
         }
         accountSwitcher_->setVisible(accounts.size() > 1);
     }
+    {
+        const QString previousScope = accountScope_->currentData().toString();
+        const QSignalBlocker scopeBlocker(accountScope_);
+        accountScope_->clear();
+        accountScope_->addItem(QStringLiteral("All accounts"), QStringLiteral("all"));
+        for (const auto &value : accounts) {
+            const auto account = value.toObject();
+            const auto accountProfile = account.value(QStringLiteral("profile")).toObject();
+            const QString accountID = account.value(QStringLiteral("id")).toString();
+            QString label = accountProfile.value(QStringLiteral("displayName")).toString();
+            if (label.isEmpty()) {
+                label = accountProfile.value(QStringLiteral("userId")).toString();
+            }
+            accountScope_->addItem(label, accountID);
+        }
+        int scopeIndex = accountScope_->findData(previousScope);
+        if (scopeIndex < 0) {
+            scopeIndex = accountScope_->findData(QStringLiteral("all"));
+        }
+        accountScope_->setCurrentIndex(scopeIndex);
+        accountScope_->setVisible(accounts.size() > 1);
+    }
+    if (accounts.size() > 1) {
+        if (!accountRoomsTimer_->isActive()) {
+            refreshAccountRooms();
+            accountRoomsTimer_->start();
+        }
+    } else {
+        accountRoomsTimer_->stop();
+        otherAccountRooms_ = {};
+    }
+    const auto profile = snapshot.value(QStringLiteral("profile")).toObject();
+    const QString profileDisplayName = profile.value(QStringLiteral("displayName")).toString();
+    const QString profileUserID = profile.value(QStringLiteral("userId")).toString();
+    profileName_->setText(profileDisplayName.isEmpty()
+                              ? (profileUserID.isEmpty() ? QStringLiteral("Pinger account")
+                                                         : profileUserID)
+                              : profileDisplayName);
+    profileID_->setText(profileUserID);
+    profileID_->setToolTip(profileUserID);
+    profileAvatarUri_ = profile.value(QStringLiteral("avatarUri")).toString();
+    setAvatarLabel(profileAvatar_, profileAvatarUri_, profileName_->text());
     const auto inviteArray = snapshot.value(QStringLiteral("invites")).toArray();
     const bool hasInvites = !inviteArray.isEmpty();
     inviteLabel_->setVisible(hasInvites);
@@ -943,14 +1868,298 @@ void MainWindow::applySnapshot(const QJsonObject &snapshot) {
     filterRooms();
 }
 
+void MainWindow::refreshAccountRooms() {
+    if (accountRoomsRequestInFlight_
+        || snapshot_.value(QStringLiteral("accounts")).toArray().size() < 2
+        || !snapshot_.value(QStringLiteral("loggedIn")).toBool()) {
+        return;
+    }
+    accountRoomsRequestInFlight_ = true;
+    backend_->call(QStringLiteral("AccountRooms"), {},
+                   [this](QJsonValue value, const QString &error) {
+        accountRoomsRequestInFlight_ = false;
+        if (!error.isEmpty()) {
+            showError(QStringLiteral("Could not refresh rooms for other accounts: %1").arg(error));
+            return;
+        }
+        otherAccountRooms_ = value.toArray();
+        filterRooms();
+    });
+}
+
+void MainWindow::updateSessionVerification(const QJsonObject &verification) {
+    if (verification.isEmpty()) {
+        if (sessionVerificationDialog_) {
+            sessionVerificationDialog_->accept();
+        }
+        return;
+    }
+
+    if (!sessionVerificationDialog_) {
+        auto *dialog = new QDialog(this);
+        sessionVerificationDialog_ = dialog;
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setModal(true);
+        dialog->setWindowTitle(QStringLiteral("Verify another session"));
+        dialog->setMinimumWidth(440);
+        auto *layout = new QVBoxLayout(dialog);
+        auto *title = new QLabel(QStringLiteral("Verify another session"), dialog);
+        QFont titleFont = title->font();
+        titleFont.setBold(true);
+        titleFont.setPointSize(titleFont.pointSize() + 2);
+        title->setFont(titleFont);
+        sessionVerificationMessage_ = new QLabel(dialog);
+        sessionVerificationMessage_->setWordWrap(true);
+        sessionVerificationMessage_->setObjectName(QStringLiteral("verificationMessage"));
+        sessionVerificationSAS_ = new QLabel(dialog);
+        sessionVerificationSAS_->setWordWrap(true);
+        sessionVerificationSAS_->setAlignment(Qt::AlignCenter);
+        sessionVerificationSAS_->setObjectName(QStringLiteral("verificationSAS"));
+        sessionVerificationError_ = new QLabel(dialog);
+        sessionVerificationError_->setWordWrap(true);
+        sessionVerificationError_->setObjectName(QStringLiteral("verificationError"));
+        sessionVerificationActions_ = new QHBoxLayout;
+        sessionVerificationActions_->addStretch(1);
+        layout->addWidget(title);
+        layout->addWidget(sessionVerificationMessage_);
+        layout->addWidget(sessionVerificationSAS_);
+        layout->addWidget(sessionVerificationError_);
+        layout->addLayout(sessionVerificationActions_);
+        connect(dialog, &QDialog::rejected, this, [this] {
+            if (!sessionVerificationActionInFlight_) {
+                runSessionVerificationAction(QStringLiteral("CancelSessionVerification"), {false});
+            }
+        });
+        connect(dialog, &QObject::destroyed, this, [this] {
+            sessionVerificationDialog_ = nullptr;
+            sessionVerificationMessage_ = nullptr;
+            sessionVerificationSAS_ = nullptr;
+            sessionVerificationError_ = nullptr;
+            sessionVerificationActions_ = nullptr;
+            sessionVerificationActionInFlight_ = false;
+        });
+        dialog->resize(520, 360);
+    }
+
+    const QString phase = verification.value(QStringLiteral("phase")).toString();
+    const QString userID = verification.value(QStringLiteral("userId")).toString();
+    const QString deviceID = verification.value(QStringLiteral("deviceId")).toString();
+    QString message;
+    if (phase == QStringLiteral("requested")) {
+        message = verification.value(QStringLiteral("incoming")).toBool()
+            ? QStringLiteral("%1 wants to verify this session.").arg(userID)
+            : QStringLiteral("Waiting for %1 to accept this verification request.").arg(userID);
+    } else if (phase == QStringLiteral("ready")) {
+        message = QStringLiteral("The other session is ready to compare. Confirm that the security codes match on both devices.");
+    } else if (phase == QStringLiteral("comparing")) {
+        message = QStringLiteral("Compare these security codes with the other device. Confirm only if they match exactly.");
+    } else if (phase == QStringLiteral("confirmed")) {
+        message = QStringLiteral("The codes matched. Waiting for the other session to finish verification.");
+    } else if (phase == QStringLiteral("done")) {
+        message = QStringLiteral("Session verification is complete.");
+    } else if (phase == QStringLiteral("cancelled")) {
+        message = verification.value(QStringLiteral("reason")).toString(
+            QStringLiteral("Session verification was cancelled."));
+    } else {
+        message = QStringLiteral("Session verification is in progress.");
+    }
+    if (!deviceID.isEmpty()) {
+        message += QStringLiteral("\nDevice: %1").arg(deviceID);
+    }
+    sessionVerificationMessage_->setText(message);
+    sessionVerificationError_->clear();
+
+    QStringList sasLines;
+    const QJsonArray emojis = verification.value(QStringLiteral("emojis")).toArray();
+    for (const auto &entry : emojis) {
+        const QJsonObject emoji = entry.toObject();
+        const QString symbol = emoji.value(QStringLiteral("emoji")).toString();
+        const QString description = emoji.value(QStringLiteral("description")).toString();
+        if (!symbol.isEmpty()) {
+            sasLines.append(description.isEmpty()
+                ? symbol : QStringLiteral("%1  %2").arg(symbol, description));
+        }
+    }
+    if (sasLines.isEmpty()) {
+        QStringList numbers;
+        for (const auto &entry : verification.value(QStringLiteral("decimals")).toArray()) {
+            numbers.append(QStringLiteral("%1").arg(entry.toInt(), 3, 10, QLatin1Char('0')));
+        }
+        if (!numbers.isEmpty()) {
+            sasLines.append(numbers.join(QStringLiteral("    ")));
+        }
+    }
+    sessionVerificationSAS_->setText(sasLines.join(QLatin1Char('\n')));
+    QFont sasFont = sessionVerificationSAS_->font();
+    sasFont.setPointSize(sasLines.isEmpty() ? QApplication::font().pointSize()
+                                            : QApplication::font().pointSize() + 3);
+    sessionVerificationSAS_->setFont(sasFont);
+    sessionVerificationSAS_->setVisible(!sasLines.isEmpty());
+
+    while (QLayoutItem *item = sessionVerificationActions_->takeAt(0)) {
+        if (QWidget *widget = item->widget()) {
+            widget->deleteLater();
+        }
+        delete item;
+    }
+    const auto addAction = [this](const QString &label, const QString &method,
+                                  const QJsonArray &params, bool primary = false) {
+        auto *button = new QPushButton(label, sessionVerificationDialog_);
+        if (primary) {
+            button->setObjectName(QStringLiteral("primaryButton"));
+            button->setDefault(true);
+        }
+        button->setEnabled(!sessionVerificationActionInFlight_);
+        sessionVerificationActions_->addWidget(button);
+        connect(button, &QPushButton::clicked, this, [this, method, params] {
+            runSessionVerificationAction(method, params);
+        });
+    };
+    if (phase == QStringLiteral("requested")
+        && verification.value(QStringLiteral("incoming")).toBool()) {
+        addAction(QStringLiteral("Decline"), QStringLiteral("CancelSessionVerification"), {false});
+        addAction(QStringLiteral("Accept"), QStringLiteral("AcceptSessionVerification"), {}, true);
+    } else if (phase == QStringLiteral("comparing")) {
+        addAction(QStringLiteral("They do not match"),
+                  QStringLiteral("CancelSessionVerification"), {true});
+        addAction(QStringLiteral("They match"), QStringLiteral("ConfirmSessionVerification"), {},
+                  true);
+    } else if (phase == QStringLiteral("done") || phase == QStringLiteral("cancelled")) {
+        addAction(QStringLiteral("Close"), QStringLiteral("CancelSessionVerification"), {false},
+                  true);
+    } else {
+        addAction(QStringLiteral("Cancel"), QStringLiteral("CancelSessionVerification"), {false});
+    }
+    sessionVerificationActions_->addStretch(1);
+    if (!sessionVerificationDialog_->isVisible()) {
+        sessionVerificationDialog_->show();
+        sessionVerificationDialog_->raise();
+        sessionVerificationDialog_->activateWindow();
+    }
+}
+
+void MainWindow::runSessionVerificationAction(const QString &method, const QJsonArray &params) {
+    if (sessionVerificationActionInFlight_) {
+        return;
+    }
+    sessionVerificationActionInFlight_ = true;
+    if (sessionVerificationError_) {
+        sessionVerificationError_->clear();
+    }
+    if (sessionVerificationActions_) {
+        for (QPushButton *button :
+             sessionVerificationDialog_->findChildren<QPushButton *>()) {
+            button->setEnabled(false);
+        }
+    }
+    backend_->call(method, params, [this](QJsonValue, const QString &error) {
+        sessionVerificationActionInFlight_ = false;
+        if (!error.isEmpty()) {
+            if (sessionVerificationError_) {
+                sessionVerificationError_->setText(error);
+            } else {
+                showError(error);
+            }
+            if (sessionVerificationDialog_) {
+                for (QPushButton *button :
+                     sessionVerificationDialog_->findChildren<QPushButton *>()) {
+                    button->setEnabled(true);
+                }
+            }
+            return;
+        }
+        loadSnapshot();
+    });
+}
+
 void MainWindow::filterRooms() {
     if (snapshot_.isEmpty()) {
         return;
     }
-    const auto roomArray = snapshot_.value(QStringLiteral("rooms")).toArray();
+    const QJsonArray activeRooms = snapshot_.value(QStringLiteral("rooms")).toArray();
+    const QJsonArray otherRooms = otherAccountRooms_;
+    const QString activeAccountID =
+        snapshot_.value(QStringLiteral("activeAccountId")).toString();
+    const QString accountScope = accountScope_->currentData().toString();
+    const bool onlyInactiveAccount =
+        accountScope != QStringLiteral("all") && accountScope != activeAccountID;
+    QJsonArray roomArray;
+    if (accountScope == QStringLiteral("all") || accountScope == activeAccountID) {
+        for (const auto &room : activeRooms) {
+            roomArray.append(room);
+        }
+    }
+    if (accountScope == QStringLiteral("all") || onlyInactiveAccount) {
+        for (const auto &value : otherRooms) {
+            const QJsonObject room = value.toObject();
+            const QString accountID = room.value(QStringLiteral("accountId")).toString();
+            if (accountID == activeAccountID) {
+                continue;
+            }
+            if (accountScope == QStringLiteral("all") || accountID == accountScope) {
+                roomArray.append(room);
+            }
+        }
+    }
     const QString scope = roomScope_->currentData().toString();
     const QString query = roomFilter_->text().trimmed();
     const QString selected = currentRoomID_;
+    int needsReplyCount = 0;
+    int readRoomCount = 0;
+    for (const auto &value : activeRooms) {
+        const auto room = value.toObject();
+        if (!roomIsArchived(room) && room.value(QStringLiteral("unread")).toInt() == 0
+            && !room.value(QStringLiteral("markedUnread")).toBool()) {
+            ++readRoomCount;
+        }
+    }
+    for (const auto &value : roomArray) {
+        const auto room = value.toObject();
+        if (roomIsArchived(room)) {
+            continue;
+        }
+        if (room.value(QStringLiteral("needsReply")).toBool()) {
+            ++needsReplyCount;
+        }
+    }
+    if (needsReplyCountLabel_) {
+        needsReplyCountLabel_->setText(needsReplyCount > 99
+            ? QStringLiteral("99+") : QString::number(needsReplyCount));
+        needsReplyCountLabel_->setVisible(needsReplyCount > 0);
+    }
+    if (needsReplyFilterButton_) {
+        needsReplyFilterButton_->setToolTip(
+            QStringLiteral("Needs reply (%1)").arg(needsReplyCount));
+    }
+    if (allRoomsFilterButton_) {
+        const QSignalBlocker blocker(allRoomsFilterButton_);
+        allRoomsFilterButton_->setChecked(scope == QStringLiteral("all"));
+    }
+    if (archivedRoomsFilterButton_) {
+        const QSignalBlocker blocker(archivedRoomsFilterButton_);
+        archivedRoomsFilterButton_->setChecked(scope == QStringLiteral("archived"));
+    }
+    if (unansweredFilterButton_) {
+        const QSignalBlocker blocker(unansweredFilterButton_);
+        unansweredFilterButton_->setChecked(
+            unansweredOnly_ || scope == QStringLiteral("unanswered"));
+    }
+    if (needsReplyFilterButton_) {
+        const QSignalBlocker blocker(needsReplyFilterButton_);
+        needsReplyFilterButton_->setChecked(
+            needsReplyOnly_ || scope == QStringLiteral("needs-reply"));
+    }
+    if (favoriteFilterButton_) {
+        const QSignalBlocker blocker(favoriteFilterButton_);
+        favoriteFilterButton_->setChecked(
+            favoritesOnly_ || scope == QStringLiteral("favorites"));
+    }
+    roomsSectionLabel_->setText(scope == QStringLiteral("archived")
+        ? QStringLiteral("ARCHIVED") : QStringLiteral("ROOMS"));
+    const bool showAllRoomActions = scope == QStringLiteral("all");
+    joinRoomQuickButton_->setVisible(showAllRoomActions);
+    archiveAllReadButton_->setVisible(showAllRoomActions);
+    archiveAllReadButton_->setEnabled(readRoomCount > 0 && !archivingReadRooms_);
     const QSignalBlocker blocker(rooms_);
     rooms_->clear();
     for (const auto &value : roomArray) {
@@ -962,6 +2171,8 @@ void MainWindow::filterRooms() {
         const bool archived = roomIsArchived(room);
         const bool favorite = room.value(QStringLiteral("favorite")).toBool();
         const bool needsReply = room.value(QStringLiteral("needsReply")).toBool();
+        const bool hasUnread = unread > 0 || room.value(QStringLiteral("markedUnread")).toBool();
+        const bool hasMentions = room.value(QStringLiteral("mentions")).toInt() > 0;
         const bool pending = roomID == pendingRoomID_;
         if (!query.isEmpty()
             && !name.contains(query, Qt::CaseInsensitive)
@@ -971,9 +2182,12 @@ void MainWindow::filterRooms() {
         }
         if (!pending && ((scope == QStringLiteral("archived") && !archived)
             || (scope != QStringLiteral("archived") && archived)
-            || (scope == QStringLiteral("unanswered") && !room.value(QStringLiteral("unanswered")).toBool())
-            || (scope == QStringLiteral("needs-reply") && !needsReply)
-            || (scope == QStringLiteral("favorites") && !favorite))) {
+            || (scope == QStringLiteral("unread") && !hasUnread)
+            || (scope == QStringLiteral("mentions") && !hasMentions)
+            || ((scope == QStringLiteral("unanswered") || unansweredOnly_)
+                && !room.value(QStringLiteral("unanswered")).toBool())
+            || ((scope == QStringLiteral("needs-reply") || needsReplyOnly_) && !needsReply)
+            || ((scope == QStringLiteral("favorites") || favoritesOnly_) && !favorite))) {
             continue;
         }
         auto *item = new QListWidgetItem(unread > 0
@@ -982,6 +2196,10 @@ void MainWindow::filterRooms() {
                                          rooms_);
         item->setData(Qt::UserRole, roomID);
         item->setData(Qt::UserRole + 1, room.toVariantMap());
+        const QString avatarUri = room.value(QStringLiteral("avatar")).toString();
+        if (avatarIcons_.contains(avatarUri)) {
+            item->setIcon(avatarIcons_.value(avatarUri));
+        }
         item->setToolTip(room.value(QStringLiteral("topic")).toString());
         if (roomID == pendingRoomID_ || roomID == selected) {
             rooms_->setCurrentItem(item);
@@ -990,16 +2208,30 @@ void MainWindow::filterRooms() {
             }
         }
     }
-    if (rooms_->currentItem() == nullptr && rooms_->count() > 0) {
-        rooms_->setCurrentRow(0);
+    // A room that leaves the filter stays open, so the conversation does not jump to another chat.
+    const bool keepSelectedOpen = !selected.isEmpty() && !roomByID(selected).isEmpty();
+    if (rooms_->currentItem() == nullptr && !onlyInactiveAccount && !keepSelectedOpen) {
+        for (int index = 0; index < rooms_->count(); ++index) {
+            const QJsonObject room =
+                QJsonObject::fromVariantMap(rooms_->item(index)->data(Qt::UserRole + 1).toMap());
+            if (room.value(QStringLiteral("accountId")).toString() == activeAccountID) {
+                rooms_->setCurrentRow(index);
+                break;
+            }
+        }
     }
+    roomsCount_->setText(QString::number(rooms_->count()));
     const auto *selectedItem = rooms_->currentItem();
-    const QString nextRoomID = selectedItem ? selectedItem->data(Qt::UserRole).toString() : QString();
+    const QString nextRoomID = selectedItem
+        ? selectedItem->data(Qt::UserRole).toString()
+        : ((onlyInactiveAccount || keepSelectedOpen) ? selected : QString());
     const bool roomChanged = nextRoomID != selected;
     if (roomChanged) {
         switchRoom(nextRoomID);
     }
-    roomTitle_->setText(selectedItem ? selectedItem->text() : QStringLiteral("Select a room"));
+    updateRoomHeader(selectedItem
+        ? QJsonObject::fromVariantMap(selectedItem->data(Qt::UserRole + 1).toMap())
+        : ((onlyInactiveAccount || keepSelectedOpen) ? roomByID(selected) : QJsonObject()));
     if (roomChanged) {
         messages_->clear();
         if (!currentRoomID_.isEmpty()) {
@@ -1007,19 +2239,261 @@ void MainWindow::filterRooms() {
         }
     }
     updateActiveRoom(currentRoomID_);
+    updateMenuState();
+    avatarLoadTimer_->start(0);
+}
+
+void MainWindow::archiveAllReadRooms() {
+    if (archivingReadRooms_) {
+        return;
+    }
+
+    archiveReadRoomQueue_.clear();
+    for (const auto &value : snapshot_.value(QStringLiteral("rooms")).toArray()) {
+        const auto room = value.toObject();
+        if (roomIsArchived(room)
+            || room.value(QStringLiteral("unread")).toInt() > 0
+            || room.value(QStringLiteral("markedUnread")).toBool()) {
+            continue;
+        }
+        archiveReadRoomQueue_.append(archivePreferenceKey(room));
+    }
+    if (archiveReadRoomQueue_.isEmpty()) {
+        return;
+    }
+
+    archivingReadRooms_ = true;
+    archiveReadRoomTotal_ = archiveReadRoomQueue_.size();
+    filterRooms();
+    statusBar()->showMessage(
+        QStringLiteral("Archiving %1 read rooms…").arg(archiveReadRoomTotal_));
+    archiveNextReadRoom();
+}
+
+void MainWindow::archiveNextReadRoom() {
+    if (archiveReadRoomQueue_.isEmpty()) {
+        archivingReadRooms_ = false;
+        statusBar()->showMessage(
+            QStringLiteral("Archived %1 read rooms").arg(archiveReadRoomTotal_), 5000);
+        loadSnapshot();
+        return;
+    }
+
+    const QString key = archiveReadRoomQueue_.takeFirst();
+    backend_->call(QStringLiteral("SetBooleanPreference"), {key, true},
+                   [this](QJsonValue, const QString &error) {
+                       if (!error.isEmpty()) {
+                           archiveReadRoomQueue_.clear();
+                           archivingReadRooms_ = false;
+                           showError(error);
+                           loadSnapshot();
+                           return;
+                       }
+                       archiveNextReadRoom();
+                   });
+}
+
+void MainWindow::updateRoomHeader(const QJsonObject &room) {
+    const bool hasRoom = !room.isEmpty();
+    const QString name = room.value(QStringLiteral("name")).toString(
+        hasRoom ? currentRoomID_ : QStringLiteral("Select a room"));
+    roomTitle_->setText(name);
+    activeRoomAvatarUri_ = room.value(QStringLiteral("avatar")).toString();
+    roomAvatar_->setVisible(hasRoom);
+    setAvatarLabel(roomAvatar_, activeRoomAvatarUri_, name);
+
+    QString subtitle = room.value(QStringLiteral("topic")).toString().trimmed();
+    if (room.value(QStringLiteral("direct")).toBool()) {
+        subtitle = QStringLiteral("Direct message");
+    }
+    roomSubtitle_->setText(QFontMetrics(roomSubtitle_->font())
+                               .elidedText(subtitle, Qt::ElideRight, 360));
+    roomSubtitle_->setVisible(!subtitle.isEmpty());
+    messageDelegate_->setShowSenderNames(!room.value(QStringLiteral("direct")).toBool());
+    messages_->doItemsLayout();
+    messages_->viewport()->update();
+}
+
+void MainWindow::updateContentBlur() {
+    const bool enabled = preferences_.value(QStringLiteral("privacy.incognito")).toBool();
+    if (enabled == contentBlurEnabled_) {
+        return;
+    }
+    contentBlurEnabled_ = enabled;
+    if (roomDelegate_) {
+        roomDelegate_->setContentBlur(enabled);
+    }
+    if (messageDelegate_) {
+        messageDelegate_->setContentBlur(enabled);
+    }
+    for (PrivacyBlurDelegate *delegate : privacyBlurDelegates_) {
+        if (delegate) {
+            delegate->setContentBlur(enabled);
+        }
+    }
+    if (contentBlurIndicator_) {
+        contentBlurIndicator_->setVisible(enabled);
+    }
+
+    const QList<QWidget *> widgets = {
+        roomTitle_, roomSubtitle_, roomAvatar_, profileAvatar_, profileName_, profileID_,
+        accountSwitcher_
+    };
+    for (QWidget *widget : widgets) {
+        if (!widget) {
+            continue;
+        }
+        if (enabled) {
+            auto *effect = qobject_cast<QGraphicsBlurEffect *>(widget->graphicsEffect());
+            if (!effect) {
+                effect = new QGraphicsBlurEffect;
+                effect->setBlurRadius(8);
+                widget->setGraphicsEffect(effect);
+            }
+            widget->setAttribute(Qt::WA_Hover, true);
+            widget->setMouseTracking(true);
+            widget->installEventFilter(this);
+            contentBlurWidgets_.insert(widget);
+            effect->setEnabled(!widget->underMouse() && !widget->hasFocus());
+        } else {
+            widget->removeEventFilter(this);
+            widget->setGraphicsEffect(nullptr);
+            contentBlurWidgets_.remove(widget);
+        }
+    }
+    if (rooms_) {
+        rooms_->viewport()->update();
+    }
+    if (messages_) {
+        messages_->viewport()->update();
+    }
+}
+
+void MainWindow::installPrivacyBlurDelegate(QListWidget *list) {
+    if (!list) {
+        return;
+    }
+    auto *delegate = new PrivacyBlurDelegate(list);
+    delegate->setContentBlur(contentBlurEnabled_);
+    list->setItemDelegate(delegate);
+    list->setMouseTracking(true);
+    list->viewport()->setMouseTracking(true);
+    privacyBlurDelegates_.insert(delegate);
+    connect(delegate, &QObject::destroyed, this, [this, delegate] {
+        privacyBlurDelegates_.remove(delegate);
+    });
+}
+
+void MainWindow::setAvatarLabel(QLabel *label, const QString &uri, const QString &name) {
+    if (!label) {
+        return;
+    }
+    label->setPixmap(QPixmap());
+    label->setText(avatarInitials(name));
+    if (!uri.isEmpty() && avatarIcons_.contains(uri)) {
+        label->setText(QString());
+        label->setPixmap(avatarIcons_.value(uri).pixmap(label->size(), label->devicePixelRatioF()));
+        return;
+    }
+    if (!uri.isEmpty()) {
+        requestAvatar(uri);
+    }
+}
+
+void MainWindow::requestAvatar(const QString &uri) {
+    if (uri.isEmpty() || avatarIcons_.contains(uri) || avatarFailures_.contains(uri)
+        || avatarRequests_.contains(uri)) {
+        return;
+    }
+    const QString url = media_->mxcUrl(uri);
+    if (url.isEmpty()) {
+        return;
+    }
+    avatarRequests_.insert(uri);
+    QPointer<MainWindow> guardedWindow(this);
+    media_->fetch(url, [guardedWindow, uri](bool ok, const QByteArray &data,
+                                           const QString &) {
+        if (!guardedWindow) {
+            return;
+        }
+        guardedWindow->avatarRequests_.remove(uri);
+        if (!ok) {
+            guardedWindow->avatarFailures_.insert(uri);
+            return;
+        }
+        QPixmap original = QPixmap::fromImage(QImage::fromData(data));
+        if (original.isNull()) {
+            guardedWindow->avatarFailures_.insert(uri);
+            return;
+        }
+        const QIcon icon = qtutil::roundedAvatarIcon(original, 64);
+        guardedWindow->avatarIcons_.insert(uri, icon);
+        for (int index = 0; index < guardedWindow->rooms_->count(); ++index) {
+            auto *item = guardedWindow->rooms_->item(index);
+            const auto room = QJsonObject::fromVariantMap(item->data(Qt::UserRole + 1).toMap());
+            if (room.value(QStringLiteral("avatar")).toString() == uri) {
+                item->setIcon(icon);
+            }
+        }
+        for (int index = 0; index < guardedWindow->messages_->count(); ++index) {
+            auto *item = guardedWindow->messages_->item(index);
+            const auto message = QJsonObject::fromVariantMap(item->data(Qt::UserRole + 1).toMap());
+            if (message.value(QStringLiteral("avatar")).toString() == uri) {
+                item->setData(Qt::UserRole + 2, icon);
+            }
+        }
+        if (guardedWindow->activeRoomAvatarUri_ == uri) {
+            guardedWindow->setAvatarLabel(guardedWindow->roomAvatar_, uri,
+                                          guardedWindow->roomTitle_->text());
+        }
+        if (guardedWindow->profileAvatarUri_ == uri) {
+            guardedWindow->setAvatarLabel(guardedWindow->profileAvatar_, uri,
+                                          guardedWindow->profileName_->text());
+        }
+        guardedWindow->rooms_->viewport()->update();
+        guardedWindow->messages_->viewport()->update();
+    });
+}
+
+void MainWindow::requestVisibleRoomAvatars() {
+    if (!rooms_ || rooms_->count() == 0) {
+        return;
+    }
+    const int first = rooms_->indexAt(QPoint(4, 4)).row();
+    if (first < 0) {
+        return;
+    }
+    int last = rooms_->indexAt(QPoint(4, qMax(4, rooms_->viewport()->height() - 4))).row();
+    if (last < first) {
+        last = qMin(rooms_->count() - 1, first + 12);
+    }
+    for (int index = first; index <= last; ++index) {
+        const auto room = QJsonObject::fromVariantMap(
+            rooms_->item(index)->data(Qt::UserRole + 1).toMap());
+        requestAvatar(room.value(QStringLiteral("avatar")).toString());
+    }
 }
 
 void MainWindow::switchRoom(const QString &roomID) {
     if (currentRoomID_ == roomID) {
         return;
     }
+    const QString accountID = snapshot_.value(QStringLiteral("activeAccountId")).toString();
     if (!currentRoomID_.isEmpty()) {
-        roomDrafts_.insert(currentRoomID_, composer_->toPlainText());
+        roomDrafts_.insert(roomDraftKey(accountID, currentRoomID_), composer_->toPlainText());
     }
     clearComposeContext();
+    ++composerMembersRequestID_;
+    composerMembers_ = {};
+    composerMentionBindings_.clear();
+    hideComposerSuggestions();
     currentRoomID_ = roomID;
-    composer_->setPlainText(roomDrafts_.take(roomID));
+    composer_->setPlainText(roomDrafts_.take(roomDraftKey(accountID, roomID)));
     sendButton_->setEnabled(!roomID.isEmpty() && !composer_->toPlainText().trimmed().isEmpty());
+    if (!roomID.isEmpty()) {
+        loadComposerMembers(roomID);
+    }
+    updateMenuState();
 }
 
 void MainWindow::updateActiveRoom(const QString &roomID) {
@@ -1103,6 +2577,7 @@ void MainWindow::loadHistory(const QString &roomID, qint64 before) {
             item->setData(Qt::UserRole, eventID);
             item->setData(Qt::UserRole + 1, message.toVariantMap());
             messagesByID_.insert(eventID, message);
+            requestAvatar(message.value(QStringLiteral("avatar")).toString());
             const QString mime = message.value(QStringLiteral("mediaMime")).toString();
             if (!eventID.isEmpty() && mime.startsWith(QStringLiteral("image/"))
                 && message.value(QStringLiteral("decryptionError")).toString().isEmpty()
@@ -1121,16 +2596,23 @@ void MainWindow::loadHistory(const QString &roomID, qint64 before) {
                     for (int index = 0; index < guardedMessages->count(); ++index) {
                         auto *current = guardedMessages->item(index);
                         if (current->data(Qt::UserRole).toString() == eventID) {
-                            current->setIcon(QIcon(preview.scaled(96, 72, Qt::KeepAspectRatio,
-                                                                  Qt::SmoothTransformation)));
+                            QScrollBar *scrollBar = guardedMessages->verticalScrollBar();
+                            const bool wasAtBottom = scrollBar->value() >= scrollBar->maximum() - 2;
+                            QPixmap thumbnail = preview.scaled(480, 264, Qt::KeepAspectRatio,
+                                                               Qt::SmoothTransformation);
+                            thumbnail.setDevicePixelRatio(3.0);
+                            current->setIcon(QIcon(thumbnail));
                             guardedMessages->doItemsLayout();
+                            if (wasAtBottom) {
+                                scrollBar->setValue(scrollBar->maximum());
+                            }
                             break;
                         }
                     }
                 });
             }
         }
-        messages_->scrollToBottom();
+        smoothScrollToBottom(messages_, 0);
         const auto room = roomByID(roomID);
         const auto eventID = room.value(QStringLiteral("lastEventId")).toString();
         const bool unread = room.value(QStringLiteral("unread")).toInt() > 0
@@ -1156,15 +2638,28 @@ void MainWindow::sendMessage() {
         return;
     }
     sendButton_->setEnabled(false);
-    const QString method = editEventID_.isEmpty()
-                               ? (replyToEventID_.isEmpty() ? QStringLiteral("SendMessage")
-                                                            : QStringLiteral("SendReply"))
-                               : QStringLiteral("EditMessage");
+    QString method = editEventID_.isEmpty()
+                         ? (replyToEventID_.isEmpty() ? QStringLiteral("SendMessage")
+                                                      : QStringLiteral("SendReply"))
+                         : QStringLiteral("EditMessage");
     QJsonArray params{currentRoomID_, text};
     if (!editEventID_.isEmpty()) {
         params.append(editEventID_);
     } else if (!replyToEventID_.isEmpty()) {
         params.append(replyToEventID_);
+    } else {
+        QJsonArray mentionIDs;
+        QSet<QString> seenMentionIDs;
+        for (auto it = composerMentionBindings_.cbegin(); it != composerMentionBindings_.cend(); ++it) {
+            if (text.contains(it.key()) && !seenMentionIDs.contains(it.value())) {
+                mentionIDs.append(it.value());
+                seenMentionIDs.insert(it.value());
+            }
+        }
+        if (!mentionIDs.isEmpty()) {
+            method = QStringLiteral("SendMessageWithMentions");
+            params.append(mentionIDs);
+        }
     }
     backend_->call(method, params,
                    [this](QJsonValue, const QString &error) {
@@ -1172,20 +2667,429 @@ void MainWindow::sendMessage() {
                            showError(error);
                        } else {
                            composer_->clear();
+                           composerMentionBindings_.clear();
                            clearComposeContext();
                            loadHistory(currentRoomID_);
+                           composer_->setFocus();
                        }
                        sendButton_->setEnabled(!currentRoomID_.isEmpty() &&
                                                !composer_->toPlainText().trimmed().isEmpty());
                    });
 }
 
+void MainWindow::loadComposerMembers(const QString &roomID) {
+    const quint64 requestID = ++composerMembersRequestID_;
+    backend_->call(QStringLiteral("RoomMembers"), {roomID},
+                   [this, roomID, requestID](QJsonValue value, const QString &error) {
+                       if (requestID != composerMembersRequestID_ || roomID != currentRoomID_) {
+                           return;
+                       }
+                       if (!error.isEmpty()) {
+                           showError(QStringLiteral("Could not load room members: %1").arg(error));
+                           return;
+                       }
+                       composerMembers_ = value.toArray();
+                       refreshComposerSuggestions();
+                   });
+}
+
+void MainWindow::hideComposerSuggestions() {
+    if (composerSuggestions_) {
+        composerSuggestions_->hide();
+    }
+    if (composerSuggestionList_) {
+        composerSuggestionList_->clear();
+    }
+    composerSuggestionKind_.clear();
+    composerSuggestionStart_ = -1;
+    composerSuggestionEnd_ = -1;
+}
+
+void MainWindow::refreshComposerSuggestions() {
+    if (!composer_ || !composerSuggestions_ || !composerSuggestionList_
+        || currentRoomID_.isEmpty()) {
+        hideComposerSuggestions();
+        return;
+    }
+
+    const QString text = composer_->toPlainText();
+    const int cursor = composer_->textCursor().position();
+    if (cursor < 0 || cursor > text.size()) {
+        hideComposerSuggestions();
+        return;
+    }
+    const QString beforeCursor = text.left(cursor);
+    composerSuggestionList_->clear();
+    composerSuggestionKind_.clear();
+    composerSuggestionStart_ = -1;
+    composerSuggestionEnd_ = -1;
+
+    static const QRegularExpression mentionPattern(QStringLiteral("(^|\\s)@([^\\s@]*)$"));
+    const auto mentionMatch = mentionPattern.match(beforeCursor);
+    if (mentionMatch.hasMatch()) {
+        const QString query = mentionMatch.captured(2);
+        const QString normalizedQuery = query.toCaseFolded();
+        composerSuggestionKind_ = QStringLiteral("mention");
+        composerSuggestionStart_ = cursor - mentionMatch.capturedLength()
+                                   + mentionMatch.captured(1).size();
+        composerSuggestionEnd_ = cursor;
+        for (const QJsonValue &value : composerMembers_) {
+            const QJsonObject member = value.toObject();
+            const QString userID = member.value(QStringLiteral("id")).toString();
+            const QString displayName = member.value(QStringLiteral("displayName")).toString();
+            const QString label = displayName.isEmpty() ? userID : displayName;
+            if (userID.isEmpty()
+                || (!label.toCaseFolded().contains(normalizedQuery)
+                    && !userID.toCaseFolded().contains(normalizedQuery))) {
+                continue;
+            }
+            auto *item = new QListWidgetItem(
+                displayName.isEmpty() ? userID : QStringLiteral("%1   %2").arg(displayName, userID),
+                composerSuggestionList_);
+            item->setData(Qt::UserRole, QStringLiteral("mention"));
+            item->setData(Qt::UserRole + 1, userID);
+            item->setData(Qt::UserRole + 2, displayName);
+            item->setToolTip(userID);
+            item->setSizeHint(QSize(0, 34));
+            if (composerSuggestionList_->count() == 8) {
+                break;
+            }
+        }
+    } else {
+        static const QRegularExpression emojiPattern(QStringLiteral("(^|\\s):([a-z0-9_]{2,})$"),
+                                                      QRegularExpression::CaseInsensitiveOption);
+        const auto emojiMatch = emojiPattern.match(beforeCursor);
+        const bool emojiAutocomplete = preferences_.value(QStringLiteral("emoji.autocomplete")).toBool();
+        if (emojiMatch.hasMatch() && emojiAutocomplete) {
+            static const QList<QPair<QString, QString>> emojiShortcodes = {
+                {QStringLiteral("smile"), QStringLiteral("😄")},
+                {QStringLiteral("grinning"), QStringLiteral("😀")},
+                {QStringLiteral("joy"), QStringLiteral("😂")},
+                {QStringLiteral("sweat_smile"), QStringLiteral("😅")},
+                {QStringLiteral("laughing"), QStringLiteral("😆")},
+                {QStringLiteral("wink"), QStringLiteral("😉")},
+                {QStringLiteral("sunglasses"), QStringLiteral("😎")},
+                {QStringLiteral("thinking"), QStringLiteral("🤔")},
+                {QStringLiteral("pensive"), QStringLiteral("😔")},
+                {QStringLiteral("sob"), QStringLiteral("😭")},
+                {QStringLiteral("heart"), QStringLiteral("❤️")},
+                {QStringLiteral("thumbsup"), QStringLiteral("👍")},
+                {QStringLiteral("thumbsdown"), QStringLiteral("👎")},
+                {QStringLiteral("clap"), QStringLiteral("👏")},
+                {QStringLiteral("raised_hands"), QStringLiteral("🙌")},
+                {QStringLiteral("ok_hand"), QStringLiteral("👌")},
+                {QStringLiteral("wave"), QStringLiteral("👋")},
+                {QStringLiteral("pray"), QStringLiteral("🙏")},
+                {QStringLiteral("eyes"), QStringLiteral("👀")},
+                {QStringLiteral("fire"), QStringLiteral("🔥")},
+                {QStringLiteral("tada"), QStringLiteral("🎉")},
+                {QStringLiteral("rocket"), QStringLiteral("🚀")},
+                {QStringLiteral("star"), QStringLiteral("⭐")},
+                {QStringLiteral("100"), QStringLiteral("💯")},
+                {QStringLiteral("white_check_mark"), QStringLiteral("✅")},
+                {QStringLiteral("x"), QStringLiteral("❌")},
+                {QStringLiteral("warning"), QStringLiteral("⚠️")},
+                {QStringLiteral("coffee"), QStringLiteral("☕")},
+            };
+            const QString query = emojiMatch.captured(2).toLower();
+            composerSuggestionKind_ = QStringLiteral("emoji");
+            composerSuggestionStart_ = cursor - emojiMatch.capturedLength()
+                                       + emojiMatch.captured(1).size();
+            composerSuggestionEnd_ = cursor;
+            for (const auto &entry : emojiShortcodes) {
+                if (!entry.first.startsWith(query)) {
+                    continue;
+                }
+                auto *item = new QListWidgetItem(
+                    QStringLiteral("%1   :%2:").arg(entry.second, entry.first),
+                    composerSuggestionList_);
+                item->setData(Qt::UserRole, QStringLiteral("emoji"));
+                item->setData(Qt::UserRole + 1, entry.second);
+                item->setSizeHint(QSize(0, 34));
+                if (composerSuggestionList_->count() == 6) {
+                    break;
+                }
+            }
+        }
+    }
+
+    if (composerSuggestionList_->count() == 0) {
+        hideComposerSuggestions();
+        return;
+    }
+    composerSuggestionList_->setCurrentRow(0);
+    const int width = qMin(420, composer_->width());
+    const int height = qMin(220, composerSuggestionList_->count() * 34 + 8);
+    const QPoint composerPosition = composer_->mapTo(chatPage_, QPoint(0, 0));
+    int y = composerPosition.y() - height - 6;
+    if (y < 0) {
+        y = composerPosition.y() + composer_->height() + 6;
+    }
+    y = qMin(y, qMax(0, chatPage_->height() - height));
+    composerSuggestions_->setGeometry(composerPosition.x(), y, width, height);
+    composerSuggestions_->show();
+    composerSuggestions_->raise();
+}
+
+void MainWindow::chooseComposerSuggestion(QListWidgetItem *item) {
+    if (!item || composerSuggestionStart_ < 0 || composerSuggestionEnd_ < composerSuggestionStart_) {
+        hideComposerSuggestions();
+        return;
+    }
+    const QString kind = composerSuggestionKind_;
+    const int start = composerSuggestionStart_;
+    const int end = composerSuggestionEnd_;
+    const QString currentText = composer_->toPlainText();
+    if (end > currentText.size()) {
+        hideComposerSuggestions();
+        return;
+    }
+
+    QString insertion;
+    if (kind == QStringLiteral("mention")) {
+        const QString userID = item->data(Qt::UserRole + 1).toString();
+        const QString displayName = item->data(Qt::UserRole + 2).toString();
+        const QString token = QStringLiteral("@%1").arg(displayName.isEmpty() ? userID : displayName);
+        composerMentionBindings_.insert(token, userID);
+        const QString suffix = currentText.mid(end);
+        insertion = token + (suffix.startsWith(QLatin1Char(' ')) ? QString() : QStringLiteral(" "));
+    } else if (kind == QStringLiteral("emoji")) {
+        insertion = item->data(Qt::UserRole + 1).toString();
+        const QString suffix = currentText.mid(end);
+        if (!suffix.startsWith(QLatin1Char(' ')) && !suffix.isEmpty()) {
+            insertion += QLatin1Char(' ');
+        }
+    } else {
+        hideComposerSuggestions();
+        return;
+    }
+
+    hideComposerSuggestions();
+    QTextCursor cursor = composer_->textCursor();
+    cursor.setPosition(start);
+    cursor.setPosition(end, QTextCursor::KeepAnchor);
+    cursor.insertText(insertion);
+    composer_->setTextCursor(cursor);
+    composer_->setFocus();
+}
+
+void MainWindow::applyComposerFormatting(const QString &format) {
+    if (!composer_) {
+        return;
+    }
+    const QString value = composer_->toPlainText();
+    const QTextCursor current = composer_->textCursor();
+    const int start = current.selectionStart();
+    const int end = current.selectionEnd();
+    const QString selected = value.mid(start, end - start);
+    int replaceStart = start;
+    int replaceEnd = end;
+    int selectionStart = start;
+    int selectionEnd = end;
+    QString replacement;
+
+    QString marker;
+    if (format == QStringLiteral("bold")) {
+        marker = QStringLiteral("**");
+    } else if (format == QStringLiteral("italic")) {
+        marker = QStringLiteral("_");
+    } else if (format == QStringLiteral("strikethrough")) {
+        marker = QStringLiteral("~~");
+    } else if (format == QStringLiteral("inlineCode") && !selected.contains(QLatin1Char('\n'))) {
+        marker = QStringLiteral("`");
+    }
+    if (!marker.isEmpty()) {
+        replacement = marker + selected + marker;
+        selectionStart = start + marker.size();
+        selectionEnd = end + marker.size();
+    } else if (format == QStringLiteral("link")) {
+        const QString label = selected.isEmpty() ? QStringLiteral("link text") : selected;
+        replacement = QStringLiteral("[%1](url)").arg(label);
+        selectionStart = start + 1;
+        selectionEnd = selectionStart + label.size();
+    } else {
+        const int previousBreak = start == 0
+            ? -1 : value.lastIndexOf(QLatin1Char('\n'), start - 1);
+        const int lineStart = previousBreak + 1;
+        const int contentEnd = end > start && value.at(end - 1) == QLatin1Char('\n')
+            ? end - 1 : end;
+        const int nextBreak = value.indexOf(QLatin1Char('\n'), contentEnd);
+        const int lineEnd = nextBreak < 0 ? value.size() : nextBreak;
+        const QString lines = value.mid(lineStart, lineEnd - lineStart);
+        replaceStart = lineStart;
+        replaceEnd = lineEnd;
+
+        if (format == QStringLiteral("codeBlock")
+            || (format == QStringLiteral("inlineCode") && selected.contains(QLatin1Char('\n')))) {
+            replacement = QStringLiteral("```\n%1\n```").arg(lines);
+            selectionStart = lineStart + 4;
+            selectionEnd = selectionStart + lines.size();
+        } else {
+            QStringList formattedLines;
+            const QStringList inputLines = lines.split(QLatin1Char('\n'));
+            for (qsizetype index = 0; index < inputLines.size(); ++index) {
+                QString prefix;
+                if (format == QStringLiteral("heading")) {
+                   prefix = index == 0 ? QStringLiteral("## ") : QString();
+                } else if (format == QStringLiteral("bulletList")) {
+                   prefix = QStringLiteral("- ");
+                } else if (format == QStringLiteral("numberedList")) {
+                   prefix = QStringLiteral("%1. ").arg(index + 1);
+                } else if (format == QStringLiteral("quote")) {
+                   prefix = QStringLiteral("> ");
+                } else {
+                   return;
+                }
+                formattedLines.append(prefix + inputLines[index]);
+            }
+            replacement = formattedLines.join(QLatin1Char('\n'));
+            selectionStart = lineStart;
+            selectionEnd = lineStart + replacement.size();
+        }
+    }
+
+    QTextCursor target = composer_->textCursor();
+    target.setPosition(replaceStart);
+    target.setPosition(replaceEnd, QTextCursor::KeepAnchor);
+    target.insertText(replacement);
+    target.setPosition(selectionStart);
+    target.setPosition(selectionEnd, QTextCursor::KeepAnchor);
+    composer_->setTextCursor(target);
+    composer_->setFocus();
+}
+
 void MainWindow::attachFile() {
     if (currentRoomID_.isEmpty()) {
         return;
     }
-    const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Attach file"));
-    if (path.isEmpty()) {
+    attachPath(QFileDialog::getOpenFileName(this, QStringLiteral("Attach file")));
+}
+
+bool MainWindow::canAcceptFileDrop(const QMimeData *mime) const {
+    if (!mime || !mime->hasUrls() || currentRoomID_.isEmpty() || pages_->currentWidget() != chatPage_) {
+        return false;
+    }
+    for (const QUrl &url : mime->urls()) {
+        if (url.isLocalFile()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent *event) {
+    if (canAcceptFileDrop(event->mimeData())) {
+        event->acceptProposedAction();
+        return;
+    }
+    QMainWindow::dragEnterEvent(event);
+}
+
+void MainWindow::dropEvent(QDropEvent *event) {
+    if (!canAcceptFileDrop(event->mimeData())) {
+        QMainWindow::dropEvent(event);
+        return;
+    }
+    const QList<QUrl> urls = event->mimeData()->urls();
+    for (const QUrl &url : urls) {
+        if (url.isLocalFile()) {
+            attachPath(url.toLocalFile());
+            break;
+        }
+    }
+    event->acceptProposedAction();
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+    if (event->type() == QEvent::KeyPress) {
+        auto *widget = qobject_cast<QWidget *>(watched);
+        if (widget && widget->window() == this) {
+            auto *keyEvent = static_cast<QKeyEvent *>(event);
+            if (watched == composer_ && composerSuggestionList_
+                && composerSuggestionList_->isVisible()) {
+                const int count = composerSuggestionList_->count();
+                if (count > 0 && (keyEvent->key() == Qt::Key_Up
+                                  || keyEvent->key() == Qt::Key_Down)) {
+                    const int current = composerSuggestionList_->currentRow();
+                    const int delta = keyEvent->key() == Qt::Key_Down ? 1 : -1;
+                    composerSuggestionList_->setCurrentRow((current + delta + count) % count);
+                    keyEvent->accept();
+                    return true;
+                }
+                if (keyEvent->key() == Qt::Key_Escape) {
+                    hideComposerSuggestions();
+                    keyEvent->accept();
+                    return true;
+                }
+                const bool selectSuggestion =
+                    keyEvent->key() == Qt::Key_Tab
+                    || ((keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter)
+                        && !keyEvent->modifiers().testFlag(Qt::ShiftModifier));
+                if (count > 0 && selectSuggestion) {
+                    chooseComposerSuggestion(composerSuggestionList_->currentItem());
+                    keyEvent->accept();
+                    return true;
+                }
+            }
+            if (handleApplicationKey(keyEvent)) {
+                keyEvent->accept();
+                return true;
+            }
+            if (watched == composer_
+                && !keyEvent->isAutoRepeat()
+                && (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter)
+                && !keyEvent->modifiers().testFlag(Qt::ShiftModifier)) {
+                const bool ctrlEnter = preferences_.value(QStringLiteral("composer.ctrl_enter")).toBool();
+                if (!ctrlEnter || keyEvent->modifiers().testFlag(Qt::ControlModifier)) {
+                    sendMessage();
+                    keyEvent->accept();
+                    return true;
+                }
+            }
+        }
+    }
+
+    auto *blurredWidget = qobject_cast<QWidget *>(watched);
+    if (contentBlurWidgets_.contains(blurredWidget)
+        && (event->type() == QEvent::Enter || event->type() == QEvent::Leave
+            || event->type() == QEvent::HoverEnter || event->type() == QEvent::HoverLeave
+            || event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut)) {
+        if (auto *effect = qobject_cast<QGraphicsBlurEffect *>(blurredWidget->graphicsEffect())) {
+            effect->setEnabled(!blurredWidget->underMouse() && !blurredWidget->hasFocus());
+        }
+    }
+
+    // The composer consumes drops for text, so file drops are intercepted here before it does.
+    if (watched == composer_ && (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove ||
+                                 event->type() == QEvent::Drop)) {
+        auto *dragEvent = static_cast<QDropEvent *>(event);
+        if (event->type() == QEvent::Drop) {
+            dropEvent(dragEvent);
+            return event->isAccepted();
+        }
+        if (canAcceptFileDrop(dragEvent->mimeData())) {
+            dragEvent->acceptProposedAction();
+            return true;
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::recordMedia(bool videoMessage) {
+    if (currentRoomID_.isEmpty()) {
+        return;
+    }
+    const RecordingDialog::Kind kind =
+        videoMessage ? RecordingDialog::Kind::VideoMessage : RecordingDialog::Kind::VoiceNote;
+    RecordingDialog dialog(kind, preferences_.value(QStringLiteral("audio.input_device")).toString(), this);
+    if (dialog.exec() != QDialog::Accepted || dialog.recordedPath().isEmpty()) {
+        return;
+    }
+    attachPath(dialog.recordedPath(), !videoMessage, videoMessage, dialog.durationMs());
+}
+
+void MainWindow::attachPath(const QString &path, bool voiceNote, bool videoMessage, qint64 durationMs) {
+    if (path.isEmpty() || currentRoomID_.isEmpty()) {
         return;
     }
     QFile file(path);
@@ -1209,10 +3113,12 @@ void MainWindow::attachFile() {
     }
     const QString roomID = currentRoomID_;
     attachButton_->setEnabled(false);
+    recordButton_->setEnabled(false);
     statusBar()->showMessage(QStringLiteral("Uploading %1…").arg(QFileInfo(path).fileName()));
-    media_->uploadAttachment(roomID, QFileInfo(path).fileName(), data, false, false, 0,
+    media_->uploadAttachment(roomID, QFileInfo(path).fileName(), data, voiceNote, videoMessage, durationMs,
                              [this, roomID](bool ok, const QString &error) {
         attachButton_->setEnabled(true);
+        recordButton_->setEnabled(true);
         if (!ok) {
             showError(error);
             return;
@@ -1231,13 +3137,15 @@ void MainWindow::showMessageContextMenu(const QPoint &position) {
     }
     const QString eventID = item->data(Qt::UserRole).toString();
     const auto message = messagesByID_.value(eventID);
+    const QString body = message.value(QStringLiteral("body")).toString();
     if (message.isEmpty()) {
         return;
     }
     const bool own = message.value(QStringLiteral("own")).toBool();
     const bool hasTransaction = !message.value(QStringLiteral("transactionId")).toString().isEmpty();
     QMenu menu(this);
-    const QAction *const reply = menu.addAction(QStringLiteral("Reply"));
+    preparePopupMenu(&menu);
+    QAction *const reply = menu.addAction(QStringLiteral("Reply"));
     QAction *const thread = menu.addAction(QStringLiteral("Reply in thread"));
     thread->setEnabled(eventID.startsWith(QLatin1Char('$'))
                        && !message.value(QStringLiteral("sending")).toBool());
@@ -1245,7 +3153,7 @@ void MainWindow::showMessageContextMenu(const QPoint &position) {
     reminder->setEnabled(eventID.startsWith(QLatin1Char('$'))
                          && !message.value(QStringLiteral("redacted")).toBool());
     const QAction *const react = menu.addAction(QStringLiteral("Add reaction…"));
-    const QAction *const copy = menu.addAction(QStringLiteral("Copy text"));
+    QAction *const copy = menu.addAction(QStringLiteral("Copy text"));
     const QAction *const saveMediaAction =
         !message.value(QStringLiteral("mediaUri")).toString().isEmpty()
             && !message.value(QStringLiteral("redacted")).toBool()
@@ -1260,16 +3168,36 @@ void MainWindow::showMessageContextMenu(const QPoint &position) {
     const QString mediaMIME = message.value(QStringLiteral("mediaMime")).toString();
     const bool audioAttachment = !mediaURI.isEmpty()
         && (mediaType == QStringLiteral("m.audio") || mediaMIME.startsWith(QStringLiteral("audio/")));
-    const QAction *const transcribeAction = audioAttachment
+    QAction *const transcribeAction = audioAttachment
         ? menu.addAction(QStringLiteral("Transcribe with AI…"))
         : nullptr;
+    QAction *const analyzeMessageAction = menu.addAction(QStringLiteral("Analyze with Language Tutor"));
+    QAction *const draftReplyAction = menu.addAction(QStringLiteral("Draft reply with AI"));
+    QAction *const explainMessageAction = menu.addAction(QStringLiteral("Explain message with AI"));
+    const bool playableAttachment = !mediaURI.isEmpty()
+        && (mediaMIME.startsWith(QStringLiteral("audio/")) || mediaMIME.startsWith(QStringLiteral("video/")))
+        && !message.value(QStringLiteral("redacted")).toBool()
+        && message.value(QStringLiteral("decryptionError")).toString().isEmpty();
+    const QAction *const playAction = playableAttachment ? menu.addAction(QStringLiteral("Play…")) : nullptr;
     const QAction *const edit = own ? menu.addAction(QStringLiteral("Edit")) : nullptr;
     const QAction *const redact = own ? menu.addAction(QStringLiteral("Delete")) : nullptr;
     const QAction *const retry = hasTransaction && !message.value(QStringLiteral("sendError")).toString().isEmpty()
                                     ? menu.addAction(QStringLiteral("Retry sending"))
                                     : nullptr;
+    if (preferences_.value(QStringLiteral("shortcuts.single_keys")).toBool(true)) {
+        setContextShortcut(reply, QKeySequence(QStringLiteral("R")));
+    }
+    setContextShortcut(copy, QKeySequence::Copy);
+    if (transcribeAction) {
+        setContextShortcut(transcribeAction, primaryShortcut(QStringLiteral("Shift+V")));
+    }
+    setContextShortcut(analyzeMessageAction, primaryShortcut(QStringLiteral("Shift+C")));
+    setContextShortcut(draftReplyAction, primaryShortcut(QStringLiteral("Shift+D")));
+    setContextShortcut(explainMessageAction, primaryShortcut(QStringLiteral("Shift+E")));
+    analyzeMessageAction->setEnabled(!body.isEmpty());
+    draftReplyAction->setEnabled(!body.isEmpty());
+    explainMessageAction->setEnabled(!body.isEmpty());
     auto *chosen = menu.exec(messages_->viewport()->mapToGlobal(position));
-    const QString body = message.value(QStringLiteral("body")).toString();
     if (chosen == reply) {
         editEventID_.clear();
         replyToEventID_ = eventID;
@@ -1296,35 +3224,16 @@ void MainWindow::showMessageContextMenu(const QPoint &position) {
         saveMedia(message);
     } else if (chosen == openMediaAction) {
         saveMedia(message, true);
+    } else if (chosen == playAction) {
+        openMediaPreview(eventID);
     } else if (chosen == transcribeAction) {
-        const QString roomID = currentRoomID_;
-        QString filename = message.value(QStringLiteral("body")).toString().trimmed();
-        if (filename.isEmpty()) {
-            filename = QStringLiteral("audio-attachment");
-        }
-        const QString contentType = mediaMIME.isEmpty() ? QStringLiteral("audio/ogg") : mediaMIME;
-        statusBar()->showMessage(QStringLiteral("Transcribing audio…"));
-        backend_->call(QStringLiteral("AITranscribeMedia"), {mediaURI, filename, contentType},
-                       [this, roomID](QJsonValue value, const QString &error) {
-                           if (!error.isEmpty()) {
-                               showError(error);
-                               return;
-                           }
-                           const QString transcript = value.toString().trimmed();
-                           if (transcript.isEmpty()) {
-                               statusBar()->showMessage(QStringLiteral("No speech was detected."), 8000);
-                               return;
-                           }
-                           if (currentRoomID_ != roomID) {
-                               statusBar()->showMessage(
-                                   QStringLiteral("Transcription is ready, but the active room changed."), 8000);
-                               return;
-                           }
-                           composer_->setPlainText(transcript);
-                           composer_->setFocus();
-                           statusBar()->showMessage(
-                               QStringLiteral("Transcript added to the composer as a draft."), 8000);
-                       });
+        transcribeMessage(message);
+    } else if (chosen == analyzeMessageAction) {
+        showAITools(QStringLiteral("Language Tutor"), QStringLiteral("C"), body);
+    } else if (chosen == draftReplyAction) {
+        showAITools(QStringLiteral("Suggestions"), QStringLiteral("D"), body);
+    } else if (chosen == explainMessageAction) {
+        showAITools(QStringLiteral("Language Tutor"), QStringLiteral("E"), body);
     } else if (chosen == edit) {
         replyToEventID_.clear();
         editEventID_ = eventID;
@@ -1343,6 +3252,42 @@ void MainWindow::showMessageContextMenu(const QPoint &position) {
     }
 }
 
+void MainWindow::transcribeMessage(const QJsonObject &message) {
+    const QString mediaURI = message.value(QStringLiteral("mediaUri")).toString();
+    if (mediaURI.isEmpty()) {
+        return;
+    }
+    const QString roomID = currentRoomID_;
+    QString filename = message.value(QStringLiteral("body")).toString().trimmed();
+    if (filename.isEmpty()) {
+        filename = QStringLiteral("audio-attachment");
+    }
+    const QString mediaMIME = message.value(QStringLiteral("mediaMime")).toString();
+    const QString contentType = mediaMIME.isEmpty() ? QStringLiteral("audio/ogg") : mediaMIME;
+    statusBar()->showMessage(QStringLiteral("Transcribing audio…"));
+    backend_->call(QStringLiteral("AITranscribeMedia"), {mediaURI, filename, contentType},
+                   [this, roomID](QJsonValue value, const QString &error) {
+        if (!error.isEmpty()) {
+            showError(error);
+            return;
+        }
+        const QString transcript = value.toString().trimmed();
+        if (transcript.isEmpty()) {
+            statusBar()->showMessage(QStringLiteral("No speech was detected."), 8000);
+            return;
+        }
+        if (currentRoomID_ != roomID) {
+            statusBar()->showMessage(
+                QStringLiteral("Transcription is ready, but the active room changed."), 8000);
+            return;
+        }
+        composer_->setPlainText(transcript);
+        composer_->setFocus();
+        statusBar()->showMessage(
+            QStringLiteral("Transcript added to the composer as a draft."), 8000);
+    });
+}
+
 void MainWindow::runMessageAction(const QString &method, const QJsonArray &params) {
     backend_->call(method, params, [this](QJsonValue, const QString &error) {
         if (!error.isEmpty()) {
@@ -1358,8 +3303,8 @@ void MainWindow::setComposeContext(const QString &label) {
     composeContext_->setText(label);
     composeContext_->show();
     cancelComposeContextButton_->show();
-    sendButton_->setText(editEventID_.isEmpty() ? QStringLiteral("Send")
-                                                : QStringLiteral("Save edit"));
+    sendButton_->setToolTip(editEventID_.isEmpty() ? QStringLiteral("Send message")
+                                                   : QStringLiteral("Save edit"));
     sendButton_->setEnabled(!composer_->toPlainText().trimmed().isEmpty());
     scheduleMessageButton_->setEnabled(!currentRoomID_.isEmpty() && editEventID_.isEmpty()
                                        && !composer_->toPlainText().trimmed().isEmpty());
@@ -1371,7 +3316,7 @@ void MainWindow::clearComposeContext() {
     composeContext_->clear();
     composeContext_->hide();
     cancelComposeContextButton_->hide();
-    sendButton_->setText(QStringLiteral("Send"));
+    sendButton_->setToolTip(QStringLiteral("Send message"));
     sendButton_->setEnabled(!currentRoomID_.isEmpty() && !composer_->toPlainText().trimmed().isEmpty());
     scheduleMessageButton_->setEnabled(!currentRoomID_.isEmpty()
                                        && !composer_->toPlainText().trimmed().isEmpty());
@@ -1387,19 +3332,29 @@ void MainWindow::showRoomContextMenu(const QPoint &position) {
     if (!item) {
         return;
     }
+    const QJsonObject selectedRoom =
+        QJsonObject::fromVariantMap(item->data(Qt::UserRole + 1).toMap());
+    if (selectedRoom.value(QStringLiteral("accountId")).toString()
+        != snapshot_.value(QStringLiteral("activeAccountId")).toString()) {
+        return;
+    }
     rooms_->setCurrentItem(item);
     const auto room = roomByID(item->data(Qt::UserRole).toString());
     const bool archived = roomIsArchived(room);
     const bool favorite = room.value(QStringLiteral("favorite")).toBool();
     const bool muted = room.value(QStringLiteral("muted")).toBool();
     const bool needsReply = room.value(QStringLiteral("needsReply")).toBool();
+    const bool unanswered = room.value(QStringLiteral("unanswered")).toBool();
     const bool unread = room.value(QStringLiteral("unread")).toInt() > 0
                         || room.value(QStringLiteral("markedUnread")).toBool();
 
     QMenu menu(this);
+    preparePopupMenu(&menu);
     auto *markRead = menu.addAction(QStringLiteral("Mark read"));
     auto *markUnread = menu.addAction(QStringLiteral("Mark unread"));
     auto *markAnswered = menu.addAction(QStringLiteral("Mark answered"));
+    auto *addNeedsReply = menu.addAction(QStringLiteral("Add to Needs Reply"));
+    menu.addSeparator();
     auto *favoriteAction = menu.addAction(favorite ? QStringLiteral("Remove from Favorites")
                                                    : QStringLiteral("Add to Favorites"));
     auto *muteAction = menu.addAction(muted ? QStringLiteral("Unmute room")
@@ -1412,6 +3367,20 @@ void MainWindow::showRoomContextMenu(const QPoint &position) {
     markRead->setEnabled(unread && !room.value(QStringLiteral("lastEventId")).toString().isEmpty());
     markUnread->setEnabled(!unread);
     markAnswered->setEnabled(needsReply);
+    addNeedsReply->setEnabled(unanswered && !needsReply);
+    if (preferences_.value(QStringLiteral("shortcuts.single_keys")).toBool(true)) {
+        setContextShortcut(markRead, QKeySequence(QStringLiteral("U")));
+        setContextShortcut(markUnread, QKeySequence(QStringLiteral("U")));
+        const QString answeredShortcut = preferences_.value(QStringLiteral("shortcuts.mark_answered"))
+                                             .toString(QStringLiteral("E")).trimmed();
+        if (answeredShortcut.size() == 1) {
+            setContextShortcut(markAnswered, QKeySequence(answeredShortcut.toUpper()));
+        }
+        setContextShortcut(addNeedsReply, QKeySequence(QStringLiteral("N")));
+        setContextShortcut(favoriteAction, QKeySequence(QStringLiteral("F")));
+        setContextShortcut(muteAction, QKeySequence(QStringLiteral("M")));
+        setContextShortcut(archiveAction, QKeySequence(QStringLiteral("A")));
+    }
 
     auto *chosen = menu.exec(rooms_->viewport()->mapToGlobal(position));
     const QString roomID = room.value(QStringLiteral("id")).toString();
@@ -1421,7 +3390,9 @@ void MainWindow::showRoomContextMenu(const QPoint &position) {
     } else if (chosen == markUnread) {
         runRoomAction(QStringLiteral("MarkUnread"), {roomID});
     } else if (chosen == markAnswered) {
-        runRoomAction(QStringLiteral("SetRoomUnanswered"), {roomID, false});
+        markRoomAnswered(roomID);
+    } else if (chosen == addNeedsReply) {
+        runRoomAction(QStringLiteral("SetRoomUnanswered"), {roomID, true});
     } else if (chosen == favoriteAction) {
         runRoomAction(QStringLiteral("SetBooleanPreference"),
                       {QStringLiteral("room.favorite.") + roomID, !favorite});
@@ -1429,24 +3400,7 @@ void MainWindow::showRoomContextMenu(const QPoint &position) {
         runRoomAction(QStringLiteral("SetBooleanPreference"),
                       {QStringLiteral("room.muted.") + roomID, !muted});
     } else if (chosen == archiveAction) {
-        const auto key = archivePreferenceKey(room);
-        const bool archive = !archived;
-        auto saveArchive = [this, key, archive] {
-            runRoomAction(QStringLiteral("SetBooleanPreference"), {key, archive});
-        };
-        const QString lastEventID = room.value(QStringLiteral("lastEventId")).toString();
-        if (archive && unread && !lastEventID.isEmpty()) {
-            backend_->call(QStringLiteral("MarkRead"), {roomID, lastEventID},
-                           [this, saveArchive](QJsonValue, const QString &error) {
-                               if (!error.isEmpty()) {
-                                   showError(error);
-                                   return;
-                               }
-                               saveArchive();
-                           });
-        } else {
-            saveArchive();
-        }
+        setRoomArchived(room, !archived);
     } else if (chosen == detailsAction) {
         showRoomDetails(roomID);
     } else if (chosen == galleryAction) {
@@ -1500,19 +3454,27 @@ void MainWindow::saveMedia(const QJsonObject &message, bool openAfterSave) {
 void MainWindow::openMediaPreview(const QString &eventID) {
     const QJsonObject message = messagesByID_.value(eventID);
     const QString mime = message.value(QStringLiteral("mediaMime")).toString();
-    if (mime.isEmpty() || !mime.startsWith(QStringLiteral("image/"))
+    const bool image = mime.startsWith(QStringLiteral("image/"));
+    const bool playable = mime.startsWith(QStringLiteral("audio/")) || mime.startsWith(QStringLiteral("video/"));
+    if (mime.isEmpty() || (!image && !playable)
         || message.value(QStringLiteral("redacted")).toBool()
         || !message.value(QStringLiteral("decryptionError")).toString().isEmpty()) {
         return;
     }
     const QString url = media_->mediaUrl(QStringLiteral("matrix"), currentRoomID_, eventID);
     const QPointer<MainWindow> guardedWindow(this);
-    media_->fetch(url, [guardedWindow](bool ok, const QByteArray &data, const QString &error) {
+    const QString title = message.value(QStringLiteral("body")).toString().trimmed();
+    media_->fetch(url, [guardedWindow, mime, playable, title](bool ok, const QByteArray &data, const QString &error) {
         if (!guardedWindow) {
             return;
         }
         if (!ok) {
             guardedWindow->showError(error);
+            return;
+        }
+        if (playable) {
+            MediaPlayerDialog player(title.isEmpty() ? QStringLiteral("Media") : title, mime, data, guardedWindow.data());
+            player.exec();
             return;
         }
         const QPixmap image = QPixmap::fromImage(QImage::fromData(data));
@@ -1818,7 +3780,9 @@ void MainWindow::scheduleMessage() {
                                        guardedSchedule->setEnabled(true);
                                        return;
                                    }
-                                   roomDrafts_.remove(roomID);
+                                   roomDrafts_.remove(roomDraftKey(
+                                       snapshot_.value(QStringLiteral("activeAccountId")).toString(),
+                                       roomID));
                                    if (currentRoomID_ == roomID) {
                                        composer_->clear();
                                        clearComposeContext();
@@ -2393,9 +4357,20 @@ void MainWindow::switchAccount(const QString &accountID) {
                            return;
                        }
                        if (value.isObject()) {
+                           if (!currentRoomID_.isEmpty()) {
+                               roomDrafts_.insert(
+                                   roomDraftKey(snapshot_.value(QStringLiteral("activeAccountId"))
+                                                    .toString(),
+                                                currentRoomID_),
+                                   composer_->toPlainText());
+                           }
+                           ++composerMembersRequestID_;
+                           composerMembers_ = {};
+                           composerMentionBindings_.clear();
+                           hideComposerSuggestions();
                            currentRoomID_.clear();
                            activeRoomSubscription_.clear();
-                           roomDrafts_.clear();
+                           composer_->clear();
                            clearComposeContext();
                            applySnapshot(value.toObject());
                        }
@@ -2415,6 +4390,7 @@ void MainWindow::openThread(const QString &rootID) {
     auto *layout = new QVBoxLayout(dialog);
     auto *status = new QLabel(QStringLiteral("Loading thread…"), dialog);
     auto *threadMessages = new QListWidget(dialog);
+    installPrivacyBlurDelegate(threadMessages);
     threadMessages->setWordWrap(true);
     auto *composer = new QPlainTextEdit(dialog);
     composer->setPlaceholderText(QStringLiteral("Reply in thread"));
@@ -2676,6 +4652,7 @@ void MainWindow::searchMessages() {
     loadMoreButton->setEnabled(false);
     auto *status = new QLabel(dialog);
     auto *results = new QListWidget(dialog);
+    installPrivacyBlurDelegate(results);
     layout->addWidget(query);
     layout->addWidget(sender);
     layout->addWidget(searchButton);
@@ -2835,6 +4812,12 @@ QJsonObject MainWindow::roomByID(const QString &roomID) const {
             return room;
         }
     }
+    for (const auto &value : otherAccountRooms_) {
+        const auto room = value.toObject();
+        if (room.value(QStringLiteral("id")).toString() == roomID) {
+            return room;
+        }
+    }
     return {};
 }
 
@@ -2940,9 +4923,16 @@ void MainWindow::callSwitchAccount(const QString &accountID) {
                            return;
                        }
                        if (result.isObject()) {
+                           if (!currentRoomID_.isEmpty()) {
+                               roomDrafts_.insert(
+                                   roomDraftKey(snapshot_.value(QStringLiteral("activeAccountId"))
+                                                    .toString(),
+                                                currentRoomID_),
+                                   composer_->toPlainText());
+                           }
                            currentRoomID_.clear();
                            activeRoomSubscription_.clear();
-                           roomDrafts_.clear();
+                           composer_->clear();
                            clearComposeContext();
                            applySnapshot(result.toObject());
                        }
@@ -3061,8 +5051,9 @@ void MainWindow::callHistory(const QString &roomID, qint64 before) {
                                auto *item = new QListWidgetItem(display, messages_);
                                item->setData(Qt::UserRole, eventID);
                                item->setData(Qt::UserRole + 1, message.toVariantMap());
+                               requestAvatar(message.value(QStringLiteral("avatar")).toString());
                            }
-                           messages_->scrollToBottom();
+                           smoothScrollToBottom(messages_, 0);
                        }
                    });
 }
@@ -4833,7 +6824,7 @@ void MainWindow::showScheduledDialog() {
 }
 
 void MainWindow::showLocalAIChatDialog() {
-    LocalAIChatDialog dialog(backend_, QString(), this);
+    LocalAIChatDialog dialog(backend_, QString(), this, contentBlurEnabled_);
     dialog.exec();
 }
 

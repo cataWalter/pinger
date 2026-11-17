@@ -3,11 +3,11 @@
 [![CI](https://github.com/cataWalter/pinger/actions/workflows/ci.yml/badge.svg)](https://github.com/cataWalter/pinger/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/cataWalter/pinger)](https://github.com/cataWalter/pinger/releases)
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![Wails v3](https://img.shields.io/badge/Wails-v3.0.0_beta.30-ff5e14)](https://wails.io)
+[![Qt 6](https://img.shields.io/badge/Qt-6.5%2B-41CD52?logo=qt&logoColor=white)](https://www.qt.io)
 [![License: AGPL-3.0+](https://img.shields.io/badge/license-AGPL--3.0%2B-blue.svg)](#license)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#run-locally)
 
-Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with SQLite caching and media storage. Pinger embeds gomuks' `pkg/hicli` engine in a [Wails v3](https://wails.io) (Go) host with a React + TypeScript interface.
+Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with SQLite caching and media storage. Pinger embeds gomuks' `pkg/hicli` engine in a Go backend and drives it from a native [Qt 6](https://www.qt.io) (C++17) desktop client.
 
 > **License note:** This application embeds `gomuks`' `pkg/hicli` engine. Review the AGPL-3.0-or-later license obligations before distributing.
 
@@ -88,7 +88,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - Optional batching combines new messages into one alert; a repeat reminder re-surfaces a still-unread room (after 5, 15, or 60 minutes); one-time codes can alert immediately and copy the code to the clipboard; an optional sound effect plays when a message is sent.
 - Reopen the window, mark all rooms read, or quit from the tray menu; the tray icon and tooltip reflect unread activity and follow the system light/dark appearance. Closing the window can minimize to tray; the startup preference registers the app with the OS. Clicking a notification focuses the app and opens the relevant room.
 - On macOS, the Dock badge and menu-bar number match the sidebar's Needs reply total: rooms awaiting a reply, excluding archived rooms and following the inbox account scope. Both numbers disappear when the total is zero.
-- All desktop platforms use the shared Pinger artwork. Windows embeds the ICO in the executable and uses the avatar or Pinger fallback as the toast logo; Linux supplies the window PNG and matches the installed `fi.mau.pinger.desktop` entry for GTK4/Wayland dock icons. macOS uses the bundled ICNS and runtime Dock icon. Notification avatars take priority over fallback artwork.
+- All desktop platforms use the shared Pinger artwork. Windows embeds the ICO in the executable and uses the avatar or Pinger fallback as the toast logo; Linux supplies the window PNG and matches the installed `fi.mau.pinger.desktop` entry for launcher and dock icons. macOS uses the bundled ICNS and runtime Dock icon. Notification avatars take priority over fallback artwork.
 
 **Settings** (`Ctrl+,` / `⌘,`)
 
@@ -160,7 +160,7 @@ Single-key shortcuts (`R`, `J`, `K`, and the answered key) can be turned off in 
 
 - The data directory holds the primary account's SQLite database (`matrix.db`; additional accounts live under `accounts/<account-id>/matrix.db`), the preferences database (`preferences.db`), the account registry (`accounts.json`), scheduled messages and reminders (`scheduled-jobs.json`), the Olm pickle key (`crypto.key`), and the legacy `preferences.json` file that is imported into `preferences.db` on first launch.
 - The local SQLite cache stores message data, including decrypted event contents. Downloaded media is cached under the user's cache directory; encrypted payloads are decrypted before caching, and cache files are owner-only. Clearing the media cache (Settings → Storage) removes only downloaded media — use OS disk encryption for protection at rest.
-- Saved composer drafts (the 100 most recent, up to 8,000 characters each) are kept as plain text in the app's web storage on this device. Logging out removes that account's drafts; turning off **Keep unsent drafts after restarting** removes all of them.
+- Saved composer drafts are kept on this device when **Keep unsent drafts after restarting** is on (`composer.keep_drafts`). Turning it off removes all saved drafts.
 - Tone Guard sends only the draft and up to two recent incoming messages to a configured loopback HTTP model. It never sends this context to a remote endpoint; when the configured endpoint is not local or the check fails, the message can still be sent.
 - Link previews send the link to your homeserver's preview endpoint, which fetches the page. They are on by default for unencrypted rooms and off for encrypted rooms; both can be turned off in Settings → Appearance. Previews are cached in memory only.
 - On first launch, data from the legacy Fyne build (`fyne-matrix` data directory and `fi.mau.fyne-matrix` preferences) is migrated into the current data directory; the legacy database is copied with SQLite's online backup API.
@@ -168,7 +168,7 @@ Single-key shortcuts (`R`, `J`, `K`, and the answered key) can be turned off in 
 
 ## Run locally
 
-Targets macOS 13+, Windows x64 (WebView2 Runtime), and Linux x64.
+Targets macOS 13+, Windows x64, and Linux x64.
 
 ### Using with Beeper
 
@@ -183,90 +183,78 @@ Pinger connects directly to Beeper's Matrix homeserver at `https://matrix.beeper
 ### Prerequisites
 
 - [Go 1.26.10](https://go.dev/dl/); scripts and tasks explicitly select this toolchain
-- [Node.js 22+](https://nodejs.org/) with npm
-- Wails CLI **v3.0.0-beta.30** (must match `go.mod`):
-  `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30`
-- macOS: Xcode Command Line Tools (`xcode-select --install`)
-- Windows: [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) and MinGW-w64 GCC for CGO (MSYS2 UCRT64 is supported; `gcc` must be on `PATH` or under `tools/msys64/ucrt64/bin`)
-- Linux: GTK4 and WebKitGTK 6 development libraries (required by Wails on Linux)
-- Qt client: Qt 6.4+ Widgets and Network development packages, plus CMake 3.21+ and a C++17 compiler
+- Qt 6.5+ with the Network, Widgets, Multimedia, and MultimediaWidgets components, plus CMake 3.21+ and a C++17 compiler (Ninja recommended)
+- macOS: Xcode Command Line Tools (`xcode-select --install`) and Qt from Homebrew (`brew install qt`)
+- Windows: a Qt 6.5+ MSVC kit and MinGW-w64 GCC for CGO (MSYS2 UCRT64 is supported; `gcc` must be on `PATH` or under `tools/msys64/ucrt64/bin`)
+- Linux: OpenGL, EGL, xkbcommon, fontconfig, and D-Bus development packages (see the CI workflow for the Ubuntu list)
 
 Two Go build tags are used throughout: `sqlite_fts5` is required (SQLite full-text search), and `goolm` selects mautrix-go's pure-Go Olm implementation (no libolm needed).
 
 ### Native Qt 6 client
 
-The C++/Qt client is being migrated against the existing Go services. In addition to account, room, messaging, thread, search, and scheduled-message workflows, it now includes general attachment uploads, inline image thumbnails/previews, attachment saving/opening, and a paginated media gallery; single-room and all-chat exports; AI tools for asking questions, reply suggestions/drafts, language detection, language tutoring, tone analysis, audio transcription, and reviewed image generation; a persisted local-AI chat with folders, image attachments, streaming/cancellation, and image generation; and broader settings for appearance, notifications, keyboard/history, devices, storage, room-key backup, AI, and updates. Remaining gaps include voice/video recording and in-app playback, some Wails-specific settings and menu/keyboard behavior, native OS notification permissions/sound, startup/tray behavior on every platform, and interactive cross-platform validation. The Wails/React app remains the default build; Qt parity is not yet complete.
+The Qt 6 client is the only desktop application. It covers account, room, messaging, thread, search, and scheduled-message workflows, attachment uploads and downloads, inline image previews, a paginated media gallery, room exports, AI tools, a persisted local-AI chat, and settings for appearance, notifications, keyboard/history, devices, storage, room-key backup, AI, and updates. Remaining gaps include voice/video recording and in-app playback, some menu and keyboard behavior, native OS notification permissions and sound, startup and tray behavior on every platform, and interactive cross-platform validation.
 
-On a system with Qt 6 development packages installed:
+Build the Go backend and the Qt client into the same folder. Replace `<qt-prefix>` with your Qt install root (on macOS with Homebrew, `$(brew --prefix qt)`):
 
 ```sh
-task build:qt6
+cmake -S qt6 -B qt6/build -G Ninja -DCMAKE_PREFIX_PATH=<qt-prefix>
+cmake --build qt6/build --target pinger-qt
+go build -tags "sqlite_fts5 goolm" -trimpath -buildvcs=false -o qt6/build/pinger .
 ./qt6/build/pinger-qt
 ```
 
-The build places the Go backend beside the Qt executable. You can also supply a backend executable with `pinger-qt --backend /path/to/pinger`. The Qt process talks to that child over stdin/stdout JSON lines; Matrix and persistence operations continue to run in the Go backend.
+With Task installed, `task build:qt6` and `task run` do the same. Visual Studio generators on Windows place executables in `qt6/build/Release/`.
+
+The GUI looks for the `pinger` backend beside its own executable. You can also pass `pinger-qt --backend /path/to/pinger`. The GUI talks to the backend over stdin/stdout JSON lines; Matrix and persistence operations run in the Go backend.
 
 ### Build and run
 
-From the repository root:
+On macOS, from the repository root:
 
 ```sh
-wails3 generate bindings -f '-tags sqlite_fts5,goolm' -clean=true -ts -i
-npm --prefix frontend ci
 sh scripts/macos/build-macos-app.sh
 open bin/Pinger.app
 ```
 
-- The script builds the frontend and executable, packages `Pinger.app`, and ad-hoc signs it so macOS can register native notifications. Quit with `Cmd+Q`.
-- A plain `go run -tags "sqlite_fts5 goolm" .` launches an unbundled executable, so macOS native notifications are unavailable in that mode.
+- The script builds the Qt client and the Go backend, places both in `Contents/MacOS/`, runs `macdeployqt` when it is available, and ad-hoc signs the bundle so macOS can register native notifications. Quit with `Cmd+Q`.
+- `go run` starts only the backend bridge, not the GUI, and cannot provide the bundle identity that native notifications need.
 - The equivalent Task command is `task package:go`.
-- Matrix sync events are handled off the UI thread and delivered to the React interface through Wails runtime events.
 
 `go build` creates a plain executable and cannot carry the macOS bundle metadata needed for a stable Finder, Dock, tray, and Notification Center identity. Use the app bundle for native notifications. The bundle is ad-hoc signed for local identity; this is not Developer ID signing or notarization.
 
-### Live development
+### Task commands
 
-```sh
-wails3 task dev
-```
-
-Hot-reloads the frontend via Vite and rebuilds the Go app on change.
-
-For a native executable without the desktop installer, run `wails3 task build:linux` on Linux or `wails3 task build:windows` on Windows. These write to `bin/`; Windows builds require MinGW-w64 GCC on `PATH`. The Windows ZIP and Linux DEB/AppImage installers are produced by the release workflow; local builds do not create those installer formats.
+- `task build` builds the Qt client and the Go backend. `task run` builds and launches the GUI.
+- `task dev:qt6` runs the Qt client with hot reload on macOS and Linux. On macOS it launches a signed development app bundle with the native usage descriptions required by system services. It rebuilds and restarts `pinger-qt` when a Qt or Go source file changes. Close `Pinger.app` first; both clients use the same data directory. A failed build keeps the running app and waits for the next save.
+- `task build:qt6` builds into `qt6/build/`. On Windows it also embeds the icon and manifest through `task generate:windows:resources`; the Windows build needs MinGW-w64 GCC on `PATH` for CGO.
+- The Windows ZIP and Linux DEB/AppImage installers are produced by the release workflow. Local builds do not create those formats.
 
 ## Project structure
 
 | Path | Purpose |
 | --- | --- |
-| `main.go` | Entry point — embeds the frontend, migrates legacy data, and starts the desktop app |
-| `desktop/` | Wails application: services, preferences, system tray, scheduled reminders, attachments |
-| `frontend/` | React + TypeScript UI (Vite build, vitest tests) |
-| `qt6/` | Native C++/Qt client and local JSON-lines backend bridge (migration in progress) |
+| `main.go` | Entry point — starts the JSON-lines backend (`desktop.RunQtBackend`) that the Qt client launches |
+| `desktop/` | Backend services: sessions, preferences, scheduled reminders, attachments, and the JSON-lines bridge |
+| `frontend/` | Unbuilt React + TypeScript reference. Not used by the application and excluded from builds, CI, and packaging |
+| `qt6/` | Native C++17 / Qt 6 desktop client (CMake) |
 | `matrix/` | Matrix client wrapper around gomuks' `hicli` engine |
 | `migration/` | First-run migration from the legacy Fyne app |
 | `preferences/` | Shared SQLite preference store (global and per-account scopes) |
 | `notifications/` | Desktop notification backends (native macOS and fallback) |
-| `scripts/` | Dev launchers, packaging, icon generation, CI checks, and release helpers, grouped by subfolder |
-| `build/` | Wails build configuration and platform assets |
+| `scripts/` | macOS packaging, Windows resource generation, CI checks, and release-asset helpers, grouped by subfolder |
+| `build/` | Platform assets used by packaging: icons, Windows manifest, and macOS `Info.plist` |
 | `assets/` | Application icons |
 | `.github/workflows/` | CI and release pipelines |
 
 ## Development & checks
 
-Application artwork is maintained in [assets/pinger.svg](assets/pinger.svg). Regenerate app PNGs, macOS ICNS, Windows ICO, Linux launcher sizes, and browser favicons with `npm --prefix frontend run icons`; verify freshness and native resolutions with `npm --prefix frontend run icons:check`. Both commands need frontend dependencies and the matching Wails CLI (resolved from `PATH`, `GOBIN`, or `GOPATH/bin`; `WAILS_COMMAND` can override it). Task builds, macOS packaging, and release jobs regenerate icons automatically. Local Windows Task builds also embed the ICO and application manifest.
+Application artwork is maintained in [assets/pinger.svg](assets/pinger.svg). Platform icon files live under `build/`; Windows builds embed `build/windows/icon.ico` and the application manifest through `task generate:windows:resources`.
 
 macOS tray artwork uses native monochrome templates; Windows variants follow system appearance rather than the chat theme, and Linux uses a colored mark. Linux alerts without a room avatar use cached application artwork; existing avatar attachments are preserved.
 
-Build the frontend before compiling Go. The same checks run in CI on every push to `main` and pull request; backend checks don't launch a desktop window:
+The same checks run in CI on every push to `main` and pull request; backend checks don't launch a desktop window. The React frontend is an unbuilt reference and is not part of any check:
 
 ```sh
-npm --prefix frontend ci
-npm --prefix frontend exec -- playwright install chromium webkit
-npm --prefix frontend test
-npm --prefix frontend run test:browser
-npm --prefix frontend run lint
-npm --prefix frontend run build
-npm --prefix frontend audit --audit-level=moderate
 export GOTOOLCHAIN=go1.26.11
 go test -tags "sqlite_fts5 goolm" ./...
 go test -race -count=1 -tags "sqlite_fts5 goolm" ./desktop ./matrix ./preferences
@@ -274,6 +262,8 @@ go vet -tags "sqlite_fts5 goolm" ./...
 go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks='SA*' -tags sqlite_fts5,goolm ./...
 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -tags sqlite_fts5,goolm ./...
 go build -tags "sqlite_fts5 goolm" .
+cmake -S qt6 -B qt6/build -G Ninja -DCMAKE_PREFIX_PATH=<qt-prefix>
+cmake --build qt6/build
 ```
 
 CI also runs 30-second, two-worker fuzz campaigns for local AI endpoint validation, media path parsing, and Matrix message content. To run one locally, use `go test -tags sqlite_fts5,goolm ./matrix -run '^$' -fuzz '^FuzzMessageFromEvent$' -fuzztime=30s -parallel=2`; the other targets are `FuzzValidateLocalHTTPEndpoint` in `./preferences` and `FuzzParseMediaAssetPath` in `./desktop`.
@@ -286,13 +276,11 @@ ruby scripts/ci/check-workflows.rb
 node --test scripts/release/release-assets.test.mjs scripts/release/release-assets-downloads.test.mjs
 ```
 
-Windows and Linux PR jobs compile the package tests and native application using the release pipeline's CGO setup. They do not exercise native windows, notifications, or operating-system permissions. Production JavaScript and CSS explicitly target Safari 16 for macOS 13; current Playwright WebKit is not a substitute for testing that minimum operating system.
-
-Frontend performance regressions cover render counts, including that composer typing does not rerender timeline Markdown, and per-render clock/relative formatter reuse. A local formatting microbenchmark measured roughly 311 ms versus 5 ms for 10,000 timestamps; this is not a whole-application frame-rate or memory benchmark. Large-history virtualization remains a separate measured change.
+Windows and Linux PR jobs build the Qt client and compile the package tests using the release pipeline's CGO setup. They do not exercise native windows, notifications, or operating-system permissions.
 
 ### Dependency maintenance
 
-[Dependabot](.github/dependabot.yml) checks Go, frontend, and GitHub Actions dependencies every Monday at 06:00 UTC, with at most three open version-update PRs per ecosystem. Patch/minor updates are grouped to reduce CI churn; React and its types stay together. Go and npm security updates have separate groups and do not wait for the weekly version-update schedule. Wails Go, CLI, and JavaScript runtime upgrades remain coordinated manually so their versions stay aligned. Vulnerability scans gate reachable Go findings and moderate-or-higher npm advisories; module-only advisories must still be reviewed separately.
+[Dependabot](.github/dependabot.yml) checks Go modules and GitHub Actions dependencies every Monday at 06:00 UTC, with at most three open version-update PRs per ecosystem. Patch/minor updates are grouped to reduce CI churn. Go security updates have their own group and do not wait for the weekly schedule. Vulnerability scans gate reachable Go findings; module-only advisories must still be reviewed separately.
 
 The [auto-merge workflow](.github/workflows/dependabot-auto-merge.yml) queues squash merges only for verified, same-repository Dependabot PRs whose highest update is patch or minor. Major and unclassified updates remain manual. It never checks out or executes PR code. Repository auto-merge must be enabled, and `main` must require the GitHub Actions `checks`, `windows-checks`, and `linux-checks` jobs, an up-to-date branch, and resolved review conversations. These settings are enabled on this repository; administrator bypass is retained for maintainer operations. Keep the required check names aligned if CI jobs are renamed.
 
@@ -306,7 +294,7 @@ After publication, the workflow updates the [Homebrew tap](https://github.com/ca
 
 The release workflow explicitly calls the APT and WinGet workflows after the build succeeds; it does not rely on `release: published` events generated by `GITHUB_TOKEN`. Main-branch releases and stable tags are both distributed automatically. Publication requires `TAP_GITHUB_TOKEN`, `GPG_PRIVATE_KEY` matching the APT repository's public key, and `WINGET_TOKEN` for the WinGet fork/PR. An encrypted signing key can use the optional `GPG_PASSPHRASE` secret. Private signing material is never uploaded.
 
-Manual Homebrew, APT, and WinGet runs default to `dry_run=true`: they download an exact platform asset, verify its release checksum and available GitHub digest, then validate and upload metadata without pushing. APT dry runs sign with an ephemeral validation key and verify both signatures; production uses the configured repository key. WinGet validates all three manifests against pinned Microsoft schemas and uses the actual ZIP's nested `pinger.exe`; rerunning submission updates the existing branch/PR instead of opening a duplicate. Schema checks do not prove Microsoft acceptance or installation on a native Windows device.
+Manual Homebrew, APT, and WinGet runs default to `dry_run=true`: they download an exact platform asset, verify its release checksum and available GitHub digest, then validate and upload metadata without pushing. APT dry runs sign with an ephemeral validation key and verify both signatures; production uses the configured repository key. WinGet validates all three manifests against pinned Microsoft schemas and uses the actual ZIP's nested `pinger-qt.exe` with a `pinger` command alias; rerunning submission updates the existing branch/PR instead of opening a duplicate. Schema checks do not prove Microsoft acceptance or installation on a native Windows device.
 
 ```bash
 gh workflow run ci.yml --ref main
@@ -317,12 +305,10 @@ gh workflow run winget-submission.yml --ref main -f tag=v0.13 -f dry_run=true
 gh workflow run dependabot-auto-merge.yml --ref main
 ```
 
-The committed `package-lock.json` makes npm the canonical package manager for CI and release builds. The root Taskfile also has optional Bun, pnpm, and Yarn adapters for local use, but those paths are not covered by CI and have no committed lockfiles.
-
 | Artifact | Contents |
 | --- | --- |
 | `Pinger-<version>-macos-universal.dmg` | Ad-hoc-signed, not notarized app + `/Applications` symlink |
-| `Pinger-<version>-windows-amd64.zip` | `pinger.exe` with embedded icon and manifest |
+| `Pinger-<version>-windows-amd64.zip` | `pinger-qt.exe` (Qt GUI) and `pinger.exe` (Go backend) with Qt runtime files; `pinger.exe` has the embedded icon and manifest |
 | `Pinger-<version>-linux-amd64.deb` | Debian package for Linux x64 |
 | `Pinger-<version>-linux-amd64.AppImage` | Portable AppImage for Linux x64 |
 | `checksums.txt` | SHA-256 manifest for all packages |

@@ -155,9 +155,12 @@ func (s *AppService) UnsubscribeFromRoom(roomID string) error {
 	return client.UnsubscribeFromRoom(roomID)
 }
 
-func (s *AppService) markAllRead() error {
+func (s *AppService) MarkAllRead() error {
 	var combinedErr error
 	client := s.currentClient()
+	if client == nil {
+		return nil
+	}
 	for _, room := range client.Rooms() {
 		page, err := client.HistoryPage(s.ctx, room.ID, 0)
 		if err != nil {

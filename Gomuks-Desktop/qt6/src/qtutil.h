@@ -37,6 +37,8 @@ QString themeName(const QJsonObject &preferences);
 bool darkTheme(const QJsonObject &preferences);
 
 QIcon applicationIcon();
+QIcon menuBarIcon(bool systemDark);
+QIcon roundedAvatarIcon(const QPixmap &source, int logicalSize);
 QPixmap avatarFor(const QJsonObject &room, int size = 48);
 QPixmap avatarFromUri(const QString &uri, int size = 48);
 

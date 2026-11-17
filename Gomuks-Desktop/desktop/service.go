@@ -3,7 +3,6 @@ package desktop
 import (
 	"context"
 	"errors"
-	"github.com/wailsapp/wails/v3/pkg/application"
 	"mychat/matrix"
 	"mychat/notifications"
 	sharedpreferences "mychat/preferences"
@@ -64,14 +63,14 @@ type AppService struct {
 }
 
 func (s *AppService) OpenExternalURL(rawURL string) error {
-	url, err := application.ValidateAndSanitizeURL(rawURL)
+	target, err := validateExternalURL(rawURL)
 	if err != nil {
 		return err
 	}
 	if s.openURL == nil {
 		return errors.New("external URL opener unavailable")
 	}
-	return s.openURL(url)
+	return s.openURL(target)
 }
 
 type Snapshot struct {

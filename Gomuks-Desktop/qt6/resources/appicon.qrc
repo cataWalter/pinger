@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="appicon.png">../../build/appicon.png</file>
+    </qresource>
+</RCC>

@@ -10,7 +10,7 @@ import (
 	"mychat/matrix"
 )
 
-func TestRunQtBackendStartsAndStopsWithoutWailsApplication(t *testing.T) {
+func TestRunQtBackendStartsAndStops(t *testing.T) {
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "data")
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {

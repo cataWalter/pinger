@@ -4,74 +4,52 @@ env:
   GOTOOLCHAIN: go1.26.11
 
 vars:
-  APP_NAME: "pinger"
-  BIN_DIR: "bin"
-  PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
-  VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
   EXTRA_TAGS: "sqlite_fts5,goolm"
-
-includes:
-  common: ./build/Taskfile.yml
-  darwin: ./build/darwin/Taskfile.yml
+  # Directory holding the Qt GUI. Multi-config generators (Visual Studio) nest it under the config name.
+  QT_OUT_DIR: '{{if eq OS "windows"}}qt6/build/Release{{else}}qt6/build{{end}}'
+  # Optional Qt install root (for example Homebrew's qt prefix). Auto-detected with Homebrew on macOS.
+  QT_PREFIX:
+    sh: '{{if eq OS "darwin"}}brew --prefix qt 2>/dev/null || true{{else}}echo{{end}}'
 
 tasks:
   build:
-    summary: Builds the macOS application
+    summary: Builds the Qt client and its Go backend
     cmds:
-      - task: "darwin:build"
-
-  package:
-    summary: Packages a production macOS build of the application
-    cmds:
-      - task: "darwin:package"
+      - task: build:qt6
 
   package:go:
-    summary: Builds a named macOS app bundle from the Go binary
+    summary: Builds the macOS app bundle (Qt GUI plus Go backend)
     platforms: [darwin]
     cmds:
       - sh scripts/macos/build-macos-app.sh
 
   run:
-    summary: Runs the macOS application
-    cmds:
-      - task: "darwin:run"
-
-  build:linux:
-    summary: Builds the Linux executable on Linux
-    platforms: [linux]
+    summary: Builds and runs the Qt client
     deps:
-      - task: common:build:frontend
+      - task: build:qt6
     cmds:
-      - mkdir -p bin
-      - go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o bin/pinger .
+      - '"{{.QT_OUT_DIR}}/pinger-qt{{exeExt}}"'
 
-  build:windows:
-    summary: Builds the Windows executable on Windows
-    platforms: [windows]
-    deps:
-      - task: common:build:frontend
-      - task: generate:windows:resources
+  dev:qt6:
+    summary: Runs the Qt client with hot reload (rebuilds and restarts pinger-qt on Qt or Go source changes)
+    platforms: [darwin, linux]
     cmds:
-      - powershell -NoProfile -Command "New-Item -ItemType Directory -Force bin | Out-Null"
-      - go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o bin/pinger.exe .
+      - sh scripts/dev/qt6-dev.sh
 
   build:qt6:
-    summary: Builds the native Qt 6 client and its Go backend
+    summary: Builds the native Qt 6 client (pinger-qt) and the Go backend (pinger) into the same folder
+    deps:
+      - task: generate:windows:resources
     cmds:
-      - cmake -S qt6 -B qt6/build -DCMAKE_BUILD_TYPE=Release
-      - cmake --build qt6/build --config Release
-      - cmd: go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o qt6/build/pinger .
-        platforms: [linux, darwin]
-      - cmd: go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o qt6/build/pinger.exe .
-        platforms: [windows]
+      - cmake -S qt6 -B qt6/build -DCMAKE_BUILD_TYPE=Release{{if .QT_PREFIX}} -DCMAKE_PREFIX_PATH="{{.QT_PREFIX}}"{{end}}
+      - cmake --build qt6/build --config Release --target pinger-qt
+      - go build -tags "{{.EXTRA_TAGS}}" -trimpath -buildvcs=false -o "{{.QT_OUT_DIR}}/pinger{{exeExt}}" .
 
   generate:windows:resources:
     summary: Embeds the native icon and application manifest in Windows builds
     platforms: [windows]
     vars:
       ARCH: '{{.ARCH | default ARCH}}'
-    deps:
-      - task: common:generate:icons
     sources:
       - build/windows/icon.ico
       - build/windows/pinger.exe.manifest
@@ -81,13 +59,3 @@ tasks:
       - rsrc_windows_{{.ARCH}}.syso
     cmds:
       - go run scripts/windows/generate-windows-resources.go -arch {{.ARCH}} -icon build/windows/icon.ico -manifest build/windows/pinger.exe.manifest -out rsrc_windows_{{.ARCH}}.syso
-
-  dev:
-    summary: Runs the application in development mode
-    cmds:
-      - cmd: bash scripts/dev/dev.sh
-        platforms: [darwin]
-      - cmd: node scripts/dev/dev.mjs
-        platforms: [linux, windows]
-    env:
-      WAILS_VITE_PORT: "{{.VITE_PORT}}"

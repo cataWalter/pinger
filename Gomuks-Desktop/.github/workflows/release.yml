@@ -35,8 +35,7 @@ jobs:
     timeout-minutes: 30
     needs: [test]
     env:
-      # Matches the deployment target in build/darwin/Taskfile.yml and the
-      # "macOS 13 or newer" support statement in the README.
+      # Matches the "macOS 13 or newer" support statement in the README.
       MACOSX_DEPLOYMENT_TARGET: "13.0"
       CGO_CFLAGS: "-mmacosx-version-min=13.0"
       CGO_LDFLAGS: "-mmacosx-version-min=13.0 -Wl,-no_warn_duplicate_libraries"
@@ -49,12 +48,14 @@ jobs:
       - name: Set up build dependencies
         uses: ./.github/actions/setup-build
 
-      - name: Build frontend
-        working-directory: frontend
+      - name: Build Qt client
         run: |
-          npm run icons
-          npm run icons:check
-          npm run build
+          cmake -S qt6 -B qt6/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          cmake --build qt6/build --target pinger-qt
 
       - name: Prepare build metadata
         shell: bash
@@ -73,6 +74,7 @@ jobs:
         run: |
           mkdir -p "dist/Pinger.app/Contents/MacOS" "dist/Pinger.app/Contents/Resources"
           cp build/darwin/icons.icns "dist/Pinger.app/Contents/Resources/icons.icns"
+          cp qt6/build/pinger-qt "dist/Pinger.app/Contents/MacOS/pinger-qt"
           for arch in amd64 arm64; do
             clang_arch="$arch"
             if [ "$arch" = amd64 ]; then clang_arch=x86_64; fi
@@ -93,6 +95,7 @@ jobs:
           /usr/bin/plutil -lint "$plist"
           test -n "$(/usr/bin/plutil -extract NSMicrophoneUsageDescription raw -o - "$plist")"
           test -n "$(/usr/bin/plutil -extract NSCameraUsageDescription raw -o - "$plist")"
+          "$QT_ROOT_DIR/bin/macdeployqt" "dist/Pinger.app" -verbose=1
           codesign --force --deep --sign - "dist/Pinger.app"
           codesign --verify --deep --strict "dist/Pinger.app"
 
@@ -153,12 +156,13 @@ jobs:
       - name: Set up build dependencies
         uses: ./.github/actions/setup-build
 
-      - name: Build frontend
-        working-directory: frontend
+      - name: Build Qt client
+        shell: pwsh
         run: |
-          npm run icons
-          npm run icons:check
-          npm run build
+          cmake -S qt6 -B qt6/build -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+          if ($LASTEXITCODE -ne 0) { throw "Qt configure failed" }
+          cmake --build qt6/build --config Release --target pinger-qt
+          if ($LASTEXITCODE -ne 0) { throw "Qt build failed" }
 
       - name: Prepare build metadata
         shell: pwsh
@@ -182,7 +186,7 @@ jobs:
             -manifest build/windows/pinger.exe.manifest `
             -out rsrc_windows_amd64.syso
 
-      - name: Build Windows x64 binaries
+      - name: Build Windows x64 backend
         shell: pwsh
         env:
           CGO_ENABLED: "1"
@@ -191,15 +195,26 @@ jobs:
           CC: gcc
         run: |
           $ldflags = "-s -w -H windowsgui -X main.Version=$env:VERSION -X main.Commit=$env:GITHUB_SHA -X main.BuildDate=$env:BUILD_DATE"
-          go build -tags "sqlite_fts5 goolm" -trimpath -buildvcs=false "-ldflags=$ldflags" -o dist/pinger.exe .
-          if ($LASTEXITCODE -ne 0) { throw "Windows build failed" }
+          New-Item -ItemType Directory -Force dist/windows | Out-Null
+          go build -tags "sqlite_fts5 goolm" -trimpath -buildvcs=false "-ldflags=$ldflags" -o dist/windows/pinger.exe .
+          if ($LASTEXITCODE -ne 0) { throw "Windows backend build failed" }
           Remove-Item rsrc_windows_amd64.syso
-          Compress-Archive -LiteralPath dist/pinger.exe -DestinationPath "dist/Pinger-$($env:VERSION)-windows-amd64.zip"
+
+      - name: Package Windows application
+        shell: pwsh
+        run: |
+          Copy-Item "qt6/build/Release/pinger-qt.exe" "dist/windows/pinger-qt.exe"
+          # windeployqt copies the Qt DLLs, plugins, and MSVC runtime that the GUI needs.
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --compiler-runtime --no-translations "dist/windows/pinger-qt.exe"
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+          $zipPath = "dist/Pinger-$($env:VERSION)-windows-amd64.zip"
+          Compress-Archive -Path "dist/windows/*" -DestinationPath $zipPath
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [System.IO.Compression.ZipFile]::OpenRead((Get-ChildItem dist/*.zip).FullName)
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zipPath).Path)
           try {
-            if ($zip.Entries.Count -ne 1 -or $zip.Entries[0].FullName -ne "pinger.exe") {
-              throw "Windows package must contain exactly pinger.exe"
+            $executables = @($zip.Entries | ForEach-Object { $_.FullName } | Where-Object { $_ -like "*.exe" })
+            if ($executables.Count -ne 2 -or $executables -notcontains "pinger-qt.exe" -or $executables -notcontains "pinger.exe") {
+              throw "Windows package must contain exactly pinger-qt.exe and pinger.exe at the archive root"
             }
           } finally { $zip.Dispose() }
 
@@ -207,8 +222,8 @@ jobs:
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Drawing
-          $icon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path dist/pinger.exe).Path)
-          if ($null -eq $icon) { throw "dist/pinger.exe has no embedded icon" }
+          $icon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path dist/windows/pinger.exe).Path)
+          if ($null -eq $icon) { throw "dist/windows/pinger.exe has no embedded icon" }
           Write-Host "Embedded icon size: $($icon.Width)x$($icon.Height)"
 
       - name: Upload Windows artifacts
@@ -234,17 +249,16 @@ jobs:
         run: |
           sudo -n apt-get update -y
           sudo -n apt-get install -y --no-install-recommends \
-            libgtk-4-dev libwebkitgtk-6.0-dev libsqlite3-dev imagemagick libfuse2
+            libgl-dev libegl-dev libxkbcommon-dev libfontconfig-dev libdbus-1-dev libsqlite3-dev libfuse2
 
       - name: Set up build dependencies
         uses: ./.github/actions/setup-build
 
-      - name: Build frontend
-        working-directory: frontend
+      - name: Build Qt client
+        shell: bash
         run: |
-          npm run icons
-          npm run icons:check
-          npm run build
+          cmake -S qt6 -B qt6/build -G Ninja -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          cmake --build qt6/build --target pinger-qt
 
       - name: Prepare build metadata
         shell: bash
@@ -272,7 +286,7 @@ jobs:
             cp "build/linux/icons/${size}x${size}/pinger.png" "dist/icons/${size}.png"
           done
 
-      - name: Build Linux x64 binaries
+      - name: Build Linux x64 backend
         shell: bash
         env:
           CGO_ENABLED: 1
@@ -285,91 +299,41 @@ jobs:
             -o dist/pinger .
           chmod 755 dist/pinger
 
-      - name: Build DEB package
+      - name: Build AppDir with bundled Qt
         shell: bash
         run: |
-          stage="$(mktemp -d)/pinger"
-          mkdir -p "$stage/DEBIAN" \
-            "$stage/usr/bin" \
-            "$stage/usr/share/applications" \
-            "$stage/usr/share/icons/hicolor" \
-            "$stage/usr/share/pixmaps" \
-            "$stage/usr/share/doc/pinger"
-
-          cat > "$stage/DEBIAN/control" <<EOF
-          Package: pinger
-          Version: ${DEB_VERSION}
-          Section: net
-          Priority: optional
-          Architecture: amd64
-          Maintainer: Pinger <pinger@localhost>
-          Depends: libgtk-4-1, libwebkitgtk-6.0-4
-          Description: Desktop client for gomuks -- a Matrix client
-           Pinger is a desktop client for gomuks, a Matrix client with
-           SQLite caching and media storage.
-          EOF
-
-          cp dist/pinger "$stage/usr/bin/pinger"
-          chmod 755 "$stage/usr/bin/pinger"
-
-          cat > "$stage/usr/share/applications/fi.mau.pinger.desktop" <<EOF
-          [Desktop Entry]
-          Name=Pinger
-          Comment=Desktop client for gomuks -- a Matrix client
-          Exec=pinger
-          Icon=pinger
-          StartupWMClass=fi.mau.pinger
-          Type=Application
-          Categories=Network;InstantMessaging;
-          Terminal=false
-          EOF
-
-          for size in 16 24 32 48 64 128 256 512 1024; do
-            dir="$stage/usr/share/icons/hicolor/${size}x${size}/apps"
-            mkdir -p "$dir"
-            cp "dist/icons/${size}.png" "$dir/pinger.png"
-          done
-          cp dist/icons/1024.png "$stage/usr/share/pixmaps/pinger.png"
-
-          cp README.md "$stage/usr/share/doc/pinger/"
-
-          dpkg-deb --root-owner-group --build "$stage" \
-            "dist/Pinger-${VERSION}-linux-amd64.deb"
-          # Fail the build if the package does not carry the application icon.
-          dpkg-deb -c "dist/Pinger-${VERSION}-linux-amd64.deb" \
-            | grep 'usr/share/icons/hicolor/256x256/apps/pinger.png'
-          ls -lh dist/*.deb
-
-      - name: Build AppImage
-        shell: bash
-        run: |
-          appdir="$(mktemp -d)/pinger.AppDir"
+          appdir="dist/AppDir"
           mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" \
-            "$appdir/usr/share/icons/hicolor" "$appdir/usr/share/pixmaps"
+            "$appdir/usr/share/icons/hicolor" "$appdir/usr/share/pixmaps" \
+            dist/tools
+
+          cp qt6/build/pinger-qt "$appdir/usr/bin/pinger-qt"
+          cp dist/pinger "$appdir/usr/bin/pinger"
+          chmod 755 "$appdir/usr/bin/pinger-qt" "$appdir/usr/bin/pinger"
 
           cat > "$appdir/AppRun" <<'EOF'
           #!/bin/sh
-          SELF="$(readlink -f "$0")"
-          DIR="$(dirname "$SELF")"
-          exec "$DIR/usr/bin/pinger" "$@"
+          HERE="$(dirname "$(readlink -f "$0")")"
+          export APPDIR="$HERE"
+          # linuxdeploy-plugin-qt writes its environment hooks here.
+          for hook in "$HERE"/apprun-hooks/*.sh; do
+            [ -f "$hook" ] && . "$hook"
+          done
+          exec "$HERE/usr/bin/pinger-qt" "$@"
           EOF
           chmod 755 "$appdir/AppRun"
 
-          cp dist/pinger "$appdir/usr/bin/pinger"
-          chmod 755 "$appdir/usr/bin/pinger"
-
-          cat > "$appdir/fi.mau.pinger.desktop" <<EOF
+          cat > "$appdir/usr/share/applications/fi.mau.pinger.desktop" <<EOF
           [Desktop Entry]
           Name=Pinger
           Comment=Desktop client for gomuks -- a Matrix client
-          Exec=pinger
+          Exec=pinger-qt
           Icon=pinger
           StartupWMClass=fi.mau.pinger
           Type=Application
           Categories=Network;InstantMessaging;
           Terminal=false
           EOF
-          cp "$appdir/fi.mau.pinger.desktop" "$appdir/usr/share/applications/fi.mau.pinger.desktop"
 
           # AppStream metadata keeps appimagetool from warning about missing upstream metadata.
           mkdir -p "$appdir/usr/share/metainfo"
@@ -398,15 +362,103 @@ jobs:
           cp dist/icons/1024.png "$appdir/pinger.png"
 
           curl --fail --location --retry 3 \
-            "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage" \
-            -o dist/appimagetool
-          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  dist/appimagetool" \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage" \
+            -o dist/tools/linuxdeploy
+          echo "c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d  dist/tools/linuxdeploy" \
             | sha256sum --check --status
-          chmod +x dist/appimagetool
-          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 dist/appimagetool "$appdir" \
+          curl --fail --location --retry 3 \
+            "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage" \
+            -o dist/tools/linuxdeploy-plugin-qt
+          echo "cfc1055b2b9dbc08412b579f20990b7b41a17b61beaa5847dc9477c96c9e9617  dist/tools/linuxdeploy-plugin-qt" \
+            | sha256sum --check --status
+          chmod +x dist/tools/linuxdeploy dist/tools/linuxdeploy-plugin-qt
+
+          # linuxdeploy finds the Qt plugin on PATH and copies Qt libraries, plugins, and QML into the AppDir.
+          PATH="$PWD/dist/tools:$PATH" \
+          QMAKE="$QT_ROOT_DIR/bin/qmake" \
+          ARCH=x86_64 \
+          APPIMAGE_EXTRACT_AND_RUN=1 \
+            dist/tools/linuxdeploy --appdir "$appdir" \
+              --executable "$appdir/usr/bin/pinger-qt" \
+              --plugin qt
+
+      - name: Build AppImage
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 \
+            "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage" \
+            -o dist/tools/appimagetool
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  dist/tools/appimagetool" \
+            | sha256sum --check --status
+          chmod +x dist/tools/appimagetool
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 dist/tools/appimagetool dist/AppDir \
             "dist/Pinger-${VERSION}-linux-amd64.AppImage"
           APPIMAGE_EXTRACT_AND_RUN=1 "dist/Pinger-${VERSION}-linux-amd64.AppImage" --appimage-version
           ls -lh dist/*.AppImage
+
+      - name: Build DEB package
+        shell: bash
+        run: |
+          stage="dist/deb-stage/pinger"
+          appdir="dist/AppDir"
+          rm -rf dist/deb-stage
+          mkdir -p "$stage/DEBIAN" \
+            "$stage/usr/bin" \
+            "$stage/usr/lib/pinger/bin" \
+            "$stage/usr/share/applications" \
+            "$stage/usr/share/icons/hicolor" \
+            "$stage/usr/share/pixmaps" \
+            "$stage/usr/share/doc/pinger"
+
+          cat > "$stage/DEBIAN/control" <<EOF
+          Package: pinger
+          Version: ${DEB_VERSION}
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Pinger <pinger@localhost>
+          Depends: libc6, libdbus-1-3, libegl1, libfontconfig1, libgl1, libxcb-cursor0, libxkbcommon0, libxkbcommon-x11-0
+          Description: Desktop client for gomuks -- a Matrix client
+           Pinger is a desktop client for gomuks, a Matrix client with
+           SQLite caching and media storage.
+          EOF
+
+          # Qt libraries and plugins come from the AppDir, so the package does not depend on distro Qt.
+          cp -a "$appdir/usr/bin/." "$stage/usr/lib/pinger/bin/"
+          cp -a "$appdir/usr/lib" "$stage/usr/lib/pinger/"
+          if [ -d "$appdir/usr/plugins" ]; then
+            cp -a "$appdir/usr/plugins" "$stage/usr/lib/pinger/"
+          fi
+          ln -s ../lib/pinger/bin/pinger-qt "$stage/usr/bin/pinger-qt"
+          ln -s ../lib/pinger/bin/pinger "$stage/usr/bin/pinger"
+
+          cat > "$stage/usr/share/applications/fi.mau.pinger.desktop" <<EOF
+          [Desktop Entry]
+          Name=Pinger
+          Comment=Desktop client for gomuks -- a Matrix client
+          Exec=pinger-qt
+          Icon=pinger
+          StartupWMClass=fi.mau.pinger
+          Type=Application
+          Categories=Network;InstantMessaging;
+          Terminal=false
+          EOF
+
+          for size in 16 24 32 48 64 128 256 512 1024; do
+            dir="$stage/usr/share/icons/hicolor/${size}x${size}/apps"
+            mkdir -p "$dir"
+            cp "dist/icons/${size}.png" "$dir/pinger.png"
+          done
+          cp dist/icons/1024.png "$stage/usr/share/pixmaps/pinger.png"
+
+          cp README.md "$stage/usr/share/doc/pinger/"
+
+          dpkg-deb --root-owner-group --build "$stage" \
+            "dist/Pinger-${VERSION}-linux-amd64.deb"
+          # Fail the build if the package does not carry the application icon.
+          dpkg-deb -c "dist/Pinger-${VERSION}-linux-amd64.deb" \
+            | grep 'usr/share/icons/hicolor/256x256/apps/pinger.png'
+          ls -lh dist/*.deb
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

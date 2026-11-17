@@ -32,18 +32,18 @@ describe('release downloads', () => {
     assert.deepEqual(calls.slice(1).map((call) => call.accept), ['application/octet-stream', 'application/octet-stream'])
   })
 
-  it('records the portable executable inside the Windows package', async () => {
-    const files = withChecksums({ 'Pinger-0.14-windows-amd64.zip': storedZip({ 'pinger.exe': 'MZ' }) })
+  it('records the GUI executable inside the Windows package', async () => {
+    const files = withChecksums({ 'Pinger-0.14-windows-amd64.zip': storedZip({ 'pinger-qt.exe': 'MZ', 'pinger.exe': 'MZ' }) })
     const { fetchImpl } = fakeFetch(files)
     const metadata = await downloadRelease('windows', dir, { fetchImpl, repository: REPOSITORY, tag: TAG, outputFile: join(dir, 'out') })
-    assert.equal(metadata.nestedFile, 'pinger.exe')
+    assert.equal(metadata.nestedFile, 'pinger-qt.exe')
     assert.equal(metadata.url, `https://github.com/${REPOSITORY}/releases/download/${TAG}/Pinger-0.14-windows-amd64.zip`)
   })
 
-  it('rejects Windows packages without exactly one executable', async () => {
-    const files = withChecksums({ 'Pinger-0.14-windows-amd64.zip': storedZip({ 'pinger.exe': 'MZ', 'helper.exe': 'MZ' }) })
+  it('rejects Windows packages without exactly pinger-qt.exe and pinger.exe', async () => {
+    const files = withChecksums({ 'Pinger-0.14-windows-amd64.zip': storedZip({ 'pinger-qt.exe': 'MZ', 'pinger.exe': 'MZ', 'helper.exe': 'MZ' }) })
     const { fetchImpl } = fakeFetch(files)
-    await assert.rejects(downloadRelease('windows', join(dir, 'windows'), { fetchImpl, repository: REPOSITORY, tag: TAG, outputFile: join(dir, 'out') }), /exactly one executable/)
+    await assert.rejects(downloadRelease('windows', join(dir, 'windows'), { fetchImpl, repository: REPOSITORY, tag: TAG, outputFile: join(dir, 'out') }), /exactly pinger-qt\.exe and pinger\.exe/)
   })
 
   it('rejects a package that does not match checksums.txt and writes nothing', async () => {
@@ -76,7 +76,7 @@ describe('WinGet manifests', () => {
     version: '0.14',
     sha256: 'c'.repeat(64),
     url: `https://github.com/${REPOSITORY}/releases/download/${TAG}/Pinger-0.14-windows-amd64.zip`,
-    nestedFile: 'pinger.exe',
+    nestedFile: 'pinger-qt.exe',
     releaseDate: '2026-10-31',
   }
 
@@ -92,7 +92,7 @@ describe('WinGet manifests', () => {
     const installer = manifests['cataWalter.Pinger.installer.yaml']
     assert.equal(installer.InstallerType, 'zip')
     assert.equal(installer.NestedInstallerType, 'portable')
-    assert.deepEqual(installer.NestedInstallerFiles, [{ RelativeFilePath: 'pinger.exe', PortableCommandAlias: 'pinger' }])
+    assert.deepEqual(installer.NestedInstallerFiles, [{ RelativeFilePath: 'pinger-qt.exe', PortableCommandAlias: 'pinger' }])
     assert.equal(installer.Installers[0].InstallerSha256, 'C'.repeat(64))
     assert.equal(installer.ReleaseDate, '2026-10-31')
   })

@@ -94,12 +94,11 @@ func runQtBackend(client *matrix.Client, dataDir, defaultDataDir, preferencesPat
 		log.Printf("start Qt media server: %v", listenErr)
 	}
 
-	shutdown := newShutdown(service, notifier)
+	shutdown := newShutdown(service)
 	defer shutdown()
 	if mediaServer != nil {
 		defer func() { _ = mediaServer.Close() }()
 	}
-	startNotifier(ctx, notifier)
 	ipc.startEvents()
 	service.startScheduledJobWorker()
 	service.startSync()
@@ -130,19 +129,27 @@ func (qtNotifier) Send(notifications.Message) error {
 	return errors.New("native notifications are unavailable in the Qt client")
 }
 
-func openExternalURL(raw string) error {
+func validateExternalURL(raw string) (string, error) {
 	target, err := url.ParseRequestURI(raw)
 	if err != nil || (target.Scheme != "https" && target.Scheme != "http" && target.Scheme != "mailto") {
-		return fmt.Errorf("unsupported external URL %q", raw)
+		return "", fmt.Errorf("unsupported external URL %q", raw)
+	}
+	return target.String(), nil
+}
+
+func openExternalURL(raw string) error {
+	target, err := validateExternalURL(raw)
+	if err != nil {
+		return err
 	}
 	var command *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		command = exec.Command("open", target.String())
+		command = exec.Command("open", target)
 	case "windows":
-		command = exec.Command("rundll32", "url.dll,FileProtocolHandler", target.String())
+		command = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
 	default:
-		command = exec.Command("xdg-open", target.String())
+		command = exec.Command("xdg-open", target)
 	}
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("open external URL: %w: %s", err, strings.TrimSpace(string(output)))

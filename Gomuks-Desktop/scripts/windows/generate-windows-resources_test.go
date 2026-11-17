@@ -55,7 +55,7 @@ func TestWindowsResourcesMatchNativeIconLoader(test *testing.T) {
 				subtest.Fatal(err)
 			}
 			if !resourceIDExists(data, 14, windowsApplicationIconID) {
-				subtest.Fatal("missing application icon 32512 expected by Wails")
+				subtest.Fatal("missing application icon 32512")
 			}
 			if resourceIDExists(data, 14, 3) {
 				subtest.Fatal("icon uses resource type 3 as its ID instead of application icon 32512")

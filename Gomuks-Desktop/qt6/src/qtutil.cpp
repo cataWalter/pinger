@@ -6,6 +6,7 @@
 #include <QFont>
 #include <QGuiApplication>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPalette>
 #include <QPixmap>
 #include <QRegularExpression>
@@ -208,6 +209,53 @@ QIcon applicationIcon() {
     painter.drawText(fallback.rect(), Qt::AlignCenter, QStringLiteral("P"));
     painter.end();
     return QIcon(fallback);
+}
+
+QIcon menuBarIcon(bool systemDark) {
+    constexpr int pixelSize = 44;
+    QPixmap pixmap(pixelSize, pixelSize);
+    pixmap.setDevicePixelRatio(2.0);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.scale(0.5, 0.5);
+    const QColor mark = systemDark
+        ? QColor(QStringLiteral("#F5F7F5"))
+        : QColor(Qt::black);
+    QPen pen(mark, 2.0);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawEllipse(QRectF(13, 13, 18, 18));
+    painter.drawEllipse(QRectF(6, 6, 32, 32));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(mark);
+    painter.drawEllipse(QRectF(19.5, 19.5, 5, 5));
+    painter.end();
+    return QIcon(pixmap);
+}
+
+QIcon roundedAvatarIcon(const QPixmap &source, int logicalSize) {
+    QIcon icon;
+    for (qreal dpr : {1.0, 2.0, 3.0}) {
+        const int pixelSize = qRound(logicalSize * dpr);
+        const QPixmap scaled = source.scaled(pixelSize, pixelSize, Qt::KeepAspectRatioByExpanding,
+                                             Qt::SmoothTransformation);
+        const QRect crop((scaled.width() - pixelSize) / 2, (scaled.height() - pixelSize) / 2,
+                         pixelSize, pixelSize);
+        QPixmap circular(pixelSize, pixelSize);
+        circular.setDevicePixelRatio(dpr);
+        circular.fill(Qt::transparent);
+        QPainter painter(&circular);
+        painter.setRenderHint(QPainter::Antialiasing);
+        QPainterPath clip;
+        clip.addEllipse(QRectF(0, 0, logicalSize, logicalSize));
+        painter.setClipPath(clip);
+        painter.drawPixmap(QRect(0, 0, logicalSize, logicalSize), scaled, crop);
+        painter.end();
+        icon.addPixmap(circular);
+    }
+    return icon;
 }
 
 QPixmap avatarFromUri(const QString &uri, int size) {

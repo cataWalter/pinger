@@ -1,7 +1,6 @@
 package main
 
 import (
-	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,21 +19,7 @@ var (
 	BuildDate = "unknown"
 )
 
-//go:embed all:frontend/dist
-var frontendAssets embed.FS
-
-//go:embed build/appicon.png
-var applicationIcon []byte
-
 func main() {
-	qtBackend := false
-	for _, arg := range os.Args[1:] {
-		if arg == "--qt-backend" {
-			qtBackend = true
-			break
-		}
-	}
-
 	if err := logging.Configure(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -86,12 +71,7 @@ func main() {
 		client.SetMediaCacheDir(mediaCacheDir)
 	}
 
-	if qtBackend {
-		err = desktop.RunQtBackend(client, dataDir, defaultDataDir, paths.PreferencesFile, mediaCacheDir)
-	} else {
-		err = desktop.Run(client, frontendAssets, applicationIcon, dataDir, defaultDataDir, paths.PreferencesFile, mediaCacheDir)
-	}
-	if err != nil {
+	if err = desktop.RunQtBackend(client, dataDir, defaultDataDir, paths.PreferencesFile, mediaCacheDir); err != nil {
 		logger.Fatal().Err(err).Msg("run desktop application")
 	}
 	logger.Info().Msg("Pinger exited")

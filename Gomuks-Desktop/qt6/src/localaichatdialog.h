@@ -23,7 +23,8 @@ class LocalAIChatDialog final : public QDialog {
     Q_OBJECT
 
 public:
-    LocalAIChatDialog(BackendClient *backend, const QString &defaultAgentId, QWidget *parent = nullptr);
+    LocalAIChatDialog(BackendClient *backend, const QString &defaultAgentId,
+                      QWidget *parent = nullptr, bool contentBlur = false);
 
 private:
     void buildUi();

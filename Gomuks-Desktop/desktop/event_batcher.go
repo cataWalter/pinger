@@ -44,7 +44,7 @@ type BatchedPayload struct {
 type BatchedEvent = BatchedPayload
 
 type EventBatcher struct {
-	wailsCtx      context.Context
+	baseCtx       context.Context
 	flushInterval time.Duration
 	maxBatchSize  int
 
@@ -58,16 +58,16 @@ type EventBatcher struct {
 	startOnce      sync.Once
 }
 
-func NewEventBatcher(wailsCtx context.Context, flushInterval time.Duration) *EventBatcher {
-	if wailsCtx == nil {
-		wailsCtx = context.Background()
+func NewEventBatcher(baseCtx context.Context, flushInterval time.Duration) *EventBatcher {
+	if baseCtx == nil {
+		baseCtx = context.Background()
 	}
 	if flushInterval <= 0 {
 		flushInterval = defaultEventBatchFlushInterval
 	}
 
 	return &EventBatcher{
-		wailsCtx:      wailsCtx,
+		baseCtx:       baseCtx,
 		flushInterval: flushInterval,
 		maxBatchSize:  defaultEventBatchMaximumSize,
 		buffer: BatchedPayload{
@@ -89,7 +89,7 @@ func (b *EventBatcher) SetEmitter(emit func(string, BatchedPayload)) {
 
 func (b *EventBatcher) Start(ctx context.Context) {
 	if ctx == nil {
-		ctx = b.wailsCtx
+		ctx = b.baseCtx
 	}
 	b.startOnce.Do(func() {
 		go b.run(ctx)
@@ -178,7 +178,7 @@ func (b *EventBatcher) Flush() {
 	defer b.flushMu.Unlock()
 
 	b.mu.Lock()
-	if b.pendingEvents == 0 || b.emit == nil || b.wailsCtx.Err() != nil {
+	if b.pendingEvents == 0 || b.emit == nil || b.baseCtx.Err() != nil {
 		b.mu.Unlock()
 		return
 	}
@@ -197,7 +197,7 @@ func (b *EventBatcher) Flush() {
 		return
 	}
 
-	// Wails queues event data asynchronously, so emitted slices must not alias the reusable accumulator.
+	// Emitters may consume event data asynchronously, so emitted slices must not alias the reusable accumulator.
 	payload := BatchedPayload{
 		NewMessages:     cloneBatchPrefix(b.buffer.NewMessages, messageCount),
 		ReadReceipts:    cloneBatchPrefix(b.buffer.ReadReceipts, receiptCount),

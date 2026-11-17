@@ -47,6 +47,13 @@ func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, da
 	if detected, _, err := mime.ParseMediaType(mimeType); err == nil {
 		mimeType = detected
 	}
+	if voiceDurationMilliseconds > 0 {
+		voiceMIME, err := voiceNoteMIMEType(mimeType, filename)
+		if err != nil {
+			return err
+		}
+		mimeType = voiceMIME
+	}
 	if videoDurationMilliseconds > 0 {
 		videoMIME, err := videoMessageMIMEType(mimeType, filename)
 		if err != nil {

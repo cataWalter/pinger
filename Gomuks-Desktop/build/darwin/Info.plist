@@ -8,7 +8,7 @@
         <key>CFBundleDisplayName</key>
             <string>Pinger</string>
         <key>CFBundleExecutable</key>
-            <string>pinger</string>
+            <string>pinger-qt</string>
         <key>CFBundleIdentifier</key>
             <string>fi.mau.pinger</string>
         <key>CFBundleVersion</key>

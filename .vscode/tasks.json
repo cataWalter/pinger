@@ -1,0 +1,22 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Pinger: Qt6 hot reload",
+      "type": "shell",
+      "command": "sh Gomuks-Desktop/scripts/dev/qt6-dev.sh",
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "GOTOOLCHAIN": "go1.26.11"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      }
+    }
+  ]
+}
