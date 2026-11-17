@@ -47,6 +47,14 @@ coverage.out
 *~
 *.swo
 
+# Qt6 client build output (see the qt6 branch)
+/Gomuks-Desktop/bin/
+/Gomuks-Desktop/qt6/build*/
+/Gomuks-Desktop/qt6/CMakeUserPresets.json
+compile_commands.json
+.cache/
+
 # macOS / Windows
 .DS_Store
+._*
 Thumbs.db
