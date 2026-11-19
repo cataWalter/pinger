@@ -37,7 +37,9 @@ func Run(assets fs.FS, applicationIcon []byte, dataDir, defaultDataDir, preferen
 		return fmt.Errorf("initialize Matrix account: %w", err)
 	}
 	shutdown := newShutdown(service, notifier)
-	app := newApplication(service, frontend, applicationIcon, shutdown)
+	preferences := service.preferenceValues()
+	backdrop := windowBackdropFor(preferences)
+	app := newApplication(service, frontend, applicationIcon, shutdown, backdrop, windowsBrowserArgsFor(preferences))
 
 	eventBatcher := NewEventBatcher(ctx, defaultEventBatchFlushInterval)
 	eventBatcher.SetEmitter(func(eventName string, payload BatchedPayload) {
@@ -58,7 +60,7 @@ func Run(assets fs.FS, applicationIcon []byte, dataDir, defaultDataDir, preferen
 		lastUnread:      -1,
 		lastNeedsReply:  -1,
 	}
-	shell.window = newMainWindow(app, applicationIcon, shell.startsHidden())
+	shell.window = newMainWindow(app, applicationIcon, shell.startsHidden(), backdrop, linuxWebviewGpuPolicyFor(preferences))
 	shell.setupTray()
 	shell.wireNotificationClicks()
 	shell.setupMenus()

@@ -77,7 +77,7 @@ jobs:
             clang_arch="$arch"
             if [ "$arch" = amd64 ]; then clang_arch=x86_64; fi
             CC="clang -arch $clang_arch" CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" go build \
-              -tags "sqlite_fts5 goolm" \
+              -tags "sqlite_fts5 goolm private_mac_apis" \
               -ldflags "-s -w -X main.Version=${VERSION} -X main.Commit=${GITHUB_SHA} -X main.BuildDate=${BUILD_DATE}" \
               -o "dist/pinger-${arch}" .
           done

@@ -74,6 +74,7 @@ func aiConvertAudioToWAV(ctx context.Context, audio []byte) ([]byte, error) {
 	defer cancel()
 	var stderr bytes.Buffer
 	command := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", inputPath, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", outputPath)
+	hideChildConsole(command)
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
 		detail := strings.TrimSpace(stderr.String())

@@ -55,6 +55,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'appearance.compact-chat-list', tab: 'Appearance', title: 'Compact chat list', description: 'Fit more rooms in the sidebar.', keywords: 'sidebar compact density list' },
   { id: 'appearance.network-icons', tab: 'Appearance', title: 'Show network labels in the chat list', description: 'Mark bridged chats with their network.', keywords: 'sidebar bridge network whatsapp telegram' },
   { id: 'appearance.favorite-chats', tab: 'Appearance', title: 'Favorite chats', description: 'List favorite rooms first, or only mark them with a star.', keywords: 'sidebar favorites pinned star' },
+  { id: 'appearance.low-spec', tab: 'Appearance', title: 'Low-spec mode', description: 'Turn off animations, transitions, shadows, and blur for smoother rendering on machines without a GPU.', keywords: 'performance slow gpu low spec animations effects blur shadows transitions smooth' },
   { id: 'appearance.message-animations', tab: 'Appearance', title: 'Animate new messages', description: 'Animate messages as they arrive.', keywords: 'animation motion new messages' },
   { id: 'appearance.show-timestamps', tab: 'Appearance', title: 'Show message timestamps', description: 'Display the date and time next to each message.', keywords: 'date time clock timestamps' },
   { id: 'appearance.hide-media', tab: 'Appearance', title: 'Hide images and videos', description: 'Show placeholders instead of media.', keywords: 'media images videos hide' },
@@ -85,7 +86,6 @@ export const settingsEntries: SettingsEntry[] = [
 
   { id: 'keyboard.ctrl-enter', tab: 'Keyboard', title: 'Use Ctrl + Enter to send', description: 'Send a message with Ctrl + Enter.', keywords: 'send enter composer' },
   { id: 'keyboard.spellcheck', tab: 'Keyboard', title: 'Spellcheck messages', description: 'Check spelling while you type.', keywords: 'spellcheck spell check' },
-  { id: 'keyboard.formatting-toolbar', tab: 'Keyboard', title: 'Show formatting toolbar', description: 'Show bold, italic and link controls.', keywords: 'formatting toolbar bold italic' },
   { id: 'keyboard.keep-drafts', tab: 'Keyboard', title: 'Keep unsent drafts after restarting', description: 'Save unsent messages on this device so they return after Pinger restarts. Turning this off removes saved drafts. On by default.', keywords: 'draft unsent message restore save persist composer' },
   { id: 'keyboard.emoji-autocomplete', tab: 'Keyboard', title: 'Suggest emoji for :shortcodes:', description: 'Complete :shortcodes: as you type.', keywords: 'emoji autocomplete shortcode' },
   { id: 'keyboard.emoticon-replacement', tab: 'Keyboard', title: 'Replace emoticons as you type', description: 'Turn :-) into an emoji while typing and when sending. On by default.', keywords: 'emoticon emoji replace' },

@@ -21,10 +21,10 @@ installAppBrowserCleanup()
 
 describe('browser smoke: chat layout', () => {
   it.each([
-    [390, 844, 100, 'Light', true],
-    [760, 600, 125, 'Dark', true],
-    [1440, 900, 100, 'Light', false],
-  ] as const)('keeps the refreshed chat view readable at %i x %i and %i percent zoom in %s with formatting %s', async (width, height, zoom, theme, formatting) => {
+    [390, 844, 100, 'Light', false],
+    [760, 600, 125, 'Dark', false],
+    [1440, 900, 100, 'Light', true],
+  ] as const)('keeps the refreshed chat view readable at %i x %i and %i percent zoom in %s', async (width, height, zoom, theme, oneLine) => {
     const user = userEvent.setup()
     await page.viewport(width, height)
     const snapshot = await service.Snapshot()
@@ -39,7 +39,7 @@ describe('browser smoke: chat layout', () => {
       [false, 'I saved the address for us.'],
       [true, 'See you there.'],
     ] as const
-    service.Snapshot.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], name: 'Nora Bennett', topic: 'Coffee, markets, and weekend plans' }], preferences: { 'appearance.theme': theme, 'appearance.zoom': String(zoom), 'appearance.font_size': zoom === 125 ? 'Large' : 'Medium', 'composer.formatting_toolbar': formatting } })
+    service.Snapshot.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], name: 'Nora Bennett', topic: 'Coffee, markets, and weekend plans' }], preferences: { 'appearance.theme': theme, 'appearance.zoom': String(zoom), 'appearance.font_size': zoom === 125 ? 'Large' : 'Medium' } })
     service.History.mockResolvedValue({
       ...history, messages: conversation.map(([own, body], index) => ({
         ...history.messages[index === 1 ? 1 : 0], id: `$chat-preview-${index}`, own, body,
@@ -57,25 +57,11 @@ describe('browser smoke: chat layout', () => {
       await settleSurfaces()
       const draft = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
       await user.type(draft, 'I will bring my camera.')
-      if (formatting) {
-        await user.click(screen.getByRole('button', { name: 'Hide formatting toolbar' }))
-        await waitFor(() => expect(screen.queryByRole('toolbar', { name: 'Formatting' })).toBeNull())
-        await user.click(screen.getByRole('button', { name: 'Formatting' }))
-        await user.click(screen.getByRole('menuitem', { name: 'Show formatting toolbar' }))
-        await waitFor(() => expect(screen.getByRole('toolbar', { name: 'Formatting' })).toBeTruthy())
-        const toolbar = screen.getByRole('toolbar', { name: 'Formatting' })
-        expect(getComputedStyle(toolbar).overflowY).toBe('visible')
-        const buttons = within(toolbar).getAllByRole('button')
-        for (let index = 1; index < buttons.length; index++) {
-          const previous = buttons[index - 1].getBoundingClientRect()
-          const current = buttons[index].getBoundingClientRect()
-          if (Math.abs(current.top - previous.top) < 1) expect(current.left).toBeGreaterThanOrEqual(previous.right)
-        }
-        const bold = within(toolbar).getByRole('button', { name: 'Bold' })
-        await page.getByRole('button', { name: /^Bold$/ }).hover()
-        await waitFor(() => expect(getComputedStyle(bold.parentElement!, '::after').opacity).toBe('1'))
-        await page.getByRole('textbox', { name: 'Message' }).hover()
-      }
+      const toolButtons = Array.from(container.querySelectorAll<HTMLElement>('.composer-tool-button'))
+      if (oneLine) expect(new Set(toolButtons.map((button) => Math.round(button.getBoundingClientRect().top))).size).toBe(1)
+      const bold = within(screen.getByRole('group', { name: 'Formatting' })).getByRole('button', { name: 'Bold' })
+      expect(bold.querySelector('.composer-tool-caption')?.textContent).toBe('Bold')
+      expect(screen.queryByRole('button', { name: 'Formatting' })).toBeNull()
       expect(draft.value).toBe('I will bring my camera.')
       const composer = container.querySelector<HTMLElement>('.composer')!
       const composerBounds = composer.getBoundingClientRect()
@@ -84,7 +70,7 @@ describe('browser smoke: chat layout', () => {
       expect(composerBounds.bottom).toBeLessThanOrEqual(height + 1)
       expect(composer.scrollWidth).toBeLessThanOrEqual(composer.clientWidth)
       const aiButtons = within(screen.getByRole('group', { name: 'AI tools' })).getAllByRole('button')
-      const controls = [...['Attach file', 'Emoji picker', 'Record voice note', 'Delivery options', 'Send message'].map((name) => screen.getByRole('button', { name })), ...aiButtons]
+      const controls = [...['Attach file', 'Emoji picker', 'Record voice note', 'Record video message', 'Send message'].map((name) => screen.getByRole('button', { name })), ...aiButtons]
       for (const control of controls) {
         const bounds = control.getBoundingClientRect()
         expect(bounds.width).toBeGreaterThanOrEqual(32)
@@ -92,6 +78,20 @@ describe('browser smoke: chat layout', () => {
         expect(bounds.left).toBeGreaterThanOrEqual(composerBounds.left)
         expect(bounds.right).toBeLessThanOrEqual(composerBounds.right)
         expect(bounds.top).toBeGreaterThanOrEqual(draft.getBoundingClientRect().bottom)
+      }
+      for (const button of aiButtons) {
+        const bounds = button.getBoundingClientRect()
+        const style = getComputedStyle(button)
+        const contentTop = bounds.top + parseFloat(style.paddingTop)
+        const contentBottom = bounds.bottom - parseFloat(style.paddingBottom)
+        for (const part of Array.from(button.children) as HTMLElement[]) {
+          if (getComputedStyle(part).display === 'none') continue
+          const partBounds = part.getBoundingClientRect()
+          expect(partBounds.top).toBeGreaterThanOrEqual(contentTop - 1)
+          expect(partBounds.bottom).toBeLessThanOrEqual(contentBottom + 1)
+          expect(partBounds.left).toBeGreaterThanOrEqual(bounds.left - 1)
+          expect(partBounds.right).toBeLessThanOrEqual(bounds.right + 1)
+        }
       }
       const bodies = Array.from(container.querySelectorAll<HTMLElement>('.timeline .message-body'))
       expect(bodies).toHaveLength(conversation.length)

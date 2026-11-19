@@ -22,4 +22,4 @@ if /usr/bin/pgrep -f "$REPO_ROOT/bin/pinger" >/dev/null; then
 fi
 
 npm --prefix frontend run build
-exec go run -tags=sqlite_fts5,goolm .
+exec go run -tags=sqlite_fts5,goolm,private_mac_apis .

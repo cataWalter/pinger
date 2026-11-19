@@ -1,15 +1,28 @@
-import { Bold, ChevronDown, Check, Clock3, Code, Paperclip, Pencil, Reply, Send, Smile, X, Heading1, Italic, Link, List, ListOrdered, Mic, Quote, Square, SquareCode, Strikethrough, Video } from 'lucide-react'
+import type { ComponentPropsWithoutRef, ReactNode } from 'react'
+import { Bold, Check, Clock3, Code, Paperclip, Pencil, Reply, Send, Smile, X, Heading1, Italic, Link, List, ListOrdered, Mic, Quote, Square, SquareCode, Strikethrough, Video } from 'lucide-react'
 import EmojiPicker from 'emoji-picker-react'
-import { parseCustomEmoticonReplacements, replaceEmoticonsAtCursor } from './composerText'
+import { parseCustomEmoticonReplacements, replaceEmoticonsAtCursor, type ComposerFormat } from './composerText'
 import { themeModeForPreference } from './themes'
 import { SnippetPopover } from './SnippetPopover'
-import { ActionMenu } from './appShared'
 import { SuggestedRepliesPicker } from './SuggestedRepliesPicker'
 import { initials, preferenceBoolean, preferenceString, IconTooltip, primaryShiftShortcutHint } from './appShared'
 import type { AppState } from './appState'
 
+const formattingTools: { action: ComposerFormat; label: string; caption: string; icon: ReactNode }[] = [
+  { action: 'bold', label: 'Bold', caption: 'Bold', icon: <Bold size={15} /> },
+  { action: 'italic', label: 'Italic', caption: 'Italic', icon: <Italic size={15} /> },
+  { action: 'strikethrough', label: 'Strikethrough', caption: 'Strike', icon: <Strikethrough size={15} /> },
+  { action: 'inlineCode', label: 'Inline code', caption: 'Code', icon: <Code size={15} /> },
+  { action: 'link', label: 'Insert link', caption: 'Link', icon: <Link size={15} /> },
+  { action: 'heading', label: 'Heading', caption: 'Heading', icon: <Heading1 size={15} /> },
+  { action: 'bulletList', label: 'Bulleted list', caption: 'Bulleted', icon: <List size={15} /> },
+  { action: 'numberedList', label: 'Numbered list', caption: 'Numbered', icon: <ListOrdered size={15} /> },
+  { action: 'quote', label: 'Quote', caption: 'Quote', icon: <Quote size={15} /> },
+  { action: 'codeBlock', label: 'Code block', caption: 'Block', icon: <SquareCode size={15} /> },
+]
+
 export function ConversationComposer({ app }: { app: AppState }) {
-  const { activeAccountID, applyEmojiSuggestion, applyFormatting, applyMention, attachmentInputRef, busy, cancelSuggestedReplies, captureNoun, chatTutorLanguage, composeText, composeTextRef, composerAIItems, composerContextMessage, composerEmojiControlRef, composerInputRef, editTarget, emojiActiveIndex, emojiOptions, emojiPickerOpen, focusTimelineMessage, handleAttachmentInput, handleComposerKeyDown, handleComposerPaste, imageRunHere, imageRunStatus, insertPickedEmoji, mentionActiveIndex, mentionOptions, openScheduleMessage, preferences, preferencesRef, removeStagedAttachment, replyTarget, roomDrafts, selectedRoom, selectedRoomID, sendableStagedAttachments, setComposeDraft, setComposeText, setEditTarget, setEmojiActiveIndex, setMentionActiveIndex, setMentionBindings, setMentionStart, setPreference, setReplyTarget, snippetExpander, snippetMatch, snippetMenuVisible, snippetOptions, stagedRoomAttachments, startRecording, stopImageGeneration, stopRecording, submitMessage, suggestRepliesForRoom, suggestedReplies, summaryStatus, systemPrefersDark, themePreference, toggleComposerEmojiPicker, updateEmojiQuery, updateMentionQuery, useSuggestedReply, videoPreviewRef, videoRecordingActive, voiceCaptureStatus, voiceRecordingActive } = app
+  const { applyEmojiSuggestion, applyFormatting, applyMention, attachmentInputRef, busy, cancelSuggestedReplies, captureNoun, chatTutorLanguage, composeText, composeTextRef, composerAIItems, composerContextMessage, composerEmojiControlRef, composerInputRef, editTarget, emojiActiveIndex, emojiOptions, emojiPickerOpen, focusTimelineMessage, handleAttachmentInput, handleComposerKeyDown, handleComposerPaste, imageRunHere, imageRunStatus, insertPickedEmoji, mentionActiveIndex, mentionOptions, openScheduleMessage, preferencesRef, removeStagedAttachment, replyTarget, roomDrafts, selectedRoom, selectedRoomID, sendableStagedAttachments, setComposeDraft, setComposeText, setEditTarget, setEmojiActiveIndex, setMentionActiveIndex, setMentionBindings, setMentionStart, setReplyTarget, snippetExpander, snippetMatch, snippetMenuVisible, snippetOptions, stagedRoomAttachments, startRecording, stopImageGeneration, stopRecording, submitMessage, suggestRepliesForRoom, suggestedReplies, summaryStatus, systemPrefersDark, themePreference, toggleComposerEmojiPicker, updateEmojiQuery, updateMentionQuery, useSuggestedReply, videoPreviewRef, videoRecordingActive, voiceCaptureStatus, voiceRecordingActive } = app
   return (
     <form className="composer" onSubmit={submitMessage}>
       <input ref={attachmentInputRef} className="visually-hidden" type="file" aria-hidden="true" tabIndex={-1} onChange={handleAttachmentInput} />
@@ -103,45 +116,16 @@ export function ConversationComposer({ app }: { app: AppState }) {
         />}
       </div>
       {videoRecordingActive && <div className="video-capture-preview"><video ref={videoPreviewRef} muted playsInline autoPlay aria-label="Camera preview" /></div>}
-      {preferenceBoolean(preferences, 'composer.formatting_toolbar') && <div className="composer-format-toolbar" role="toolbar" aria-label="Formatting">
-        <div className="composer-format-group" role="group" aria-label="Inline formatting">
-          <IconTooltip label="Bold text"><button className="icon-button" type="button" aria-label="Bold" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bold')}><Bold size={15} /></button></IconTooltip>
-          <IconTooltip label="Italic text"><button className="icon-button" type="button" aria-label="Italic" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('italic')}><Italic size={15} /></button></IconTooltip>
-          <IconTooltip label="Strikethrough text"><button className="icon-button" type="button" aria-label="Strikethrough" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('strikethrough')}><Strikethrough size={15} /></button></IconTooltip>
-          <IconTooltip label="Inline code"><button className="icon-button" type="button" aria-label="Inline code" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('inlineCode')}><Code size={15} /></button></IconTooltip>
-        </div>
-        <div className="composer-format-group" role="group" aria-label="Link insertion">
-          <IconTooltip label="Insert link"><button className="icon-button" type="button" aria-label="Insert link" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('link')}><Link size={15} /></button></IconTooltip>
-        </div>
-        <div className="composer-format-group" role="group" aria-label="Block formatting">
-          <IconTooltip label="Format as heading"><button className="icon-button" type="button" aria-label="Heading" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('heading')}><Heading1 size={15} /></button></IconTooltip>
-          <IconTooltip label="Start a bulleted list"><button className="icon-button" type="button" aria-label="Bulleted list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('bulletList')}><List size={15} /></button></IconTooltip>
-          <IconTooltip label="Start a numbered list"><button className="icon-button" type="button" aria-label="Numbered list" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('numberedList')}><ListOrdered size={15} /></button></IconTooltip>
-          <IconTooltip label="Format as quote"><button className="icon-button" type="button" aria-label="Quote" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('quote')}><Quote size={15} /></button></IconTooltip>
-          <IconTooltip label="Insert a code block"><button className="icon-button" type="button" aria-label="Code block" disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting('codeBlock')}><SquareCode size={15} /></button></IconTooltip>
-        </div>
-        <IconTooltip label="Hide formatting toolbar" className="composer-format-close"><button className="icon-button" type="button" aria-label="Hide formatting toolbar" onMouseDown={(event) => event.preventDefault()} onClick={() => void setPreference('composer.formatting_toolbar', false)}><X size={14} /></button></IconTooltip>
-      </div>}
       <div className="composer-footer">
         <div className="composer-toolbar-row composer-toolbar-row-compose">
           <div className="composer-tool-group composer-tool-group-message" role="group" aria-label="Message tools">
-            {!preferenceBoolean(preferences, 'composer.formatting_toolbar') && <ActionMenu key={`format:${activeAccountID}:${selectedRoomID}`} label="Formatting" icon={<Bold size={16} />} side="top" disabled={!selectedRoom || busy} items={[
-              { label: 'Bold', icon: <Bold size={15} />, onSelect: () => applyFormatting('bold') },
-              { label: 'Italic', icon: <Italic size={15} />, onSelect: () => applyFormatting('italic') },
-              { label: 'Strikethrough', icon: <Strikethrough size={15} />, onSelect: () => applyFormatting('strikethrough') },
-              { label: 'Inline code', icon: <Code size={15} />, onSelect: () => applyFormatting('inlineCode') },
-              { label: 'Insert link', icon: <Link size={15} />, onSelect: () => applyFormatting('link') },
-              { label: 'Heading', icon: <Heading1 size={15} />, onSelect: () => applyFormatting('heading') },
-              { label: 'Bulleted list', icon: <List size={15} />, onSelect: () => applyFormatting('bulletList') },
-              { label: 'Numbered list', icon: <ListOrdered size={15} />, onSelect: () => applyFormatting('numberedList') },
-              { label: 'Quote', icon: <Quote size={15} />, onSelect: () => applyFormatting('quote') },
-              { label: 'Code block', icon: <SquareCode size={15} />, onSelect: () => applyFormatting('codeBlock') },
-              { label: 'Show formatting toolbar', icon: <Bold size={15} />, onSelect: () => void setPreference('composer.formatting_toolbar', true) },
-            ]} />}
-            <div className="composer-tool-cluster" role="group" aria-label="Add content">
-              <IconTooltip label="Attach file"><button className="icon-button" type="button" aria-label="Attach file" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onClick={() => attachmentInputRef.current?.click()}><Paperclip size={15} /></button></IconTooltip>
+            <div className="composer-tool-cluster composer-tool-cluster--format" role="group" aria-label="Formatting">
+              {formattingTools.map((tool) => <ComposerToolButton key={tool.action} caption={tool.caption} icon={tool.icon} aria-label={tool.label} title={tool.label} disabled={!selectedRoom || busy} onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormatting(tool.action)} />)}
+            </div>
+            <div className="composer-tool-cluster composer-tool-cluster--attach" role="group" aria-label="Add content">
+              <ComposerToolButton caption="Attach" icon={<Paperclip size={15} />} aria-label="Attach file" title="Attach a file" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onClick={() => attachmentInputRef.current?.click()} />
               <div className="composer-emoji-control" ref={composerEmojiControlRef}>
-                <IconTooltip label="Choose an emoji"><button className="icon-button" type="button" aria-label="Emoji picker" aria-haspopup="dialog" aria-expanded={emojiPickerOpen} disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onMouseDown={(event) => event.preventDefault()} onClick={toggleComposerEmojiPicker}><Smile size={15} /></button></IconTooltip>
+                <ComposerToolButton caption="Emoji" icon={<Smile size={15} />} aria-label="Emoji picker" aria-haspopup="dialog" aria-expanded={emojiPickerOpen} title="Insert an emoji" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onMouseDown={(event) => event.preventDefault()} onClick={toggleComposerEmojiPicker} />
                 {emojiPickerOpen && <div className="composer-emoji-popover" role="dialog" aria-label="Choose an emoji">
                   <EmojiPicker
                     className="composer-emoji-picker-widget"
@@ -155,23 +139,17 @@ export function ConversationComposer({ app }: { app: AppState }) {
                 </div>}
               </div>
             </div>
-            <div className="composer-tool-cluster" role="group" aria-label="Delivery options">
-              <IconTooltip label={voiceRecordingActive ? 'Stop and send voice note' : 'Record voice note'}><button className="icon-button" type="button" aria-label={voiceRecordingActive ? 'Stop and send voice note' : 'Record voice note'} aria-pressed={voiceRecordingActive} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing' || videoRecordingActive} onClick={() => voiceRecordingActive ? stopRecording() : void startRecording('voice')}>{voiceRecordingActive ? <Square size={15} /> : <Mic size={15} />}</button></IconTooltip>
-              {videoRecordingActive && <IconTooltip label="Stop and send video message"><button className="icon-button is-recording" type="button" aria-label="Stop and send video message" onClick={stopRecording}><Square size={15} /></button></IconTooltip>}
-              <ActionMenu key={`delivery:${activeAccountID}:${selectedRoomID}`} label="Delivery options" icon={<ChevronDown size={16} />} side="top" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} items={[
-                { label: 'Record video message', icon: <Video size={15} />, onSelect: () => void startRecording('video') },
-                { label: replyTarget ? 'Schedule reply' : 'Schedule message', icon: <Clock3 size={15} />, onSelect: openScheduleMessage, disabled: !composeText.trim() || Boolean(editTarget) },
-              ]} />
+            <div className="composer-tool-cluster composer-tool-cluster--delivery" role="group" aria-label="Delivery">
+              <ComposerToolButton caption={voiceRecordingActive ? 'Stop' : 'Voice'} icon={voiceRecordingActive ? <Square size={15} /> : <Mic size={15} />} aria-label={voiceRecordingActive ? 'Stop and send voice note' : 'Record voice note'} aria-pressed={voiceRecordingActive} className={voiceRecordingActive ? 'is-recording' : undefined} title={voiceRecordingActive ? 'Stop and send voice note' : 'Record a voice note'} disabled={!selectedRoom || busy || voiceCaptureStatus === 'processing' || videoRecordingActive} onClick={() => voiceRecordingActive ? stopRecording() : void startRecording('voice')} />
+              {videoRecordingActive
+                ? <ComposerToolButton caption="Stop" icon={<Square size={15} />} aria-label="Stop and send video message" title="Stop and send video message" className="is-recording" onClick={stopRecording} />
+                : <ComposerToolButton caption="Video" icon={<Video size={15} />} aria-label="Record video message" title="Record a video message" disabled={!selectedRoom || busy || voiceCaptureStatus !== null} onClick={() => void startRecording('video')} />}
+              <ComposerToolButton caption="Schedule" icon={<Clock3 size={15} />} aria-label={replyTarget ? 'Schedule reply' : 'Schedule message'} title="Schedule this message for later" disabled={!selectedRoom || busy || voiceCaptureStatus !== null || !composeText.trim() || Boolean(editTarget)} onClick={() => openScheduleMessage()} />
             </div>
-            <div className="composer-tool-cluster composer-ai-cluster" role="group" aria-label="AI tools">
-              {composerAIItems().map((item) => {
-                const shortcut = item.primaryShiftKey ? primaryShiftShortcutHint(item.primaryShiftKey) : ''
-                return <IconTooltip key={item.label} label={item.label}>
-                  <button className="icon-button" type="button" aria-label={item.label} title={item.title} aria-keyshortcuts={item.primaryShiftKey ? `Control+Shift+${item.primaryShiftKey} Meta+Shift+${item.primaryShiftKey}` : undefined} disabled={item.disabled} onMouseDown={(event) => event.preventDefault()} onClick={() => item.onSelect()}>{item.icon}{shortcut && <kbd aria-hidden="true">{shortcut}</kbd>}</button>
-                </IconTooltip>
-              })}
+            <div className="composer-tool-cluster composer-ai-cluster composer-tool-cluster--ai" role="group" aria-label="AI tools">
+              {composerAIItems().map((item) => <ComposerToolButton key={item.label} caption={item.caption ?? item.label} icon={item.icon} shortcut={item.primaryShiftKey ? primaryShiftShortcutHint(item.primaryShiftKey) : undefined} aria-label={item.label} aria-keyshortcuts={item.primaryShiftKey ? `Control+Shift+${item.primaryShiftKey} Meta+Shift+${item.primaryShiftKey}` : undefined} title={item.title ?? item.label} disabled={item.disabled} onMouseDown={(event) => event.preventDefault()} onClick={() => item.onSelect()} />)}
+              {imageRunHere && <ComposerToolButton caption="Stop" icon={<Square size={15} />} aria-label="Stop image generation" title="Stop image generation" className="is-recording" onClick={stopImageGeneration} />}
             </div>
-            {imageRunHere && <IconTooltip label="Stop image generation"><button className="icon-button is-recording" type="button" aria-label="Stop image generation" onClick={stopImageGeneration}><Square size={15} /></button></IconTooltip>}
           </div>
         </div>
         {suggestedReplies && suggestedReplies.roomId === selectedRoomID && (
@@ -185,5 +163,15 @@ export function ConversationComposer({ app }: { app: AppState }) {
         </IconTooltip>
       </div>
     </form>
+  )
+}
+
+function ComposerToolButton({ caption, icon, shortcut, className, ...buttonProps }: ComponentPropsWithoutRef<'button'> & { caption: string; icon: ReactNode; shortcut?: string }) {
+  return (
+    <button className={className ? `composer-tool-button ${className}` : 'composer-tool-button'} type="button" {...buttonProps}>
+      {icon}
+      <span className="composer-tool-caption">{caption}</span>
+      {shortcut && <kbd aria-hidden="true">{shortcut}</kbd>}
+    </button>
   )
 }

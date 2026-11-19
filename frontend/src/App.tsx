@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { BootScreen, DeviceVerificationScreen, SignInScreen } from './AuthScreens'
 import { SettingsProvider } from './SettingsContext'
 import { accentCssVariables } from './accent'
@@ -61,7 +62,13 @@ function AppBody() {
   const part22 = useComposerKeys(part21)
   const { accentPalette, appZoom, busy, error, handleApplicationKeyDown, homeserver, mobilePane, password, preferences, recoveryKey, safeBubbleColor, setError, setHomeserver, setPassword, setRecoveryKey, setUsername, snapshot, submitLogin, submitVerification, systemPrefersDark, themeChoice, username } = part22
 
+  const lowSpecMode = preferenceBoolean(snapshot?.preferences ?? {}, 'appearance.low_spec_mode')
+  useEffect(() => {
+    document.documentElement.dataset.lowSpec = String(lowSpecMode)
+  }, [lowSpecMode])
+
   if (!snapshot) return <BootScreen error={error} />
+
 
   if (!snapshot.loggedIn) {
     return (

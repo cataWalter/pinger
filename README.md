@@ -45,7 +45,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - Reply and quick-reaction controls stay visible; replying opens a quoted reply composer; reactions show as chips. The message **context menu** offers Reply, Reply in thread, React, Bookmark, Mark as unread, Copy (plain or with timestamp), Forward…, a "Received at" timestamp, Set reminder, and — when an AI endpoint is configured — Translate, Draft reply with AI, and Explain message; your own messages add Edit and Delete, and failed sends add Retry sending.
 - **Forward** text messages to any other room; bookmarks and read-state changes are stored locally.
 - In direct chats, your own messages show a **Seen at** timestamp derived from the other person's read receipt.
-- The composer accepts pasted images and files dropped onto the window (50 MiB per attachment), completes `@` mentions from the room member list, suggests emoji for `:shortcodes:`, and optionally replaces emoticons as you type. The **Formatting** menu preserves the selected draft text; Settings can keep the full formatting toolbar expanded.
+- The composer accepts pasted images and files dropped onto the window (50 MiB per attachment), completes `@` mentions from the room member list, suggests emoji for `:shortcodes:`, and optionally replaces emoticons as you type. The composer toolbar holds every formatting action (Bold, Italic, Strike, Code, Link, Heading, lists, Quote, and code block) under captioned icons; each one wraps the selected draft text. On narrow windows the tools wrap onto more lines and drop their captions, and each icon keeps its tooltip.
 - **Voice notes** record straight from the composer with a selectable microphone (up to 4 minutes / 50 MiB); the next voice note can auto-play. Any audio message can be **transcribed with AI** and the transcript inserted into the composer as a draft.
 - An optional **undo send** window (5–30 seconds) holds outgoing messages briefly so they can be recalled.
 - **Link previews** show a title, summary, and thumbnail under the first web link in a text message. Your homeserver fetches the page; previews are off in encrypted rooms unless enabled in Settings → Appearance.
@@ -53,7 +53,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 
 **Scheduled messages & reminders**
 
-- **Send Later**, in the composer's **Delivery options** menu, schedules a draft — or a reply — for a future time; the same menu starts video recording. **Remind Later** sets a reminder on any message. Delays run from 1 minute to 7 days, with default delays and quick time suggestions configurable in Settings → General.
+- **Send Later**, the **Schedule** button in the composer's toolbar, schedules a draft — or a reply — for a future time; **Video** in the same toolbar starts video recording. **Remind Later** sets a reminder on any message. Delays run from 1 minute to 7 days, with default delays and quick time suggestions configurable in Settings → General.
 - The queue dialog, under **Room actions → Scheduled messages and reminders**, lists pending, fired, and failed jobs and lets you reschedule, edit, or cancel them. Its count remains visible in the header. Reminders surface as an in-app notice and a desktop notification, and can archive the room afterwards.
 - Jobs persist in `scheduled-jobs.json` and fire from a background worker while Pinger is running.
 - Scheduled messages remain in the sending state until Matrix confirms delivery. Failed or interrupted jobs retain their transaction ID for retry; check the room before retrying an interrupted send.
@@ -82,6 +82,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - System default plus eleven themes — Light, Dark, VS Code, OLED black, Bosco, Rosa, Dracula, Midnight, Slate, Solarized, Sepia — with visual previews, independent accent palettes, and chat wallpapers. Existing theme names and custom colors are preserved; text and focus colors are derived for readability.
 - Font size (Small/Medium/Large), app zoom 75–125% (`Ctrl`/`⌘` + `+` / `-` / `0`), compact chat list, room previews, unread badges, network labels for bridged chats, favorite placement (top of list or star only), message animations, 24-hour or relative timestamps, optional hiding of media and deleted messages, balanced line wrapping, and a pointer cursor on clickable controls.
 - Motion is restrained and follows the OS reduced-motion preference. Message entrances apply only to new visible arrivals, not history loads, older-page prepends, or receipt updates.
+- Low-spec mode (Settings → Appearance → Performance) turns off animations, transitions, blur, and decorative shadows for machines without a GPU. Spinners, focus rings, and selection states still show. On macOS the glass backdrop is removed after a restart. On Windows and Linux, GPU rendering is also turned off after a restart.
 
 **System tray & notifications**
 
@@ -99,7 +100,7 @@ A searchable dialog with twelve tabs:
 - **Account** — profile details, typing indicators, content blur (read receipts are still sent when you open a room), log out.
 - **Appearance** — theme, accent, wallpaper, font size, app zoom, message and sidebar layout, link previews, timestamps.
 - **Notifications** — permission, enable/focus, sound and volume, content privacy, per-category alerts and tones, batching, repeat reminder, one-time-code handling, sound effects, and a button that opens the OS notification settings for Pinger.
-- **Keyboard** — Ctrl+Enter send, undo send window, spellcheck, formatting toolbar, emoji suggestions, emoticon replacement, copy timestamps, Up-arrow focus, single-key shortcuts (R, J, K, and the answered key), mark-answered key, full shortcut list.
+- **Keyboard** — Ctrl+Enter send, undo send window, spellcheck, emoji suggestions, emoticon replacement, copy timestamps, Up-arrow focus, single-key shortcuts (R, J, K, and the answered key), mark-answered key, full shortcut list.
 - **History** — messages loaded when a room opens (25–1000).
 - **Devices** — list active devices with last-seen details, revoke them, and start an emoji comparison with another verified session.
 - **Storage** — database, WAL, and media-cache sizes; clear media cache; optimize the database (VACUUM); storage per chat; cleanup filtered by media type and age.
@@ -130,6 +131,8 @@ Press `?` in the app (or open Settings → Keyboard) for the authoritative list.
 | `Ctrl+Shift+L` | Jump to the latest messages |
 | `Ctrl`/`⌘` + `Shift+T` | Analyze the composer draft with Language Tutor |
 | `Ctrl`/`⌘` + `Enter` | Check the edited draft in the Language Tutor (does not replace the composer) |
+| `Ctrl`/`⌘` + `1` | In the Language Tutor, keep your edited draft in the composer |
+| `Ctrl`/`⌘` + `2` | In the Language Tutor, replace the draft with the correction |
 | `Ctrl`/`⌘` + `Shift+B` | Suggest replies |
 | `Ctrl`/`⌘` + `Shift+J` | Generate an image from the draft for approval |
 | `Ctrl`/`⌘` + `Shift+O` | Prepare a Local AI summary chat |
@@ -192,6 +195,8 @@ Pinger connects directly to Beeper's Matrix homeserver at `https://matrix.beeper
 - Linux: GTK4 and WebKitGTK 6 development libraries (required by Wails on Linux)
 
 Two Go build tags are used throughout: `sqlite_fts5` is required (SQLite full-text search), and `goolm` selects mautrix-go's pure-Go Olm implementation (no libolm needed).
+
+macOS builds also set `private_mac_apis`. It enables the native Liquid Glass window backdrop (macOS 26+), so the sidebar shows the system glass material behind it. Wails only exposes that effect through this tag, which uses private macOS APIs. Builds made with this tag cannot be distributed through the Mac App Store. Without the tag, the app still runs with an opaque window.
 
 ### Build and run
 

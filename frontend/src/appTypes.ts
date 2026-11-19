@@ -113,6 +113,7 @@ export type MediaApprovalRequest = { items: MediaApprovalItem[]; onApprove: () =
 
 export type ActionMenuEntry = {
   label: string
+  caption?: string
   icon: ReactNode
   onSelect: () => void
   primaryShiftKey?: string

@@ -55,7 +55,33 @@ func newShutdown(service *AppService, notifier notifications.Notifier) func() {
 	}
 }
 
-func newApplication(service *AppService, frontend fs.FS, applicationIcon []byte, shutdown func()) *application.App {
+// windowBackdropFor picks the native macOS backdrop. Low-spec mode uses a plain window so macOS
+// does not composite the glass layer behind the web view.
+func windowBackdropFor(preferences map[string]any) application.MacBackdrop {
+	if lowSpec, _ := preferences["appearance.low_spec_mode"].(bool); lowSpec {
+		return application.MacBackdropNormal
+	}
+	return macWindowBackdrop
+}
+
+// windowsBrowserArgsFor turns off WebView2 GPU rendering and smooth scrolling in low-spec mode.
+// Chromium reads these switches once at startup, so a change takes effect after a restart.
+func windowsBrowserArgsFor(preferences map[string]any) []string {
+	if lowSpec, _ := preferences["appearance.low_spec_mode"].(bool); !lowSpec {
+		return nil
+	}
+	return []string{"--disable-gpu", "--disable-smooth-scrolling"}
+}
+
+// linuxWebviewGpuPolicyFor turns off WebKitGTK hardware acceleration in low-spec mode, effective after a restart.
+func linuxWebviewGpuPolicyFor(preferences map[string]any) application.WebviewGpuPolicy {
+	if lowSpec, _ := preferences["appearance.low_spec_mode"].(bool); lowSpec {
+		return application.WebviewGpuPolicyNever
+	}
+	return application.WebviewGpuPolicyAlways
+}
+
+func newApplication(service *AppService, frontend fs.FS, applicationIcon []byte, shutdown func(), backdrop application.MacBackdrop, browserArgs []string) *application.App {
 	staticAssets := application.AssetFileServerFS(frontend)
 	mediaAssets := newMediaAssetHandler(service)
 
@@ -63,6 +89,9 @@ func newApplication(service *AppService, frontend fs.FS, applicationIcon []byte,
 		Name:        "Pinger",
 		Description: "A Matrix desktop client",
 		Icon:        applicationIcon,
+		Flags: map[string]any{
+			"macLiquidGlass": backdrop == application.MacBackdropLiquidGlass,
+		},
 		Services: []application.Service{
 			application.NewService(service),
 			application.NewService(NewLanguageTutorService(service)),
@@ -81,6 +110,9 @@ func newApplication(service *AppService, frontend fs.FS, applicationIcon []byte,
 		},
 		Linux: application.LinuxOptions{
 			ApplicationID: "fi.mau.pinger",
+		},
+		Windows: application.WindowsOptions{
+			AdditionalBrowserArgs: browserArgs,
 		},
 		OnShutdown: shutdown,
 	})
@@ -145,7 +177,7 @@ func wireLifecycleHooks(service *AppService, app *application.App) {
 	}
 }
 
-func newMainWindow(app *application.App, applicationIcon []byte, hidden bool) *application.WebviewWindow {
+func newMainWindow(app *application.App, applicationIcon []byte, hidden bool, backdrop application.MacBackdrop, gpuPolicy application.WebviewGpuPolicy) *application.WebviewWindow {
 	return app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:               "main",
 		Title:              "Pinger",
@@ -161,6 +193,7 @@ func newMainWindow(app *application.App, applicationIcon []byte, hidden bool) *a
 		Hidden:             hidden,
 		Mac: application.MacWindow{
 			WindowLevel: application.MacWindowLevelNormal,
+			Backdrop:    backdrop,
 			// Draw the content under a transparent title bar so the sidebar and chat header sit at the top edge.
 			TitleBar: application.MacTitleBar{
 				AppearsTransparent: true,
@@ -169,7 +202,8 @@ func newMainWindow(app *application.App, applicationIcon []byte, hidden bool) *a
 			},
 		},
 		Linux: application.LinuxWindow{
-			Icon: applicationIcon,
+			Icon:             applicationIcon,
+			WebviewGpuPolicy: gpuPolicy,
 		},
 	})
 }

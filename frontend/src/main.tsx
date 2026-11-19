@@ -9,6 +9,9 @@ import '@fontsource/space-grotesk/600.css'
 import 'katex/dist/katex.min.css'
 import './style.css'
 import App from './App'
+import { markLiquidGlassWhenReady } from './nativeBackdrop'
+
+markLiquidGlassWhenReady()
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

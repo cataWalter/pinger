@@ -92,68 +92,8 @@
   resize: none;
 }
 
-.app-shell[data-ui='desktop'] .composer-format-toolbar {
-  flex-wrap: wrap;
-  gap: 2px;
-  max-width: 100%;
-  padding-top: 6px;
-  border-top: 1px solid var(--line-soft);
-}
-
-.app-shell[data-ui='desktop'] .composer-format-group {
-  flex-wrap: nowrap;
-  padding: 0;
-}
-
-.app-shell[data-ui='desktop'] .composer-format-toolbar .icon-button {
-  width: 24px;
-  height: 24px;
-  min-width: 24px;
-  min-height: 24px;
-}
-
-.app-shell[data-ui='desktop'] .composer-format-close {
-  margin-left: auto;
-}
-
-.app-shell[data-ui='desktop'] .composer-format-toolbar+.composer-footer {
-  padding-top: 0;
-  border-top: 0;
-}
-
 .app-shell[data-ui='desktop'] .composer-toolbar-row-compose {
   align-items: center;
-}
-
-.app-shell[data-ui='desktop'] .composer-tool-group-message {
-  gap: 3px;
-}
-
-.app-shell[data-ui='desktop'] .composer-tool-group-message .icon-button:not(.has-label) {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-}
-
-.app-shell[data-ui='desktop'] .composer-tool-group-message .composer-ai-cluster .icon-button {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1px;
-  width: auto;
-  min-width: 38px;
-  height: auto;
-  min-height: 0;
-  padding: 3px 4px 2px;
-}
-
-.app-shell[data-ui='desktop'] .composer-tool-group-message .composer-ai-cluster .icon-button kbd {
-  font: inherit;
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
 }
 
 .app-shell[data-ui='desktop'] .send-button {

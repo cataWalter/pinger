@@ -1,0 +1,25 @@
+/* Low-spec mode turns off effects that cost frame time on machines without a GPU. Spinners keep turning
+   because they show progress. Focused elements and selected or pressed states keep their shadow rings,
+   and the incognito content blur is left alone because it is a privacy control. */
+:root[data-low-spec='true'] *,
+:root[data-low-spec='true'] *::before,
+:root[data-low-spec='true'] *::after {
+  transition: none !important;
+  scroll-behavior: auto !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  text-shadow: none !important;
+  will-change: auto !important;
+}
+
+:root[data-low-spec='true'] *:not(.loading-mark):not(.audio-loading-icon),
+:root[data-low-spec='true'] *:not(.loading-mark):not(.audio-loading-icon)::before,
+:root[data-low-spec='true'] *:not(.loading-mark):not(.audio-loading-icon)::after {
+  animation: none !important;
+}
+
+:root[data-low-spec='true'] *:not(:focus, :focus-within, .is-selected, .is-active, [aria-pressed='true'], [aria-selected='true'], [aria-checked='true'], [aria-current]),
+:root[data-low-spec='true'] *:not(:focus, :focus-within, .is-selected, .is-active, [aria-pressed='true'], [aria-selected='true'], [aria-checked='true'], [aria-current])::before,
+:root[data-low-spec='true'] *:not(:focus, :focus-within, .is-selected, .is-active, [aria-pressed='true'], [aria-selected='true'], [aria-checked='true'], [aria-current])::after {
+  box-shadow: none !important;
+}

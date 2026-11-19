@@ -86,7 +86,7 @@ jobs:
           go test -tags sqlite_fts5,goolm ./matrix -run '^$' -fuzz '^FuzzMessageFromEvent$' -fuzztime=30s -parallel=2
 
       - name: Build
-        run: go build -tags "sqlite_fts5 goolm" .
+        run: go build -tags "sqlite_fts5 goolm private_mac_apis" .
 
       - name: Upload browser failure screenshots
         if: failure()
@@ -136,6 +136,9 @@ jobs:
 
       - name: Test notification icon selection
         run: go test -tags "sqlite_fts5 goolm" ./notifications -run 'TestNotificationAttachments|TestNotificationIconCache' -count=1
+
+      - name: Test image engine process handling
+        run: go test -tags "sqlite_fts5 goolm" ./desktop -run 'TestProcessCommand|TestReapOrphanedImageEngine' -count=1
 
       - name: Build Windows application
         run: go build -tags "sqlite_fts5 goolm" -o bin/pinger-ci.exe .

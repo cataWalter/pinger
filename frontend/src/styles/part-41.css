@@ -137,7 +137,7 @@
 
 .composer-toolbar-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px 8px;
   min-width: 0;
@@ -154,61 +154,132 @@
   align-self: center;
 }
 
-.composer-format-toolbar,
+/* Tools stay on one line when the window is wide enough; otherwise whole clusters and then their buttons wrap onto further lines. */
 .composer-tool-group {
   display: flex;
+  flex: 1 1 auto;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  align-items: flex-start;
+  gap: 2px 0;
   min-width: 0;
+  padding: 2px 2px 6px;
 }
 
-.composer-tool-group-message {
-  margin-left: 0;
-}
-
-.composer-format-group,
 .composer-tool-cluster {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 6px;
+  border-left: 1px solid var(--line-soft);
+}
+
+.composer-tool-cluster:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+/* Dark themes get lighter tints so the icons keep their contrast. */
+.app-shell {
+  --tool-format: #2f6fbf;
+  --tool-attach: #b7721a;
+  --tool-delivery: #138089;
+  --tool-ai: #7c4fd0;
+}
+
+.app-shell[data-theme-mode='dark'] {
+  --tool-format: #6ea8ef;
+  --tool-attach: #e0a34f;
+  --tool-delivery: #4fb8c0;
+  --tool-ai: #a98af0;
+}
+
+.composer-tool-cluster--format {
+  --tool-color: var(--tool-format);
+}
+
+.composer-tool-cluster--attach {
+  --tool-color: var(--tool-attach);
+}
+
+.composer-tool-cluster--delivery {
+  --tool-color: var(--tool-delivery);
+}
+
+.composer-tool-cluster--ai {
+  --tool-color: var(--tool-ai);
+}
+
+.composer-tool-button {
   display: inline-flex;
   flex: 0 0 auto;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  max-width: 100%;
-  gap: 2px;
-  min-height: 30px;
-  padding: 2px;
-  border-radius: var(--radius-md);
-  background: transparent;
-}
-
-.composer-tool-group-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding-left: 2px;
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.composer-toolbar-row .icon-button {
-  width: 26px;
-  height: 26px;
-  border-color: transparent;
+  justify-content: center;
+  gap: 1px;
+  min-width: 40px;
+  max-width: 64px;
+  min-height: 36px;
+  padding: 3px 4px 2px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--muted);
+  color: var(--tool-color, var(--muted));
+  font: inherit;
+  cursor: pointer;
 }
 
-.composer-toolbar-row .icon-button:hover:not(:disabled) {
-  transform: none;
-  background: var(--paper);
-  color: var(--accent);
+.composer-tool-button>svg,
+.composer-tool-button kbd,
+.composer-tool-caption {
+  flex: none;
 }
 
-.composer-toolbar-row .icon-button:disabled {
+.composer-tool-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--tool-color, var(--accent)) 14%, transparent);
+  color: var(--tool-color, var(--accent));
+}
+
+.composer-tool-button:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.composer-tool-button.is-recording {
+  --tool-color: var(--danger);
+}
+
+.composer-tool-caption {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-tool-button kbd {
+  font: inherit;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+/* The footer is the container and includes the Send button, so 640px here leaves the toolbar about 580px. Below that, icons only; each keeps its title. */
+@container (max-width: 639px) {
+  .composer-tool-caption {
+    display: none;
+  }
+
+  .composer-tool-button {
+    min-width: 34px;
+    min-height: 34px;
+  }
 }
 
 .composer-hint {

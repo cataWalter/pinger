@@ -42,8 +42,10 @@ func latestEdit(edits []*database.Event) *database.Event {
 }
 
 // applyEditedBody shows the replacement text, because gomuks only swaps in m.new_content when LastEditRef is set.
+// Decrypted E2EE messages also carry Encrypted, so only skip them when the original or the edit failed to decrypt.
 func applyEditedBody(message *Message, original, edit *database.Event) {
-	if message.Redacted || message.Encrypted || message.DecryptionError != "" {
+	if message.Redacted || message.DecryptionError != "" || edit.DecryptionError != "" ||
+		(edit.MegolmSessionID != "" && edit.Decrypted == nil) {
 		return
 	}
 	withEdit := *original

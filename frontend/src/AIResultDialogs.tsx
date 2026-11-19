@@ -94,12 +94,22 @@ function LanguageTutorDialog({ state, hasEditTarget, languages, onClose, onCheck
   // The result describes originalText, so an edited draft is marked stale until it is checked again.
   const stale = isDraft && draftText !== state.originalText
   const correctedText = state.analysis?.corrected_text.trim() ?? ''
+  const keepDisabled = !draftText || hasEditTarget
+  const replaceDisabled = !correctedText || state.busy || hasEditTarget
 
+  // Shortcuts mirror the footer buttons and respect their disabled state, so Ctrl/⌘+2 cannot insert an empty correction.
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
-    if (!isDraft || !draftText) return
-    event.preventDefault()
-    onCheck(draft)
+    if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey || !isDraft) return
+    if (event.key === 'Enter' && draftText) {
+      event.preventDefault()
+      onCheck(draft)
+    } else if (event.key === '1' && !keepDisabled) {
+      event.preventDefault()
+      onUseDraft(draft)
+    } else if (event.key === '2' && !replaceDisabled) {
+      event.preventDefault()
+      onUseDraft(correctedText)
+    }
   }
 
   return (
@@ -134,8 +144,12 @@ function LanguageTutorDialog({ state, hasEditTarget, languages, onClose, onCheck
               <button className="settings-command" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" title={`Check draft (${primaryModifierLabel()} + Enter)`} disabled={!draftText} onClick={() => onCheck(draft)}>
                 Check <kbd aria-hidden="true">{primaryModifierLabel()} Enter</kbd>
               </button>
-              <button className="settings-command" type="button" title="Put your edited text in the composer" disabled={!draftText || hasEditTarget} onClick={() => onUseDraft(draft)}>Keep my draft</button>
-              <button className="settings-command ai-result-primary" type="button" title={`Put the ${learningName} correction in the composer`} disabled={!correctedText || state.busy || hasEditTarget} onClick={() => onUseDraft(correctedText)}>Replace draft with {learningName}</button>
+              <button className="settings-command" type="button" aria-keyshortcuts="Control+1 Meta+1" title={`Put your edited text in the composer (${primaryModifierLabel()} + 1)`} disabled={keepDisabled} onClick={() => onUseDraft(draft)}>
+                Keep my draft <kbd aria-hidden="true">{primaryModifierLabel()} 1</kbd>
+              </button>
+              <button className="settings-command ai-result-primary" type="button" aria-keyshortcuts="Control+2 Meta+2" title={`Put the ${learningName} correction in the composer (${primaryModifierLabel()} + 2)`} disabled={replaceDisabled} onClick={() => onUseDraft(correctedText)}>
+                Replace draft with {learningName} <kbd aria-hidden="true">{primaryModifierLabel()} 2</kbd>
+              </button>
             </>
             : <button className="settings-command" type="button" onClick={onClose}>Close</button>}
         </footer>

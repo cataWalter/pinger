@@ -88,8 +88,6 @@ describe('browser smoke: performance', () => {
     { width: 2048, count: 1000 },
   ])('aligns incoming and outgoing messages across the timeline at $width pixels with $count messages', async ({ width, count }) => {
     await page.viewport(width, 780)
-    const snapshot = await service.Snapshot()
-    service.Snapshot.mockResolvedValueOnce({ ...snapshot, preferences: { ...snapshot.preferences, 'composer.formatting_toolbar': true } })
     const history = await service.History()
     const template = history.messages[0]
     service.History.mockResolvedValueOnce({
@@ -119,9 +117,8 @@ describe('browser smoke: performance', () => {
       expect(Math.abs(incoming!.getBoundingClientRect().left - left)).toBeLessThanOrEqual(2)
       expect(timeline.scrollWidth).toBeLessThanOrEqual(timeline.clientWidth)
     })
-    const formatting = screen.getByRole('toolbar', { name: 'Formatting' }).getBoundingClientRect()
     const tools = screen.getByRole('group', { name: 'Message tools' }).getBoundingClientRect()
-    expect(formatting.bottom).toBeLessThanOrEqual(tools.top)
+    expect(tools.height).toBeLessThanOrEqual(160)
     if (width > 1000) {
       expect(container.querySelector('.composer')!.getBoundingClientRect().height).toBeLessThan(160)
     }
@@ -194,5 +191,36 @@ describe('browser smoke: performance', () => {
       maxCommitMs: Math.round(Math.max(...commits)),
     }))
   }, 60000)
+
+  it('turns off decorative effects but keeps spinners and focus rings in low-spec mode', async () => {
+    await page.viewport(1100, 900)
+    const snapshot = await service.Snapshot()
+    service.Snapshot.mockResolvedValueOnce({ ...snapshot, preferences: { ...snapshot.preferences, 'appearance.low_spec_mode': true } })
+    renderApp()
+    await waitFor(() => expect(document.documentElement.dataset.lowSpec).toBe('true'))
+
+    const decorative = document.createElement('div')
+    decorative.style.animation = 'screen-enter 300ms ease'
+    decorative.style.backdropFilter = 'blur(8px)'
+    decorative.style.boxShadow = '0 0 0 2px red'
+    const spinner = document.createElement('div')
+    spinner.className = 'loading-mark'
+    const focusTarget = document.createElement('input')
+    focusTarget.style.boxShadow = '0 0 0 2px red'
+    document.body.append(decorative, spinner, focusTarget)
+    try {
+      focusTarget.focus()
+      expect(getComputedStyle(decorative).animationName).toBe('none')
+      expect(getComputedStyle(decorative).backdropFilter).toBe('none')
+      expect(getComputedStyle(decorative).boxShadow).toBe('none')
+      expect(getComputedStyle(spinner).animationName).toBe('spin')
+      expect(getComputedStyle(focusTarget).boxShadow).not.toBe('none')
+    } finally {
+      decorative.remove()
+      spinner.remove()
+      focusTarget.remove()
+      delete document.documentElement.dataset.lowSpec
+    }
+  })
 
 })

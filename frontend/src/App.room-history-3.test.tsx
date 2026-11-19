@@ -201,6 +201,66 @@ describe('room history updates', () => {
     expect(screen.queryByRole('dialog', { name: 'Tutor this draft' })).toBeNull()
   })
 
+  it.each(['ctrlKey', 'metaKey'])('keeps the edited Language Tutor draft with %s+1', async (modifier) => {
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:11434' },
+    })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'Ciao, come stai?' } })
+    await userEvent.click(menuCommand('Analyze draft with Language Tutor'))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
+    await within(dialog).findByText('Merhaba, nasılsın?')
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Your text' }), { target: { value: 'Ciao, come stai oggi?' } })
+    fireEvent.keyDown(dialog, { key: '1', [modifier]: true })
+
+    expect(composer.value).toBe('Ciao, come stai oggi?')
+    expect(screen.queryByRole('dialog', { name: 'Tutor this draft' })).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it.each(['ctrlKey', 'metaKey'])('replaces the draft with the Language Tutor correction with %s+2', async (modifier) => {
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:11434' },
+    })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'Ciao, come stai?' } })
+    await userEvent.click(menuCommand('Analyze draft with Language Tutor'))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
+    await within(dialog).findByText('Merhaba, nasılsın?')
+    fireEvent.keyDown(dialog, { key: '2', [modifier]: true })
+
+    expect(composer.value).toBe('Merhaba, nasılsın?')
+    expect(screen.queryByRole('dialog', { name: 'Tutor this draft' })).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('ignores Ctrl+2 while the Language Tutor correction is still pending', async () => {
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:11434' },
+    })
+    harness.tutorService.Analyze.mockReturnValueOnce(new Promise(() => { }))
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'Ciao, come stai?' } })
+    await userEvent.click(menuCommand('Analyze draft with Language Tutor'))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
+    fireEvent.keyDown(dialog, { key: '2', ctrlKey: true })
+
+    expect(composer.value).toBe('Ciao, come stai?')
+    expect(screen.getByRole('dialog', { name: 'Tutor this draft' })).toBeTruthy()
+  })
+
   it.each(['ctrlKey', 'metaKey'])('checks an edited Language Tutor draft with %s+Enter without replacing the composer', async (modifier) => {
     harness.service.Snapshot.mockResolvedValue({
       ...snapshot,
@@ -332,7 +392,7 @@ describe('room history updates', () => {
     await user.click(menuCommand('Analyze draft with Language Tutor'))
     const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
     const close = within(dialog).getByRole('button', { name: 'Close Language Tutor' })
-    fireEvent.keyDown(close, { key: '2', ctrlKey: true })
+    fireEvent.keyDown(close, { key: '3', ctrlKey: true })
     act(() => harness.eventHandlers.get('application-menu:action')?.({ data: 'room-next' }))
     expect(harness.service.SetActiveRoom).not.toHaveBeenCalledWith(secondRoom.id)
     await within(dialog).findByText('Merhaba, nasılsın?')

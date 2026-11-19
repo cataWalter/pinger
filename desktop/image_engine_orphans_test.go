@@ -43,6 +43,13 @@ func TestReapOrphanedImageEngineKeepsRecordOwnedByLiveInstance(t *testing.T) {
 	}
 }
 
+func TestProcessCommandReportsCurrentProcess(t *testing.T) {
+	command, ok := processCommand(os.Getpid())
+	if !ok || command == "" {
+		t.Fatalf("processCommand(current pid) = %q, %v; want the running executable", command, ok)
+	}
+}
+
 func TestImageEngineRecordPathRequiresDataDir(t *testing.T) {
 	if got := imageEngineRecordPath(""); got != "" {
 		t.Fatalf("imageEngineRecordPath(\"\") = %q, want empty", got)

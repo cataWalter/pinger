@@ -6,7 +6,7 @@ import App from './App'
 import { SNIPPETS_STORAGE_KEY } from './snippets'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
 import { appendedTimelineMessageIDs, preferredScrollBehavior, TimelineMessageList, type TimelineMessageActions } from './appShared'
-import { harness, room, message, menuCommand, snapshot } from './appTestSetup'
+import { harness, room, message, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
   const { clipboardSetText, harness } = await import('./appTestSetup')
@@ -175,36 +175,15 @@ describe('settings storage, integrations, help, and about', () => {
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeTruthy()
   })
 
-  it('formats selected composer text from the formatting toolbar', async () => {
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'composer.formatting_toolbar': true } })
-    render(<App />)
-    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
-    fireEvent.change(composer, { target: { value: 'say hello', selectionStart: 4, selectionEnd: 9 } })
-
-    const formattingToolbar = await screen.findByRole('toolbar', { name: 'Formatting' })
-    expect(within(formattingToolbar).getByRole('group', { name: 'Inline formatting' })).toBeTruthy()
-    expect(within(formattingToolbar).getByRole('group', { name: 'Link insertion' })).toBeTruthy()
-    expect(within(formattingToolbar).getByRole('group', { name: 'Block formatting' })).toBeTruthy()
-    const boldButton = await screen.findByRole('button', { name: 'Bold' })
-    expect(boldButton.classList.contains('icon-button')).toBe(true)
-    expect(boldButton.parentElement?.getAttribute('data-tooltip')).toBe('Bold text')
-    fireEvent.mouseDown(boldButton)
-    fireEvent.click(boldButton)
-
-    await waitFor(() => expect(composer.value).toBe('say **hello**'))
-    await waitFor(() => {
-      expect(composer.selectionStart).toBe(6)
-      expect(composer.selectionEnd).toBe(11)
-    })
-  })
-
-  it('formats a preserved text selection from the collapsed formatting menu', async () => {
+  it('formats a preserved text selection from the composer formatting tools', async () => {
     const user = userEvent.setup()
     render(<App />)
     const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
     fireEvent.change(composer, { target: { value: 'say hello', selectionStart: 4, selectionEnd: 9 } })
-    await user.click(await screen.findByRole('button', { name: 'Formatting' }))
-    await user.click(await screen.findByRole('menuitem', { name: 'Bold' }))
+
+    const formatting = await screen.findByRole('group', { name: 'Formatting' })
+    expect(screen.queryByRole('button', { name: 'Formatting' })).toBeNull()
+    await user.click(within(formatting).getByRole('button', { name: 'Bold' }))
     await waitFor(() => expect(composer.value).toBe('say **hello**'))
     await waitFor(() => expect(document.activeElement).toBe(composer))
     expect(composer.selectionStart).toBe(6)
@@ -266,14 +245,16 @@ describe('settings storage, integrations, help, and about', () => {
     }
   })
 
-  it('groups AI actions separately from message tools in the composer', async () => {
+  it('keeps every composer tool in one row of labelled groups with no hidden menus', async () => {
     render(<App />)
     await screen.findByRole('textbox', { name: 'Message' })
 
     const aiTools = await screen.findByRole('group', { name: 'AI tools' })
     const messageTools = await screen.findByRole('group', { name: 'Message tools' })
+    const formattingTools = within(messageTools).getByRole('group', { name: 'Formatting' })
     const contentTools = within(messageTools).getByRole('group', { name: 'Add content' })
-    const deliveryTools = within(messageTools).getByRole('group', { name: 'Delivery options' })
+    const deliveryTools = within(messageTools).getByRole('group', { name: 'Delivery' })
+    expect(within(formattingTools).getByRole('button', { name: 'Bold' }).querySelector('.composer-tool-caption')?.textContent).toBe('Bold')
     expect(within(aiTools).getByRole('button', { name: 'Analyze draft with Language Tutor' })).toBeTruthy()
     expect(within(aiTools).getByRole('button', { name: 'Generate image from draft' })).toBeTruthy()
     expect(within(aiTools).getByRole('button', { name: 'Suggest replies' })).toBeTruthy()
@@ -284,8 +265,10 @@ describe('settings storage, integrations, help, and about', () => {
     expect(within(contentTools).getByRole('button', { name: 'Attach file' })).toBeTruthy()
     expect(within(contentTools).getByRole('button', { name: 'Emoji picker' })).toBeTruthy()
     expect(within(deliveryTools).getByRole('button', { name: 'Record voice note' })).toBeTruthy()
-    expect(within(deliveryTools).getByRole('button', { name: 'Delivery options' })).toBeTruthy()
-    expect(menuCommand('Record video message')).toBeTruthy()
-    expect(menuCommand('Schedule message')).toBeTruthy()
+    expect(within(deliveryTools).getByRole('button', { name: 'Record video message' })).toBeTruthy()
+    expect((within(deliveryTools).getByRole('button', { name: 'Schedule message' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Formatting' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Delivery options' })).toBeNull()
+    expect(screen.queryByRole('toolbar', { name: 'Formatting' })).toBeNull()
   })
 })

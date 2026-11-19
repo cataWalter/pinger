@@ -7,9 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -77,7 +75,8 @@ func reapOrphanedImageEngine(path string) error {
 		return nil
 	}
 	var killErr error
-	if command, ok := processCommand(record.PID); ok && record.Binary != "" && strings.Contains(command, record.Binary) {
+	// Windows paths are case-insensitive, so the match ignores case on every platform.
+	if command, ok := processCommand(record.PID); ok && record.Binary != "" && strings.Contains(strings.ToLower(command), strings.ToLower(record.Binary)) {
 		killErr = killImageEngineTree(record.PID)
 	}
 	if err := removeRecordFile(path); err != nil {
@@ -94,19 +93,6 @@ func removeRecordFile(path string) error {
 		return fmt.Errorf("remove image engine record: %w", err)
 	}
 	return nil
-}
-
-// processCommand returns the command line of pid. It reports false when the process does not exist or ps is unavailable.
-func processCommand(pid int) (string, bool) {
-	if pid <= 0 {
-		return "", false
-	}
-	output, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return "", false
-	}
-	command := strings.TrimSpace(string(output))
-	return command, command != ""
 }
 
 func processExists(pid int) bool {

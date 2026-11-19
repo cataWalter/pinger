@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
+import { lowSpecModeEnabled } from '../dom'
 
+// Low-spec mode counts as reduced motion so exit transitions and view transitions finish immediately.
 export function prefersReducedMotion(): boolean {
+  if (lowSpecModeEnabled()) return true
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 

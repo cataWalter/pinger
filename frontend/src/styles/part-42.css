@@ -1,49 +1,12 @@
 
-.composer-format-group:first-child>.icon-tooltip:first-child::after {
-  left: 0;
-  transform: translateY(4px);
-}
-
-.composer-format-group:first-child>.icon-tooltip:first-child:hover::after,
-.composer-format-group:first-child>.icon-tooltip:first-child:focus-within::after {
-  transform: translateY(0);
-}
-
-.composer-format-close::after,
-.composer-format-group[aria-label='Block formatting']>.icon-tooltip:last-child::after,
-.composer-tool-group-message>.composer-tool-cluster:last-child>.icon-tooltip:last-child::after,
 .composer-footer>.send-tooltip::after {
   right: 0;
   left: auto;
   transform: translateY(4px);
 }
 
-.composer-format-close:hover::after,
-.composer-format-close:focus-within::after,
-.composer-format-group[aria-label='Block formatting']>.icon-tooltip:last-child:hover::after,
-.composer-format-group[aria-label='Block formatting']>.icon-tooltip:last-child:focus-within::after,
-.composer-tool-group-message>.composer-tool-cluster:last-child>.icon-tooltip:last-child:hover::after,
-.composer-tool-group-message>.composer-tool-cluster:last-child>.icon-tooltip:last-child:focus-within::after,
 .composer-footer>.send-tooltip:hover::after,
 .composer-footer>.send-tooltip:focus-within::after {
-  transform: translateY(0);
-}
-
-.composer-ai-cluster>.icon-tooltip:first-child::after {
-  left: 0;
-  transform: translateY(4px);
-}
-
-.composer-ai-cluster>.icon-tooltip:last-child::after {
-  right: 0;
-  left: auto;
-  transform: translateY(4px);
-}
-
-.composer-ai-cluster>.icon-tooltip:first-child:hover::after,
-.composer-ai-cluster>.icon-tooltip:first-child:focus-within::after,
-.composer-ai-cluster>.icon-tooltip:last-child:hover::after,
-.composer-ai-cluster>.icon-tooltip:last-child:focus-within::after {
   transform: translateY(0);
 }
 
@@ -77,15 +40,12 @@
     gap: 6px;
   }
 
-  .composer-toolbar-row,
-  .composer-format-toolbar,
-  .composer-tool-group {
+  .composer-toolbar-row {
     gap: 5px;
   }
 
-  .composer-format-group,
   .composer-tool-cluster {
-    gap: 1px;
+    padding: 0 4px;
   }
 }
 
@@ -248,6 +208,18 @@
   flex: 0 0 auto;
   height: 38px;
   margin: 0 -14px;
+}
+
+/* With Liquid Glass the window material shows behind the page. The sidebar is a theme-coloured tint over it, and the conversation pane stays opaque for legibility. */
+:root[data-liquid-glass='true'],
+:root[data-liquid-glass='true'] body,
+:root[data-liquid-glass='true'] #root,
+:root[data-liquid-glass='true'] .app-shell[data-ui='desktop'] {
+  background: transparent;
+}
+
+:root[data-liquid-glass='true'] .app-shell[data-ui='desktop'] .sidebar {
+  background: color-mix(in srgb, var(--sidebar-bg) 72%, transparent);
 }
 
 .app-shell[data-ui='desktop'] :is(.brand-name, .room-name) {

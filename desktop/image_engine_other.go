@@ -5,7 +5,9 @@ package desktop
 import "os/exec"
 
 // configureImageEngineProcess has no parent-death signal here, so the startup reaper handles orphans.
-func configureImageEngineProcess(_ *exec.Cmd) {}
+func configureImageEngineProcess(command *exec.Cmd) {
+	hideChildConsole(command)
+}
 
 // killImageEngineTree kills the sd-server process.
 func killImageEngineTree(pid int) error {

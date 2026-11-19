@@ -86,7 +86,7 @@
   border-color: var(--line);
 }
 
-.app-shell[data-ui='desktop'] :is(.icon-button, .composer-tool-button, .format-button, .composer-ai-button) {
+.app-shell[data-ui='desktop'] :is(.icon-button, .format-button, .composer-ai-button) {
   color: var(--muted);
   background: transparent;
   border-color: transparent;
@@ -95,13 +95,13 @@
   transition: color var(--motion-fast), background-color var(--motion-fast), border-color var(--motion-fast);
 }
 
-.app-shell[data-ui='desktop'] :is(.icon-button, .composer-tool-button, .format-button, .composer-ai-button):hover {
+.app-shell[data-ui='desktop'] :is(.icon-button, .format-button, .composer-ai-button):hover {
   color: var(--ink);
   background: var(--surface-hover);
   transform: none;
 }
 
-.app-shell[data-ui='desktop'] :is(.icon-button, .composer-tool-button) {
+.app-shell[data-ui='desktop'] .icon-button {
   min-width: 32px;
   min-height: 32px;
 }

@@ -37,7 +37,7 @@ dev_mode:
     - cmd: >-
         mkdir -p bin &&
         env CGO_ENABLED=1 CGO_CFLAGS="-mmacosx-version-min=13.0" CGO_LDFLAGS="-mmacosx-version-min=13.0" MACOSX_DEPLOYMENT_TARGET=13.0
-        go build -tags=sqlite_fts5,goolm -buildvcs=false -gcflags=all=-l -o bin/pinger .
+        go build -tags=sqlite_fts5,goolm,private_mac_apis -buildvcs=false -gcflags=all=-l -o bin/pinger .
       type: blocking
     - cmd: wails3 task common:dev:frontend
       type: background

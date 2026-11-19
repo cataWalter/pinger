@@ -169,7 +169,7 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     expect(screen.getByRole('button', { name: 'Send message' }).parentElement?.getAttribute('data-tooltip')).toBe('Send message')
-    expect(screen.getByRole('button', { name: 'Attach file' }).parentElement?.getAttribute('data-tooltip')).toBe('Attach file')
+    expect(screen.getByRole('button', { name: 'Attach file' }).title).toBe('Attach a file')
     expect(screen.getByRole('button', { name: 'Room actions' }).parentElement?.getAttribute('data-tooltip')).toBe('Room actions')
     const utilities = await screen.findByRole('group', { name: 'Conversation utilities' })
     expect(within(utilities).getByRole('button', { name: 'Search messages' })).toBeTruthy()

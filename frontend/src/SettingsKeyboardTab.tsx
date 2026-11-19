@@ -31,6 +31,9 @@ export function KeyboardSettingsTab({ preferences, onPreferenceChange, onManageS
     ['Ctrl / ⌘ + Shift + P', 'Toggle content blur'],
     ['Ctrl / ⌘ + Shift + I', 'Toggle hiding images and videos'],
     ...Object.values(AI_ACTION_SHORTCUTS).map<[string, string]>(({ key, description }) => [`Ctrl / ⌘ + Shift + ${key}`, description]),
+    ['Ctrl / ⌘ + Enter', 'Check draft in Language Tutor'],
+    ['Ctrl / ⌘ + 1', 'Keep my draft in Language Tutor'],
+    ['Ctrl / ⌘ + 2', 'Replace draft with Language Tutor correction'],
     ['Ctrl / ⌘ + Shift + A', 'Show all rooms'],
     ['Ctrl / ⌘ + Shift + U', 'Show needs-reply rooms'],
     ['Ctrl / ⌘ + Shift + M', 'Start a private model chat'],
@@ -102,7 +105,6 @@ export function KeyboardSettingsTab({ preferences, onPreferenceChange, onManageS
 
       <SettingsGroup title="Composer">
         <PreferenceToggle label="Use Ctrl + Enter to send" checked={preferenceBoolean(preferences, 'composer.ctrl_enter')} onChange={(value) => onPreferenceChange('composer.ctrl_enter', value)} />
-        <PreferenceToggle label="Show formatting toolbar" checked={preferenceBoolean(preferences, 'composer.formatting_toolbar')} onChange={(value) => onPreferenceChange('composer.formatting_toolbar', value)} />
         <PreferenceToggle label="Keep unsent drafts after restarting" checked={preferenceBoolean(preferences, 'composer.keep_drafts', true)} onChange={(value) => onPreferenceChange('composer.keep_drafts', value)} />
         <PreferenceToggle label="Use Up to focus the message list when the composer is empty" checked={preferenceBoolean(preferences, 'composer.arrow_up_focus_timeline')} onChange={(value) => onPreferenceChange('composer.arrow_up_focus_timeline', value)} />
         <PreferenceToggle label="Include timestamps when copying messages" checked={preferenceBoolean(preferences, 'clipboard.copy_timestamp')} onChange={(value) => onPreferenceChange('clipboard.copy_timestamp', value)} />

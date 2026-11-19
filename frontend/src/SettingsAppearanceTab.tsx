@@ -98,6 +98,11 @@ export function AppearanceSettingsTab({ preferences, onPreferenceChange }: Prefe
         <PreferenceToggle label="Use a 24-hour clock" checked={preferenceBoolean(preferences, 'appearance.time_24_hour')} onChange={(value) => onPreferenceChange('appearance.time_24_hour', value)} />
         <PreferenceToggle label="Use relative timestamps" checked={preferenceBoolean(preferences, 'appearance.relative_timestamps')} onChange={(value) => onPreferenceChange('appearance.relative_timestamps', value)} />
       </SettingsGroup>
+
+      <SettingsGroup title="Performance">
+        <PreferenceToggle label="Low-spec mode" checked={preferenceBoolean(preferences, 'appearance.low_spec_mode')} onChange={(value) => onPreferenceChange('appearance.low_spec_mode', value)} />
+        <p className="settings-note">Turns off animations, transitions, shadows, and blur. Restart Pinger to also remove the macOS glass backdrop and, on Windows and Linux, turn off GPU rendering.</p>
+      </SettingsGroup>
     </SettingsSection>
   )
 }
