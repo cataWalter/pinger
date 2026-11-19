@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo } from 'react'
 import { Events } from '@wailsio/runtime'
-import { AppService } from '../bindings/mychat/desktop'
 import { type Room } from '../bindings/mychat/desktop/models.js'
 import { DEFAULT_ACCENT_NAME, accentPaletteFor } from './accent'
 import { SYSTEM_THEME_NAME, themeIdForPreference } from './themes'
 import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID } from './localAIChats'
-import { type ChatExportProgressEvent, EMPTY_ROOMS, preferenceBoolean, preferenceString, reconcileRoomSnapshots, isUnansweredRoom, isNeedsReplyRoom, compareRoomActivity, rankQuickSwitcherRooms } from './appShared'
+import { type ChatExportProgressEvent, preferenceBoolean, preferenceString, isUnansweredRoom, isNeedsReplyRoom, compareRoomActivity, rankQuickSwitcherRooms } from './appShared'
 import type { useTimelineHistory } from './useTimelineHistory'
 
 export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
-  const { activeAccountID, chatExport, editTarget, editTargetRef, imageSendRun, inboxAccountScope, localAIChatId, localAIChatList, localAIChatOpen, localAIFolderFilter, mentionQuery, mentionStart, otherAccountRooms, preferences, quickSwitcherQuery, replyTarget, roomContextMenu, roomMembers, roomRefinements, roomScope, roomSelectionAnchorRef, rooms, scheduledJobs, search, selectedRoom, selectedRoomID, selectedRoomIDs, setAudioInputDevices, setChatExport, setImageSendRun, setOtherAccountRooms, setSelectedAudioInputDeviceId, setSelectedRoomIDs, setSystemPrefersDark, snapshot, systemPrefersDark } = app
+  const { activeAccountID, chatExport, editTarget, editTargetRef, imageSendRun, localAIChatId, localAIChatList, localAIChatOpen, localAIFolderFilter, mentionQuery, mentionStart, preferences, quickSwitcherQuery, replyTarget, roomContextMenu, roomMembers, roomRefinements, roomScope, roomSelectionAnchorRef, rooms, scheduledJobs, search, selectedRoom, selectedRoomID, selectedRoomIDs, setAudioInputDevices, setChatExport, setImageSendRun, setSelectedAudioInputDeviceId, setSelectedRoomIDs, setSystemPrefersDark, systemPrefersDark } = app
   // Progress is only listened to while an image from the composer is generating.
   const imageRunRequestID = imageSendRun?.requestID ?? ''
   useEffect(() => {
@@ -59,32 +58,9 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
     }
   }, [setAudioInputDevices])
   editTargetRef.current = editTarget
-  const inboxAccountCount = snapshot?.accounts?.length ?? 0
   const archivedPreferenceKey = useCallback((roomID: string, accountID = '') => `room.archived.${accountID || activeAccountID || 'primary'}.${roomID}`, [activeAccountID])
-  useEffect(() => {
-    if (inboxAccountCount < 2) return
-    let active = true
-    const refreshOtherAccountRooms = () => {
-      void AppService.AccountRooms().then((accountRooms) => {
-        if (active) setOtherAccountRooms((current) => reconcileRoomSnapshots(current, (accountRooms ?? []).filter((room) => room.accountId !== activeAccountID)))
-      }).catch(() => undefined)
-    }
-    refreshOtherAccountRooms()
-    const timer = window.setInterval(refreshOtherAccountRooms, 15000)
-    return () => {
-      active = false
-      window.clearInterval(timer)
-    }
-  }, [inboxAccountCount, activeAccountID, setOtherAccountRooms])
-  // Rooms of signed-in accounts other than the active one are cached and refreshed on an interval.
-  const effectiveAccountScope = inboxAccountCount > 1 ? inboxAccountScope : 'all'
-  const crossAccountRooms = inboxAccountCount > 1 ? otherAccountRooms : EMPTY_ROOMS
-  const scopedRooms = useMemo(() => effectiveAccountScope === 'all'
-    ? (crossAccountRooms.length > 0 ? [...rooms, ...crossAccountRooms] : rooms)
-    : effectiveAccountScope === activeAccountID ? rooms : crossAccountRooms.filter((room) => room.accountId === effectiveAccountScope),
-    [rooms, crossAccountRooms, effectiveAccountScope, activeAccountID])
   const localAIRooms = useMemo(() => localAIChatList.chats.map((chat) => localAIChatToRoom(chat, preferenceBoolean(preferences, localAIFavoritePreference(chat.id)))), [localAIChatList.chats, preferences])
-  // Private model chats belong to no Matrix account, so they are hidden while the list is limited to one account.
+  // Private model chats belong to no Matrix account, so they join the All list only when included.
   const localAIRoomsForList = useMemo(() => roomScope === 'local-ai' ? localAIRooms : localAIRooms.filter((room) => {
     const chatID = localAIChatIDFromRoomID(room.id)
     return chatID !== null && preferenceBoolean(preferences, localAIIncludeInAllPreference(chatID))
@@ -92,7 +68,7 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
   const localAIIconByRoomID = useMemo(() => new Map(localAIChatList.chats.map((chat) => [localAIRoomID(chat.id), localAIChatIcon(chat)] as const)), [localAIChatList.chats])
   const localAIFolderIDByRoomID = useMemo(() => new Map(localAIChatList.chats.map((chat) => [localAIRoomID(chat.id), chat.folderId] as const)), [localAIChatList.chats])
   const localAIActiveFolder = localAIFolderFilter ? localAIChatList.folders.find((folder) => folder.id === localAIFolderFilter) ?? null : null
-  const listRooms = useMemo(() => effectiveAccountScope === 'all' ? [...scopedRooms, ...localAIRoomsForList] : scopedRooms, [scopedRooms, localAIRoomsForList, effectiveAccountScope])
+  const listRooms = useMemo(() => [...rooms, ...localAIRoomsForList], [rooms, localAIRoomsForList])
   const filteredRooms = useMemo(() => {
     const query = search.trim().toLowerCase()
     const today = Date.now()
@@ -117,8 +93,7 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
   // The open private chat takes the highlight, because the Matrix selection is cleared while it is open.
   const activeListRoomID = localAIChatOpen ? (localAIChatId ? localAIRoomID(localAIChatId) : '') : selectedRoomID
   const quickSwitcherRooms = useMemo(() => rankQuickSwitcherRooms(rooms, quickSwitcherQuery), [rooms, quickSwitcherQuery])
-  const needsReplyCount = useMemo(() => scopedRooms.filter((room) => isNeedsReplyRoom(room) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [scopedRooms, preferences, archivedPreferenceKey])
-  const readRoomCount = useMemo(() => rooms.filter((room) => room.unread === 0 && !room.markedUnread && !preferenceBoolean(preferences, archivedPreferenceKey(room.id))).length, [rooms, preferences, archivedPreferenceKey])
+  const needsReplyCount = useMemo(() => rooms.filter((room) => isNeedsReplyRoom(room) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [rooms, preferences, archivedPreferenceKey])
   const contextMenuRooms = roomContextMenu
     ? (selectedRoomIDs.includes(roomContextMenu.roomID) ? selectedRoomIDs : [roomContextMenu.roomID])
       .map((roomID) => rooms.find((room) => room.id === roomID))
@@ -140,7 +115,7 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
   useEffect(() => {
     setSelectedRoomIDs([])
     roomSelectionAnchorRef.current = ''
-  }, [effectiveAccountScope, roomScope, roomRefinements.unanswered, roomRefinements.needsReply, roomRefinements.favorite, search, roomSelectionAnchorRef, setSelectedRoomIDs])
+  }, [roomScope, roomRefinements.unanswered, roomRefinements.needsReply, roomRefinements.favorite, search, roomSelectionAnchorRef, setSelectedRoomIDs])
   const mentionOptions = mentionStart < 0 ? [] : roomMembers.filter((member) => {
     const query = mentionQuery.toLowerCase()
     return `${member.displayName} ${member.id}`.toLowerCase().includes(query)
@@ -165,5 +140,5 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
     const minutes = Number(preferenceString(preferences, key, String(fallback)))
     return Number.isInteger(minutes) && minutes >= 1 && minutes <= 10080 ? minutes : fallback
   }
-  return { ...app, imageRunRequestID, runningChatExportRoomID, chatExportForSelectedRoom, audioInputDevicePreference, inboxAccountCount, archivedPreferenceKey, effectiveAccountScope, crossAccountRooms, scopedRooms, localAIRooms, localAIRoomsForList, localAIIconByRoomID, localAIFolderIDByRoomID, localAIActiveFolder, listRooms, filteredRooms, activeListRoomID, quickSwitcherRooms, needsReplyCount, readRoomCount, contextMenuRooms, contextMenuNeedsReplyAddRooms, contextMenuNeedsReplyAddCount, contextMenuIsBulk, contextMenuHasUnread, contextMenuNeedsArchive, contextMenuNeedsFavorite, contextMenuNeedsMute, contextMenuChatID, contextMenuLocalAIRoom, contextMenuLocalAIInAll, contextMenuLocalAIFolderID, scheduledJobCount, mentionOptions, themePreference, themeChoice, accentPalette, bubbleColor, safeBubbleColor, composerContextMessage, defaultScheduleDelayMinutes }
+  return { ...app, imageRunRequestID, runningChatExportRoomID, chatExportForSelectedRoom, audioInputDevicePreference, archivedPreferenceKey, localAIRooms, localAIRoomsForList, localAIIconByRoomID, localAIFolderIDByRoomID, localAIActiveFolder, listRooms, filteredRooms, activeListRoomID, quickSwitcherRooms, needsReplyCount, contextMenuRooms, contextMenuNeedsReplyAddRooms, contextMenuNeedsReplyAddCount, contextMenuIsBulk, contextMenuHasUnread, contextMenuNeedsArchive, contextMenuNeedsFavorite, contextMenuNeedsMute, contextMenuChatID, contextMenuLocalAIRoom, contextMenuLocalAIInAll, contextMenuLocalAIFolderID, scheduledJobCount, mentionOptions, themePreference, themeChoice, accentPalette, bubbleColor, safeBubbleColor, composerContextMessage, defaultScheduleDelayMinutes }
 }

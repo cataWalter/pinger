@@ -43,7 +43,9 @@ func newShutdown(service *AppService, notifier notifications.Notifier) func() {
 	return func() {
 		shutdownOnce.Do(func() {
 			service.close()
-			service.closeAccountClients()
+			if client := service.currentClient(); client != nil {
+				client.Close()
+			}
 			if lifecycle, ok := notifier.(notifications.Lifecycle); ok {
 				if closeErr := lifecycle.Close(); closeErr != nil {
 					log.Printf("stop native notifications: %v", closeErr)

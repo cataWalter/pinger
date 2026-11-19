@@ -4,9 +4,9 @@ import { type MatrixUpdate, type MatrixNotification, type PreferenceValues, desc
 import type { useAccountWorkspace } from './useAccountWorkspace'
 
 export function useNotificationDelivery(app: ReturnType<typeof useAccountWorkspace>) {
-  const { activeAccountID, archivedPreferenceKey, nativeNotificationsRef, notificationBatchesRef, notificationKey, notificationRoomName, openNotificationRoom, otherAccountRoomsRef, playNotificationAlert, preferencesRef, repeatRemindersRef, roomsRef, selectedRoomRef, setError } = app
+  const { activeAccountID, archivedPreferenceKey, nativeNotificationsRef, notificationBatchesRef, notificationKey, notificationRoomName, playNotificationAlert, preferencesRef, repeatRemindersRef, roomsRef, selectedRoomRef, setError, showRoom } = app
   // Subscription handlers read these through a ref so the event listeners are attached once.
-  const matrixUpdateHandlersRef = useRef({ archivedPreferenceKey, deliverNotification, queueNotificationBatch, openNotificationRoom, deliverMatrixNotifications, activeAccountID })
+  const matrixUpdateHandlersRef = useRef({ archivedPreferenceKey, deliverNotification, queueNotificationBatch, showRoom, deliverMatrixNotifications, activeAccountID })
 
   function notificationPreferences(notification: MatrixNotification) {
     return notification.accountId && notification.accountId !== matrixUpdateHandlersRef.current.activeAccountID
@@ -57,7 +57,7 @@ export function useNotificationDelivery(app: ReturnType<typeof useAccountWorkspa
         const systemNotification = new Notification(text.title, { body: text.subtitle ? `${text.subtitle}: ${text.body}` : text.body })
         systemNotification.onclick = () => {
           window.focus()
-          matrixUpdateHandlersRef.current.openNotificationRoom(notification.accountId ?? '', notification.roomId)
+          matrixUpdateHandlersRef.current.showRoom(notification.roomId)
         }
         playNotificationAlert(preferences, notification.category)
       } catch (notificationError) {
@@ -113,9 +113,7 @@ export function useNotificationDelivery(app: ReturnType<typeof useAccountWorkspa
     const timer = window.setTimeout(() => {
       reminders.delete(key)
       const current = notificationPreferences(notification)
-      const accountID = matrixUpdateHandlersRef.current.activeAccountID
-      const candidateRooms = notification.accountId && notification.accountId !== accountID ? otherAccountRoomsRef.current : roomsRef.current
-      const room = candidateRooms.find((item) => item.id === notification.roomId)
+      const room = roomsRef.current.find((item) => item.id === notification.roomId)
       if (!room || (room.unread <= 0 && !room.markedUnread) || notificationRoomIsSelected(notification)) return
       if (!notificationAllowed(current, notification.roomId, notification.category)) return
       const roomName = notificationRoomName(notification)
@@ -124,6 +122,6 @@ export function useNotificationDelivery(app: ReturnType<typeof useAccountWorkspa
     }, minutes * 60_000)
     reminders.set(key, timer)
   }
-  matrixUpdateHandlersRef.current = { archivedPreferenceKey, deliverNotification, queueNotificationBatch, openNotificationRoom, deliverMatrixNotifications, activeAccountID }
+  matrixUpdateHandlersRef.current = { archivedPreferenceKey, deliverNotification, queueNotificationBatch, showRoom, deliverMatrixNotifications, activeAccountID }
   return { ...app, matrixUpdateHandlersRef, notificationPreferences, notificationRoomIsSelected, deliverMatrixNotifications, deliverNotification, queueNotificationBatch, flushNotificationBatch, scheduleRepeatReminder }
 }

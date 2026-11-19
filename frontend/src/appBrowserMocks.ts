@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { AccountSummary, Invite, Room } from '../bindings/mychat/desktop/models.js'
+import type { Invite } from '../bindings/mychat/desktop/models.js'
 
 export const service = (() => {
   const room = {
@@ -23,7 +23,6 @@ export const service = (() => {
     accountId: 'primary',
     bridge: '',
   }
-  const accounts: AccountSummary[] = []
   const snapshot = {
     loggedIn: true,
     needsVerification: false,
@@ -38,8 +37,7 @@ export const service = (() => {
       avatarUri: '',
       verified: true,
     },
-    accounts,
-    activeAccountId: 'primary',
+    accountId: 'primary',
     invites: [] as Invite[],
     rooms: [room,
       { ...room, id: '!design:example.org', name: 'Design review and accessibility working group', preview: 'The updated conversation layout is ready to review.', unread: 12, mentions: 2, needsReply: true, favorite: true },
@@ -54,7 +52,6 @@ export const service = (() => {
     OpenExternalURL: vi.fn(() => Promise.resolve()),
     NativeNotificationsSupported: vi.fn(() => Promise.resolve(false)),
     ScheduledJobs: vi.fn(() => Promise.resolve([])),
-    AccountRooms: vi.fn((): Promise<Room[]> => Promise.resolve([])),
     ThreadMessages: vi.fn((): Promise<object[]> => Promise.resolve([])),
     DeclineInvite: vi.fn(() => Promise.resolve()),
     History: vi.fn(() => Promise.resolve({

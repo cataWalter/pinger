@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react'
-import { type NewRoomMode } from './RoomMembership'
 import { useSettings } from './SettingsContext'
-import { type Member, type Message, type MessageSearchResult, type Room, type Snapshot } from '../bindings/mychat/desktop/models.js'
+import { type Member, type Message, type MessageSearchResult, type Snapshot } from '../bindings/mychat/desktop/models.js'
 import { type EmojiQuery } from './composerText'
 import { loadSnippets, type Snippet } from './snippets'
 import { useConnectionProblem } from './useConnectionProblem'
@@ -11,7 +10,7 @@ import { type RoomScope, type RoomRefinements, type ChatExportState, type Schedu
 
 export function useShellState() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
-  const activeAccountID = snapshot?.activeAccountId ?? ''
+  const activeAccountID = snapshot?.accountId ?? ''
   const workspaceGenerationRef = useRef(0)
   const connectionProblem = useConnectionProblem(snapshot?.connectionState === 'offline')
   const [systemPrefersDark, setSystemPrefersDark] = useState(() =>
@@ -35,10 +34,6 @@ export function useShellState() {
   const [search, setSearch] = useState('')
   const [roomScope, setRoomScope] = useState<RoomScope>('all')
   const [roomRefinements, setRoomRefinements] = useState<RoomRefinements>({ unanswered: false, needsReply: false, favorite: false })
-  const [inboxAccountScope, setInboxAccountScope] = useState('all')
-  const [otherAccountRooms, setOtherAccountRooms] = useState<Room[]>([])
-  const otherAccountRoomsRef = useRef(otherAccountRooms)
-  otherAccountRoomsRef.current = otherAccountRooms
   const [messages, setMessages] = useState<Message[]>([])
   // Loading older room history before a Local AI summary chat opens.
   const [summaryStatus, setSummaryStatus] = useState('')
@@ -61,7 +56,6 @@ export function useShellState() {
   const [redactTarget, setRedactTarget] = useState<Message | null>(null)
   const [roomInfoOpen, setRoomInfoOpen] = useState(false)
   const [openThread, setOpenThread] = useState<{ roomID: string; rootID: string } | null>(null)
-  const [newRoomMode, setNewRoomMode] = useState<NewRoomMode | null>(null)
   const [inviteBusyRoomID, setInviteBusyRoomID] = useState('')
   const [profilePhotoPreview, setProfilePhotoPreview] = useState<{ source: string; label: string } | null>(null)
   const [agentEditor, setAgentEditor] = useState<ChatAgentProfile | null>(null)
@@ -91,12 +85,6 @@ export function useShellState() {
   const [scheduledDialogError, setScheduledDialogError] = useState('')
   const [scheduledNotice, setScheduledNotice] = useState('')
   const { settingsOpen, setSettingsOpen, settingsTab, setSettingsTab } = useSettings()
-  const [accountManagerOpen, setAccountManagerOpen] = useState(false)
-  const [addingAccount, setAddingAccount] = useState(false)
-  const [accountHomeserver, setAccountHomeserver] = useState('https://matrix.org')
-  const [accountUsername, setAccountUsername] = useState('')
-  const [accountPassword, setAccountPassword] = useState('')
-  const [accountError, setAccountError] = useState('')
   const [undoRoomID, setUndoRoomID] = useState('')
   const undoToastTimerRef = useRef<number | null>(null)
   const scheduledNoticeTimerRef = useRef<number | null>(null)
@@ -120,5 +108,5 @@ export function useShellState() {
   const [autoPlayNextMessageId, setAutoPlayNextMessageId] = useState<string | null>(null)
   const [voiceCaptureStatus, setVoiceCaptureStatus] = useState<'recording' | 'processing' | null>(null)
   const [captureKind, setCaptureKind] = useState<CaptureKind>('voice')
-  return { snapshot, setSnapshot, activeAccountID, workspaceGenerationRef, connectionProblem, systemPrefersDark, setSystemPrefersDark, selectedRoomID, setSelectedRoomID, localAIChatOpen, setLocalAIChatOpen, localAIChatId, setLocalAIChatId, localAIInitialDraftVersion, localAIInitialDraft, setLocalAIInitialDraft, localAINewChatAgentId, setLocalAINewChatAgentId, localAINewChatKind, setLocalAINewChatKind, localAIChatList, localAIRenameDraft, setLocalAIRenameDraft, localAIDeleteArmedID, setLocalAIDeleteArmedID, localAIFolderFilter, setLocalAIFolderFilter, localAIFolderDraft, setLocalAIFolderDraft, localAIFolderDeleteArmedID, setLocalAIFolderDeleteArmedID, mobilePane, setMobilePane, search, setSearch, roomScope, setRoomScope, roomRefinements, setRoomRefinements, inboxAccountScope, setInboxAccountScope, otherAccountRooms, setOtherAccountRooms, otherAccountRoomsRef, messages, setMessages, summaryStatus, setSummaryStatus, summaryLoadingRef, composeText, setComposeText, stagedAttachments, setStagedAttachments, mediaApproval, setMediaApproval, snippets, setSnippets, mentionBindings, setMentionBindings, mentionStart, setMentionStart, mentionEnd, setMentionEnd, mentionQuery, setMentionQuery, emojiMatch, setEmojiMatch, emojiPickerOpen, setEmojiPickerOpen, emojiActiveIndex, setEmojiActiveIndex, mentionActiveIndex, setMentionActiveIndex, replyTarget, setReplyTarget, editTarget, setEditTarget, reactingMessageID, setReactingMessageID, redactTarget, setRedactTarget, roomInfoOpen, setRoomInfoOpen, openThread, setOpenThread, newRoomMode, setNewRoomMode, inviteBusyRoomID, setInviteBusyRoomID, profilePhotoPreview, setProfilePhotoPreview, agentEditor, setAgentEditor, agentSettingsError, setAgentSettingsError, roomMembers, setRoomMembers, roomMembersLoading, setRoomMembersLoading, roomMembersError, setRoomMembersError, typingUsers, setTypingUsers, leaveConfirmOpen, setLeaveConfirmOpen, leaveRoomError, setLeaveRoomError, leavingRoom, setLeavingRoom, chatExport, setChatExport, searchOpen, setSearchOpen, messageSearch, setMessageSearch, searchRoomID, setSearchRoomID, searchSender, setSearchSender, searchFrom, setSearchFrom, searchTo, setSearchTo, searchResults, setSearchResults, searchNextBatch, setSearchNextBatch, searchStatus, setSearchStatus, searching, setSearching, scheduledDraft, setScheduledDraft, scheduledDueAt, setScheduledDueAt, scheduledSaving, setScheduledSaving, scheduledBusyID, setScheduledBusyID, scheduledDialogError, setScheduledDialogError, scheduledNotice, setScheduledNotice, settingsOpen, setSettingsOpen, settingsTab, setSettingsTab, accountManagerOpen, setAccountManagerOpen, addingAccount, setAddingAccount, accountHomeserver, setAccountHomeserver, accountUsername, setAccountUsername, accountPassword, setAccountPassword, accountError, setAccountError, undoRoomID, setUndoRoomID, undoToastTimerRef, scheduledNoticeTimerRef, roomContextMenu, setRoomContextMenu, selectedRoomIDs, setSelectedRoomIDs, messageContextMenu, setMessageContextMenu, forwardingMessage, setForwardingMessage, forwardTargetRoomID, setForwardTargetRoomID, forwardBusy, setForwardBusy, forwardError, setForwardError, quickSwitcherOpen, setQuickSwitcherOpen, quickSwitcherQuery, setQuickSwitcherQuery, quickSwitcherIndex, setQuickSwitcherIndex, homeserver, setHomeserver, username, setUsername, password, setPassword, recoveryKey, setRecoveryKey, busy, setBusy, autoPlayNextMessageId, setAutoPlayNextMessageId, voiceCaptureStatus, setVoiceCaptureStatus, captureKind, setCaptureKind }
+  return { snapshot, setSnapshot, activeAccountID, workspaceGenerationRef, connectionProblem, systemPrefersDark, setSystemPrefersDark, selectedRoomID, setSelectedRoomID, localAIChatOpen, setLocalAIChatOpen, localAIChatId, setLocalAIChatId, localAIInitialDraftVersion, localAIInitialDraft, setLocalAIInitialDraft, localAINewChatAgentId, setLocalAINewChatAgentId, localAINewChatKind, setLocalAINewChatKind, localAIChatList, localAIRenameDraft, setLocalAIRenameDraft, localAIDeleteArmedID, setLocalAIDeleteArmedID, localAIFolderFilter, setLocalAIFolderFilter, localAIFolderDraft, setLocalAIFolderDraft, localAIFolderDeleteArmedID, setLocalAIFolderDeleteArmedID, mobilePane, setMobilePane, search, setSearch, roomScope, setRoomScope, roomRefinements, setRoomRefinements, messages, setMessages, summaryStatus, setSummaryStatus, summaryLoadingRef, composeText, setComposeText, stagedAttachments, setStagedAttachments, mediaApproval, setMediaApproval, snippets, setSnippets, mentionBindings, setMentionBindings, mentionStart, setMentionStart, mentionEnd, setMentionEnd, mentionQuery, setMentionQuery, emojiMatch, setEmojiMatch, emojiPickerOpen, setEmojiPickerOpen, emojiActiveIndex, setEmojiActiveIndex, mentionActiveIndex, setMentionActiveIndex, replyTarget, setReplyTarget, editTarget, setEditTarget, reactingMessageID, setReactingMessageID, redactTarget, setRedactTarget, roomInfoOpen, setRoomInfoOpen, openThread, setOpenThread, inviteBusyRoomID, setInviteBusyRoomID, profilePhotoPreview, setProfilePhotoPreview, agentEditor, setAgentEditor, agentSettingsError, setAgentSettingsError, roomMembers, setRoomMembers, roomMembersLoading, setRoomMembersLoading, roomMembersError, setRoomMembersError, typingUsers, setTypingUsers, leaveConfirmOpen, setLeaveConfirmOpen, leaveRoomError, setLeaveRoomError, leavingRoom, setLeavingRoom, chatExport, setChatExport, searchOpen, setSearchOpen, messageSearch, setMessageSearch, searchRoomID, setSearchRoomID, searchSender, setSearchSender, searchFrom, setSearchFrom, searchTo, setSearchTo, searchResults, setSearchResults, searchNextBatch, setSearchNextBatch, searchStatus, setSearchStatus, searching, setSearching, scheduledDraft, setScheduledDraft, scheduledDueAt, setScheduledDueAt, scheduledSaving, setScheduledSaving, scheduledBusyID, setScheduledBusyID, scheduledDialogError, setScheduledDialogError, scheduledNotice, setScheduledNotice, settingsOpen, setSettingsOpen, settingsTab, setSettingsTab, undoRoomID, setUndoRoomID, undoToastTimerRef, scheduledNoticeTimerRef, roomContextMenu, setRoomContextMenu, selectedRoomIDs, setSelectedRoomIDs, messageContextMenu, setMessageContextMenu, forwardingMessage, setForwardingMessage, forwardTargetRoomID, setForwardTargetRoomID, forwardBusy, setForwardBusy, forwardError, setForwardError, quickSwitcherOpen, setQuickSwitcherOpen, quickSwitcherQuery, setQuickSwitcherQuery, quickSwitcherIndex, setQuickSwitcherIndex, homeserver, setHomeserver, username, setUsername, password, setPassword, recoveryKey, setRecoveryKey, busy, setBusy, autoPlayNextMessageId, setAutoPlayNextMessageId, voiceCaptureStatus, setVoiceCaptureStatus, captureKind, setCaptureKind }
 }

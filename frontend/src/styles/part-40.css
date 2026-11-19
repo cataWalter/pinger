@@ -141,6 +141,71 @@
   overflow-wrap: anywhere;
 }
 
+.language-tutor-dialog {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell[data-ui='desktop'] .room-info-dialog.language-tutor-dialog {
+  width: min(480px, 100%);
+}
+
+.ai-result-scrim.language-tutor-scrim {
+  background: rgba(11, 24, 18, 0.12);
+}
+
+.language-tutor-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.language-tutor-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.language-tutor-editor .eyebrow {
+  color: var(--accent);
+}
+
+.language-tutor-editor textarea {
+  flex: 1 0 auto;
+  min-height: 120px;
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  resize: none;
+}
+
+.language-tutor-stale {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.language-tutor-dialog .ai-result-footer {
+  flex-wrap: wrap;
+}
+
+.language-tutor-dialog .ai-result-footer kbd {
+  margin-left: 6px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   .ai-result-dialog {
     width: 100%;

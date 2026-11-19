@@ -60,9 +60,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])

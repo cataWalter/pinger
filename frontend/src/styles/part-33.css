@@ -106,8 +106,6 @@
 
 :is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .message-search-panel,
 .app-shell[data-theme='oled-black'] .message-search-panel,
-:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .settings-dialog,
-.app-shell[data-theme='oled-black'] .settings-dialog,
 :is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .room-info-dialog,
 .app-shell[data-theme='oled-black'] .room-info-dialog {
   color: var(--ink);
@@ -115,21 +113,11 @@
   border-color: var(--line);
 }
 
-:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .settings-tabs,
-.app-shell[data-theme='oled-black'] .settings-tabs,
-:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .settings-header,
-.app-shell[data-theme='oled-black'] .settings-header,
 :is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .room-info-header,
 .app-shell[data-theme='oled-black'] .room-info-header,
 :is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .room-info-footer,
 .app-shell[data-theme='oled-black'] .room-info-footer {
   border-color: var(--line);
-}
-
-:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .settings-tabs button.is-active,
-.app-shell[data-theme='oled-black'] .settings-tabs button.is-active {
-  color: var(--accent-bright);
-  background: color-mix(in srgb, var(--accent) 22%, var(--paper));
 }
 
 :is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .settings-command,

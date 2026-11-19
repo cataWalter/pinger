@@ -16,10 +16,10 @@ import (
 // The returned cleanup removes the temp file and must run after the alert is sent.
 func (s *AppService) notificationAvatarFile(accountID, mxc string) (string, func()) {
 	noop := func() {}
-	if accountID == "" || mxc == "" {
+	if accountID == "" || mxc == "" || accountID != s.currentAccountID() {
 		return "", noop
 	}
-	client := s.accountClientsSnapshot()[accountID]
+	client := s.currentClient()
 	if client == nil {
 		return "", noop
 	}
@@ -76,30 +76,12 @@ func (s *AppService) ensureNotificationPermission() (bool, error) {
 }
 
 func (s *AppService) Logout() error {
-	accountID := s.currentAccountID()
 	client := s.currentClient()
 	if client == nil {
 		return errors.New("no active account to log out")
 	}
 	if err := client.Logout(s.ctx); err != nil {
 		return err
-	}
-	clients := s.accountClientsSnapshot()
-	s.accountMu.RLock()
-	registry := s.accountRegistry
-	s.accountMu.RUnlock()
-	if registry != nil {
-		for _, account := range registry.All() {
-			nextClient := clients[account.ID]
-			if account.ID == accountID || nextClient == nil || !nextClient.IsLoggedIn() {
-				continue
-			}
-			if err := registry.SetActive(account.ID); err != nil {
-				return err
-			}
-			s.setActiveAccount(account.ID, nextClient)
-			return nil
-		}
 	}
 	if s.quit != nil {
 		s.quit()
@@ -111,32 +93,43 @@ func (s *AppService) startEventPump(emit func(Update)) {
 	s.accountMu.Lock()
 	s.emitUpdate = emit
 	s.accountMu.Unlock()
-	for accountID, client := range s.accountClientsSnapshot() {
-		s.startAccountEventPump(accountID, client)
+	client := s.currentClient()
+	accountID := s.currentAccountID()
+	if client == nil || s.ctx.Err() != nil {
+		return
 	}
+	s.workers.Add(1)
+	go func() {
+		defer s.workers.Done()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case update, ok := <-client.Events():
+				if !ok || s.ctx.Err() != nil {
+					return
+				}
+				if update.Error != "" {
+					logging.For("service").Warn().
+						Str("connection_state", string(update.ConnectionState)).
+						Str("detail", update.Error).
+						Msg("Matrix update reported an error")
+				}
+				emit(mapAccountUpdate(update, accountID, s.preferenceValuesForAccount(accountID)))
+			}
+		}
+	}()
 }
 
 func (s *AppService) startSync() {
-	for accountID, client := range s.accountClientsSnapshot() {
-		s.startAccountSync(accountID, client)
-	}
-}
-
-func (s *AppService) startAccountSync(accountID string, client *matrix.Client) {
-	s.accountMu.Lock()
-	if s.accountSyncStarted == nil {
-		s.accountSyncStarted = make(map[string]bool)
-	}
-	if s.accountSyncStarted[accountID] || !client.IsLoggedIn() || s.ctx.Err() != nil {
-		s.accountMu.Unlock()
+	client := s.currentClient()
+	if client == nil || !client.IsLoggedIn() || s.ctx.Err() != nil {
 		return
 	}
-	s.accountSyncStarted[accountID] = true
 	s.workers.Add(1)
-	s.accountMu.Unlock()
 	go func() {
 		defer s.workers.Done()
-		if err := client.StartWithRetry(s.ctx); err != nil && s.ctx.Err() == nil && s.currentAccountID() == accountID {
+		if err := client.StartWithRetry(s.ctx); err != nil && s.ctx.Err() == nil {
 			s.accountMu.RLock()
 			emit := s.emitUpdate
 			s.accountMu.RUnlock()
@@ -206,10 +199,9 @@ func (s *AppService) processDueScheduledJobs() {
 		log.Printf("persist scheduled message completions: %v", err)
 	}
 	now := time.Now().UnixMilli()
-	for accountID, client := range s.accountClientsSnapshot() {
-		if !client.IsLoggedIn() || client.ConnectionState() != matrix.StateConnected {
-			continue
-		}
+	accountID := s.currentAccountID()
+	client := s.currentClient()
+	if client != nil && client.IsLoggedIn() && client.ConnectionState() == matrix.StateConnected {
 		s.workers.Add(1)
 		go func() {
 			defer s.workers.Done()

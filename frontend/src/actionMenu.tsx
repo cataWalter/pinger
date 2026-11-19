@@ -17,6 +17,10 @@ export function primaryShiftShortcutLabel(key: string) {
   return modifier === '⌘' ? `⌘⇧${key}` : `${modifier}+Shift+${key}`
 }
 
+export function primaryShiftShortcutHint(key: string) {
+  return `${primaryModifierLabel()}⇧${key}`
+}
+
 export function ActionMenu({ label, icon, items, side = 'bottom', showLabel = false, disabled = false, count = 0 }: {
   label: string
   icon: ReactNode

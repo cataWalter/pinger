@@ -118,67 +118,6 @@
   cursor: default;
 }
 
-.new-room-dialog {
-  width: min(440px, 100%);
-}
-
-.confirm-dialog>.new-room-tabs {
-  justify-content: flex-start;
-  gap: 4px;
-  margin: 14px 0 4px;
-}
-
-.new-room-tabs button.is-active {
-  color: var(--on-accent);
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.new-room-form label {
-  display: grid;
-  gap: 5px;
-  margin: 10px 0 0;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.new-room-form input:not([type="checkbox"]),
-.new-room-form textarea {
-  width: 100%;
-  min-width: 0;
-  min-height: 34px;
-  padding: 7px 9px;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
-  font: inherit;
-  font-size: 11px;
-}
-
-.new-room-form textarea {
-  resize: vertical;
-}
-
-.new-room-form label.new-room-check {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--ink);
-  font-size: 11px;
-}
-
-.new-room-form p {
-  margin: 6px 0 0;
-}
-
-.new-room-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 7px;
-  margin-top: 18px;
-}
-
 .room-invite-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

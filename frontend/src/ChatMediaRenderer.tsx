@@ -5,6 +5,11 @@ export function matrixMediaURL(roomID: string, eventID: string) {
   return `/media/matrix/${encodeURIComponent(roomID)}/${encodeURIComponent(eventID)}`
 }
 
+export function matrixMediaPreviewURL(roomID: string, eventID: string) {
+  const url = matrixMediaURL(roomID, eventID)
+  return url && `${url}?size=preview`
+}
+
 export function matrixMXCMediaURL(uri: string) {
   const match = /^mxc:\/\/([^/]+)\/([^/]+)$/.exec(uri)
   if (!match) return ''

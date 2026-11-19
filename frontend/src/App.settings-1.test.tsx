@@ -66,7 +66,6 @@ describe('settings storage, integrations, help, and about', () => {
   beforeEach(() => {
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
     harness.service.History.mockResolvedValue({ messages: [], before: 0, hasMore: false })
     harness.service.ScheduledJobs.mockResolvedValue([])
     harness.service.SetActiveRoom.mockResolvedValue(undefined)
@@ -139,7 +138,8 @@ describe('settings storage, integrations, help, and about', () => {
       current: false,
     }
     harness.service.Devices.mockResolvedValue([device])
-    const user = await openSettingsTab('Devices')
+    const user = await openSettingsTab('Account')
+    await user.click(await screen.findByText('Advanced'))
     expect(await screen.findByText('Old laptop')).toBeTruthy()
 
     await user.click(await screen.findByRole('button', { name: 'Revoke' }))
@@ -158,7 +158,7 @@ describe('settings storage, integrations, help, and about', () => {
       harness.eventHandlers.get('application-menu:about')?.({ data: undefined })
     })
     const settingsDialog = await screen.findByRole('dialog', { name: 'Settings' })
-    expect(within(settingsDialog).getByRole('tab', { name: 'About' }).getAttribute('aria-selected')).toBe('true')
+    expect(within(settingsDialog).getByRole('tab', { name: 'Help' }).getAttribute('aria-selected')).toBe('true')
     expect(within(settingsDialog).getByRole('button', { name: 'Check for updates' })).toBeTruthy()
 
     await act(async () => {
@@ -219,8 +219,8 @@ describe('settings storage, integrations, help, and about', () => {
       ...snapshot,
       rooms: [room, { ...room, id: '!wa1:example.org', name: 'Alice', bridge: 'WA' }, { ...room, id: '!wa2:example.org', name: 'Bob', bridge: 'WA' }],
     })
-    await openSettingsTab('Integrations')
-
+    const user = await openSettingsTab('Account')
+    await user.click(await screen.findByText('Advanced'))
     const status = await screen.findByLabelText('Detected chat networks')
     expect(within(status).getByText('WhatsApp').nextElementSibling?.textContent).toBe('2 chats detected')
     expect(within(status).getByText('Telegram').nextElementSibling?.textContent).toBe('No chats detected')

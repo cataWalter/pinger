@@ -10,9 +10,6 @@ export const harness = {
     Verify: vi.fn(),
     OpenExternalURL: vi.fn(),
     Logout: vi.fn(),
-    AddAccount: vi.fn(),
-    SwitchAccount: vi.fn(),
-    AccountRooms: vi.fn(),
     History: vi.fn(),
     SearchMessages: vi.fn(),
     ScheduledJobs: vi.fn(),
@@ -49,8 +46,6 @@ export const harness = {
     StartDirectChat: vi.fn(),
     AcceptInvite: vi.fn(),
     DeclineInvite: vi.fn(),
-    JoinRoom: vi.fn(),
-    CreateGroupRoom: vi.fn(),
     InviteToRoom: vi.fn(),
     URLPreview: vi.fn(),
     ThreadMessages: vi.fn(),
@@ -183,7 +178,8 @@ export function menuCommand(label: string) {
   if (direct) return direct
   const roomCommands = ['Media gallery', 'Export chat', 'Scheduled messages and reminders', 'Add to Favorites', 'Remove from Favorites', 'Mute room', 'Unmute room']
   const deliveryCommands = ['Record video message', 'Schedule message', 'Schedule reply']
-  const menuName = roomCommands.includes(label) ? 'Room actions' : deliveryCommands.includes(label) ? 'Delivery options' : 'AI tools'
+  const menuName = roomCommands.includes(label) ? 'Room actions' : deliveryCommands.includes(label) ? 'Delivery options' : null
+  if (!menuName) return screen.getByRole('button', { name: label })
   if (!screen.queryByRole('menu', { name: menuName })) fireEvent.click(screen.getByRole('button', { name: menuName }))
   return within(screen.getByRole('menu', { name: menuName })).getByRole(/Favorites|Mute room|Unmute room/.test(label) ? 'menuitemcheckbox' : 'menuitem', { name: label })
 }
@@ -210,8 +206,7 @@ export const snapshot: Snapshot = {
     avatarUri: '',
     verified: true,
   },
-  accounts: [],
-  activeAccountId: 'primary',
+  accountId: 'primary',
   rooms: [room],
   invites: [],
   slidingSyncListCounts: { main: 1 },

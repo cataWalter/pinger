@@ -3,7 +3,7 @@ import { HardDrive } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type MediaCacheUsage, type MediaCleanupResult, type RoomStorage, type StorageUsage } from '../bindings/mychat/desktop/models.js'
 import { describeError, formatBytes } from './appShared'
-import { SettingsSection } from './SettingsControls'
+import { SettingsAdvanced, SettingsSection } from './SettingsControls'
 import { storageMediaOptions, storageAgeOptions, storageChatLimit } from './storageSettingsConstants'
 import { RecentMessagesExport } from './RecentMessagesExport'
 
@@ -63,8 +63,10 @@ export function StorageSettingsTab() {
       <button className="settings-command" type="button" disabled={storageLoading || storageAction !== ''} onClick={() => void runStorageAction('clear')}><HardDrive size={15} />{storageAction === 'clear' ? 'Clearing cache…' : 'Clear media cache'}</button>
       <button className="settings-command" type="button" disabled={storageLoading || storageAction !== ''} onClick={() => void runStorageAction('optimize')}><HardDrive size={15} />{storageAction === 'optimize' ? 'Optimizing database…' : 'Optimize database'}</button>
       <p className="settings-note">Clearing the media cache does not remove messages or encryption keys.</p>
-      <ChatStorageSettings />
-      <RecentMessagesExport />
+      <SettingsAdvanced description="Per-chat storage cleanup and exporting recent messages.">
+        <ChatStorageSettings />
+        <RecentMessagesExport />
+      </SettingsAdvanced>
     </SettingsSection>
   )
 }

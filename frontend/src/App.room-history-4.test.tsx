@@ -60,9 +60,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -193,10 +190,10 @@ describe('room history updates', () => {
     expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Hello, how are you?', 'draft', 'fr', 'de', expect.any(String))
     const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
     expect(await within(dialog).findByText('CORRECTED · FRENCH')).toBeTruthy()
-    expect(within(dialog).getByText('TRANSLATION · GERMAN')).toBeTruthy()
     expect(dialog.querySelector('p[lang="fr"]')?.textContent).toBe('Bonjour, comment ça va ?')
-    expect(within(dialog).getByText('Use the contraction “ça va” in this expression.')).toBeTruthy()
-    expect(within(dialog).getByText('bonjour')).toBeTruthy()
+    expect(within(dialog).queryByText('TRANSLATION · GERMAN')).toBeNull()
+    expect(within(dialog).queryByText('Use the contraction “ça va” in this expression.')).toBeNull()
+    expect(within(dialog).queryByText('bonjour')).toBeNull()
     expect(within(dialog).getByRole('button', { name: 'Replace draft with French' })).toBeTruthy()
   })
 

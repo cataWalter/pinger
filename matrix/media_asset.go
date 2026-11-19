@@ -57,6 +57,16 @@ func (locks *mediaAssetLocks) lock(key string) func() {
 }
 
 func (c *Client) OpenMediaFileForEvent(ctx context.Context, roomID, eventID string) (*os.File, string, error) {
+	return c.openMediaFileForEvent(ctx, roomID, eventID, false)
+}
+
+// OpenMediaPreviewForEvent prefers the Matrix thumbnail so inline previews do not decode full-size originals.
+// The thumbnail's MIME type is not stored on the message, so the returned MIME type is empty and callers must sniff it.
+func (c *Client) OpenMediaPreviewForEvent(ctx context.Context, roomID, eventID string) (*os.File, string, error) {
+	return c.openMediaFileForEvent(ctx, roomID, eventID, true)
+}
+
+func (c *Client) openMediaFileForEvent(ctx context.Context, roomID, eventID string, preview bool) (*os.File, string, error) {
 	if !validMediaIdentifier(roomID) || !validMediaIdentifier(eventID) {
 		return nil, "", ErrInvalidMediaRequest
 	}
@@ -79,6 +89,15 @@ func (c *Client) OpenMediaFileForEvent(ctx context.Context, roomID, eventID stri
 	}
 	if !ok || message.Redacted || message.MediaURI == "" {
 		return nil, "", ErrMediaNotFound
+	}
+	if preview && message.MediaThumbnailURI != "" {
+		file, err := c.openCachedMediaFile(ctx, message.MediaThumbnailURI, message.MediaThumbnailEncrypted)
+		if err == nil {
+			return file, "", nil
+		}
+		if !errors.Is(err, ErrMediaNotFound) {
+			return nil, "", err
+		}
 	}
 	file, err := c.openCachedMediaFile(ctx, message.MediaURI, message.MediaEncrypted)
 	if err != nil {

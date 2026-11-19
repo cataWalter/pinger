@@ -25,6 +25,11 @@ export const ROOM_LIST_MAX_SYNC_RANGE = 200
 
 export const VIRTUAL_TIMELINE_THRESHOLD = 200
 
+// Trimming only happens while the user is at the bottom. KEEP must stay above VIRTUAL_TIMELINE_THRESHOLD so the list does not remount after a trim.
+export const TIMELINE_TRIM_THRESHOLD = 500
+
+export const TIMELINE_KEEP_COUNT = 300
+
 export const chatWallpapers = [
   { name: 'None', swatch: 'var(--paper)' },
   { name: 'Meadow', swatch: 'linear-gradient(135deg, #e8f2e8, #f7f5e9)' },

@@ -1,8 +1,8 @@
 import { fuzzyScore } from './fuzzy'
 
-export type SettingsTab = 'General' | 'Appearance' | 'Notifications' | 'Keyboard' | 'History' | 'Account' | 'Devices' | 'Storage' | 'Security' | 'Help' | 'About' | 'AI' | 'Integrations'
+export type SettingsTab = 'General' | 'Account' | 'Appearance' | 'Notifications' | 'Keyboard' | 'Storage' | 'AI' | 'Help'
 
-export const SETTINGS_TABS: SettingsTab[] = ['General', 'Account', 'Appearance', 'Notifications', 'Keyboard', 'History', 'Devices', 'Storage', 'Security', 'Help', 'About', 'AI', 'Integrations']
+export const SETTINGS_TABS: SettingsTab[] = ['General', 'Account', 'Appearance', 'Notifications', 'Keyboard', 'Storage', 'AI', 'Help']
 
 export type SettingsEntry = {
   id: string
@@ -96,10 +96,10 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'keyboard.mark-answered', tab: 'Keyboard', title: 'Mark answered shortcut', description: 'Use one letter to mark the selected room answered.', keywords: 'shortcut answered key letter' },
   { id: 'keyboard.reference', tab: 'Keyboard', title: 'Keyboard shortcuts', description: 'Every shortcut Pinger understands.', keywords: 'shortcut keys reference list', anchor: '.keyboard-shortcut-list' },
 
-  { id: 'history.initial-messages', tab: 'History', title: 'Messages to load', description: 'Load this many recent messages when opening a room.', keywords: 'history messages load count limit' },
+  { id: 'history.initial-messages', tab: 'Storage', title: 'Messages to load', description: 'Load this many recent messages when opening a room.', keywords: 'history messages load count limit' },
 
-  { id: 'devices.list', tab: 'Devices', title: 'Active devices', description: 'Signed-in devices and when they were last active.', keywords: 'devices sessions list', anchor: '.device-row' },
-  { id: 'devices.revoke', tab: 'Devices', title: 'Revoke device', description: 'Sign a device out of this account.', keywords: 'revoke device sign out remove', anchor: '.device-row .settings-command' },
+  { id: 'devices.list', tab: 'Account', title: 'Active devices', description: 'Signed-in devices and when they were last active.', keywords: 'devices sessions list', anchor: '.device-row' },
+  { id: 'devices.revoke', tab: 'Account', title: 'Revoke device', description: 'Sign a device out of this account.', keywords: 'revoke device sign out remove', anchor: '.device-row .settings-command' },
 
   { id: 'storage.data-folder', tab: 'Storage', title: 'Data folder', description: 'Where Pinger keeps its database, keys and preferences.', keywords: 'data folder location directory move appdata storage restart' },
   { id: 'storage.summary', tab: 'Storage', title: 'Local storage', description: 'Sizes of the local database and media cache.', keywords: 'storage disk usage database cache', anchor: '.storage-summary' },
@@ -109,12 +109,12 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'storage.clear-matching', tab: 'Storage', title: 'Clear matching cached media', description: 'Remove cached media for the selected chats.', keywords: 'storage cleanup media age type' },
   { id: 'storage.export-recent', tab: 'Storage', title: 'Export recent messages for all chats', description: 'Save the newest messages of every chat as text files in a folder.', keywords: 'storage export download backup messages chats history transcript recent last' },
 
-  { id: 'security.verification', tab: 'Security', title: 'Device verification', description: 'Whether this device is verified with your account.', keywords: 'security encryption verified device', anchor: '.settings-note' },
-  { id: 'security.backup-passphrase', tab: 'Security', title: 'Backup passphrase', description: 'Protect the exported key backup with a passphrase.', keywords: 'security passphrase backup keys' },
-  { id: 'security.confirm-passphrase', tab: 'Security', title: 'Confirm passphrase', description: 'Repeat the backup passphrase.', keywords: 'security passphrase confirm' },
-  { id: 'security.export-keys', tab: 'Security', title: 'Export room keys', description: 'Save an encrypted copy of your room keys.', keywords: 'security export backup keys download' },
-  { id: 'security.import-passphrase', tab: 'Security', title: 'Import passphrase', description: 'Passphrase of the backup file you are importing.', keywords: 'security import passphrase' },
-  { id: 'security.import-file', tab: 'Security', title: 'Import room key file', description: 'Restore room keys from a backup file.', keywords: 'security import backup file restore' },
+  { id: 'security.verification', tab: 'Account', title: 'Device verification', description: 'Whether this device is verified with your account.', keywords: 'security encryption verified device', anchor: '.settings-note' },
+  { id: 'security.backup-passphrase', tab: 'Account', title: 'Backup passphrase', description: 'Protect the exported key backup with a passphrase.', keywords: 'security passphrase backup keys' },
+  { id: 'security.confirm-passphrase', tab: 'Account', title: 'Confirm passphrase', description: 'Repeat the backup passphrase.', keywords: 'security passphrase confirm' },
+  { id: 'security.export-keys', tab: 'Account', title: 'Export room keys', description: 'Save an encrypted copy of your room keys.', keywords: 'security export backup keys download' },
+  { id: 'security.import-passphrase', tab: 'Account', title: 'Import passphrase', description: 'Passphrase of the backup file you are importing.', keywords: 'security import passphrase' },
+  { id: 'security.import-file', tab: 'Account', title: 'Import room key file', description: 'Restore room keys from a backup file.', keywords: 'security import backup file restore' },
 
   { id: 'ai.connection', tab: 'AI', title: 'OpenAI-compatible AI', description: 'Connect Pinger to a llama-server or other OpenAI-compatible endpoint.', keywords: 'ai llm model endpoint local', anchor: '.ai-settings-form' },
   { id: 'ai.endpoint', tab: 'AI', title: 'Endpoint', description: 'Address of the OpenAI-compatible endpoint.', keywords: 'ai endpoint url server address' },
@@ -124,7 +124,7 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'ai.test', tab: 'AI', title: 'Test endpoint', description: 'Check that the endpoint answers.', keywords: 'ai test connection endpoint' },
   { id: 'ai.agents', tab: 'AI', title: 'Chat agents', description: 'Create named agents with instructions for private model chats, and choose a default for new chats.', keywords: 'agent agents role persona instructions private local ai chat default', anchor: '.local-ai-agent-settings' },
   { id: 'ai.prompts', tab: 'AI', title: 'AI prompts and tuning', description: 'Edit the instructions, temperature (0.6 to 2), and token limit for each AI feature.', keywords: 'ai prompt prompts instructions system temperature max tokens tune agent summarize translate reply tone', anchor: '.ai-prompts-settings' },
-  { id: 'integrations.networks', tab: 'Integrations', title: 'Detected chat networks', description: 'Bridged networks found in your chats.', keywords: 'bridges whatsapp telegram signal integration', anchor: '.integration-status' },
+  { id: 'integrations.networks', tab: 'Account', title: 'Detected chat networks', description: 'Bridged networks found in your chats.', keywords: 'bridges whatsapp telegram signal integration', anchor: '.integration-status' },
 
   { id: 'help.keyboard', tab: 'Help', title: 'Keyboard shortcuts', description: 'A quick tour of the shortcuts Pinger uses.', keywords: 'help shortcuts' },
   { id: 'help.storage', tab: 'Help', title: 'Storage and media', description: 'How clearing the media cache affects your messages.', keywords: 'help storage media cache' },
@@ -133,10 +133,10 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'help.encryption', tab: 'Help', title: 'Encryption and room keys', description: 'Export room keys from Security and protect the file with a passphrase.', keywords: 'help encryption keys backup' },
   { id: 'help.report-issue', tab: 'Help', title: 'Report an issue', description: 'Open the issue tracker on GitHub.', keywords: 'help report bug issue github' },
 
-  { id: 'about.update', tab: 'About', title: 'Check for updates', description: 'Look for a newer Pinger release.', keywords: 'about update version upgrade release' },
-  { id: 'about.repository', tab: 'About', title: 'Project repository', description: 'Source code for Pinger.', keywords: 'about github repository source code' },
-  { id: 'about.feedback', tab: 'About', title: 'Send feedback or report an issue', description: 'Open the issue tracker on GitHub.', keywords: 'about feedback issue github' },
-  { id: 'about.license', tab: 'About', title: 'License', description: 'Terms Pinger is released under.', keywords: 'about license agpl gpl', anchor: 'a[href*="LICENSE"]' },
+  { id: 'about.update', tab: 'Help', title: 'Check for updates', description: 'Look for a newer Pinger release.', keywords: 'about update version upgrade release' },
+  { id: 'about.repository', tab: 'Help', title: 'Project repository', description: 'Source code for Pinger.', keywords: 'about github repository source code' },
+  { id: 'about.feedback', tab: 'Help', title: 'Send feedback or report an issue', description: 'Open the issue tracker on GitHub.', keywords: 'about feedback issue github' },
+  { id: 'about.license', tab: 'Help', title: 'License', description: 'Terms Pinger is released under.', keywords: 'about license agpl gpl', anchor: 'a[href*="LICENSE"]' },
 ]
 
 function scoreEntry(entry: SettingsEntry, terms: string[]) {

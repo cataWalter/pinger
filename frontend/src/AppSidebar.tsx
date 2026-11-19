@@ -1,14 +1,14 @@
-import { Archive, ArchiveRestore, ChevronDown, Bell, BellOff, Check, CircleDot, MessageCircleMore, Pencil, Reply, Search, Settings, Sparkles, Star, Trash2, X, Folder, FolderPlus, Plus } from 'lucide-react'
+import { Archive, ArchiveRestore, Bell, BellOff, Check, CircleDot, MessageCircleMore, Pencil, Reply, Search, Settings, Sparkles, Star, Trash2, X, Folder, FolderPlus, Plus } from 'lucide-react'
 import { type Room } from '../bindings/mychat/desktop/models.js'
 import { InviteList } from './RoomMembership'
 import { ConnectionStatusBanner } from './ConnectionStatusBanner'
 import { localAIFavoritePreference, localAIIncludeInAllPreference, LOCAL_AI_FOLDER_NAME_CHARACTERS } from './localAIChats'
-import { Avatar, preferenceBoolean, isNeedsReplyRoom, primaryModifierLabel, RoomButton, reportRoomListVisibleRange, VirtualRoomList } from './appShared'
+import { preferenceBoolean, isNeedsReplyRoom, primaryModifierLabel, RoomButton, reportRoomListVisibleRange, VirtualRoomList } from './appShared'
 import type { AppState } from './appState'
 import { getVolatileAIDraft } from './volatileAIDrafts'
 
 export function AppSidebar({ app }: { app: AppState }) {
-  const { acceptInvite, activeAccountID, activeListRoomID, answeredShortcut, applyBulkRoomAction, applyMenuFilter, archiveAllReadRooms, clearRoomSelection, connectionProblem, contextMenuChatID, contextMenuHasUnread, contextMenuIsBulk, contextMenuLocalAIFolderID, contextMenuLocalAIInAll, contextMenuLocalAIRoom, contextMenuNeedsArchive, contextMenuNeedsFavorite, contextMenuNeedsMute, contextMenuNeedsReplyAddCount, contextMenuNeedsReplyAddRooms, contextMenuRooms, declineInvite, deleteLocalAIChat, deleteLocalAIFolder, effectiveAccountScope, filteredRooms, handleMarkAnsweredKeyDown, inboxAccountCount, inviteBusyRoomID, isActiveAccountRoom, isLastMessageByCurrentUser, listRooms, localAIActiveFolder, localAIChatList, localAIDeleteArmedID, localAIFolderDeleteArmedID, localAIFolderDraft, localAIFolderFilter, localAIIconByRoomID, markRoomAnswered, markRoomRead, markRoomUnread, menuFilter, moveLocalAIChatToFolder, needsReplyCount, preferences, readRoomCount, roomButtonActionsRef, roomContextMenu, roomListRef, roomRefinements, roomScope, roomSearchInputRef, saveLocalAIFolderDraft, search, selectLocalAIChat, selectedRoomID, selectedRoomIDs, selectedRoomListIndex, setAccountError, setAccountManagerOpen, setAddingAccount, setInboxAccountScope, setLocalAIDeleteArmedID, setLocalAIFolderDeleteArmedID, setLocalAIFolderDraft, setLocalAIFolderFilter, setLocalAIRenameDraft, setNewRoomMode, setPreference, setRoomArchived, setRoomContextMenu, setRoomScope, setSearch, setSettingsOpen, snapshot, startLocalAIChat, toggleRoomRefinement } = app
+  const { acceptInvite, activeAccountID, activeListRoomID, answeredShortcut, applyBulkRoomAction, applyMenuFilter, clearRoomSelection, connectionProblem, contextMenuChatID, contextMenuHasUnread, contextMenuIsBulk, contextMenuLocalAIFolderID, contextMenuLocalAIInAll, contextMenuLocalAIRoom, contextMenuNeedsArchive, contextMenuNeedsFavorite, contextMenuNeedsMute, contextMenuNeedsReplyAddCount, contextMenuNeedsReplyAddRooms, contextMenuRooms, declineInvite, deleteLocalAIChat, deleteLocalAIFolder, filteredRooms, handleMarkAnsweredKeyDown, inviteBusyRoomID, isLastMessageByCurrentUser, listRooms, localAIActiveFolder, localAIChatList, localAIDeleteArmedID, localAIFolderDeleteArmedID, localAIFolderDraft, localAIFolderFilter, localAIIconByRoomID, markRoomAnswered, markRoomRead, markRoomUnread, menuFilter, moveLocalAIChatToFolder, needsReplyCount, preferences, roomButtonActionsRef, roomContextMenu, roomListRef, roomRefinements, roomScope, roomSearchInputRef, saveLocalAIFolderDraft, search, selectLocalAIChat, selectedRoomID, selectedRoomIDs, selectedRoomListIndex, setLocalAIDeleteArmedID, setLocalAIFolderDeleteArmedID, setLocalAIFolderDraft, setLocalAIFolderFilter, setLocalAIRenameDraft, setPreference, setRoomArchived, setRoomContextMenu, setRoomScope, setSearch, setSettingsOpen, snapshot, startLocalAIChat, toggleRoomRefinement } = app
   const { aiEnabled, aiReplyDraftBatch, busy, cancelAIDraftBatch, editTarget, generateNeedsReplyDrafts, volatileAIDrafts } = app
   const draftBatchTitle = aiReplyDraftBatch.status === 'running'
     ? `Generating AI drafts: ${aiReplyDraftBatch.completed} of ${aiReplyDraftBatch.total}`
@@ -16,7 +16,7 @@ export function AppSidebar({ app }: { app: AppState }) {
       ? aiReplyDraftBatch.failures.join('\n')
       : 'Generate a reply draft for each chat that needs a reply'
   const aiDraftPreview = (room: Room) => {
-    if (!isActiveAccountRoom(room) || !isNeedsReplyRoom(room)) return undefined
+    if (!isNeedsReplyRoom(room)) return undefined
     return getVolatileAIDraft(volatileAIDrafts, activeAccountID, room.id)?.text.replace(/\s+/g, ' ').trim() || undefined
   }
   return (
@@ -25,18 +25,17 @@ export function AppSidebar({ app }: { app: AppState }) {
       <div className="sidebar-titlebar" aria-hidden="true" style={{ '--wails-draggable': 'drag' } as React.CSSProperties} />
       <ConnectionStatusBanner problem={connectionProblem} />
       <>
-        <label className="room-search">
-          <Search size={16} />
-          <input ref={roomSearchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a room" aria-label="Find a room" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
-          {search && <button type="button" aria-label="Clear room search" title="Clear room search" onClick={() => setSearch('')}><X size={16} /></button>}
-        </label>
+        <div className="room-search-row">
+          <label className="room-search">
+            <Search size={16} />
+            <input ref={roomSearchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a room" aria-label="Find a room" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
+            {search && <button type="button" aria-label="Clear room search" title="Clear room search" onClick={() => setSearch('')}><X size={16} /></button>}
+          </label>
+          <button className="sidebar-icon" type="button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}>
+            <Settings size={16} />
+          </button>
+        </div>
         <div className="room-filters" role="group" aria-label="Filter rooms">
-          {inboxAccountCount > 1 && (
-            <select className="room-account-filter" aria-label="Filter rooms by account" value={effectiveAccountScope} onChange={(event) => setInboxAccountScope(event.target.value)}>
-              <option value="all">All accounts</option>
-              {(snapshot?.accounts ?? []).map((account) => <option key={account.id} value={account.id}>{account.profile.displayName || account.profile.userId}</option>)}
-            </select>
-          )}
           <div className="room-scope-filters" role="group" aria-label="Room visibility">
             <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-label="All" aria-pressed={roomScope === 'all'} aria-keyshortcuts="Control+Shift+A Meta+Shift+A" title="All rooms (Ctrl / ⌘ + Shift + A)" onClick={() => setRoomScope('all')}><MessageCircleMore size={13} /><span className="filter-label">All</span></button>
             <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => applyMenuFilter('archived')}><Archive size={13} /><span className="filter-label">Archive</span></button>
@@ -84,21 +83,21 @@ export function AppSidebar({ app }: { app: AppState }) {
           }} />}
         </div>}
         {menuFilter === 'all' && <InviteList invites={snapshot.invites ?? []} busyRoomID={inviteBusyRoomID} onAccept={(invite) => void acceptInvite(invite)} onDecline={(invite) => void declineInvite(invite)} />}
-        <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : roomScope === 'local-ai' ? 'AI CHATS' : 'ROOMS'}</span><span className="room-section-actions">{roomScope === 'all' && <button className="room-archive-all" type="button" aria-label="Join or create a room" title="Join or create a room" onClick={() => setNewRoomMode('join')}><Plus size={13} /></button>}{roomScope === 'all' && <button className="room-archive-all" type="button" aria-label="Archive all read rooms" title="Archive all read rooms" disabled={readRoomCount === 0} onClick={() => void archiveAllReadRooms()}><Archive size={13} /></button>}{roomScope === 'all' && (roomRefinements.unanswered || roomRefinements.needsReply) && <button className="room-archive-all" type="button" aria-label={aiReplyDraftBatch.status === 'running' ? `Generating AI reply drafts, ${aiReplyDraftBatch.completed} of ${aiReplyDraftBatch.total} complete` : 'Generate AI reply drafts'} title={draftBatchTitle} disabled={!aiEnabled || busy || Boolean(editTarget) || aiReplyDraftBatch.status === 'running'} onClick={() => void generateNeedsReplyDrafts()}><Sparkles size={13} /></button>}{roomScope === 'all' && aiReplyDraftBatch.status === 'running' && <button className="room-archive-all" type="button" aria-label="Cancel AI reply draft generation" title="Cancel AI reply draft generation" onClick={cancelAIDraftBatch}><X size={13} /></button>}{roomScope === 'local-ai' && <button className="room-archive-all" type="button" aria-label="New private chat" title="New private chat (Ctrl / ⌘ + Shift + M)" onClick={() => startLocalAIChat()}><Plus size={13} /></button>}<span className="room-section-count">{filteredRooms.length.toString().padStart(2, '0')}</span></span></div>
+        <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : roomScope === 'local-ai' ? 'AI CHATS' : 'ROOMS'}</span><span className="room-section-actions">{roomScope === 'all' && (roomRefinements.unanswered || roomRefinements.needsReply) && <button className="room-archive-all" type="button" aria-label={aiReplyDraftBatch.status === 'running' ? `Generating AI reply drafts, ${aiReplyDraftBatch.completed} of ${aiReplyDraftBatch.total} complete` : 'Generate AI reply drafts'} title={draftBatchTitle} disabled={!aiEnabled || busy || Boolean(editTarget) || aiReplyDraftBatch.status === 'running'} onClick={() => void generateNeedsReplyDrafts()}><Sparkles size={13} /></button>}{roomScope === 'all' && aiReplyDraftBatch.status === 'running' && <button className="room-archive-all" type="button" aria-label="Cancel AI reply draft generation" title="Cancel AI reply draft generation" onClick={cancelAIDraftBatch}><X size={13} /></button>}{roomScope === 'local-ai' && <button className="room-archive-all" type="button" aria-label="New private chat" title="New private chat (Ctrl / ⌘ + Shift + M)" onClick={() => startLocalAIChat()}><Plus size={13} /></button>}<span className="room-section-count">{filteredRooms.length.toString().padStart(2, '0')}</span></span></div>
         <VirtualRoomList
           listRef={roomListRef}
           rooms={filteredRooms}
           selectedRoomIndex={selectedRoomListIndex}
           rowHeight={preferenceBoolean(preferences, 'sidebar.compact_chat_list') ? 46 : 62}
           listCount={Math.max(filteredRooms.length, snapshot?.slidingSyncListCounts?.main ?? 0)}
-          rangeKey={snapshot?.activeAccountId ?? ''}
+          rangeKey={snapshot?.accountId ?? ''}
           onVisibleRange={reportRoomListVisibleRange}
           renderRoom={(room, index) => (
             <RoomButton
               key={`${room.accountId}:${room.id}`}
               room={room}
               index={index}
-              active={room.id === activeListRoomID && isActiveAccountRoom(room)}
+              active={room.id === activeListRoomID}
               needsReply={isNeedsReplyRoom(room)}
               aiDraft={aiDraftPreview(room)}
               multiSelected={selectedRoomIDs.length > 1 && selectedRoomIDs.includes(room.id)}
@@ -216,19 +215,6 @@ export function AppSidebar({ app }: { app: AppState }) {
           </button>}
         </div>}
       </>
-      <div className="sidebar-profile">
-        <button className="account-switcher-trigger" type="button" aria-label="Manage Matrix accounts" title="Manage Matrix accounts" onClick={() => { setAccountError(''); setAddingAccount(false); setAccountManagerOpen(true) }}>
-          <Avatar uri={snapshot.profile.avatarUri} label={snapshot.profile.displayName || snapshot.profile.userId} className="profile-avatar" />
-          <span className="profile-copy">
-            <strong>{snapshot.profile.displayName || snapshot.profile.userId}</strong>
-            <span>{snapshot.profile.userId}</span>
-          </span>
-          <ChevronDown size={14} />
-        </button>
-        <button className="sidebar-icon" type="button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}>
-          <Settings size={16} />
-        </button>
-      </div>
     </aside>
   )
 }

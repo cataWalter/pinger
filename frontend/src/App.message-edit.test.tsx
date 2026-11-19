@@ -49,7 +49,6 @@ describe('message editing', () => {
   beforeEach(() => {
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.ScheduledJobs.mockResolvedValue([])
     harness.service.SetActiveRoom.mockResolvedValue(undefined)

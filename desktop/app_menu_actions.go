@@ -41,22 +41,6 @@ func clampZoom(zoom int) int {
 	return min(max(zoom, zoomMinimum), zoomMaximum)
 }
 
-// accountMenuLabel returns the display name, with the user ID in brackets when both exist.
-func accountMenuLabel(account AccountSummary) string {
-	name := account.Profile.DisplayName
-	userID := account.Profile.UserID
-	switch {
-	case name != "" && userID != "" && name != userID:
-		return fmt.Sprintf("%s (%s)", name, userID)
-	case name != "":
-		return name
-	case userID != "":
-		return userID
-	default:
-		return "Account"
-	}
-}
-
 // choose returns whenTrue if condition holds, otherwise whenFalse.
 func choose(condition bool, whenTrue, whenFalse string) string {
 	if condition {

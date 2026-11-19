@@ -60,9 +60,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -196,16 +193,6 @@ describe('room history updates', () => {
     await waitFor(() => expect(container.querySelector('.room-list .room-button')).toBeNull())
     await user.click(await screen.findByRole('button', { name: 'All' }))
     expect(container.querySelector('.room-list .room-button')).toBeTruthy()
-  })
-
-  it('archives all currently read rooms', async () => {
-    const user = userEvent.setup()
-    const { container } = render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-    await user.click(await screen.findByRole('button', { name: 'Archive all read rooms' }))
-
-    await waitFor(() => expect(harness.service.SetBooleanPreference).toHaveBeenCalledWith(`room.archived.primary.${room.id}`, true))
-    expect(container.querySelector('.room-list .room-button')).toBeNull()
   })
 
   it('uses the configured next-unread room after archiving the selected room', async () => {

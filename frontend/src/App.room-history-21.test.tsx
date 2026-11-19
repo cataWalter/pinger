@@ -63,9 +63,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -256,12 +253,15 @@ describe('room history updates', () => {
 
   it('reloads the initial page when the history count preference changes', async () => {
     const user = userEvent.setup()
+    harness.service.StorageUsage.mockResolvedValue({ databaseBytes: 2048, walBytes: 0 })
+    harness.service.MediaCacheUsage.mockResolvedValue({ bytes: 4096, files: 3 })
+    harness.service.RoomStorageUsage.mockResolvedValue([])
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     await user.click(await screen.findByRole('button', { name: 'Settings' }))
-    await user.click(await screen.findByRole('tab', { name: 'History' }))
-    await user.selectOptions(await screen.findByRole('combobox'), '250')
+    await user.click(await screen.findByRole('tab', { name: 'Storage' }))
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Messages to load' }), '250')
 
     await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('history.initial_messages', '250'))
     await waitFor(() => expect(harness.service.History).toHaveBeenCalledTimes(2))

@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { type Room } from '../bindings/mychat/desktop/models.js'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
 import * as appShared from './appShared'
@@ -62,9 +61,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -126,27 +122,6 @@ describe('room history updates', () => {
         hasMore: true,
       }
     })
-  })
-
-  const teamRoom: Room = { ...room, id: '!team:example.org', name: 'Team', direct: false }
-
-  it('creates an encrypted group and invites people', async () => {
-    const user = userEvent.setup()
-    harness.service.CreateGroupRoom.mockResolvedValue(teamRoom.id)
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-
-    await user.click(await screen.findByRole('button', { name: 'Join or create a room' }))
-    await user.click(await screen.findByRole('tab', { name: 'Create' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Create a group' })
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, teamRoom] })
-    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Team')
-    await user.type(within(dialog).getByRole('textbox', { name: 'Invite people (optional)' }), '@alice:example.org, @bob:example.org')
-    expect((within(dialog).getByRole('checkbox', { name: 'End-to-end encryption' }) as HTMLInputElement).checked).toBe(true)
-    await user.click(within(dialog).getByRole('button', { name: 'Create group' }))
-
-    await waitFor(() => expect(harness.service.SetActiveRoom).toHaveBeenLastCalledWith(teamRoom.id))
-    expect(harness.service.CreateGroupRoom).toHaveBeenCalledWith({ name: 'Team', topic: '', invitees: ['@alice:example.org', '@bob:example.org'], encrypted: true })
   })
 
   it('invites people from the room details', async () => {

@@ -3,6 +3,7 @@ import { page } from 'vitest/browser'
 import { describe, expect, it, vi } from 'vitest'
 import { service } from './appBrowserMocks'
 import { installAppBrowserCleanup, renderApp } from './appBrowserHarness'
+import { TIMELINE_KEEP_COUNT } from './appConstants'
 
 vi.mock('@wailsio/runtime', () => ({
   Call: { ByName: vi.fn(() => Promise.resolve()) },
@@ -71,17 +72,22 @@ describe('browser smoke: history', () => {
     const template = history.messages[0]
     service.History.mockResolvedValueOnce({
       ...history, messages: Array.from({ length: 1000 }, (_, index) => ({
-        ...template, id: `$keyboard-${index}`, body: `Virtual keyboard message ${index}`, timestamp: template.timestamp + index * 1000,
+        ...template, id: `$keyboard-${index}`, body: `Virtual keyboard message ${index}`, timestamp: template.timestamp + index * 1000, timelineCursor: index + 1,
       }))
     })
+    // Reaching the trimmed top requests the next older page; an empty page keeps the retained rows as the first rows.
+    service.History.mockResolvedValueOnce({ ...history, messages: [], before: 0, hasMore: false })
     const { container } = renderApp()
     await waitFor(() => expect(container.querySelector('[data-event-id="$keyboard-999"]')).not.toBeNull())
     const timeline = screen.getByRole('region', { name: 'Message timeline' })
     await waitFor(() => expect(timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight).toBeLessThanOrEqual(4))
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    const retainedStart = 1000 - TIMELINE_KEEP_COUNT
     fireEvent.keyDown(timeline, { key: 'Home' })
-    await waitFor(() => expect((document.activeElement as HTMLElement)?.dataset.eventId).toBe('$keyboard-0'))
+    await waitFor(() => expect((document.activeElement as HTMLElement)?.dataset.eventId).toBe(`$keyboard-${retainedStart}`))
+    await waitFor(() => expect(service.History).toHaveBeenLastCalledWith('!browser-smoke:example.org', retainedStart + 1))
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' })
-    await waitFor(() => expect((document.activeElement as HTMLElement)?.dataset.eventId).toBe('$keyboard-1'))
+    await waitFor(() => expect((document.activeElement as HTMLElement)?.dataset.eventId).toBe(`$keyboard-${retainedStart + 1}`))
     fireEvent.keyDown(timeline, { key: 'End' })
     await waitFor(() => expect((document.activeElement as HTMLElement)?.dataset.eventId).toBe('$keyboard-999'))
     expect(container.querySelectorAll('.message-row').length).toBeLessThan(200)

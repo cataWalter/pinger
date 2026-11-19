@@ -58,11 +58,6 @@
   border-color: var(--accent-text);
 }
 
-.app-shell[data-ui='desktop'] .composer-area {
-  padding: 0 20px 14px;
-  background: var(--canvas);
-}
-
 .app-shell[data-ui='desktop'] .composer {
   color: var(--ink);
   background: var(--paper);
@@ -134,7 +129,7 @@
   transform: none;
 }
 
-.app-shell[data-ui='desktop'] :is(.settings-dialog, .confirm-dialog, .quick-switcher, .room-info-dialog, .schedule-dialog, .ai-result-dialog, .room-dialog) {
+.app-shell[data-ui='desktop'] :is(.confirm-dialog, .quick-switcher, .room-info-dialog, .schedule-dialog, .ai-result-dialog, .room-dialog) {
   color: var(--ink);
   background: var(--paper);
   border: 1px solid var(--line);
@@ -144,62 +139,19 @@
   max-height: calc(100dvh - 32px);
 }
 
-.app-shell[data-ui='desktop'] :is(.settings-header, .settings-footer, .dialog-header, .dialog-footer) {
+.app-shell[data-ui='desktop'] :is(.dialog-header, .dialog-footer) {
   color: var(--ink);
   background: var(--paper);
   border-color: var(--line);
 }
 
-.app-shell[data-ui='desktop'] .settings-sidebar {
-  background: var(--canvas-warm);
-  border-color: var(--line);
-}
-
-.app-shell[data-ui='desktop'] .settings-content {
-  background: var(--paper);
-}
-
-.app-shell[data-ui='desktop'] .settings-section h3 {
-  font-size: 18px;
-  font-weight: 600;
-  font-family: inherit;
-}
-
-.app-shell[data-ui='desktop'] .setting-row {
-  align-items: center;
-  padding: 14px 0;
-  border-color: var(--line);
-  gap: 16px;
-}
-
-.app-shell[data-ui='desktop'] .setting-row strong {
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.app-shell[data-ui='desktop'] .setting-row small {
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.app-shell[data-ui='desktop'] :is(.setting-row input:not([type='checkbox']):not([type='range']):not([type='color']), .setting-row select, .settings-search, .settings-input, .dialog-input) {
+.app-shell[data-ui='desktop'] :is(.setting-row input:not([type='checkbox']):not([type='range']):not([type='color']), .setting-row select, .settings-input, .dialog-input) {
   color: var(--ink);
   background: var(--canvas-warm);
   border: 1px solid var(--control-border);
   border-radius: var(--radius-sm);
   box-shadow: none;
   min-height: 32px;
-}
-
-.app-shell[data-ui='desktop'] :is(.settings-nav-button, .settings-tab) {
-  color: var(--muted);
-  background: transparent;
-}
-
-.app-shell[data-ui='desktop'] :is(.settings-nav-button, .settings-tab).is-active {
-  color: var(--accent-text);
-  background: var(--surface-selected);
 }
 
 .app-shell[data-ui='desktop'] .toggle-track {

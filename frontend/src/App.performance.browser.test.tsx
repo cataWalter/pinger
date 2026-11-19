@@ -1,9 +1,10 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { page } from 'vitest/browser'
 import { describe, expect, it, vi } from 'vitest'
-import type { AccountSummary, Room } from '../bindings/mychat/desktop/models.js'
+import type { Room } from '../bindings/mychat/desktop/models.js'
 import { service } from './appBrowserMocks'
 import { captureScreenshot, installAppBrowserCleanup, renderApp } from './appBrowserHarness'
+import { TIMELINE_KEEP_COUNT } from './appConstants'
 
 vi.mock('@wailsio/runtime', () => ({
   Call: { ByName: vi.fn(() => Promise.resolve()) },
@@ -35,12 +36,16 @@ describe('browser smoke: performance', () => {
       timelineCursor: index + 1,
     }))
     service.History.mockResolvedValueOnce({ ...history, messages: historyMessages })
+    // Scrolling to the trimmed top requests the next older page; an empty page keeps the retained rows as the first rows.
+    service.History.mockResolvedValueOnce({ ...history, messages: [], before: 0, hasMore: false })
     const { container } = renderApp()
     await waitFor(() => {
       const tail = container.querySelector('[data-event-id="$coverage-999"]')
       expect(tail).not.toBeNull()
       expect(getComputedStyle(tail!).visibility).toBe('visible')
     }, { timeout: 5000 })
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    const retainedStart = historyMessages.length - TIMELINE_KEEP_COUNT
     const timeline = screen.getByRole('region', { name: 'Message timeline' })
     let previousFirstIndex = -1
     for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
@@ -60,7 +65,7 @@ describe('browser smoke: performance', () => {
         const firstIndex = historyMessages.findIndex((message) => message.id === visibleRows[0].dataset.eventId)
         const lastIndex = historyMessages.findIndex((message) => message.id === visibleRows[visibleRows.length - 1].dataset.eventId)
         expect(firstIndex).toBeGreaterThan(previousFirstIndex)
-        if (fraction === 0) expect(firstIndex).toBe(0)
+        if (fraction === 0) expect(firstIndex).toBe(retainedStart)
         if (fraction === 1) expect(lastIndex).toBe(historyMessages.length - 1)
         else expect(lastIndex).toBeLessThan(historyMessages.length - 1)
         expect(Math.abs(visibleRows[0].getBoundingClientRect().height / visibleRows[0].offsetHeight - zoom / 100)).toBeLessThan(0.05)
@@ -72,6 +77,7 @@ describe('browser smoke: performance', () => {
       })
       previousFirstIndex = settledFirstIndex
     }
+    await waitFor(() => expect(service.History).toHaveBeenLastCalledWith('!browser-smoke:example.org', retainedStart + 1))
     await captureScreenshot({ path: `../.vitest/ui/timeline-scroll-coverage-${zoom}.png` })
   })
 
@@ -123,109 +129,70 @@ describe('browser smoke: performance', () => {
     await captureScreenshot({ path: `../.vitest/ui/timeline-alignment-${width}-${count}.png` })
   })
 
-  it.each([100, 500, 1000].flatMap((count) => [1, 3].map((accountCount) => ({ count, accountCount }))))('measures room lists with $count rooms across $accountCount accounts without disturbing the conversation', async ({ count, accountCount }) => {
+  it.each([100, 500, 1000])('measures room lists with %i rooms without disturbing the conversation', async (count) => {
     await page.viewport(1100, 780)
     const snapshot = await service.Snapshot()
-    const accounts: AccountSummary[] = Array.from({ length: accountCount }, (_, index) => ({
-      id: index === 0 ? 'primary' : `account-${index}`,
-      profile: { ...snapshot.profile, displayName: `Account ${index + 1}` },
-    }))
-    let rooms: Room[] = Array.from({ length: count }, (_, index) => ({
+    const rooms: Room[] = Array.from({ length: count }, (_, index) => ({
       ...snapshot.rooms[0],
-      id: `!benchmark-room-${Math.floor(index / accountCount)}:example.org`,
-      accountId: accounts[index % accountCount].id,
+      id: `!benchmark-room-${index}:example.org`,
+      accountId: 'primary',
       name: `Room ${index + 1}`,
       preview: `Preview ${index + 1}`,
       lastEventAt: 1793447100000 + index * 1000,
       lastEventSeenAt: 0,
     }))
-    service.Snapshot.mockResolvedValueOnce({ ...snapshot, accounts, rooms: rooms.filter((room) => room.accountId === 'primary') })
-    const accountRoomsImplementation = service.AccountRooms.getMockImplementation()!
-    service.AccountRooms.mockImplementation(async () => rooms.map((room) => ({ ...room })))
-    const intervalSpy = vi.spyOn(window, 'setInterval')
-    try {
-      const paint = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-      const commits: number[] = []
-      const started = performance.now()
-      const { container } = renderApp((_id, _phase, actualDuration) => commits.push(actualDuration))
-      const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
-      const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
-      await waitFor(() => expect(container.querySelector('.room-section-actions')?.textContent).toBe(String(count).padStart(2, '0')))
-      await document.fonts.ready
+    service.Snapshot.mockResolvedValueOnce({ ...snapshot, rooms })
+    const paint = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    const commits: number[] = []
+    const started = performance.now()
+    const { container } = renderApp((_id, _phase, actualDuration) => commits.push(actualDuration))
+    const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await waitFor(() => expect(container.querySelector('.room-section-actions')?.textContent).toBe(String(count).padStart(2, '0')))
+    await document.fonts.ready
+    await paint()
+    const renderMs = performance.now() - started
+    fireEvent.change(composer, { target: { value: 'Warm draft' } })
+    await paint()
+    const historyCalls = service.History.mock.calls.length
+    const trackedRoom = container.querySelector('.room-button')!
+    const trackedMessage = container.querySelector('.message-row')!
+    const roomRows = container.querySelectorAll('.room-button').length
+    const nodes = container.querySelectorAll('*').length
+    expect(roomRows).toBeGreaterThan(0)
+    expect(roomRows).toBeLessThanOrEqual(Math.min(count, 100))
+    const inputMs: number[] = []
+    for (let sample = 0; sample < 5; sample++) {
+      const inputStarted = performance.now()
+      fireEvent.change(composer, { target: { value: `Draft ${sample}` } })
       await paint()
-      const renderMs = performance.now() - started
-      const refresh = intervalSpy.mock.calls.find(([, delay]) => delay === 15000)?.[0]
-      if (accountCount > 1) expect(typeof refresh).toBe('function')
-      const refreshRooms = refresh as (() => void) | undefined
-      const poll = async () => {
-        if (refreshRooms) await act(async () => refreshRooms())
-        await paint()
-      }
-      fireEvent.change(composer, { target: { value: 'Warm draft' } })
-      await poll()
-      const historyCalls = service.History.mock.calls.length
-      const accountRoomCalls = service.AccountRooms.mock.calls.length
-      const trackedRoom = container.querySelector('.room-button')!
-      const trackedMessage = container.querySelector('.message-row')!
-      const roomRows = container.querySelectorAll('.room-button').length
-      const nodes = container.querySelectorAll('*').length
-      expect(roomRows).toBeGreaterThan(0)
-      expect(roomRows).toBeLessThanOrEqual(Math.min(count, 100))
-      const inputMs: number[] = []
-      const pollMs: number[] = []
-      for (let sample = 0; sample < 5; sample++) {
-        const inputStarted = performance.now()
-        fireEvent.change(composer, { target: { value: `Draft ${sample}` } })
-        await paint()
-        inputMs.push(performance.now() - inputStarted)
-        if (refreshRooms) {
-          const pollStarted = performance.now()
-          await poll()
-          pollMs.push(performance.now() - pollStarted)
-        }
-        expect(trackedRoom.isConnected).toBe(true)
-        expect(trackedMessage.isConnected).toBe(true)
-      }
-      expect(service.AccountRooms.mock.calls.length - accountRoomCalls).toBe(accountCount > 1 ? 5 : 0)
-      const search = screen.getByRole('textbox', { name: 'Find a room' })
-      const searchMs: number[] = []
-      for (const query of ['Room 1', 'Room 10', 'Preview 99', 'no matching room', '']) {
-        const searchStarted = performance.now()
-        fireEvent.change(search, { target: { value: query } })
-        await paint()
-        searchMs.push(performance.now() - searchStarted)
-        const expected = rooms.filter((room) => `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query.toLowerCase())).length
-        expect(container.querySelector('.room-section-actions')?.textContent).toBe(String(expected).padStart(2, '0'))
-        expect(composer.value).toBe('Draft 4')
-      }
-      if (accountCount > 1) {
-        const changedRoom = rooms.find((room) => room.accountId === 'account-1')!
-        rooms = rooms.map((room) => room.id === changedRoom.id && room.accountId === changedRoom.accountId ? { ...room, preview: 'Fresh background preview', unread: 4 } : room)
-        fireEvent.change(search, { target: { value: changedRoom.id } })
-        await poll()
-        const preview = within(roomList).getByText('Fresh background preview')
-        expect(preview.closest('button')?.querySelector('.unread-count')?.textContent).toBe('4')
-        expect(within(roomList).getByText('Room 1')).toBeTruthy()
-        expect(within(roomList).getByText('Room 3')).toBeTruthy()
-      }
-      expect(service.History.mock.calls.length).toBe(historyCalls)
-      expect(composer.value).toBe('Draft 4')
-      expect(roomList.scrollWidth).toBeLessThanOrEqual(roomList.clientWidth)
-      console.info('Room-list performance', JSON.stringify({
-        rooms: count,
-        accounts: accountCount,
-        roomRows,
-        nodes,
-        renderMs: Math.round(renderMs),
-        inputMs: inputMs.map((value) => Math.round(value)),
-        searchMs: searchMs.map((value) => Math.round(value)),
-        pollMs: pollMs.map((value) => Math.round(value)),
-        maxCommitMs: Math.round(Math.max(...commits)),
-      }))
-    } finally {
-      intervalSpy.mockRestore()
-      service.AccountRooms.mockImplementation(accountRoomsImplementation)
+      inputMs.push(performance.now() - inputStarted)
+      expect(trackedRoom.isConnected).toBe(true)
+      expect(trackedMessage.isConnected).toBe(true)
     }
+    const search = screen.getByRole('textbox', { name: 'Find a room' })
+    const searchMs: number[] = []
+    for (const query of ['Room 1', 'Room 10', 'Preview 99', 'no matching room', '']) {
+      const searchStarted = performance.now()
+      fireEvent.change(search, { target: { value: query } })
+      await paint()
+      searchMs.push(performance.now() - searchStarted)
+      const expected = rooms.filter((room) => `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query.toLowerCase())).length
+      expect(container.querySelector('.room-section-actions')?.textContent).toBe(String(expected).padStart(2, '0'))
+      expect(composer.value).toBe('Draft 4')
+    }
+    expect(service.History.mock.calls.length).toBe(historyCalls)
+    expect(composer.value).toBe('Draft 4')
+    expect(roomList.scrollWidth).toBeLessThanOrEqual(roomList.clientWidth)
+    console.info('Room-list performance', JSON.stringify({
+      rooms: count,
+      roomRows,
+      nodes,
+      renderMs: Math.round(renderMs),
+      inputMs: inputMs.map((value) => Math.round(value)),
+      searchMs: searchMs.map((value) => Math.round(value)),
+      maxCommitMs: Math.round(Math.max(...commits)),
+    }))
   }, 60000)
 
 })

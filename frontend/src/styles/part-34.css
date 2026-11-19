@@ -33,16 +33,6 @@
   color: var(--sidebar-muted);
 }
 
-.app-shell[data-theme='bosco'] .profile-copy strong,
-.app-shell[data-theme='rosa'] .profile-copy strong,
-.app-shell[data-theme='solarized'] .profile-copy strong,
-.app-shell[data-theme='sepia'] .profile-copy strong,
-.app-shell[data-theme='dracula'] .profile-copy strong,
-.app-shell[data-theme='midnight'] .profile-copy strong,
-.app-shell[data-theme='slate'] .profile-copy strong {
-  color: var(--sidebar-ink);
-}
-
 .app-shell[data-theme='bosco'] .room-search,
 .app-shell[data-theme='rosa'] .room-search,
 .app-shell[data-theme='solarized'] .room-search,
@@ -152,27 +142,6 @@
 .app-shell[data-theme='dracula'] .room-button.is-active .room-preview,
 .app-shell[data-theme='midnight'] .room-button.is-active .room-preview,
 .app-shell[data-theme='slate'] .room-button.is-active .room-preview {
-  color: var(--sidebar-muted);
-}
-
-.app-shell[data-theme='bosco'] .sidebar-profile,
-.app-shell[data-theme='rosa'] .sidebar-profile,
-.app-shell[data-theme='solarized'] .sidebar-profile,
-.app-shell[data-theme='sepia'] .sidebar-profile,
-.app-shell[data-theme='dracula'] .sidebar-profile,
-.app-shell[data-theme='midnight'] .sidebar-profile,
-.app-shell[data-theme='slate'] .sidebar-profile {
-  background: var(--sidebar-panel);
-  border-top-color: var(--sidebar-border);
-}
-
-.app-shell[data-theme='bosco'] .profile-copy span,
-.app-shell[data-theme='rosa'] .profile-copy span,
-.app-shell[data-theme='solarized'] .profile-copy span,
-.app-shell[data-theme='sepia'] .profile-copy span,
-.app-shell[data-theme='dracula'] .profile-copy span,
-.app-shell[data-theme='midnight'] .profile-copy span,
-.app-shell[data-theme='slate'] .profile-copy span {
   color: var(--sidebar-muted);
 }
 

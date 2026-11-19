@@ -125,46 +125,6 @@ func TestMarkJoinedShowsInvitedRoomImmediately(t *testing.T) {
 	}
 }
 
-func TestParseJoinTarget(t *testing.T) {
-	tests := []struct {
-		name    string
-		target  string
-		want    string
-		via     []string
-		wantErr string
-	}{
-		{name: "alias", target: " #room:example.org ", want: "#room:example.org"},
-		{name: "room ID routes via its server", target: "!abc:example.org", want: "!abc:example.org", via: []string{"example.org"}},
-		{name: "server-less room ID", target: "!abcdef", want: "!abcdef"},
-		{name: "matrix.to alias", target: "https://matrix.to/#/%23room:example.org", want: "#room:example.org"},
-		{name: "matrix.to room ID with via", target: "https://matrix.to/#/!abc:example.org?via=other.org", want: "!abc:example.org", via: []string{"other.org"}},
-		{name: "matrix URI", target: "matrix:r/room:example.org", want: "#room:example.org"},
-		{name: "empty", target: "  ", wantErr: "enter a room address"},
-		{name: "user ID", target: "@alice:example.org", wantErr: "person"},
-		{name: "matrix.to user", target: "https://matrix.to/#/@alice:example.org", wantErr: "person"},
-		{name: "alias without server", target: "#room", wantErr: "invalid room address"},
-		{name: "plain words", target: "my room", wantErr: "invalid room address"},
-		{name: "other website", target: "https://example.org/room", wantErr: "not a Matrix room link"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got, via, err := parseJoinTarget(test.target)
-			if test.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
-					t.Fatalf("parseJoinTarget(%q) error = %v, want %q", test.target, err, test.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("parseJoinTarget(%q) error = %v", test.target, err)
-			}
-			if got != test.want || strings.Join(via, ",") != strings.Join(test.via, ",") {
-				t.Fatalf("parseJoinTarget(%q) = %q, %v; want %q, %v", test.target, got, via, test.want, test.via)
-			}
-		})
-	}
-}
-
 func TestNormalizeInviteesDropsSelfAndDuplicates(t *testing.T) {
 	invitees, err := normalizeInvitees([]string{" @alice:example.org ", "", "@me:example.org", "@alice:example.org", "@bob:example.org"}, "@me:example.org")
 	if err != nil {
@@ -192,12 +152,6 @@ func TestRoomOperationsRejectInvalidInputBeforeNetwork(t *testing.T) {
 	}
 	if err := client.DeclineInvite(t.Context(), ""); err == nil {
 		t.Fatal("DeclineInvite() accepted an empty room ID")
-	}
-	if _, err := client.CreateGroupRoom(t.Context(), GroupRoomRequest{Name: "  "}); err == nil || !strings.Contains(err.Error(), "room name") {
-		t.Fatalf("CreateGroupRoom() error = %v, want a missing name error", err)
-	}
-	if _, err := client.CreateGroupRoom(t.Context(), GroupRoomRequest{Name: strings.Repeat("x", maxRoomNameLength+1)}); err == nil {
-		t.Fatal("CreateGroupRoom() accepted an overlong name")
 	}
 	if err := client.InviteUsers(t.Context(), "!room:example.org", []string{" "}); err == nil || !strings.Contains(err.Error(), "Matrix ID") {
 		t.Fatalf("InviteUsers() error = %v, want a missing invitee error", err)

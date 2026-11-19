@@ -1,10 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Check, UserPlus, X } from 'lucide-react'
-import type { GroupRoomRequest, Invite } from '../bindings/mychat/desktop/models.js'
-import { DialogSurface } from './DialogSurface'
+import type { Invite } from '../bindings/mychat/desktop/models.js'
 import { Avatar, describeError } from './appShared'
-
-export type NewRoomMode = 'join' | 'create'
 
 export function parseMatrixIDList(text: string) {
   return text.split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean)
@@ -48,72 +45,6 @@ export function InviteList({ invites, busyRoomID, onAccept, onDecline }: {
         )
       })}
     </section>
-  )
-}
-
-export function NewRoomDialog({ initialMode = 'join', onClose, onJoin, onCreate }: {
-  initialMode?: NewRoomMode
-  onClose: () => void
-  onJoin: (target: string) => Promise<void>
-  onCreate: (request: GroupRoomRequest) => Promise<void>
-}) {
-  const [mode, setMode] = useState<NewRoomMode>(initialMode)
-  const [address, setAddress] = useState('')
-  const [name, setName] = useState('')
-  const [topic, setTopic] = useState('')
-  const [people, setPeople] = useState('')
-  const [encrypted, setEncrypted] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const ready = mode === 'join' ? Boolean(address.trim()) : Boolean(name.trim())
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (busy || !ready) return
-    setBusy(true)
-    setError('')
-    try {
-      if (mode === 'join') await onJoin(address.trim())
-      else await onCreate({ name: name.trim(), topic: topic.trim(), invitees: parseMatrixIDList(people), encrypted })
-    } catch (submitError) {
-      setError(describeError(submitError))
-      setBusy(false)
-    }
-  }
-
-  function switchMode(next: NewRoomMode) {
-    if (busy) return
-    setMode(next)
-    setError('')
-  }
-
-  return (
-    <div className="confirm-scrim" role="presentation">
-      <DialogSurface className="confirm-dialog new-room-dialog" labelledBy="new-room-title" onClose={onClose}>
-        <h2 id="new-room-title">{mode === 'join' ? 'Join a room' : 'Create a group'}</h2>
-        <div className="new-room-tabs" role="tablist" aria-label="New room">
-          <button type="button" role="tab" aria-selected={mode === 'join'} className={mode === 'join' ? 'is-active' : ''} onClick={() => switchMode('join')}>Join</button>
-          <button type="button" role="tab" aria-selected={mode === 'create'} className={mode === 'create' ? 'is-active' : ''} onClick={() => switchMode('create')}>Create</button>
-        </div>
-        <form className="new-room-form" onSubmit={(event) => void submit(event)}>
-          {mode === 'join' ? <>
-            <label><span>Room address</span><input key="address" autoFocus value={address} maxLength={2048} placeholder="#room:example.org" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setAddress(event.target.value)} /></label>
-            <p>Use a room alias, a room ID or a matrix.to link.</p>
-          </> : <>
-            <label><span>Name</span><input key="name" autoFocus value={name} maxLength={255} onChange={(event) => setName(event.target.value)} /></label>
-            <label><span>Topic (optional)</span><input value={topic} maxLength={1000} onChange={(event) => setTopic(event.target.value)} /></label>
-            <label><span>Invite people (optional)</span><textarea rows={2} value={people} placeholder="@name:example.org" spellCheck={false} autoCorrect="off" autoCapitalize="off" onChange={(event) => setPeople(event.target.value)} /></label>
-            <label className="new-room-check"><input type="checkbox" checked={encrypted} onChange={(event) => setEncrypted(event.target.checked)} /><span>End-to-end encryption</span></label>
-            <p>{encrypted ? 'Encryption cannot be turned off later.' : 'Messages will be readable by the servers in this room.'}</p>
-          </>}
-          {error && <p className="room-info-state is-error" role="alert">{error}</p>}
-          <div className="new-room-actions">
-            <button type="button" disabled={busy} onClick={onClose}>Cancel</button>
-            <button type="submit" disabled={busy || !ready}>{mode === 'join' ? (busy ? 'Joining…' : 'Join room') : (busy ? 'Creating…' : 'Create group')}</button>
-          </div>
-        </form>
-      </DialogSurface>
-    </div>
   )
 }
 

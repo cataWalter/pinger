@@ -60,9 +60,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -128,13 +125,12 @@ describe('room history updates', () => {
     })
   })
 
-  it('generates one unsent RAM-only reply for each Needs reply room in the active account', async () => {
+  it('generates one unsent RAM-only reply for each Needs reply room', async () => {
     const user = userEvent.setup()
     const firstNeedsReplyRoom = { ...room, unanswered: true, needsReply: true }
-    const otherAccountRoom = { ...secondRoom, id: '!other:example.org', accountId: 'secondary', name: 'Other account' }
     harness.service.Snapshot.mockResolvedValue({
       ...snapshot,
-      rooms: [firstNeedsReplyRoom, secondRoom, otherAccountRoom],
+      rooms: [firstNeedsReplyRoom, secondRoom],
       preferences: { 'ai.endpoint': 'http://localhost:8080' },
     })
     harness.service.AIGenerateReplyDraft.mockImplementation(async (roomID: string) => `AI reply for ${roomID}`)

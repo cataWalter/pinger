@@ -61,9 +61,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -253,49 +250,18 @@ describe('room history updates', () => {
     expect(screen.getByText('@alice:example.org wants to verify this session.')).toBeTruthy()
   })
 
-  it('starts session verification from the Devices settings tab', async () => {
+  it('starts session verification from the Devices section of Account settings', async () => {
     const user = userEvent.setup()
     harness.service.Devices.mockResolvedValue([])
     harness.service.StartSessionVerification.mockResolvedValue(undefined)
     render(<App />)
     await user.click(await screen.findByRole('button', { name: 'Settings' }))
-    await user.click(await screen.findByRole('tab', { name: 'Devices' }))
+    await user.click(await screen.findByRole('tab', { name: 'Account' }))
+    await user.click(await screen.findByText('Advanced'))
 
     await user.click(await screen.findByRole('button', { name: 'Verify another session' }))
 
     await waitFor(() => expect(harness.service.StartSessionVerification).toHaveBeenCalledOnce())
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull())
-  })
-
-  it('joins a room by address from the new room dialog', async () => {
-    const user = userEvent.setup()
-    harness.service.JoinRoom.mockResolvedValue(teamRoom.id)
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-
-    await user.click(await screen.findByRole('button', { name: 'Join or create a room' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Join a room' })
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, teamRoom] })
-    await user.type(within(dialog).getByRole('textbox', { name: 'Room address' }), ' #team:example.org ')
-    await user.click(within(dialog).getByRole('button', { name: 'Join room' }))
-
-    await waitFor(() => expect(harness.service.SetActiveRoom).toHaveBeenLastCalledWith(teamRoom.id))
-    expect(harness.service.JoinRoom).toHaveBeenCalledWith('#team:example.org')
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Join a room' })).toBeNull())
-  })
-
-  it('keeps the new room dialog open with the error when joining fails', async () => {
-    const user = userEvent.setup()
-    harness.service.JoinRoom.mockRejectedValue(new Error('room not found'))
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-
-    await user.click(await screen.findByRole('button', { name: 'Join or create a room' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Join a room' })
-    await user.type(within(dialog).getByRole('textbox', { name: 'Room address' }), '#missing:example.org')
-    await user.click(within(dialog).getByRole('button', { name: 'Join room' }))
-
-    expect((await within(dialog).findByRole('alert')).textContent).toBe('room not found')
-    expect((within(dialog).getByRole('button', { name: 'Join room' }) as HTMLButtonElement).disabled).toBe(false)
   })
 })

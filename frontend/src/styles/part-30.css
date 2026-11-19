@@ -25,16 +25,6 @@
   font-size: 10px;
 }
 
-.room-account-filter {
-  min-height: 30px;
-  padding: 0 8px;
-  color: var(--sidebar-muted, #aeb8c7);
-  font-size: 11px;
-  background: var(--sidebar-panel, #1c3a30);
-  border: 1px solid var(--sidebar-border, #345044);
-  border-radius: var(--radius-sm);
-}
-
 .room-scope-filters button,
 .room-refinement-filters button {
   background: var(--sidebar-panel, #1c3a30);
@@ -109,20 +99,6 @@
   box-shadow: 0 0 0 3px var(--signal-soft);
 }
 
-.sidebar-profile {
-  margin-right: -4px;
-  margin-left: -4px;
-  padding: 12px 8px 4px;
-  background: #172e26;
-  border-top-color: #345044;
-  border-radius: 5px 5px 0 0;
-}
-
-.profile-copy strong {
-  color: #f2f7f3;
-}
-
-.profile-copy span,
 .room-muted-mark {
   color: #a1adbd;
 }

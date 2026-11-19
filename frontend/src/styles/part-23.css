@@ -207,14 +207,6 @@
   padding-bottom: 6px;
 }
 
-.sidebar-profile {
-  border-top-color: rgba(230, 244, 235, 0.14);
-  background: rgba(255, 255, 255, 0.03);
-  margin: 10px -4px 0;
-  padding: 12px 8px 4px;
-  border-radius: 12px 12px 0 0;
-}
-
 .icon-button {
   border-radius: var(--radius-lg);
   transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);

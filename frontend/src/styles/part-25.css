@@ -5,14 +5,12 @@
 
 .message-search-panel,
 .room-info-dialog,
-.settings-dialog,
 .confirm-dialog {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--line-soft);
 }
 
-.settings-scrim,
 .room-info-scrim {
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -25,18 +23,8 @@
   -webkit-backdrop-filter: blur(10px);
 }
 
-.settings-dialog,
 .room-info-dialog {
   animation: dialog-enter var(--motion-deliberate) var(--ease-out) both;
-}
-
-.settings-tab {
-  border-radius: var(--radius-lg);
-  transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
-}
-
-.settings-tab.is-active {
-  box-shadow: var(--shadow-xs);
 }
 
 .setting-row,

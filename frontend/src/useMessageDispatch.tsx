@@ -4,7 +4,7 @@ import { type MatrixNotification, type PreferenceValues, type OutgoingMessage, d
 import type { useSessionActions } from './useSessionActions'
 
 export function useMessageDispatch(app: ReturnType<typeof useSessionActions>) {
-  const { activeAccountID, busy, composeTextRef, editTarget, forwardBusy, forwardTargetRoomID, forwardingMessage, isActiveAccountRoom, mediaApproval, preferences, preferencesRef, refreshScheduledJobs, roomDrafts, rooms, roomsRef, scheduledBusyID, scheduledDraft, scheduledDueAt, scheduledSaving, scheduledTimes, selectedRoomID, selectedRoomRef, setAutoPlayNextMessageId, setBusy, setComposeText, setError, setForwardBusy, setForwardError, setForwardingMessage, setHistoryRevision, setMediaApproval, setMentionBindings, setMentionStart, setReplyTarget, setRoomArchived, setScheduledBusyID, setScheduledDialogError, setScheduledDraft, setScheduledJobsError, setScheduledSaving, setSnapshot, stagedAttachments, visibleMessages, workspaceGenerationRef } = app
+  const { activeAccountID, busy, composeTextRef, editTarget, forwardBusy, forwardTargetRoomID, forwardingMessage, mediaApproval, preferences, preferencesRef, refreshScheduledJobs, roomDrafts, rooms, roomsRef, scheduledBusyID, scheduledDraft, scheduledDueAt, scheduledSaving, scheduledTimes, selectedRoomID, selectedRoomRef, setAutoPlayNextMessageId, setBusy, setComposeText, setError, setForwardBusy, setForwardError, setForwardingMessage, setHistoryRevision, setMediaApproval, setMentionBindings, setMentionStart, setReplyTarget, setRoomArchived, setScheduledBusyID, setScheduledDialogError, setScheduledDraft, setScheduledJobsError, setScheduledSaving, setSnapshot, stagedAttachments, visibleMessages, workspaceGenerationRef } = app
 
   async function submitScheduledDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -90,7 +90,7 @@ export function useMessageDispatch(app: ReturnType<typeof useSessionActions>) {
 
   async function confirmMessageForward() {
     if (!forwardingMessage || forwardBusy) return
-    const destination = rooms.find((candidate) => candidate.id === forwardTargetRoomID && isActiveAccountRoom(candidate))
+    const destination = rooms.find((candidate) => candidate.id === forwardTargetRoomID)
     const body = displayMessageBody(forwardingMessage).trim()
     if (!destination || !body) return
     setForwardBusy(true)

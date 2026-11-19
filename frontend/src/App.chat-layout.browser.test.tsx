@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { page } from 'vitest/browser'
 import { describe, expect, it, vi } from 'vitest'
+import { LanguageTutorService } from '../bindings/mychat/desktop'
 import { service } from './appBrowserMocks'
 import { captureScreenshot, installAppBrowserCleanup, renderApp, settleSurfaces } from './appBrowserHarness'
 
@@ -82,8 +83,10 @@ describe('browser smoke: chat layout', () => {
       expect(composerBounds.right).toBeLessThanOrEqual(width + 1)
       expect(composerBounds.bottom).toBeLessThanOrEqual(height + 1)
       expect(composer.scrollWidth).toBeLessThanOrEqual(composer.clientWidth)
-      for (const name of ['Attach file', 'Emoji picker', 'Record voice note', 'Delivery options', 'AI tools', 'Send message']) {
-        const bounds = screen.getByRole('button', { name }).getBoundingClientRect()
+      const aiButtons = within(screen.getByRole('group', { name: 'AI tools' })).getAllByRole('button')
+      const controls = [...['Attach file', 'Emoji picker', 'Record voice note', 'Delivery options', 'Send message'].map((name) => screen.getByRole('button', { name })), ...aiButtons]
+      for (const control of controls) {
+        const bounds = control.getBoundingClientRect()
         expect(bounds.width).toBeGreaterThanOrEqual(32)
         expect(bounds.height).toBeGreaterThanOrEqual(32)
         expect(bounds.left).toBeGreaterThanOrEqual(composerBounds.left)
@@ -185,29 +188,62 @@ describe('browser smoke: chat layout', () => {
     expect(service.AIComplete).not.toHaveBeenCalled()
     expect(composer.value).toBe('I arrived')
 
-    await user.click(screen.getByRole('button', { name: 'AI tools' }))
-    const menu = await screen.findByRole('menu', { name: 'AI tools' })
+    const aiTools = screen.getByRole('group', { name: 'AI tools' })
     await document.fonts.ready
     await settleSurfaces()
-    const bounds = menu.getBoundingClientRect()
+    const bounds = aiTools.getBoundingClientRect()
     expect(bounds.left).toBeGreaterThanOrEqual(0)
     expect(bounds.right).toBeLessThanOrEqual(width + 1)
     expect(bounds.top).toBeGreaterThanOrEqual(0)
     expect(bounds.bottom).toBeLessThanOrEqual(height + 1)
-    expect(menu.scrollWidth).toBeLessThanOrEqual(menu.clientWidth + 1)
-    expect(menu.querySelectorAll('kbd')).toHaveLength(5)
-    for (const item of within(menu).getAllByRole('menuitem')) {
-      const label = item.querySelector('span')!
-      const shortcut = item.querySelector('kbd')!
-      const itemBounds = item.getBoundingClientRect()
-      const shortcutBounds = shortcut.getBoundingClientRect()
-      expect(shortcutBounds.left).toBeGreaterThanOrEqual(label.getBoundingClientRect().right)
-      expect(shortcutBounds.right).toBeLessThanOrEqual(itemBounds.right)
-      expect(label.scrollWidth).toBeLessThanOrEqual(label.clientWidth + 1)
-      expect(item.getAttribute('aria-keyshortcuts')).toContain('Control+Shift+')
-      expect(item.getAttribute('aria-keyshortcuts')).toContain('Meta+Shift+')
+    const aiButtons = within(aiTools).getAllByRole('button')
+    expect(aiButtons).toHaveLength(5)
+    for (const button of aiButtons) {
+      const buttonBounds = button.getBoundingClientRect()
+      expect(buttonBounds.left).toBeGreaterThanOrEqual(bounds.left)
+      expect(buttonBounds.right).toBeLessThanOrEqual(bounds.right + 1)
+      expect(button.getAttribute('aria-keyshortcuts')).toContain('Control+Shift+')
+      expect(button.getAttribute('aria-keyshortcuts')).toContain('Meta+Shift+')
+      const hint = button.querySelector('kbd')!
+      expect(hint.textContent).toMatch(/⇧/)
+      const hintBounds = hint.getBoundingClientRect()
+      expect(hintBounds.left).toBeGreaterThanOrEqual(buttonBounds.left)
+      expect(hintBounds.right).toBeLessThanOrEqual(buttonBounds.right + 1)
+      expect(hintBounds.bottom).toBeLessThanOrEqual(buttonBounds.bottom + 1)
     }
     await captureScreenshot({ path: `../.vitest/ui/ai-tools-${width}.png` })
+  })
+
+  it.each([
+    [1100, 780],
+    [390, 844],
+  ] as const)('keeps the Language Tutor draft editor and correction inside the viewport at %i x %i', async (width, height) => {
+    const user = userEvent.setup()
+    await page.viewport(width, height)
+    const snapshot = await service.Snapshot()
+    service.Snapshot.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], name: 'Nora Bennett' }], preferences: { ...snapshot.preferences, 'ai.endpoint': 'http://localhost:11434' } })
+    vi.mocked(LanguageTutorService.Analyze).mockResolvedValueOnce({ detected_language: 'it', corrected_text: 'Merhaba, nasılsın?', translation: '', grammar_notes: null, vocabulary: null, text_to_insert: '' })
+    renderApp()
+    const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
+    await user.click(await within(roomList).findByRole('button', { name: /Nora Bennett/ }))
+    await user.type(await screen.findByRole('textbox', { name: 'Message' }), 'Ciao, come stai? Spero che tu stia bene oggi.')
+    await user.click(within(screen.getByRole('group', { name: 'AI tools' })).getByRole('button', { name: 'Analyze draft with Language Tutor' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
+    await waitFor(() => expect(within(dialog).getByText('Merhaba, nasılsın?')).toBeTruthy())
+    await document.fonts.ready
+    await settleSurfaces()
+    const dialogBounds = dialog.getBoundingClientRect()
+    const editor = dialog.querySelector<HTMLElement>('.language-tutor-editor')!
+    const editorBounds = editor.getBoundingClientRect()
+    const contentBounds = dialog.querySelector('.language-tutor-content')!.getBoundingClientRect()
+    expect(dialogBounds.left).toBeGreaterThanOrEqual(-1)
+    expect(dialogBounds.right).toBeLessThanOrEqual(width + 1)
+    expect(dialog.scrollWidth).toBeLessThanOrEqual(dialog.clientWidth + 1)
+    expect(within(editor).getByRole('textbox', { name: 'Your text' }).getBoundingClientRect().right).toBeLessThanOrEqual(editorBounds.right + 1)
+    if (width > 760) {
+      expect(dialogBounds.width).toBeLessThanOrEqual(481)
+    }
+    expect(contentBounds.top).toBeGreaterThanOrEqual(editorBounds.bottom - 1)
   })
 
 })

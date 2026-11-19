@@ -60,9 +60,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -157,30 +154,6 @@ describe('room history updates', () => {
       harness.eventHandlers.get('notification:open-room')?.({ data: secondRoom.id })
     })
     await waitFor(() => expect(harness.service.History).toHaveBeenCalledWith(secondRoom.id, 0))
-  })
-
-  it('delivers background account alerts with their own privacy settings without replacing the active timeline', async () => {
-    harness.service.NativeNotificationsSupported.mockResolvedValue(true)
-    harness.service.SendNotification.mockResolvedValue(true)
-    harness.service.Snapshot.mockResolvedValue({
-      ...snapshot,
-      preferences: { 'notifications.enabled': false },
-    })
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-    act(() => harness.eventHandlers.get('matrix:update')?.({
-      data: {
-        accountId: 'second',
-        rooms: [{ ...room, accountId: 'second', name: 'Background room' }],
-        notificationPreferences: { 'notifications.only_when_unfocused': false, 'notifications.privacy': 'Hidden content' },
-        notifications: [{ roomId: room.id, accountId: 'second', sender: 'Private sender', senderAvatar: 'mxc://example.org/private-sender', body: 'Private message', category: 'direct' }],
-      }
-    }))
-    await waitFor(() => expect(harness.service.SendNotification).toHaveBeenCalledWith(expect.objectContaining({
-      title: 'Matrix', body: 'New activity', accountId: 'second', roomId: room.id, senderAvatar: '',
-    })))
-    expect(screen.getByText('latest message')).toBeTruthy()
-    expect(harness.service.SwitchAccount).not.toHaveBeenCalled()
   })
 
   it('keeps group alerts off by default and sends them when enabled', async () => {

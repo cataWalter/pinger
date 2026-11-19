@@ -1,7 +1,6 @@
 package desktop
 
 import (
-	"fmt"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"strconv"
 )
@@ -31,9 +30,6 @@ func (m *applicationMenus) applicationMenu() *application.Menu {
 
 	file := menu.AddSubmenu("File")
 	file.Add("New Private Model Chat").SetAccelerator("CmdOrCtrl+shift+m").OnClick(m.dispatch(menuActionPrivateChatNew))
-	file.AddSeparator()
-	m.accounts = file.AddSubmenu("Switch Account")
-	file.Add("Add Account...").OnClick(m.dispatch(menuActionSettingsPrefix + "Account"))
 	file.AddSeparator()
 	file.AddRole(application.CloseWindow)
 
@@ -111,33 +107,6 @@ func (m *applicationMenus) applicationMenu() *application.Menu {
 	m.applyLanguage(m.language)
 	m.applyState(MenuState{Filter: "all"})
 	return menu
-}
-
-// refreshAccounts rebuilds the switch-account submenu after the account list or active account changes.
-func (m *applicationMenus) refreshAccounts() {
-	if m.accounts == nil {
-		return
-	}
-	m.populateAccounts(m.accounts, m.service.Accounts(), m.service.currentAccountID())
-	if m.root != nil {
-		m.root.Update()
-	}
-}
-
-// populateAccounts fills menu with one radio item per account, numbering the first nine with shortcuts.
-func (m *applicationMenus) populateAccounts(menu *application.Menu, accounts []AccountSummary, activeID string) {
-	menu.Clear()
-	if len(accounts) == 0 {
-		menu.Add("No Accounts").SetEnabled(false)
-		return
-	}
-	for index, account := range accounts {
-		item := menu.AddRadio(accountMenuLabel(account), account.ID == activeID)
-		if index < 9 {
-			item.SetAccelerator(fmt.Sprintf("CmdOrCtrl+Alt+%d", index+1))
-		}
-		item.OnClick(m.dispatch(menuActionAccountPrefix + account.ID))
-	}
 }
 
 // applyState enables, labels, and checks the items that depend on the frontend state.

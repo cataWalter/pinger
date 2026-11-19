@@ -132,7 +132,6 @@ func (s *desktopShell) setupMenus() {
 	s.tray.SetMenu(s.menus.trayMenu())
 	if runtime.GOOS == "darwin" {
 		s.app.Menu.SetApplicationMenu(s.menus.applicationMenu())
-		s.menus.refreshAccounts()
 		s.menus.syncPreferences(s.service.preferenceValues())
 	}
 }

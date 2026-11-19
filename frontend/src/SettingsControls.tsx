@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { type PreferenceValues } from './appShared'
 import './settings.css'
 
@@ -23,6 +23,26 @@ export function SettingsGroup({ title, children }: { title: string; children: Re
       <h4 className="settings-group-title">{title}</h4>
       {children}
     </div>
+  )
+}
+
+// The dialog sets this while a search is active or a search result is revealed on the current tab.
+export const SettingsAdvancedRevealContext = createContext(false)
+
+// Rarely used controls sit in a collapsed disclosure so each tab shows its everyday options first.
+// Content mounts only once opened, so a closed section does not load data (devices, storage usage).
+export function SettingsAdvanced({ description, children }: { description: string; children: ReactNode }) {
+  const [opened, setOpened] = useState(false)
+  const revealed = useContext(SettingsAdvancedRevealContext)
+  const showBody = opened || revealed
+  return (
+    <details className="settings-advanced" open={showBody} onToggle={(event) => setOpened(event.currentTarget.open)}>
+      <summary>
+        <span>Advanced</span>
+        <small>{description}</small>
+      </summary>
+      <div className="settings-advanced-body">{showBody ? children : null}</div>
+    </details>
   )
 }
 

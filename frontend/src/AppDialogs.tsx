@@ -1,27 +1,24 @@
 import { Suspense } from 'react'
-import { Check, X, Plus, Upload } from 'lucide-react'
+import { Upload } from 'lucide-react'
 import { QuickSwitcher } from './QuickSwitcher'
 import { ProfilePhotoViewer } from './ProfilePhotoViewer'
 import { RoomInfoDialog } from './RoomInfoDialog'
-import { NewRoomDialog } from './RoomMembership'
 import { ThreadPanel } from './ThreadPanel'
 import { VerificationDialog } from './VerificationDialog'
 import { AppService } from '../bindings/mychat/desktop'
 import { languageName, roomLearningLanguageChoice, roomLearningLanguageKey, roomTutorLanguageChoice, roomTutorLanguageKey } from './aiSettings'
-import { DialogSurface } from './DialogSurface'
 import { DialogPresence } from './DialogPresence'
-import { Avatar } from './appShared'
 import type { AppState } from './appState'
 import { SettingsDialog, AIResultDialogs, ScheduledJobsDialog, ScheduledDraftDialog, MediaApprovalDialog, GeneratedImageDialog, LeaveRoomDialog, RedactDialog, ForwardMessageDialog, MediaGalleryDialog } from './appLazyDialogs'
 
 export function AppDialogs({ app }: { app: AppState }) {
-  const { acceptAIResult, accountError, accountHomeserver, accountManagerOpen, accountPassword, accountUsername, activeAccountID, activeThread, addingAccount, agentEditor, agentSettingsError, aiPanel, approveGeneratedImage, archiveInactiveRooms, audioInputDevices, busy, closeAIResult, closeLanguageTutor, closeMediaGallery, confirmMessageForward, createAgentProfile, createGroupRoom, deleteAgentProfile, editTarget, forwardBusy, forwardError, forwardTargetRoomID, forwardingMessage, generatedImageReview, historyRevision, inviteToSelectedRoom, isActiveAccountRoom, joinRoomByAddress, languageRoles, languageTutorState, leaveConfirmOpen, leaveRoomError, leaveSelectedRoom, leavingRoom, manageScheduledJob, mediaApproval, mediaGalleryError, mediaGalleryFilter, mediaGalleryItems, mediaGalleryLoading, mediaGalleryOpen, mediaGalleryScanned, messages, newRoomMode, openMediaGallery, persistRoomAgents, preferences, profilePhotoPreview, quickSwitcherIndex, quickSwitcherInputRef, quickSwitcherOpen, quickSwitcherQuery, quickSwitcherRooms, redactMessage, redactTarget, regenerateAIResult, resetAccountWorkspace, resolveMediaApproval, roomAgents, roomDrafts, roomInfoOpen, roomMembers, roomMembersError, roomMembersLoading, rooms, saveAgentProfile, scheduleTimeSuggestions, scheduledBusyID, scheduledDialogError, scheduledDraft, scheduledDueAt, scheduledJobs, scheduledJobsError, scheduledJobsOpen, scheduledLoading, scheduledSaving, scheduledTimes, selectedAudioInputDeviceId, selectedRoom, selectedRoomID, sendAIFollowUp, setAIFollowUp, setAccountError, setAccountHomeserver, setAccountManagerOpen, setAccountPassword, setAccountUsername, setAddingAccount, setAgentEditor, setAgentSettingsError, setForwardTargetRoomID, setForwardingMessage, setGeneratedImageReview, setLeaveConfirmOpen, setLeaveRoomError, setMediaGalleryFilter, setNewRoomMode, setOpenThread, setPreference, setPreferenceWithTransition, setPreferences, setProfilePhotoPreview, setQuickSwitcherIndex, setQuickSwitcherOpen, setQuickSwitcherQuery, setRedactTarget, setRoomInfoOpen, setScheduledDraft, setScheduledDueAt, setScheduledJobsOpen, setScheduledTimes, setSettingsOpen, setSettingsTab, setStagedAttachments, settingsOpen, settingsTab, showRoom, snapshot, snippets, stopAIRequest, submitAddAccount, submitScheduledDraft, switchAccount, updateSnippets, useLanguageTutorDraft } = app
+  const { acceptAIResult, activeAccountID, activeThread, agentEditor, agentSettingsError, aiPanel, analyzeWithLanguageTutor, approveGeneratedImage, archiveInactiveRooms, audioInputDevices, busy, closeAIResult, closeLanguageTutor, closeMediaGallery, confirmMessageForward, createAgentProfile, deleteAgentProfile, editTarget, forwardBusy, forwardError, forwardTargetRoomID, forwardingMessage, generatedImageReview, historyRevision, inviteToSelectedRoom, languageRoles, languageTutorState, leaveConfirmOpen, leaveRoomError, leaveSelectedRoom, leavingRoom, manageScheduledJob, mediaApproval, mediaGalleryError, mediaGalleryFilter, mediaGalleryItems, mediaGalleryLoading, mediaGalleryOpen, mediaGalleryScanned, messages, openMediaGallery, persistRoomAgents, preferences, profilePhotoPreview, quickSwitcherIndex, quickSwitcherInputRef, quickSwitcherOpen, quickSwitcherQuery, quickSwitcherRooms, redactMessage, redactTarget, regenerateAIResult, resetAccountWorkspace, resolveMediaApproval, roomAgents, roomDrafts, roomInfoOpen, roomMembers, roomMembersError, roomMembersLoading, rooms, saveAgentProfile, scheduleTimeSuggestions, scheduledBusyID, scheduledDialogError, scheduledDraft, scheduledDueAt, scheduledJobs, scheduledJobsError, scheduledJobsOpen, scheduledLoading, scheduledSaving, scheduledTimes, selectedAudioInputDeviceId, selectedRoom, selectedRoomID, sendAIFollowUp, setAIFollowUp, setAgentEditor, setAgentSettingsError, setForwardTargetRoomID, setForwardingMessage, setGeneratedImageReview, setLeaveConfirmOpen, setLeaveRoomError, setMediaGalleryFilter, setOpenThread, setPreference, setPreferenceWithTransition, setPreferences, setProfilePhotoPreview, setQuickSwitcherIndex, setQuickSwitcherOpen, setQuickSwitcherQuery, setRedactTarget, setRoomInfoOpen, setScheduledDraft, setScheduledDueAt, setScheduledJobsOpen, setScheduledTimes, setSettingsOpen, setSettingsTab, setStagedAttachments, settingsOpen, settingsTab, showRoom, snapshot, snippets, stopAIRequest, submitScheduledDraft, updateSnippets, useLanguageTutorDraft } = app
   return (
     <>
     {forwardingMessage && <Suspense fallback={null}>
       <ForwardMessageDialog
         message={forwardingMessage}
-        destinations={rooms.filter((room) => room.id !== selectedRoomID && isActiveAccountRoom(room))}
+        destinations={rooms.filter((room) => room.id !== selectedRoomID)}
         targetRoomID={forwardTargetRoomID}
         busy={forwardBusy}
         error={forwardError}
@@ -43,52 +40,10 @@ export function AppDialogs({ app }: { app: AppState }) {
         onFollowUpChange={setAIFollowUp}
         onSendFollowUp={sendAIFollowUp}
         onCloseLanguageTutor={closeLanguageTutor}
+        onCheckLanguageTutorDraft={(text) => void analyzeWithLanguageTutor(text, 'draft')}
         onUseLanguageTutorDraft={useLanguageTutorDraft}
       />
     </Suspense>}
-    {accountManagerOpen && <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setAccountManagerOpen(false) }}>
-      <DialogSurface className="room-info-dialog account-dialog" labelledBy="account-manager-title" onClose={() => { if (!busy) setAccountManagerOpen(false) }} onClick={(event) => event.stopPropagation()}>
-        <header className="room-info-header">
-          <div><span className="eyebrow">MATRIX</span><h2 id="account-manager-title">{addingAccount ? 'Add account' : 'Accounts'}</h2></div>
-          <button className="icon-button" type="button" aria-label="Close account manager" disabled={busy} onClick={() => setAccountManagerOpen(false)}><X size={16} /></button>
-        </header>
-        {accountError && <p className="account-manager-error" role="alert">{accountError}</p>}
-        {addingAccount ? <form className="account-add-form" onSubmit={submitAddAccount}>
-          <div className="account-add-field-group">
-            <label className="field" htmlFor="account-homeserver">
-              <span>Homeserver</span>
-              <input id="account-homeserver" type="url" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={accountHomeserver} onChange={(event) => setAccountHomeserver(event.target.value)} autoComplete="url" aria-describedby="account-homeserver-help" required />
-            </label>
-            <p className="field-help" id="account-homeserver-help">Example: https://matrix.org</p>
-          </div>
-          <label className="field" htmlFor="account-username">
-            <span>Username</span>
-            <input id="account-username" value={accountUsername} onChange={(event) => setAccountUsername(event.target.value)} autoComplete="username" autoCapitalize="none" spellCheck={false} autoCorrect="off" required />
-          </label>
-          <label className="field" htmlFor="account-password">
-            <span>Password</span>
-            <input id="account-password" type="password" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} autoComplete="new-password" required />
-          </label>
-          <div className="account-manager-actions">
-            <button className="settings-command" type="button" disabled={busy} onClick={() => { setAddingAccount(false); setAccountError('') }}>Cancel</button>
-            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Connecting…' : 'Add account'}{!busy && <Plus size={15} />}</button>
-          </div>
-        </form> : <div className="account-manager-content">
-          <div className="account-option-list" aria-label="Connected Matrix accounts">
-            {(snapshot.accounts ?? []).map((account) => {
-              const label = account.profile.displayName || account.profile.userId
-              const active = account.id === snapshot.activeAccountId
-              return <button key={account.id} className="account-option" type="button" aria-current={active ? 'true' : undefined} disabled={busy} onClick={() => void switchAccount(account.id)}>
-                <Avatar uri={account.profile.avatarUri} label={label} className="profile-avatar" />
-                <span className="account-option-copy"><strong>{label}</strong><span>{account.profile.userId}</span></span>
-                {active ? <Check size={16} aria-label="Current account" /> : <span className="account-option-homeserver">{account.profile.homeserver}</span>}
-              </button>
-            })}
-          </div>
-          <button className="settings-command account-add-button" type="button" disabled={busy} onClick={() => { setAccountError(''); setAddingAccount(true) }}><Plus size={15} />Add account</button>
-        </div>}
-      </DialogSurface>
-    </div>}
     <DialogPresence open={settingsOpen}>
     {settingsOpen && (
       <Suspense fallback={null}>
@@ -193,7 +148,6 @@ export function AppDialogs({ app }: { app: AppState }) {
       preferences={preferences}
       onClose={() => setOpenThread(null)}
     />}
-    <DialogPresence open={!!newRoomMode}>{newRoomMode && <NewRoomDialog initialMode={newRoomMode} onClose={() => setNewRoomMode(null)} onJoin={joinRoomByAddress} onCreate={createGroupRoom} />}</DialogPresence>
     <DialogPresence open={mediaGalleryOpen && !!selectedRoom}>
     {mediaGalleryOpen && selectedRoom && <Suspense fallback={null}>
       <MediaGalleryDialog

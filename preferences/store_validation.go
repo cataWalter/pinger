@@ -236,3 +236,38 @@ func (s *Store) DeleteRetired() (int, error) {
 	s.publish(Change{Revision: revision})
 	return len(retired), nil
 }
+
+// DeleteAccountsExcept removes account-scoped preferences for every account other than keepAccountID.
+// It returns the number of rows deleted and is safe to call on every start.
+func (s *Store) DeleteAccountsExcept(keepAccountID string) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin account preference cleanup: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec("DELETE FROM preferences WHERE scope = ? AND account_id <> ?", AccountScope, keepAccountID)
+	if err != nil {
+		return 0, fmt.Errorf("delete preferences for other accounts: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count deleted account preferences: %w", err)
+	}
+	if deleted == 0 {
+		return 0, nil
+	}
+	var revision int64
+	if err := tx.QueryRow("SELECT revision FROM preference_meta WHERE id = 1").Scan(&revision); err != nil {
+		return 0, fmt.Errorf("read preference revision: %w", err)
+	}
+	revision++
+	if _, err := tx.Exec("UPDATE preference_meta SET revision = ? WHERE id = 1", revision); err != nil {
+		return 0, fmt.Errorf("write preference revision: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit account preference cleanup: %w", err)
+	}
+	s.markRevision(revision)
+	s.publish(Change{Revision: revision})
+	return int(deleted), nil
+}

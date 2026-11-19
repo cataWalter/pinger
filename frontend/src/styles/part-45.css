@@ -20,43 +20,13 @@
   background: transparent;
 }
 
-.app-shell[data-ui='desktop'] .sidebar-profile {
-  color: var(--sidebar-ink);
-  background: var(--sidebar-panel);
-  border-color: var(--sidebar-border);
-  border-radius: var(--radius-sm);
-}
-
-.app-shell[data-ui='desktop'] :is(.account-switcher-trigger, .sidebar-icon) {
+.app-shell[data-ui='desktop'] .sidebar-icon {
   color: var(--sidebar-ink);
   background: transparent;
   border-color: var(--sidebar-border);
 }
 
-.app-shell[data-ui='desktop'] .profile-copy span {
-  color: var(--sidebar-muted);
-}
-
-.app-shell[data-ui='desktop'] .settings-tabs {
-  background: var(--canvas-warm);
-}
-
-.app-shell[data-ui='desktop'] .settings-tabs button.is-active {
-  color: var(--accent-text);
-  background: var(--surface-selected);
-}
-
-.app-shell[data-ui='desktop'] .setting-toggle {
-  color: var(--ink);
-  padding: 13px 0;
-  border-color: var(--line);
-}
-
-.app-shell[data-ui='desktop'] .setting-toggle input {
-  accent-color: var(--accent-text);
-}
-
-.app-shell[data-ui='desktop'] :is(.settings-dialog, .room-info-dialog, .confirm-dialog, .quick-switcher) {
+.app-shell[data-ui='desktop'] :is(.room-info-dialog, .confirm-dialog, .quick-switcher) {
   animation: surface-enter var(--motion-surface) var(--ease-out) both;
 }
 
@@ -72,11 +42,11 @@
   border-color: var(--line);
 }
 
-.app-shell[data-ui='desktop'] :is(.room-info-section h3, .settings-search-result strong) {
+.app-shell[data-ui='desktop'] .room-info-section h3 {
   color: var(--ink);
 }
 
-.app-shell[data-ui='desktop'] :is(.message-search-result, .settings-search-result):hover {
+.app-shell[data-ui='desktop'] .message-search-result:hover {
   background: var(--surface-hover);
   border-color: var(--line);
 }
@@ -90,7 +60,7 @@
   animation: surface-enter var(--motion-standard) var(--ease-out) both;
 }
 
-.app-shell[data-ui='desktop'] :is(.reaction-chip.is-reacted, .settings-tabs button.is-active, .settings-tab.is-active, .settings-nav-button.is-active) {
+.app-shell[data-ui='desktop'] .reaction-chip.is-reacted {
   color: var(--selected-text);
 }
 

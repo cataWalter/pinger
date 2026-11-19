@@ -4,7 +4,7 @@ import { ArrowUpRight, Copy, FileText, Sparkles, X, Download, ZoomIn, ZoomOut } 
 import { AppService } from '../bindings/mychat/desktop'
 import { type Message } from '../bindings/mychat/desktop/models.js'
 import { AI_ACTION_SHORTCUTS } from './aiSettings'
-import { matrixMediaURL } from './ChatMediaRenderer'
+import { matrixMediaPreviewURL, matrixMediaURL } from './ChatMediaRenderer'
 import { VoiceMessagePlayer } from './VoiceMessagePlayer'
 import { DialogSurface } from './DialogSurface'
 import { observeMediaVisibility } from './avatar'
@@ -245,7 +245,7 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
       {error && <span className="media-error" role="status">{error}</span>}
       {source && isImage && <>
         <button className="media-preview-button" type="button" aria-label={`Open image ${filename}`} title={`Open image ${filename}`} onClick={() => void openImage()}>
-          <img className="media-preview" src={source} alt={filename} loading="lazy" onError={() => setError('This image could not be loaded.')} />
+          <img className="media-preview" src={matrixMediaPreviewURL(roomID, message.id)} alt={filename} loading="lazy" onError={() => setError('This image could not be loaded.')} />
         </button>
         <div className="media-toolbar"><button className="media-download" type="button" aria-label={`Download ${filename}`} onClick={() => void downloadFile()}><Download size={13} />Download</button>{savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}</div>
       </>}

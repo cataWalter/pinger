@@ -106,6 +106,32 @@ func (s *scheduledJobStore) updateJob(id string, update func(*ScheduledJob) erro
 	return errors.New("scheduled job not found")
 }
 
+func (s *scheduledJobStore) keepOnlyAccount(accountID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]ScheduledJob, 0, len(s.jobs))
+	for _, job := range s.jobs {
+		owner := job.AccountID
+		if owner == "" {
+			owner = primaryAccountID
+		}
+		if owner == accountID {
+			kept = append(kept, job)
+		}
+	}
+	removed := len(s.jobs) - len(kept)
+	if removed == 0 {
+		return 0, nil
+	}
+	previous := s.jobs
+	s.jobs = kept
+	if err := s.saveLocked(); err != nil {
+		s.jobs = previous
+		return 0, err
+	}
+	return removed, nil
+}
+
 func (s *scheduledJobStore) saveLocked() error {
 	contents, err := json.Marshal(s.jobs)
 	if err != nil {

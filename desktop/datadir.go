@@ -25,7 +25,7 @@ type DataLocation struct {
 // DataLocation returns the folders the application stores its data in.
 func (s *AppService) DataLocation() DataLocation {
 	s.accountMu.RLock()
-	dataDir, defaultDir, mediaCacheDir := s.dataDir, s.defaultDataDir, s.accountMediaCacheDir
+	dataDir, defaultDir, mediaCacheDir := s.dataDir, s.defaultDataDir, s.mediaCacheRoot
 	s.accountMu.RUnlock()
 
 	location := DataLocation{DataDir: dataDir, DefaultDir: defaultDir, MediaCacheDir: mediaCacheDir}

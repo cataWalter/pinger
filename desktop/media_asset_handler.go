@@ -19,6 +19,7 @@ const maxVideoMessageDurationMilliseconds = 3 * 60 * 1000
 
 type mediaAssetSource interface {
 	OpenMediaFileForEvent(context.Context, string, string) (*os.File, string, error)
+	OpenMediaPreviewForEvent(context.Context, string, string) (*os.File, string, error)
 	OpenMediaFileForURI(context.Context, string) (*os.File, error)
 }
 
@@ -86,7 +87,11 @@ func (handler mediaAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	var declaredMIME string
 	switch source {
 	case "matrix", "encrypted":
-		file, declaredMIME, err = client.OpenMediaFileForEvent(r.Context(), roomID, eventID)
+		if r.URL.Query().Get("size") == "preview" {
+			file, declaredMIME, err = client.OpenMediaPreviewForEvent(r.Context(), roomID, eventID)
+		} else {
+			file, declaredMIME, err = client.OpenMediaFileForEvent(r.Context(), roomID, eventID)
+		}
 	case "mxc":
 		file, err = client.OpenMediaFileForURI(r.Context(), "mxc://"+roomID+"/"+eventID)
 	default:

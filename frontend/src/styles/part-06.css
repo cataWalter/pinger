@@ -107,30 +107,6 @@
   border-radius: 50%;
 }
 
-.profile-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.profile-copy strong,
-.profile-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.profile-copy strong {
-  color: #f0f5f1;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.profile-copy span {
-  color: #99aca0;
-  font-size: 9px;
-}
-
 .sidebar-icon {
   display: grid;
   place-items: center;

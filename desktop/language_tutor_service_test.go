@@ -127,23 +127,72 @@ func TestLanguageTutorUsesChatLearningAndExplanationLanguages(t *testing.T) {
 
 func TestParseTutorAnalysisValidatesDraftOutput(t *testing.T) {
 	draft := mustLanguageTutorRequest(t, "Merhaba", languageTutorModeDraft, "tr", "it")
-	valid := `{"detected_language":"Turkish","corrected_text":"Merhaba.","translation":"Ciao."}`
+	valid := `{"detected_language":"Turkish","corrected_text":"Merhaba."}`
 	analysis, err := parseTutorAnalysis(valid, draft)
 	if err != nil {
 		t.Fatalf("parseTutorAnalysis() error = %v", err)
 	}
-	if analysis.DetectedLanguage != "tr" || analysis.TextToInsert != "Merhaba." || analysis.Translation != "Ciao." {
+	if analysis.DetectedLanguage != "tr" || analysis.TextToInsert != "Merhaba." {
 		t.Fatalf("normalized analysis = %+v", analysis)
 	}
 
 	for _, response := range []string{
 		`not json`,
-		`{"detected_language":"12","corrected_text":"Merhaba.","translation":"Ciao."}`,
-		`{"detected_language":"tr","corrected_text":"","translation":"Ciao."}`,
+		`{"detected_language":"12","corrected_text":"Merhaba."}`,
+		`{"detected_language":"tr","corrected_text":""}`,
 	} {
 		if _, err := parseTutorAnalysis(response, draft); err == nil {
 			t.Errorf("parseTutorAnalysis(%q) accepted invalid output", response)
 		}
+	}
+}
+
+func TestDraftOutputDropsTranslationNotesAndVocabulary(t *testing.T) {
+	draft := mustLanguageTutorRequest(t, "Merhaba", languageTutorModeDraft, "tr", "it")
+	response := `{"detected_language":"tr","corrected_text":"Merhaba.","translation":"Ciao.","grammar_notes":["Should be discarded."],"vocabulary":[{"term":"merhaba","meaning":"hello","example":"Merhaba, Ali."}]}`
+	analysis, err := parseTutorAnalysis(response, draft)
+	if err != nil {
+		t.Fatalf("parseTutorAnalysis() error = %v", err)
+	}
+	if analysis.CorrectedText != "Merhaba." || analysis.TextToInsert != "Merhaba." {
+		t.Fatalf("normalized analysis = %+v", analysis)
+	}
+	if analysis.Translation != "" || len(analysis.GrammarNotes) != 0 || len(analysis.Vocabulary) != 0 {
+		t.Fatalf("draft kept extra fields: %+v", analysis)
+	}
+}
+
+func TestDraftRequestSendsCorrectionOnlySchema(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ResponseFormat struct {
+				JSONSchema struct {
+					Schema struct {
+						Properties map[string]json.RawMessage `json:"properties"`
+					} `json:"schema"`
+				} `json:"json_schema"`
+			} `json:"response_format"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		properties := request.ResponseFormat.JSONSchema.Schema.Properties
+		if len(properties) != 2 || properties["detected_language"] == nil || properties["corrected_text"] == nil {
+			t.Errorf("draft schema properties = %v, want only detected_language and corrected_text", properties)
+		}
+		if err := json.NewEncoder(w).Encode(chatCompletionResponse(`{"detected_language":"tr","corrected_text":"Merhaba."}`)); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	draft := mustLanguageTutorRequest(t, "Merhaba", languageTutorModeDraft, "tr", "it")
+	analysis, err := analyzeLanguageTutor(context.Background(), server.Client(), server.URL, "tutor-model", testLanguageTutorTuning(), draft, nil)
+	if err != nil {
+		t.Fatalf("analyzeLanguageTutor() error = %v", err)
+	}
+	if analysis.CorrectedText != "Merhaba." {
+		t.Fatalf("unexpected analysis: %+v", analysis)
 	}
 }
 
@@ -160,7 +209,7 @@ func TestDraftRequestReturnsOnlyTargetLanguageText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("languageTutorUserPrompt() error = %v", err)
 	}
-	if !strings.Contains(prompt, "Learning language: Turkish (tr)") || !strings.Contains(prompt, "grammar_notes") {
+	if !strings.Contains(prompt, "Learning language: Turkish (tr)") || strings.Contains(prompt, "grammar_notes") || strings.Contains(prompt, `"translation"`) {
 		t.Fatalf("draft prompt = %q", prompt)
 	}
 }

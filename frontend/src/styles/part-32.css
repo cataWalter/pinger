@@ -18,7 +18,6 @@
   font-size: 12px;
 }
 
-.settings-scrim,
 .room-info-scrim {
   display: flex;
   align-items: stretch;
@@ -27,87 +26,6 @@
   background: rgba(17, 25, 35, 0.12);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-}
-
-.settings-scrim {
-  display: grid;
-  place-items: center;
-  padding: 24px;
-}
-
-.settings-dialog {
-  grid-template-columns: 142px minmax(0, 1fr);
-  grid-template-rows: auto auto minmax(0, 1fr);
-  width: min(1080px, calc(100vw - 48px));
-  height: calc(100vh - 48px);
-  max-height: none;
-  margin: 0;
-  border-color: var(--line);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-lg);
-  animation: dialog-enter var(--motion-surface) var(--ease-out) both;
-}
-
-.settings-header {
-  grid-column: 1 / -1;
-  padding: 15px 18px;
-  background: var(--paper);
-}
-
-.settings-header h2 {
-  color: var(--ink);
-  font-size: 20px;
-}
-
-.settings-search {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  min-width: 0;
-}
-
-.settings-tabs {
-  grid-column: 1;
-  grid-row: 3;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  overflow: auto;
-  padding: 12px 8px;
-  border-right: 1px solid var(--line);
-  border-bottom: 0;
-}
-
-.settings-tabs button {
-  min-height: 36px;
-  padding: 0 9px;
-  color: var(--muted);
-  text-align: left;
-  border: 0;
-  border-radius: var(--radius-xs);
-  font-size: 11px;
-}
-
-.settings-tabs button.is-active {
-  color: var(--accent);
-  background: #edf1ff;
-  border: 0;
-  font-weight: 600;
-}
-
-.settings-content {
-  grid-column: 2;
-  grid-row: 3;
-  padding: 18px 20px 24px;
-}
-
-.settings-section {
-  margin: 0;
-}
-
-.settings-section h3 {
-  color: var(--ink);
-  font-family: var(--font-display);
-  font-size: 16px;
 }
 
 .setting-row,

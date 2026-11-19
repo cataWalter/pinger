@@ -28,22 +28,22 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 **Triage & workflow**
 
 - **Needs reply** sidebar view, persisted in SQLite. Mark a room answered with `E` (configurable in Settings → Keyboard); `Ctrl+Z` / `⌘Z` restores the most recently dismissed room. Triage shortcuts are ignored while the composer is focused.
-- **Room filters**: All, Archive, Needs reply, and Favorites toggles plus a one-click "archive all read rooms" cleanup; `Ctrl+Shift+U` shows only needs-reply rooms, `Ctrl+Shift+A` shows all.
+- **Room filters**: All, Archive, Needs reply, and Favorites toggles; `Ctrl+Shift+U` shows only needs-reply rooms, `Ctrl+Shift+A` shows all.
 - **Quick switcher** (`Ctrl+K` / `⌘K`) fuzzy-jumps to any room by name; **message search** (`Ctrl+F` / `⌘F`) searches local history across all rooms with optional filters (chat, sender, from/to dates); `/` focuses room search.
 - **Room navigation**: `Ctrl+1`–`Ctrl+9` jump to a room by list position; `Alt+↑`/`Alt+↓` cycle rooms; `Ctrl+Shift+↑`/`Ctrl+Shift+↓` cycle needs-reply rooms; `Ctrl+Shift+L` jumps to the latest message.
 - **Room actions**: right-click a room (or `Shift+F10`) to remove it from Needs reply, mark it read/unread, archive/restore it, or favorite/unfavorite it; multi-selecting rooms applies the same actions in bulk. The tray menu and the macOS **Messages** menu can mark everything read.
-- **Invitations** appear at the top of the All view with Accept and Decline buttons; invite avatars are not loaded until you join. The **+** button beside the room list joins a room by alias, room ID, or matrix.to link, or creates a private group with an optional topic, invitees, and end-to-end encryption (on by default).
+- **Invitations** appear at the top of the All view with Accept and Decline buttons; invite avatars are not loaded until you join. Accepting an invitation is the only way to join a room.
 
 **Accounts**
 
-- Sign in to several Matrix accounts from the avatar menu at the bottom of the sidebar. The inbox can show every account or scope to one, and `Ctrl+Alt+1`–`Ctrl+Alt+9` switches the active account.
-- Every account keeps its own database, preferences, and AI profiles under the data directory.
-- Unsent composer drafts stay separate for each account and room and, by default, are saved on this device so they return after a restart (Settings → Keyboard → **Keep unsent drafts after restarting**; turning it off deletes saved drafts). Staged attachments stay only while the app is running. Switching accounts preserves both; logging out or leaving a room discards its drafts. Pending confirmations and AI suggestions close when switching accounts.
+- Pinger supports one Matrix account. Data from any other account left on this device by an earlier version is deleted on the next launch, and the active account is kept.
+- The account keeps its database, preferences, and AI profiles under the data directory.
+- Unsent composer drafts stay separate for each room and, by default, are saved on this device so they return after a restart (Settings → Keyboard → **Keep unsent drafts after restarting**; turning it off deletes saved drafts). Staged attachments stay only while the app is running. Logging out or leaving a room discards its drafts.
 
 **Messaging**
 
 - Reply and quick-reaction controls stay visible; replying opens a quoted reply composer; reactions show as chips. The message **context menu** offers Reply, Reply in thread, React, Bookmark, Mark as unread, Copy (plain or with timestamp), Forward…, a "Received at" timestamp, Set reminder, and — when an AI endpoint is configured — Translate, Draft reply with AI, and Explain message; your own messages add Edit and Delete, and failed sends add Retry sending.
-- **Forward** text messages to any other room of the same account; bookmarks and read-state changes are stored locally.
+- **Forward** text messages to any other room; bookmarks and read-state changes are stored locally.
 - In direct chats, your own messages show a **Seen at** timestamp derived from the other person's read receipt.
 - The composer accepts pasted images and files dropped onto the window (50 MiB per attachment), completes `@` mentions from the room member list, suggests emoji for `:shortcodes:`, and optionally replaces emoticons as you type. The **Formatting** menu preserves the selected draft text; Settings can keep the full formatting toolbar expanded.
 - **Voice notes** record straight from the composer with a selectable microphone (up to 4 minutes / 50 MiB); the next voice note can auto-play. Any audio message can be **transcribed with AI** and the transcript inserted into the composer as a draft.
@@ -61,12 +61,13 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 
 **AI assistance**
 
-- The composer's **AI tools** menu groups Language Tutor, suggested replies, image generation, summarization, and translation. Active image generation keeps a directly accessible Stop control.
-- AI action shortcuts are shown in menus and Settings → Keyboard.
+- The composer's **AI tools** buttons put Language Tutor, suggested replies, image generation, summarization, and translation one click away. Each button shows its shortcut beneath the icon. Active image generation keeps a directly accessible Stop control.
+- Language Tutor drafts open in a narrow side panel with your text above the corrected text. Edits run only when you press **Check**. **Keep my draft** puts your edited text in the composer, and **Replace draft** puts the corrected text there.
+- AI action shortcuts appear under the composer AI buttons and in Settings → Keyboard.
 
 - Configure an OpenAI-compatible endpoint in Settings → Integrations (endpoint URL, optional model name, connection test) — including a llama-server you run yourself. Each chat's tutor language is set in its room details and defaults to the default language chosen in Settings → AI.
 - Actions: **Ask AI** (answer a question using room context), draft a reply, explain or translate a selected message, rewrite or shorten composer text, summarize a room, identify chat topics and themes, analyze a two-person conversation, and run a per-room chat agent. **Translate chat** into the chat's tutor language batches the room history so a whole conversation can be translated at once, and audio messages can be transcribed (optional transcription model in Settings → Integrations). Results can be inserted into the composer as a draft or reply.
-- Create up to eight named instruction profiles per room, with an optional default. Profiles are managed in the room **Details** panel, stored in the active account's local preferences, and are not synced through Matrix.
+- Create up to eight named instruction profiles per room, with an optional default. Profiles are managed in the room **Details** panel, stored in local preferences, and are not synced through Matrix.
 - AI actions return suggestions only. Nothing is sent as a Matrix message unless you review and send it yourself. The selected text, included chat context, and custom profile instructions are sent to the configured endpoint, which may be remote.
 - **Tone Guard** checks drafts over 10 words, drafts sent from 10 PM to 6 AM, drafts after tense incoming messages, or every draft in rooms where it is enabled. It uses only a local loopback model; a remote endpoint, timeout, or model error fails open. Medium- or high-severity drafts can be replaced with a calmer alternative or sent unchanged.
 
@@ -87,7 +88,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - Alerts use the operating system's native notification service: Notification Center on macOS, toast notifications on Windows, and the freedesktop notification service on Linux. macOS requires the bundled Pinger app identity; Windows and Linux use system notification settings. Desktop settings control permission, focus, sound and volume, content privacy (sender + preview, sender only, or hidden), and separate alerts for direct messages, mentions, and group messages with a per-category tone (Chime, Pulse, Soft, Silent). Muted rooms never notify. Settings → Notifications can open the OS notification settings for Pinger.
 - Optional batching combines new messages into one alert; a repeat reminder re-surfaces a still-unread room (after 5, 15, or 60 minutes); one-time codes can alert immediately and copy the code to the clipboard; an optional sound effect plays when a message is sent.
 - Reopen the window, mark all rooms read, or quit from the tray menu; the tray icon and tooltip reflect unread activity and follow the system light/dark appearance. Closing the window can minimize to tray; the startup preference registers the app with the OS. Clicking a notification focuses the app and opens the relevant room.
-- On macOS, the Dock badge and menu-bar number match the sidebar's Needs reply total: rooms awaiting a reply, excluding archived rooms and following the inbox account scope. Both numbers disappear when the total is zero.
+- On macOS, the Dock badge and menu-bar number match the sidebar's Needs reply total: rooms awaiting a reply, excluding archived rooms. Both numbers disappear when the total is zero.
 - All desktop platforms use the shared Pinger artwork. Windows embeds the ICO in the executable and uses the avatar or Pinger fallback as the toast logo; Linux supplies the window PNG and matches the installed `fi.mau.pinger.desktop` entry for GTK4/Wayland dock icons. macOS uses the bundled ICNS and runtime Dock icon. Notification avatars take priority over fallback artwork.
 
 **Settings** (`Ctrl+,` / `⌘,`)
@@ -128,6 +129,7 @@ Press `?` in the app (or open Settings → Keyboard) for the authoritative list.
 | `Ctrl+Shift+A` | Show all rooms (clear filters) |
 | `Ctrl+Shift+L` | Jump to the latest messages |
 | `Ctrl`/`⌘` + `Shift+T` | Analyze the composer draft with Language Tutor |
+| `Ctrl`/`⌘` + `Enter` | Check the edited draft in the Language Tutor (does not replace the composer) |
 | `Ctrl`/`⌘` + `Shift+B` | Suggest replies |
 | `Ctrl`/`⌘` + `Shift+J` | Generate an image from the draft for approval |
 | `Ctrl`/`⌘` + `Shift+O` | Prepare a Local AI summary chat |
@@ -139,7 +141,6 @@ Press `?` in the app (or open Settings → Keyboard) for the authoritative list.
 | `Ctrl`/`⌘` + `Shift+V` | Transcribe the focused audio message |
 | `Ctrl`/`⌘` + `Shift+M` | Start a private model chat |
 | `Ctrl+1` … `Ctrl+9` | Jump to room by list position |
-| `Ctrl+Alt+1` … `Ctrl+Alt+9` | Switch Matrix account |
 | `Ctrl`/`⌘` + `+` / `-` / `0` | Zoom in / out / reset app zoom |
 | `↑` `↓` `Home` `End` | Navigate the room list |
 | `Shift+F10` | Open the room actions menu |
@@ -158,13 +159,13 @@ Single-key shortcuts (`R`, `J`, `K`, and the answered key) can be turned off in 
 | **Data directory** | `~/Library/Application Support/gomuks-desktop` | `%AppData%\gomuks-desktop` | `~/.config/gomuks-desktop` |
 | **Media cache** | `~/Library/Caches/gomuks-desktop/media` | `%LocalAppData%\gomuks-desktop\media` | `~/.cache/gomuks-desktop/media` |
 
-- The data directory holds the primary account's SQLite database (`matrix.db`; additional accounts live under `accounts/<account-id>/matrix.db`), the preferences database (`preferences.db`), the account registry (`accounts.json`), scheduled messages and reminders (`scheduled-jobs.json`), the Olm pickle key (`crypto.key`), and the legacy `preferences.json` file that is imported into `preferences.db` on first launch.
+- The data directory holds the account's SQLite database (`matrix.db`), the preferences database (`preferences.db`), the account registry (`accounts.json`), scheduled messages and reminders (`scheduled-jobs.json`), the Olm pickle key (`crypto.key`), and the legacy `preferences.json` file that is imported into `preferences.db` on first launch.
 - The local SQLite cache stores message data, including decrypted event contents. Downloaded media is cached under the user's cache directory; encrypted payloads are decrypted before caching, and cache files are owner-only. Clearing the media cache (Settings → Storage) removes only downloaded media — use OS disk encryption for protection at rest.
-- Saved composer drafts (the 100 most recent, up to 8,000 characters each) are kept as plain text in the app's web storage on this device. Logging out removes that account's drafts; turning off **Keep unsent drafts after restarting** removes all of them.
+- Saved composer drafts (the 100 most recent, up to 8,000 characters each) are kept as plain text in the app's web storage on this device. Logging out removes drafts; turning off **Keep unsent drafts after restarting** removes all of them.
 - Tone Guard sends only the draft and up to two recent incoming messages to a configured loopback HTTP model. It never sends this context to a remote endpoint; when the configured endpoint is not local or the check fails, the message can still be sent.
 - Link previews send the link to your homeserver's preview endpoint, which fetches the page. They are on by default for unencrypted rooms and off for encrypted rooms; both can be turned off in Settings → Appearance. Previews are cached in memory only.
 - On first launch, data from the legacy Fyne build (`fyne-matrix` data directory and `fi.mau.fyne-matrix` preferences) is migrated into the current data directory; the legacy database is copied with SQLite's online backup API.
-- On each launch, removed features' stored data is deleted: the `relationship-health.db*` files for each account and their retired preference keys. The step is idempotent and ignores missing files.
+- On each launch, data from any account other than the active one is deleted: its database, preferences, scheduled jobs, and cached media. Removed features' stored data is deleted too: the `relationship-health.db*` files for each account and their retired preference keys. The step is idempotent and ignores missing files.
 
 ## Run locally
 
@@ -216,7 +217,7 @@ open bin/Pinger.app
 wails3 task dev
 ```
 
-Hot-reloads the frontend via Vite and rebuilds the Go app on change.
+Hot-reloads the frontend via Vite and rebuilds the Go app on change. `go run ./scripts/dev` starts the same `wails3 dev` session from a Go launcher and accepts `WAILS_VITE_PORT` as an override.
 
 For a native executable without the desktop installer, run `wails3 task build:linux` on Linux or `wails3 task build:windows` on Windows. These write to `bin/`; Windows builds require MinGW-w64 GCC on `PATH`. The Windows ZIP and Linux DEB/AppImage installers are produced by the release workflow; local builds do not create those installer formats.
 

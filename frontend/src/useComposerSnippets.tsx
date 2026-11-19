@@ -1,5 +1,5 @@
 import { AppService } from '../bindings/mychat/desktop'
-import { type GroupRoomRequest, type Invite, type Member } from '../bindings/mychat/desktop/models.js'
+import { type Invite, type Member } from '../bindings/mychat/desktop/models.js'
 import { formatComposerText, insertEmoji, type ComposerFormat } from './composerText'
 import { saveSnippets, type Snippet } from './snippets'
 import { useSnippetExpander } from './useSnippetExpander'
@@ -8,7 +8,7 @@ import { getVolatileAIDraft, updateVolatileAIDraft } from './volatileAIDrafts'
 import type { useMessageAIActions } from './useMessageAIActions'
 
 export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>) {
-  const { activeAccountID, aiPanel, closeLanguageTutor, composeText, composeTextRef, composerEmojiSelectionRef, composerInputRef, editTarget, emojiMatch, emojiOptions, focusTimelineMessage, handleMessageDoubleClick, handleTimelineAudioEnded, inviteBusyRoomID, languageTutorState, mentionEnd, mentionOptions, mentionStart, openMessageContextMenu, openThreadPanel, removeReaction, roomDrafts, selectedRoomID, selectedRoomRef, sendReaction, setAIPanel, setComposeText, setEditTarget, setEmojiMatch, setEmojiPickerOpen, setError, setInviteBusyRoomID, setMentionBindings, setMentionQuery, setMentionStart, setNewRoomMode, setReplyTarget, setSnapshot, setSnippets, setSuggestedReplies, setVolatileAIDrafts, showRoom, snippets, startDirectChat, timelineMessageActionsRef, updateEmojiQuery, updateMentionQuery, volatileAIDrafts } = app
+  const { activeAccountID, aiPanel, closeLanguageTutor, composeText, composeTextRef, composerEmojiSelectionRef, composerInputRef, editTarget, emojiMatch, emojiOptions, focusTimelineMessage, handleMessageDoubleClick, handleTimelineAudioEnded, inviteBusyRoomID, languageTutorState, mentionEnd, mentionOptions, mentionStart, openMessageContextMenu, openThreadPanel, removeReaction, roomDrafts, selectedRoomID, selectedRoomRef, sendReaction, setAIPanel, setComposeText, setEditTarget, setEmojiMatch, setEmojiPickerOpen, setError, setInviteBusyRoomID, setMentionBindings, setMentionQuery, setMentionStart, setReplyTarget, setSnapshot, setSnippets, setSuggestedReplies, setVolatileAIDrafts, showRoom, snippets, startDirectChat, timelineMessageActionsRef, updateEmojiQuery, updateMentionQuery, volatileAIDrafts } = app
 
   function setComposeDraft(text: string) {
     composeTextRef.current = text
@@ -78,14 +78,14 @@ export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>)
     })
   }
 
-  function useLanguageTutorDraft() {
-    const text = languageTutorState?.analysis?.text_to_insert.trim()
-    if (languageTutorState?.mode !== 'draft' || !text || editTarget) return
+  function useLanguageTutorDraft(text: string) {
+    const draft = text.trim()
+    if (languageTutorState?.mode !== 'draft' || !draft || editTarget) return
     if (languageTutorState.accountID !== activeAccountID || languageTutorState.roomID !== selectedRoomRef.current) {
       closeLanguageTutor()
       return
     }
-    setComposeDraft(text)
+    setComposeDraft(draft)
     closeLanguageTutor()
     requestAnimationFrame(() => composerInputRef.current?.focus())
   }
@@ -193,18 +193,5 @@ export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>)
     }
   }
 
-  async function openNewRoom(roomID: string) {
-    setSnapshot(await AppService.Snapshot())
-    setNewRoomMode(null)
-    showRoom(roomID)
-  }
-
-  async function joinRoomByAddress(target: string) {
-    await openNewRoom(await AppService.JoinRoom(target))
-  }
-
-  async function createGroupRoom(request: GroupRoomRequest) {
-    await openNewRoom(await AppService.CreateGroupRoom(request))
-  }
-  return { ...app, snippetExpander, snippetOptions, snippetMatch, snippetMenuVisible, applyMention, useLanguageTutorDraft, useSuggestedReply, acceptAIResult, setComposeDraft, updateSnippets, applyEmojiSuggestion, toggleComposerEmojiPicker, insertPickedEmoji, applyFormatting, acceptInvite, declineInvite, openNewRoom, joinRoomByAddress, createGroupRoom }
+  return { ...app, snippetExpander, snippetOptions, snippetMatch, snippetMenuVisible, applyMention, useLanguageTutorDraft, useSuggestedReply, acceptAIResult, setComposeDraft, updateSnippets, applyEmojiSuggestion, toggleComposerEmojiPicker, insertPickedEmoji, applyFormatting, acceptInvite, declineInvite }
 }

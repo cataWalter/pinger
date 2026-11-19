@@ -168,14 +168,6 @@
   background: #2a352e;
 }
 
-:is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .settings-dialog,
-.app-shell[data-theme='oled-black'] .settings-dialog,
-.app-shell[data-theme='dracula'] .settings-dialog,
-.app-shell[data-theme='midnight'] .settings-dialog,
-.app-shell[data-theme='slate'] .settings-dialog {
-  border-color: var(--line);
-}
-
 :is(.app-shell[data-theme='dark'], .app-shell[data-theme='vs-code']) .setting-row strong,
 .app-shell[data-theme='oled-black'] .setting-row strong,
 .app-shell[data-theme='dracula'] .setting-row strong,

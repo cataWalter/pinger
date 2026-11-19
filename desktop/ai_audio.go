@@ -104,6 +104,7 @@ func aiCompletionTimeoutFor(messages []AIMessage) time.Duration {
 }
 
 // AIComplete sends chat messages to the configured local endpoint and returns the reply text.
+// Each reply delta is emitted as an ai:stream event while the model writes, so the panel shows text early.
 // The temperature argument is kept for the frontend binding; every request uses the fixed sampling values.
 func (s *AppService) AIComplete(messages []AIMessage, requestID string, temperature float64, maxTokens int) (string, error) {
 	endpoint, model, err := s.aiEndpointSettings()
@@ -113,7 +114,21 @@ func (s *AppService) AIComplete(messages []AIMessage, requestID string, temperat
 	thinkingLevel := stringPreference(s.preferenceValues(), aiThinkingLevelPreference, aiThinkingLevelDefault)
 	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
 	defer release()
-	return aiChatCompletionWithThinking(ctx, aiHTTPClient, endpoint, model, messages, aiCompletionTimeoutFor(messages), maxTokens, aiThinkingOptions(thinkingLevel))
+	var onChunk func(string)
+	if requestID != "" && s.emitAIStream != nil {
+		onChunk = func(text string) {
+			s.emitAIStream(AIStreamEvent{RequestID: requestID, Text: text})
+		}
+	}
+	return aiStreamChatCompletion(ctx, aiHTTPClient, endpoint, model, messages, maxTokens, aiThinkingOptions(thinkingLevel), onChunk)
+}
+
+// aiStreamChatCompletion requests an OpenAI-compatible reply as a stream and passes each text delta to onChunk.
+// A nil onChunk makes the request non-streaming.
+func aiStreamChatCompletion(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, maxTokens int, chatTemplateKwargs map[string]any, onChunk func(string)) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, aiCompletionTimeoutFor(messages))
+	defer cancel()
+	return aiProviderCompletion(ctx, client, AIProviderOpenAICompatible, endpoint, model, messages, aiCompletionOptions{MaxTokens: maxTokens, ChatTemplateKwargs: chatTemplateKwargs}, onChunk)
 }
 
 // AICancel stops a running AI request.

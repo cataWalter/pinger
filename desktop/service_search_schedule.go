@@ -144,28 +144,6 @@ func (s *AppService) DeclineInvite(roomID string) error {
 	return client.DeclineInvite(s.ctx, roomID)
 }
 
-// JoinRoom accepts a room ID, an alias, a matrix.to link or a matrix: URI.
-func (s *AppService) JoinRoom(target string) (string, error) {
-	client := s.currentClient()
-	if client == nil {
-		return "", errNoActiveAccount
-	}
-	return client.JoinRoom(s.ctx, target)
-}
-
-func (s *AppService) CreateGroupRoom(request GroupRoomRequest) (string, error) {
-	client := s.currentClient()
-	if client == nil {
-		return "", errNoActiveAccount
-	}
-	return client.CreateGroupRoom(s.ctx, matrix.GroupRoomRequest{
-		Name:      request.Name,
-		Topic:     request.Topic,
-		Invitees:  request.Invitees,
-		Encrypted: request.Encrypted,
-	})
-}
-
 func (s *AppService) InviteToRoom(roomID string, userIDs []string) error {
 	client := s.currentClient()
 	if client == nil {

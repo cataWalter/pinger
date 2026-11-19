@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -83,5 +84,68 @@ func TestOpenMediaFileForEventRejectsMalformedAndMissingIDs(t *testing.T) {
 	}
 	if _, _, err = client.OpenMediaFileForEvent(context.Background(), "!room:example.org", "$missing"); err != ErrMediaNotFound {
 		t.Fatalf("missing event error = %v, want ErrMediaNotFound", err)
+	}
+}
+
+func TestOpenMediaPreviewForEventPrefersThumbnailAndFallsBack(t *testing.T) {
+	client, err := New(filepath.Join(t.TempDir(), "profile", "matrix.db"))
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	defer client.Close()
+	client.SetMediaCacheDir(t.TempDir())
+
+	const roomID = "!room:example.org"
+	if err = client.engine.DB.Room.CreateRow(context.Background(), id.RoomID(roomID)); err != nil {
+		t.Fatalf("create room row: %v", err)
+	}
+	insertImage := func(eventID string, info map[string]any, mediaURI string) {
+		t.Helper()
+		content, marshalErr := json.Marshal(map[string]any{"msgtype": "m.image", "body": "photo.png", "url": mediaURI, "info": info})
+		if marshalErr != nil {
+			t.Fatalf("marshal event content: %v", marshalErr)
+		}
+		storedEvent := &database.Event{
+			RoomID:    id.RoomID(roomID),
+			ID:        id.EventID(eventID),
+			Sender:    id.UserID("@alice:example.org"),
+			Type:      event.EventMessage.Type,
+			Timestamp: jsontime.UM(time.Now()),
+			Content:   content,
+			Unsigned:  json.RawMessage(`{}`),
+		}
+		if _, insertErr := client.engine.DB.Event.Insert(context.Background(), storedEvent); insertErr != nil {
+			t.Fatalf("insert media event: %v", insertErr)
+		}
+	}
+	insertImage("$with-thumbnail", map[string]any{"mimetype": "image/png", "thumbnail_url": "mxc://example.org/thumb-small"}, "mxc://example.org/full-large")
+	insertImage("$without-thumbnail", map[string]any{"mimetype": "image/png"}, "mxc://example.org/full-only")
+	writeCacheFile(t, client, "mxc://example.org/full-large", false, "full-large")
+	writeCacheFile(t, client, "mxc://example.org/thumb-small", false, "thumb-small")
+	writeCacheFile(t, client, "mxc://example.org/full-only", false, "full-only")
+
+	readOpened := func(file *os.File, openErr error) string {
+		t.Helper()
+		if openErr != nil {
+			t.Fatalf("open media: %v", openErr)
+		}
+		defer file.Close()
+		data, readErr := io.ReadAll(file)
+		if readErr != nil {
+			t.Fatalf("read media: %v", readErr)
+		}
+		return string(data)
+	}
+	preview, _, previewErr := client.OpenMediaPreviewForEvent(context.Background(), roomID, "$with-thumbnail")
+	if got := readOpened(preview, previewErr); got != "thumb-small" {
+		t.Fatalf("preview with thumbnail = %q, want thumbnail bytes", got)
+	}
+	fallback, _, fallbackErr := client.OpenMediaPreviewForEvent(context.Background(), roomID, "$without-thumbnail")
+	if got := readOpened(fallback, fallbackErr); got != "full-only" {
+		t.Fatalf("preview without thumbnail = %q, want original bytes", got)
+	}
+	original, _, originalErr := client.OpenMediaFileForEvent(context.Background(), roomID, "$with-thumbnail")
+	if got := readOpened(original, originalErr); got != "full-large" {
+		t.Fatalf("original open = %q, want original bytes", got)
 	}
 }

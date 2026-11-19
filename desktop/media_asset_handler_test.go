@@ -44,13 +44,15 @@ func FuzzParseMediaAssetPath(f *testing.F) {
 }
 
 type testMediaAssetSource struct {
-	path     string
-	mimeType string
-	eventErr error
-	uriErr   error
-	roomID   string
-	eventID  string
-	mediaURI string
+	path        string
+	previewPath string
+	mimeType    string
+	eventErr    error
+	uriErr      error
+	roomID      string
+	eventID     string
+	mediaURI    string
+	previewed   bool
 }
 
 func (source *testMediaAssetSource) OpenMediaFileForEvent(_ context.Context, roomID, eventID string) (*os.File, string, error) {
@@ -60,6 +62,15 @@ func (source *testMediaAssetSource) OpenMediaFileForEvent(_ context.Context, roo
 	}
 	file, err := os.Open(source.path)
 	return file, source.mimeType, err
+}
+
+func (source *testMediaAssetSource) OpenMediaPreviewForEvent(_ context.Context, roomID, eventID string) (*os.File, string, error) {
+	source.roomID, source.eventID, source.previewed = roomID, eventID, true
+	if source.eventErr != nil {
+		return nil, "", source.eventErr
+	}
+	file, err := os.Open(source.previewPath)
+	return file, "", err
 }
 
 func (source *testMediaAssetSource) OpenMediaFileForURI(_ context.Context, mediaURI string) (*os.File, error) {
@@ -100,6 +111,35 @@ func TestMediaAssetHandlerServesRangesAndEventMIME(t *testing.T) {
 	}
 	if source.roomID != "!room:example.org" || source.eventID != "$photo" {
 		t.Fatalf("resolved event = %q/%q", source.roomID, source.eventID)
+	}
+}
+
+func TestMediaAssetHandlerServesPreviewSizeFromPreviewSource(t *testing.T) {
+	dir := t.TempDir()
+	fullPath := filepath.Join(dir, "full")
+	previewPath := filepath.Join(dir, "preview")
+	if err := os.WriteFile(fullPath, []byte("full-size-original"), 0o600); err != nil {
+		t.Fatalf("write original media: %v", err)
+	}
+	if err := os.WriteFile(previewPath, []byte("small-preview"), 0o600); err != nil {
+		t.Fatalf("write preview media: %v", err)
+	}
+	const eventPath = "/media/matrix/%21room%3Aexample.org/%24photo"
+
+	source := &testMediaAssetSource{path: fullPath, previewPath: previewPath, mimeType: "image/webp"}
+	handler := mediaAssetHandler{currentClient: func() mediaAssetSource { return source }}
+	preview := httptest.NewRecorder()
+	handler.ServeHTTP(preview, httptest.NewRequest(http.MethodGet, eventPath+"?size=preview", nil))
+	if preview.Code != http.StatusOK || preview.Body.String() != "small-preview" || !source.previewed {
+		t.Fatalf("preview = %d %q (previewed %v), want preview bytes from preview source", preview.Code, preview.Body.String(), source.previewed)
+	}
+
+	source = &testMediaAssetSource{path: fullPath, previewPath: previewPath, mimeType: "image/webp"}
+	handler = mediaAssetHandler{currentClient: func() mediaAssetSource { return source }}
+	full := httptest.NewRecorder()
+	handler.ServeHTTP(full, httptest.NewRequest(http.MethodGet, eventPath, nil))
+	if full.Code != http.StatusOK || full.Body.String() != "full-size-original" || source.previewed {
+		t.Fatalf("full = %d %q (previewed %v), want original bytes from event source", full.Code, full.Body.String(), source.previewed)
 	}
 }
 

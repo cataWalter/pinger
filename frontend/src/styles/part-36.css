@@ -1,51 +1,9 @@
 
 @media (max-width: 760px) {
 
-  .settings-scrim,
   .room-info-scrim,
   .media-gallery-scrim {
     padding: 0;
-  }
-
-  .settings-dialog {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto minmax(0, 1fr);
-    width: 100%;
-    height: 100%;
-    border-radius: 0;
-  }
-
-  .settings-header {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .settings-tabs {
-    grid-column: 1;
-    grid-row: 2;
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding: 0 10px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .settings-search {
-    grid-column: 1;
-    grid-row: 3;
-    margin: 10px 12px 0;
-  }
-
-  .settings-tabs button {
-    flex: 0 0 auto;
-    min-height: 42px;
-  }
-
-  .settings-content {
-    grid-column: 1;
-    grid-row: 4;
-    padding: 14px 16px 20px;
   }
 
   .room-info-dialog {

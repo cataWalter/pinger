@@ -263,7 +263,7 @@ func (s *AppService) aiEndpointSettings() (string, string, error) {
 	endpoint, _ := preferences["ai.endpoint"].(string)
 	model, _ := preferences["ai.model"].(string)
 	if endpoint == "" {
-		return "", "", errors.New("set an AI endpoint in Settings > Integrations")
+		return "", "", errors.New("set an AI endpoint in Settings > AI")
 	}
 	return endpoint, model, nil
 }

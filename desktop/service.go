@@ -12,17 +12,13 @@ import (
 )
 
 type AppService struct {
-	// Lock order: accountOpenMu, then accountMu, then activeRoomMu. localAIChatMu and chatExportMu are leaves; never nest them.
+	// Lock order: accountMu, then activeRoomMu. localAIChatMu and chatExportMu are leaves; never nest them.
 	client                 *matrix.Client
 	accountMu              sync.RWMutex
-	accountOpenMu          sync.Mutex
 	accountRegistry        *accountRegistry
-	accountClients         map[string]*matrix.Client
-	accountEventPumps      map[string]bool
-	accountSyncStarted     map[string]bool
 	dataDir                string
 	defaultDataDir         string
-	accountMediaCacheDir   string
+	mediaCacheRoot         string
 	activeAccountID        string
 	preferences            *PreferenceStore
 	sharedPreferences      *sharedpreferences.Store
@@ -38,7 +34,6 @@ type AppService struct {
 	setAutostart           func(bool) error
 	setMenuBarIcon         func(bool)
 	menuStateChanged       func(MenuState)
-	menuAccountsChanged    func()
 	chooseSavePath         func(directory, filename string) (string, error)
 	chooseDownloadFolder   func() (string, error)
 	revealFile             func(string) error
@@ -75,18 +70,17 @@ func (s *AppService) OpenExternalURL(rawURL string) error {
 }
 
 type Snapshot struct {
-	LoggedIn              bool             `json:"loggedIn"`
-	NeedsVerification     bool             `json:"needsVerification"`
-	Verification          *Verification    `json:"verification"`
-	SyncReady             bool             `json:"syncReady"`
-	ConnectionState       string           `json:"connectionState"`
-	SlidingSyncListCounts map[string]int   `json:"slidingSyncListCounts"`
-	Profile               AccountProfile   `json:"profile"`
-	Accounts              []AccountSummary `json:"accounts"`
-	ActiveAccountID       string           `json:"activeAccountId"`
-	Rooms                 []Room           `json:"rooms"`
-	Invites               []Invite         `json:"invites"`
-	Preferences           map[string]any   `json:"preferences"`
+	AccountID             string         `json:"accountId"`
+	LoggedIn              bool           `json:"loggedIn"`
+	NeedsVerification     bool           `json:"needsVerification"`
+	Verification          *Verification  `json:"verification"`
+	SyncReady             bool           `json:"syncReady"`
+	ConnectionState       string         `json:"connectionState"`
+	SlidingSyncListCounts map[string]int `json:"slidingSyncListCounts"`
+	Profile               AccountProfile `json:"profile"`
+	Rooms                 []Room         `json:"rooms"`
+	Invites               []Invite       `json:"invites"`
+	Preferences           map[string]any `json:"preferences"`
 }
 
 type Room struct {
@@ -121,13 +115,6 @@ type Invite struct {
 	InviterName string `json:"inviterName"`
 	Direct      bool   `json:"direct"`
 	InvitedAt   int64  `json:"invitedAt"`
-}
-
-type GroupRoomRequest struct {
-	Name      string   `json:"name"`
-	Topic     string   `json:"topic"`
-	Invitees  []string `json:"invitees"`
-	Encrypted bool     `json:"encrypted"`
 }
 
 type LinkPreview struct {

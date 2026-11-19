@@ -6,7 +6,7 @@ import { localDateTimeInputValue, preferenceBoolean, timelineMessageID, isNeedsR
 import type { useInboxState } from './useInboxState'
 
 export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
-  const { activeThread, answeredShortcut, composeText, defaultScheduleDelayMinutes, editTarget, leaveConfirmOpen, markRoomAnsweredRef, messageContextMenu, messagesRef, newRoomMode, pinnedScrollTopRef, preferencesRef, quickSwitcherOpen, reactingMessageID, redactTarget, replyTarget, roomContextMenu, roomInfoOpen, roomsRef, selectedRoomID, selectedRoomRef, setMessageContextMenu, setOpenThread, setPreferenceRef, setReactingMessageID, setRoomContextMenu, setScheduledDialogError, setScheduledDraft, setScheduledDueAt, settingsOpen, singleKeyShortcuts, snapshot, stickToBottomRef, timelineListRef, timelineRef, visibleMessages } = app
+  const { activeThread, answeredShortcut, composeText, defaultScheduleDelayMinutes, editTarget, leaveConfirmOpen, markRoomAnsweredRef, messageContextMenu, messagesRef, pinnedScrollTopRef, preferencesRef, quickSwitcherOpen, reactingMessageID, redactTarget, replyTarget, roomContextMenu, roomInfoOpen, roomsRef, selectedRoomID, selectedRoomRef, setMessageContextMenu, setOpenThread, setPreferenceRef, setReactingMessageID, setRoomContextMenu, setScheduledDialogError, setScheduledDraft, setScheduledDueAt, settingsOpen, singleKeyShortcuts, stickToBottomRef, timelineListRef, timelineRef, visibleMessages } = app
 
   function openScheduleMessage() {
     if (!selectedRoomID || !composeText.trim() || editTarget) return
@@ -32,7 +32,7 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
   useEffect(() => {
     selectedRoomRef.current = selectedRoomID
     void AppService.SetActiveRoom(selectedRoomID)
-  }, [selectedRoomID, snapshot?.activeAccountId, selectedRoomRef])
+  }, [selectedRoomID, selectedRoomRef])
 
   useEffect(() => {
     const handleContentBlurShortcut = (event: globalThis.KeyboardEvent) => {
@@ -63,7 +63,7 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
       if (!singleKeyShortcuts || event.repeat || event.altKey || event.metaKey || event.ctrlKey || event.key.toUpperCase() !== answeredShortcut) return
       const target = event.target
       if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [contenteditable="true"]'))) return
-      if (settingsOpen || roomInfoOpen || activeThread || newRoomMode || leaveConfirmOpen || redactTarget || quickSwitcherOpen) return
+      if (settingsOpen || roomInfoOpen || activeThread || leaveConfirmOpen || redactTarget || quickSwitcherOpen) return
       const roomID = roomContextMenu?.roomID ?? selectedRoomID
       const room = roomsRef.current.find((candidate) => candidate.id === roomID)
       if (!room || !isNeedsReplyRoom(room)) return
@@ -72,7 +72,7 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
     }
     window.addEventListener('keydown', handleGlobalAnsweredShortcut)
     return () => window.removeEventListener('keydown', handleGlobalAnsweredShortcut)
-  }, [activeThread, answeredShortcut, singleKeyShortcuts, leaveConfirmOpen, newRoomMode, quickSwitcherOpen, roomContextMenu, roomInfoOpen, redactTarget, selectedRoomID, settingsOpen, markRoomAnsweredRef, roomsRef])
+  }, [activeThread, answeredShortcut, singleKeyShortcuts, leaveConfirmOpen, quickSwitcherOpen, roomContextMenu, roomInfoOpen, redactTarget, selectedRoomID, settingsOpen, markRoomAnsweredRef, roomsRef])
 
   useEffect(() => {
     if (!roomContextMenu && !messageContextMenu) return

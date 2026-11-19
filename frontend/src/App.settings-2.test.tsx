@@ -66,7 +66,6 @@ describe('settings storage, integrations, help, and about', () => {
   beforeEach(() => {
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
     harness.service.History.mockResolvedValue({ messages: [], before: 0, hasMore: false })
     harness.service.ScheduledJobs.mockResolvedValue([])
     harness.service.SetActiveRoom.mockResolvedValue(undefined)
@@ -165,6 +164,7 @@ describe('settings storage, integrations, help, and about', () => {
       .mockResolvedValue([{ roomId: '!room:example.org', name: 'Test room', messages: 12, textBytes: 1024, mediaBytes: 0, mediaFiles: 0 }])
     harness.service.ClearCachedMedia.mockResolvedValue({ files: 3, bytes: 4096 })
     const user = await openSettingsTab('Storage')
+    await user.click(await screen.findByText('Advanced'))
 
     const table = await screen.findByRole('table', { name: 'Storage used by each chat' })
     expect(within(table).getByText('Test room')).toBeTruthy()
@@ -181,6 +181,7 @@ describe('settings storage, integrations, help, and about', () => {
     confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     harness.service.RoomStorageUsage.mockResolvedValue([{ roomId: '!room:example.org', name: 'Test room', messages: 1, textBytes: 10, mediaBytes: 20, mediaFiles: 1 }])
     const user = await openSettingsTab('Storage')
+    await user.click(await screen.findByText('Advanced'))
 
     await user.click(await screen.findByRole('button', { name: 'Clear matching media' }))
     expect(confirmSpy).toHaveBeenCalled()
@@ -191,6 +192,7 @@ describe('settings storage, integrations, help, and about', () => {
     harness.service.ChooseDownloadFolder.mockResolvedValue('/tmp/exports')
     harness.service.ExportRecentMessagesForAllChats.mockResolvedValue({ path: '/tmp/exports/All chats last 50 messages.txt', chats: 2, messages: 80, failed: 1, cancelled: false })
     const user = await openSettingsTab('Storage')
+    await user.click(await screen.findByText('Advanced'))
 
     const limit = await screen.findByRole('spinbutton', { name: 'Messages per chat' })
     await user.clear(limit)
@@ -219,7 +221,7 @@ describe('settings storage, integrations, help, and about', () => {
       updateAvailable: true,
       message: 'Version v1.1.0 is available.',
     })
-    const user = await openSettingsTab('About')
+    const user = await openSettingsTab('Help')
 
     expect(await screen.findByText('1.0.0')).toBeTruthy()
     expect(await screen.findByText('abcdef0')).toBeTruthy()
@@ -234,7 +236,7 @@ describe('settings storage, integrations, help, and about', () => {
 
   it('reports update check failures without changing the About page', async () => {
     harness.service.CheckForUpdates.mockRejectedValueOnce(new Error('Network unavailable'))
-    const user = await openSettingsTab('About')
+    const user = await openSettingsTab('Help')
 
     await user.click(await screen.findByRole('button', { name: 'Check for updates' }))
     expect(await screen.findByText('Network unavailable')).toBeTruthy()
@@ -243,10 +245,9 @@ describe('settings storage, integrations, help, and about', () => {
 
   it('shows unknown build metadata when the metadata service fails', async () => {
     harness.service.AppBuildInfo.mockRejectedValueOnce(new Error('Metadata unavailable'))
-    await openSettingsTab('About')
-
-    const aboutDetails = screen.getByText('Application').parentElement
-    await waitFor(() => expect(within(aboutDetails!).getAllByText('unknown')).toHaveLength(2))
+    await openSettingsTab('Help')
+    const aboutSection = screen.getByText('Application').parentElement
+    await waitFor(() => expect(within(aboutSection!).getAllByText('unknown')).toHaveLength(2))
   })
 
   it('links the help center to the keyboard and storage settings', async () => {
@@ -267,6 +268,7 @@ describe('settings storage, integrations, help, and about', () => {
 
   it('filters keyboard shortcuts by action and key combination', async () => {
     const user = await openSettingsTab('Keyboard')
+    await user.click(await screen.findByText('Advanced'))
     const search = await screen.findByRole('searchbox', { name: 'Search keyboard shortcuts' })
 
     await user.type(search, 'Language Tutor')
@@ -281,6 +283,7 @@ describe('settings storage, integrations, help, and about', () => {
 
   it('reports when no keyboard shortcut matches the search', async () => {
     const user = await openSettingsTab('Keyboard')
+    await user.click(await screen.findByText('Advanced'))
 
     await user.type(await screen.findByRole('searchbox', { name: 'Search keyboard shortcuts' }), 'zzzzz')
     expect(await screen.findByText(/No shortcuts match/)).toBeTruthy()

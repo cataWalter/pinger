@@ -249,3 +249,37 @@ func TestScheduledJobsAreScopedToTheirAccount(t *testing.T) {
 		t.Fatalf("primary account job list = %+v", jobs)
 	}
 }
+
+func TestScheduledJobStoreKeepsOnlySurvivorJobsAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scheduled-jobs.json")
+	store, err := newScheduledJobStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dueAt := time.Now().Add(time.Hour).UnixMilli()
+	if _, err := store.scheduleMessage(primaryAccountID, "!primary:example.org", "primary send", dueAt); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := store.scheduleMessage("account-2", "!kept:example.org", "kept send", dueAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed, err := store.keepOnlyAccount("account-2")
+	if err != nil || removed != 1 {
+		t.Fatalf("keepOnlyAccount() = %d, %v; want 1, nil", removed, err)
+	}
+	reopened, err := newScheduledJobStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jobs := reopened.listForAccount(primaryAccountID); len(jobs) != 0 {
+		t.Fatalf("primary account job list after prune = %+v, want none", jobs)
+	}
+	if jobs := reopened.listForAccount("account-2"); len(jobs) != 1 || jobs[0].ID != kept.ID {
+		t.Fatalf("survivor job list after prune = %+v", jobs)
+	}
+	again, err := reopened.keepOnlyAccount("account-2")
+	if err != nil || again != 0 {
+		t.Fatalf("second keepOnlyAccount() = %d, %v; want 0, nil", again, err)
+	}
+}

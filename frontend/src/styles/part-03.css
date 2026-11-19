@@ -17,6 +17,13 @@
   flex: 0 0 auto;
 }
 
+.room-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 7px;
+}
+
 .room-search {
   display: flex;
   align-items: center;

@@ -32,12 +32,6 @@ func TestRoomMembershipCallsNeedAnActiveAccount(t *testing.T) {
 	if err := service.DeclineInvite("!room:example.org"); err == nil {
 		t.Fatal("DeclineInvite() succeeded without an account")
 	}
-	if _, err := service.JoinRoom("#room:example.org"); err == nil {
-		t.Fatal("JoinRoom() succeeded without an account")
-	}
-	if _, err := service.CreateGroupRoom(GroupRoomRequest{Name: "Team"}); err == nil {
-		t.Fatal("CreateGroupRoom() succeeded without an account")
-	}
 	if err := service.InviteToRoom("!room:example.org", []string{"@alice:example.org"}); err == nil {
 		t.Fatal("InviteToRoom() succeeded without an account")
 	}

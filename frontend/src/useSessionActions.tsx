@@ -5,7 +5,7 @@ import { describeError, preferenceBoolean, preferenceString, isUnansweredRoom, i
 import type { useRoomActions } from './useRoomActions'
 
 export function useSessionActions(app: ReturnType<typeof useRoomActions>) {
-  const { answeredShortcut, archivedPreferenceKey, clearNeedsReply, clearRoomSelection, filteredRooms, homeserver, isActiveAccountRoom, markRoomAnswered, nextRoomAfterArchive, nextRoomByBehavior, openRoomContextMenu, password, preferences, recoveryKey, roomListRef, roomsRef, selectedRoomID, setBusy, setError, setPassword, setPreference, setRecoveryKey, setRoomContextMenu, setSelectedRoomID, setSnapshot, showRoom, singleKeyShortcuts, snapshot, updateRoomNeedsReply, username } = app
+  const { answeredShortcut, archivedPreferenceKey, clearNeedsReply, clearRoomSelection, filteredRooms, homeserver, markRoomAnswered, nextRoomAfterArchive, nextRoomByBehavior, openRoomContextMenu, password, preferences, recoveryKey, roomListRef, roomsRef, selectedRoomID, setBusy, setError, setPassword, setPreference, setRecoveryKey, setRoomContextMenu, setSelectedRoomID, setSnapshot, showRoom, singleKeyShortcuts, snapshot, updateRoomNeedsReply, username } = app
 
   async function applyBulkRoomAction(action: 'answered' | 'needs-reply' | 'read' | 'unread' | 'archive' | 'restore' | 'favorite' | 'unfavorite' | 'mute' | 'unmute', targetRooms: Room[]) {
     const targetRoomIDs = new Set(targetRooms.map((room) => room.id))
@@ -38,7 +38,7 @@ export function useSessionActions(app: ReturnType<typeof useRoomActions>) {
         const candidates = selectedIndex >= 0
           ? [...filteredRooms.slice(selectedIndex + 1), ...filteredRooms.slice(0, selectedIndex)]
           : filteredRooms
-        const nextRoom = candidates.find((room) => !targetRoomIDs.has(room.id) && isActiveAccountRoom(room))
+        const nextRoom = candidates.find((room) => !targetRoomIDs.has(room.id))
         if (nextRoom) showRoom(nextRoom.id)
       }
       return
@@ -145,16 +145,14 @@ export function useSessionActions(app: ReturnType<typeof useRoomActions>) {
   }
 
   function isLastMessageByCurrentUser(room: Room) {
-    const userID = isActiveAccountRoom(room)
-      ? snapshot?.profile.userId
-      : snapshot?.accounts?.find((account) => account.id === room.accountId)?.profile.userId
+    const userID = snapshot?.profile.userId
     return Boolean(room.lastEventSender && userID === room.lastEventSender)
   }
 
   function handleRoomKeyDown(event: KeyboardEvent<HTMLButtonElement>, room: Room, index: number) {
-    if (isActiveAccountRoom(room)) handleMarkAnsweredKeyDown(event, room.id)
+    handleMarkAnsweredKeyDown(event, room.id)
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
-    if (isActiveAccountRoom(room) && ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu')) {
+    if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
       event.preventDefault()
       const bounds = event.currentTarget.getBoundingClientRect()
       openRoomContextMenu(room.id, bounds.right - 216, bounds.bottom)

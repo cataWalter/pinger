@@ -7,7 +7,7 @@ import { resolveLanguageRoles } from './aiSettings'
 import { LanguageSettings } from './LanguageSettings'
 import { AIPromptSettings } from './AIPromptSettings'
 import LocalAIAgentSettings from './LocalAIAgentSettings'
-import { PreferenceToggle, SettingsSection } from './SettingsControls'
+import { PreferenceToggle, SettingsAdvanced, SettingsSection } from './SettingsControls'
 
 type AISettingsTabProps = {
   preferences: PreferenceValues
@@ -31,17 +31,19 @@ export function AISettingsTab({ preferences, rooms, onPreferenceChange, onPrefer
         thinkingLevel={preferenceString(preferences, 'ai.thinking_level', 'none')}
         onSave={onPreferenceChange}
       />
-      <ImageGenerationSettings
-        binaryPath={preferenceString(preferences, 'ai.image.binary_path', '')}
-        modelPath={preferenceString(preferences, 'ai.image.model_path', '')}
-        idleMinutes={preferenceString(preferences, 'ai.image.idle_minutes', '3')}
-        size={preferenceString(preferences, 'ai.image.size', '512x512')}
-        steps={preferenceString(preferences, 'ai.image.steps', '')}
-        guidanceScale={preferenceString(preferences, 'ai.image.cfg_scale', '')}
-        sampler={preferenceString(preferences, 'ai.image.sampler', '')}
-        negativePrompt={preferenceString(preferences, 'ai.image.negative_prompt', '')}
-        onSave={onPreferenceChange}
-      />
+      <SettingsAdvanced description="Local image generation: model paths, size, and sampling.">
+        <ImageGenerationSettings
+          binaryPath={preferenceString(preferences, 'ai.image.binary_path', '')}
+          modelPath={preferenceString(preferences, 'ai.image.model_path', '')}
+          idleMinutes={preferenceString(preferences, 'ai.image.idle_minutes', '3')}
+          size={preferenceString(preferences, 'ai.image.size', '512x512')}
+          steps={preferenceString(preferences, 'ai.image.steps', '')}
+          guidanceScale={preferenceString(preferences, 'ai.image.cfg_scale', '')}
+          sampler={preferenceString(preferences, 'ai.image.sampler', '')}
+          negativePrompt={preferenceString(preferences, 'ai.image.negative_prompt', '')}
+          onSave={onPreferenceChange}
+        />
+      </SettingsAdvanced>
       <LocalAIAgentSettings agents={localAIAgents} onSave={(collection) => onPreferenceChange('ai.local_agents', serializeChatAgents(collection))} />
       <PreferenceToggle label="Detect the learning language of unarchived chats automatically" checked={preferenceBoolean(preferences, 'ai.detect_chat_language')} onChange={(value) => onPreferenceChange('ai.detect_chat_language', value)} />
       <LanguageSettings roles={resolveLanguageRoles(preferences)} preferences={preferences} rooms={rooms} onPreferencesChange={onPreferencesChange} />

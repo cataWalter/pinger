@@ -7,7 +7,7 @@ import { IN_APP_NOTICE_TIMEOUT_MS, describeError, displayMessageBody, preference
 import type { useMessageSearch } from './useMessageSearch'
 
 export function useLocalAIChats(app: ReturnType<typeof useMessageSearch>) {
-  const { activeListRoomID, composerInputRef, filteredRooms, focusTimelineMessage, historyRoomIDRef, localAIAgents, localAIChatOpen, localAIInitialDraftVersion, messages, pendingSearchJumpRef, preferences, roomSelectionAnchorRef, roomSwitchRef, scheduledNoticeTimerRef, selectedRoom, selectedRoomID, selectedRoomIDs, selectedRoomRef, setError, setHasOlder, setHistoryPageRevision, setHistoryRevision, setLoadingHistory, setLoadingOlder, setLocalAIChatId, setLocalAIChatOpen, setLocalAIDeleteArmedID, setLocalAIInitialDraft, setLocalAINewChatAgentId, setLocalAINewChatKind, setLocalAIRenameDraft, setMessageContextMenu, setMessages, setMobilePane, setOlderCursor, setRoomContextMenu, setScheduledNotice, setSearchOpen, setSelectedRoomID, setSelectedRoomIDs, setSnapshot, setUndoRoomID, showRoomRef, snapshot, stickToBottomRef, timelineHeightBeforePrepend, triageBusyRef, undoRoomID, undoToastTimerRef } = app
+  const { activeListRoomID, composerInputRef, filteredRooms, focusTimelineMessage, historyRoomIDRef, localAIAgents, localAIChatOpen, localAIInitialDraftVersion, messages, pendingSearchJumpRef, preferences, roomSelectionAnchorRef, roomSwitchRef, scheduledNoticeTimerRef, selectedRoom, selectedRoomID, selectedRoomIDs, selectedRoomRef, setError, setHasOlder, setHistoryPageRevision, setHistoryRevision, setLoadingHistory, setLoadingOlder, setLocalAIChatId, setLocalAIChatOpen, setLocalAIDeleteArmedID, setLocalAIInitialDraft, setLocalAINewChatAgentId, setLocalAINewChatKind, setLocalAIRenameDraft, setMessageContextMenu, setMessages, setMobilePane, setOlderCursor, setRoomContextMenu, setScheduledNotice, setSearchOpen, setSelectedRoomID, setSelectedRoomIDs, setSnapshot, setUndoRoomID, showRoomRef, stickToBottomRef, timelineHeightBeforePrepend, triageBusyRef, undoRoomID, undoToastTimerRef } = app
 
   function showUndoToast(roomID: string) {
     if (undoToastTimerRef.current !== null) window.clearTimeout(undoToastTimerRef.current)
@@ -185,13 +185,10 @@ export function useLocalAIChats(app: ReturnType<typeof useMessageSearch>) {
     showRoomRef.current('')
   }, [selectedRoomID, localAIChatOpen, selectedRoom, showRoomRef])
 
-  function isActiveAccountRoom(room: Room) {
-    return !room.accountId || room.accountId === snapshot?.activeAccountId
-  }
-  const selectedRoomListIndex = filteredRooms.findIndex((room) => room.id === activeListRoomID && isActiveAccountRoom(room))
+  const selectedRoomListIndex = filteredRooms.findIndex((room) => room.id === activeListRoomID)
 
   function nextRoomByBehavior(excludedRoomIDs: Set<string>, behavior: string) {
-    const candidates = filteredRooms.filter((room) => !excludedRoomIDs.has(room.id) && isActiveAccountRoom(room))
+    const candidates = filteredRooms.filter((room) => !excludedRoomIDs.has(room.id))
     if (behavior === 'none') return ''
     if (behavior === 'next_unread') return candidates.find((room) => room.unread > 0 || room.markedUnread)?.id ?? ''
     return candidates[0]?.id ?? ''
@@ -201,5 +198,5 @@ export function useLocalAIChats(app: ReturnType<typeof useMessageSearch>) {
     const behavior = preferenceString(preferences, 'archive.next_room', 'next_visible')
     return nextRoomByBehavior(archivedRoomIDs, behavior)
   }
-  return { ...app, startLocalAIChat, selectLocalAIChat, openLocalAIChatView, selectedRoomListIndex, openSearchResult, nextRoomByBehavior, nextRoomAfterArchive, showUndoToast, showScheduledNotice, clearScheduledNotice, clearUndoToast, openRoomContextMenu, updateRoomNeedsReply, openMessageContextMenu, copyMessage, clearNeedsReply, undoAnswered, showRoom, isActiveAccountRoom }
+  return { ...app, startLocalAIChat, selectLocalAIChat, openLocalAIChatView, selectedRoomListIndex, openSearchResult, nextRoomByBehavior, nextRoomAfterArchive, showUndoToast, showScheduledNotice, clearScheduledNotice, clearUndoToast, openRoomContextMenu, updateRoomNeedsReply, openMessageContextMenu, copyMessage, clearNeedsReply, undoAnswered, showRoom }
 }

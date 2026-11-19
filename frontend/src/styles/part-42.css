@@ -29,6 +29,24 @@
   transform: translateY(0);
 }
 
+.composer-ai-cluster>.icon-tooltip:first-child::after {
+  left: 0;
+  transform: translateY(4px);
+}
+
+.composer-ai-cluster>.icon-tooltip:last-child::after {
+  right: 0;
+  left: auto;
+  transform: translateY(4px);
+}
+
+.composer-ai-cluster>.icon-tooltip:first-child:hover::after,
+.composer-ai-cluster>.icon-tooltip:first-child:focus-within::after,
+.composer-ai-cluster>.icon-tooltip:last-child:hover::after,
+.composer-ai-cluster>.icon-tooltip:last-child:focus-within::after {
+  transform: translateY(0);
+}
+
 .mention-menu.emoji-menu .mention-option span {
   margin-right: 4px;
 }
@@ -232,11 +250,11 @@
   margin: 0 -14px;
 }
 
-.app-shell[data-ui='desktop'] :is(.brand-name, .profile-copy strong, .room-name) {
+.app-shell[data-ui='desktop'] :is(.brand-name, .room-name) {
   color: var(--sidebar-ink);
 }
 
-.app-shell[data-ui='desktop'] :is(.profile-copy small, .room-section-label, .room-preview, .room-time, .sidebar-footnote) {
+.app-shell[data-ui='desktop'] :is(.room-section-label, .room-preview, .room-time, .sidebar-footnote) {
   color: var(--sidebar-muted);
 }
 

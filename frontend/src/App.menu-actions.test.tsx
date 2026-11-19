@@ -56,7 +56,6 @@ describe('native application menu actions', () => {
     vi.clearAllMocks()
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
     harness.service.History.mockResolvedValue({ messages: [message('$latest', 'latest message', 300)], before: 0, hasMore: false })
     harness.service.ScheduledJobs.mockResolvedValue([])
     harness.service.SetActiveRoom.mockResolvedValue(undefined)
@@ -71,7 +70,6 @@ describe('native application menu actions', () => {
     harness.service.ListLocalAIChats.mockResolvedValue([])
     harness.service.ListLocalAIChatFolders.mockResolvedValue([])
     harness.service.LoadLocalAIChatMessages.mockResolvedValue([])
-    harness.service.SwitchAccount.mockResolvedValue({ ...snapshot, activeAccountId: 'secondary' })
     harness.tutorService.Analyze.mockReturnValue(new Promise(() => undefined))
   })
 
@@ -123,15 +121,6 @@ describe('native application menu actions', () => {
 
     const settingsDialog = await screen.findByRole('dialog', { name: 'Settings' })
     expect(within(settingsDialog).getByRole('tab', { name: 'Keyboard' }).getAttribute('aria-selected')).toBe('true')
-  })
-
-  it('switches accounts from the native menu', async () => {
-    render(<App />)
-    await screen.findByText('latest message')
-
-    act(() => dispatchMenuAction('account:secondary'))
-
-    await waitFor(() => expect(harness.service.SwitchAccount).toHaveBeenCalledWith('secondary'))
   })
 
   it('opens the quick switcher from the native menu', async () => {

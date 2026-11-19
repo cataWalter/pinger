@@ -39,7 +39,7 @@ describe('settings search', () => {
 
   it('searches across every tab', () => {
     const tabs = new Set(searchSettings('encrypt').map((entry) => entry.tab))
-    expect(tabs.has('Security')).toBe(true)
+    expect(tabs.has('Account')).toBe(true)
     expect(tabs.has('Help')).toBe(true)
   })
 

@@ -3,7 +3,7 @@ import { Check, FileText, Plus, RotateCcw, Search, Trash2, X } from 'lucide-reac
 import { parseCustomEmoticonReplacements, type EmoticonReplacement } from './composerText'
 import { AI_ACTION_SHORTCUTS } from './aiSettings'
 import { preferenceBoolean, preferenceString } from './appShared'
-import { PreferenceToggle, SettingRow, SettingsGroup, SettingsSection, type PreferenceTabProps } from './SettingsControls'
+import { PreferenceToggle, SettingRow, SettingsAdvanced, SettingsGroup, SettingsSection, type PreferenceTabProps } from './SettingsControls'
 
 type KeyboardSettingsTabProps = PreferenceTabProps & {
   onManageSnippets: () => void
@@ -26,7 +26,6 @@ export function KeyboardSettingsTab({ preferences, onPreferenceChange, onManageS
     ['Ctrl / ⌘ + Shift + R', 'Show unanswered rooms'],
     ['Ctrl / ⌘ + Shift + F', 'Show favorite rooms'],
     ['Ctrl / ⌘ + 1–9', 'Switch to a visible room'],
-    ['Ctrl / ⌘ + Alt + 1–9', 'Switch Matrix accounts'],
     ['Ctrl / ⌘ + + / -', 'Adjust app zoom'],
     ['Ctrl / ⌘ + 0', 'Reset app zoom'],
     ['Ctrl / ⌘ + Shift + P', 'Toggle content blur'],
@@ -137,7 +136,7 @@ export function KeyboardSettingsTab({ preferences, onPreferenceChange, onManageS
         <p className="settings-note">Expand personal shortcuts while composing. Snippets are stored on this device.</p>
       </SettingsGroup>
 
-      <SettingsGroup title="Shortcut reference">
+      <SettingsAdvanced description="Search every keyboard shortcut.">
         <div className="settings-search shortcut-search">
           <Search size={15} />
           <input
@@ -169,7 +168,7 @@ export function KeyboardSettingsTab({ preferences, onPreferenceChange, onManageS
           ))}
         </dl>
         {normalizedShortcutSearch && filteredKeyboardShortcuts.length === 0 && <p className="settings-note" role="status">No shortcuts match “{shortcutSearchQuery.trim()}”.</p>}
-      </SettingsGroup>
+      </SettingsAdvanced>
     </SettingsSection>
   )
 }

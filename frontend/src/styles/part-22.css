@@ -209,15 +209,6 @@
     display: none;
   }
 
-  .settings-scrim {
-    align-items: end;
-    padding: 8px;
-  }
-
-  .settings-dialog {
-    max-height: min(650px, calc(100% - 16px));
-  }
-
   .room-info-scrim {
     align-items: end;
     padding: 8px;
@@ -225,14 +216,6 @@
 
   .room-info-dialog {
     max-height: min(650px, calc(100% - 16px));
-  }
-
-  .settings-header {
-    padding: 14px 16px 10px;
-  }
-
-  .settings-content {
-    padding: 14px 16px 20px;
   }
 }
 

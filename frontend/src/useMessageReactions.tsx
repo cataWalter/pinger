@@ -7,7 +7,7 @@ import { describeError, preferenceBoolean, preferenceString, isUnansweredRoom, i
 import type { useComposerActions } from './useComposerActions'
 
 export function useMessageReactions(app: ReturnType<typeof useComposerActions>) {
-  const { archivedPreferenceKey, busy, composeText, editTarget, emojiMatch, isActiveAccountRoom, localAIChatId, localAIChatOpen, needsReplyCount, pendingReactionsRef, preferences, preferencesRef, reactionErrorRef, redactTarget, roomRefinements, roomScope, selectedRoom, selectedRoomID, setBusy, setEditTarget, setEmojiActiveIndex, setEmojiMatch, setError, setHistoryRevision, setMentionActiveIndex, setMentionEnd, setMentionQuery, setMentionStart, setReactingMessageID, setRedactTarget, setReplyTarget, setRoomInfoOpen, setRoomRefinements, setRoomScope, setSnapshot, showRoom, stageAttachmentFiles, startingDirectChatRef } = app
+  const { archivedPreferenceKey, busy, composeText, editTarget, emojiMatch, localAIChatId, localAIChatOpen, needsReplyCount, pendingReactionsRef, preferences, preferencesRef, reactionErrorRef, redactTarget, roomRefinements, roomScope, selectedRoom, selectedRoomID, setBusy, setEditTarget, setEmojiActiveIndex, setEmojiMatch, setError, setHistoryRevision, setMentionActiveIndex, setMentionEnd, setMentionQuery, setMentionStart, setReactingMessageID, setRedactTarget, setReplyTarget, setRoomInfoOpen, setRoomRefinements, setRoomScope, setSnapshot, showRoom, stageAttachmentFiles, startingDirectChatRef } = app
 
   function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const imageItem = Array.from(event.clipboardData.items).find((item) => item.type.startsWith('image/'))
@@ -149,7 +149,7 @@ export function useMessageReactions(app: ReturnType<typeof useComposerActions>) 
   const aiEndpoint = preferenceString(preferences, 'ai.endpoint', '')
   const aiEnabled = aiEndpoint !== ''
   // Native menu state mirrors the selected room and filters; menu actions reuse the keyboard handlers.
-  const menuRoom = selectedRoom && isActiveAccountRoom(selectedRoom) && !isLocalAIRoomID(selectedRoom.id) ? selectedRoom : undefined
+  const menuRoom = selectedRoom && !isLocalAIRoomID(selectedRoom.id) ? selectedRoom : undefined
   const menuRoomSelected = Boolean(menuRoom)
   const menuRoomUnread = menuRoom ? isUnreadRoom(menuRoom) : false
   const menuRoomArchived = menuRoom ? preferenceBoolean(preferences, archivedPreferenceKey(menuRoom.id, menuRoom.accountId)) : false

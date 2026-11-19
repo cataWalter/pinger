@@ -10,7 +10,6 @@ import (
 	"mychat/datadir"
 	"mychat/desktop"
 	"mychat/logging"
-	"mychat/matrix"
 	"mychat/migration"
 )
 
@@ -67,18 +66,13 @@ func main() {
 		logger.Warn().Err(migrationReport.PreferencesWarning).Msg("could not migrate legacy preferences")
 	}
 
-	client, err := matrix.New(filepath.Join(dataDir, "matrix.db"))
-	if err != nil {
-		logger.Fatal().Err(err).Msg("initialize Matrix client")
-	}
-	logger.Info().Msg("application data and Matrix database ready")
-	mediaCacheDir := ""
+	logger.Info().Msg("application data ready")
+	mediaCacheRoot := ""
 	if cacheDir, cacheErr := os.UserCacheDir(); cacheErr == nil && cacheDir != "" {
-		mediaCacheDir = filepath.Join(cacheDir, "gomuks-desktop", "media")
-		client.SetMediaCacheDir(mediaCacheDir)
+		mediaCacheRoot = filepath.Join(cacheDir, "gomuks-desktop", "media")
 	}
 
-	if err = desktop.Run(client, frontendAssets, applicationIcon, dataDir, defaultDataDir, paths.PreferencesFile, mediaCacheDir); err != nil {
+	if err = desktop.Run(frontendAssets, applicationIcon, dataDir, defaultDataDir, paths.PreferencesFile, mediaCacheRoot); err != nil {
 		logger.Fatal().Err(err).Msg("run desktop application")
 	}
 	logger.Info().Msg("Pinger exited")

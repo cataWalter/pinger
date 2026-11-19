@@ -60,9 +60,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -160,7 +157,7 @@ describe('room history updates', () => {
     expect(screen.queryByRole('menuitem', { name: 'Translate message with local AI' })).toBeNull()
   })
 
-  it('analyzes an outgoing draft and replaces it with ready-to-send tutor-language text', async () => {
+  it('analyzes an outgoing draft and replaces the composer with the Turkish correction', async () => {
     const user = userEvent.setup()
     harness.service.Snapshot.mockResolvedValue({
       ...snapshot,
@@ -176,13 +173,35 @@ describe('room history updates', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
     expect(dialog.querySelector('.ai-result-disclaimer')).toBeNull()
     expect(within(dialog).getByText('Merhaba, nasılsın?')).toBeTruthy()
+    expect((within(dialog).getByRole('textbox', { name: 'Your text' }) as HTMLTextAreaElement).value).toBe('Ciao, come stai?')
     await user.click(within(dialog).getByRole('button', { name: 'Replace draft with Turkish' }))
 
     expect(composer.value).toBe('Merhaba, nasılsın?')
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
-  it.each(['ctrlKey', 'metaKey'])('replaces the Language Tutor draft with %s+Enter', async (modifier) => {
+  it('keeps the edited draft in the composer with Keep my draft', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:11434' },
+    })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'Ciao, come stai?' } })
+    await user.click(menuCommand('Analyze draft with Language Tutor'))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
+    await within(dialog).findByText('Merhaba, nasılsın?')
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Your text' }), { target: { value: 'Ciao, come stai oggi?' } })
+    await user.click(within(dialog).getByRole('button', { name: 'Keep my draft' }))
+
+    expect(composer.value).toBe('Ciao, come stai oggi?')
+    expect(screen.queryByRole('dialog', { name: 'Tutor this draft' })).toBeNull()
+  })
+
+  it.each(['ctrlKey', 'metaKey'])('checks an edited Language Tutor draft with %s+Enter without replacing the composer', async (modifier) => {
     harness.service.Snapshot.mockResolvedValue({
       ...snapshot,
       preferences: { 'ai.endpoint': 'http://localhost:11434' },
@@ -194,14 +213,44 @@ describe('room history updates', () => {
     await userEvent.click(menuCommand('Analyze draft with Language Tutor'))
 
     const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
-    const replaceButton = within(dialog).getByRole('button', { name: 'Replace draft with Turkish' })
-    expect(replaceButton.getAttribute('aria-keyshortcuts')).toBe('Control+Enter Meta+Enter')
-    expect(replaceButton.title).toContain('Ctrl / ⌘ + Enter')
+    const editor = within(dialog).getByRole('textbox', { name: 'Your text' }) as HTMLTextAreaElement
+    await waitFor(() => expect(document.activeElement).toBe(editor))
+    fireEvent.change(editor, { target: { value: 'Ciao, come stai oggi?' } })
+    expect(within(dialog).getByText('Changed since the last check. Press Check to update.')).toBeTruthy()
+    expect(harness.tutorService.Analyze).toHaveBeenCalledTimes(1)
+
+    harness.tutorService.Analyze.mockResolvedValueOnce({ detected_language: 'it', corrected_text: 'Merhaba, bugün nasılsın?' })
     fireEvent.keyDown(dialog, { key: 'Enter', [modifier]: true })
 
-    await waitFor(() => expect(composer.value).toBe('Merhaba, nasılsın?'))
+    expect(await within(dialog).findByText('Merhaba, bugün nasılsın?')).toBeTruthy()
+    expect(harness.tutorService.Analyze).toHaveBeenLastCalledWith('Ciao, come stai oggi?', 'draft', 'tr', 'en', expect.any(String))
+    expect(within(dialog).queryByText('Changed since the last check. Press Check to update.')).toBeNull()
+    expect(composer.value).toBe('Ciao, come stai?')
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
-    expect(screen.queryByRole('dialog', { name: 'Tutor this draft' })).toBeNull()
+  })
+
+  it('shows the corrected text while the check is still streaming', async () => {
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:11434' },
+    })
+    let resolveAnalysis: (analysis: unknown) => void = () => { }
+    harness.tutorService.Analyze.mockReturnValueOnce(new Promise((resolve) => { resolveAnalysis = resolve }))
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Message' }), { target: { value: 'Ciao, come stai?' } })
+    await userEvent.click(menuCommand('Analyze draft with Language Tutor'))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
+    const calls = harness.tutorService.Analyze.mock.calls
+    const requestID = calls[calls.length - 1][4]
+    act(() => harness.eventHandlers.get('ai:stream')?.({ data: { requestId: requestID, text: '{"detected_language":"it","corrected_text":"Merhaba, nas' } }))
+    expect(await within(dialog).findByText('Merhaba, nas')).toBeTruthy()
+    act(() => harness.eventHandlers.get('ai:stream')?.({ data: { requestId: requestID, text: 'ılsın?"}' } }))
+    expect(await within(dialog).findByText('Merhaba, nasılsın?')).toBeTruthy()
+
+    act(() => resolveAnalysis({ detected_language: 'it', corrected_text: 'Merhaba, nasılsın?' }))
+    expect(await within(dialog).findByRole('button', { name: 'Copy corrected · turkish' })).toBeTruthy()
   })
 
   it.each(['ctrlKey', 'metaKey'])('analyzes the composer draft with %s+Shift+T', async (modifier) => {
@@ -286,6 +335,7 @@ describe('room history updates', () => {
     fireEvent.keyDown(close, { key: '2', ctrlKey: true })
     act(() => harness.eventHandlers.get('application-menu:action')?.({ data: 'room-next' }))
     expect(harness.service.SetActiveRoom).not.toHaveBeenCalledWith(secondRoom.id)
+    await within(dialog).findByText('Merhaba, nasılsın?')
     await user.click(within(dialog).getByRole('button', { name: 'Replace draft with Turkish' }))
     expect(composer.value).toBe('Merhaba, nasılsın?')
   })

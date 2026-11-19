@@ -191,6 +191,59 @@ func TestDeleteRetiredRemovesRemovedFeatureKeys(t *testing.T) {
 	}
 }
 
+func TestDeleteAccountsExceptKeepsOnlySurvivorPreferences(t *testing.T) {
+	store, err := open(filepath.Join(t.TempDir(), "preferences.db"), 5*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	const keepID = "0123456789abcdef0123456789abcdef"
+	const otherID = "fedcba9876543210fedcba9876543210"
+	rows := []struct {
+		scope     Scope
+		accountID string
+		key       string
+	}{
+		{GlobalScope, "", "notifications.enabled"},
+		{AccountScope, keepID, "room.favorite.!keep:example.org"},
+		{AccountScope, otherID, "room.favorite.!other:example.org"},
+		{AccountScope, "primary", "room.favorite.!primary:example.org"},
+	}
+	for _, row := range rows {
+		if _, err := store.db.Exec("INSERT INTO preferences (scope, account_id, key, value_json, updated_at, revision) VALUES (?, ?, ?, ?, 0, 0)", row.scope, row.accountID, row.key, []byte("true")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deleted, err := store.DeleteAccountsExcept(keepID)
+	if err != nil {
+		t.Fatalf("DeleteAccountsExcept() error = %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("DeleteAccountsExcept() deleted %d rows, want 2", deleted)
+	}
+	kept, err := store.All(AccountScope, keepID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := kept["room.favorite.!keep:example.org"]; !ok || len(kept) != 1 {
+		t.Fatalf("survivor preferences = %v, want only its favorite room key", kept)
+	}
+	global, err := store.All(GlobalScope, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := global["notifications.enabled"]; !ok {
+		t.Fatal("DeleteAccountsExcept() removed a global preference")
+	}
+	again, err := store.DeleteAccountsExcept(keepID)
+	if err != nil {
+		t.Fatalf("second DeleteAccountsExcept() error = %v", err)
+	}
+	if again != 0 {
+		t.Fatalf("second DeleteAccountsExcept() deleted %d rows, want 0", again)
+	}
+}
+
 func TestStorePublishesChanges(t *testing.T) {
 	store, err := open(filepath.Join(t.TempDir(), "preferences.db"), 5*time.Millisecond)
 	if err != nil {

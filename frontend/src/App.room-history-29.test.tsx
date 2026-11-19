@@ -60,9 +60,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -283,5 +280,33 @@ describe('room history updates', () => {
     expect(container.querySelector('.message-row .message-avatar')).toBeNull()
     expect(container.querySelector('.message-row img')).toBeNull()
     expect(screen.queryByTitle('Encrypted message')).toBeNull()
+  })
+
+  it('trims the oldest messages while following the latest and resumes paging from the trim boundary', async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() { }
+      unobserve() { }
+      disconnect() { }
+    })
+    // jsdom has no element scrolling; Virtuoso calls scrollBy when it pins the list.
+    Object.defineProperty(Element.prototype, 'scrollBy', { configurable: true, value: () => { } })
+    try {
+      const bulk = Array.from({ length: 600 }, (_, index) => message(`$bulk-${index + 1}`, `bulk ${index + 1}`, index + 1))
+      harness.service.History.mockImplementation(async (_roomID: string, before: number) => {
+        if (before === 0) return { messages: bulk, before: 1, hasMore: true }
+        return { messages: [], before: 0, hasMore: false }
+      })
+      render(<App />)
+
+      const timeline = await screen.findByRole('region', { name: 'Message timeline' })
+      await waitFor(() => expect(timeline.getAttribute('data-virtualized')).toBe('true'))
+      await act(async () => {})
+
+      fireEvent.scroll(timeline)
+
+      await waitFor(() => expect(harness.service.History).toHaveBeenLastCalledWith(room.id, 301))
+    } finally {
+      Reflect.deleteProperty(Element.prototype, 'scrollBy')
+    }
   })
 })

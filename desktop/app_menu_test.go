@@ -128,11 +128,6 @@ func TestTrayMenuIconsAreValidPNGs(t *testing.T) {
 func TestApplicationMenuAcceleratorsAreUniqueAndModified(t *testing.T) {
 	menus := newApplicationMenus(&AppService{}, nil, nil, nil)
 	menu := menus.applicationMenu()
-	accounts := make([]AccountSummary, 0, 9)
-	for index := range 9 {
-		accounts = append(accounts, AccountSummary{ID: fmt.Sprintf("account-%d", index)})
-	}
-	menus.populateAccounts(menus.accounts, accounts, "account-0")
 
 	seen := make(map[string]string)
 	for _, item := range menuItemsUnder(menu) {

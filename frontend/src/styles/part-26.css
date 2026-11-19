@@ -18,7 +18,6 @@
 /* Press feedback. */
 .icon-button:active:not(:disabled),
 .room-button:active,
-.settings-tab:active,
 .primary-button:active:not(:disabled) {
   transform: scale(0.98);
 }

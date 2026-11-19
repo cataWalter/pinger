@@ -5,6 +5,7 @@ import { type Room, type Snapshot } from '../bindings/mychat/desktop/models.js'
 import { type PreferenceValues } from './appShared'
 import { type Snippet } from './snippets'
 import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
+import { SettingsAdvanced, SettingsAdvancedRevealContext } from './SettingsControls'
 import { DialogSurface } from './DialogSurface'
 import { SnippetSettingsModal } from './SnippetSettingsModal'
 import { GeneralSettingsTab, HistorySettingsTab } from './SettingsGeneralTab'
@@ -180,6 +181,7 @@ export function SettingsDialog({
               )
             })}
           </nav>
+          <SettingsAdvancedRevealContext.Provider value={searchActive || searchTarget?.entry.tab === tab}>
           <div id="settings-panel" className={`settings-content ${searchActive ? 'is-searching' : ''}`} role="tabpanel" aria-labelledby={`settings-tab-${tab.toLowerCase().replace(/\s+/g, '-')}`} tabIndex={0} ref={settingsPanelRef}>
             {searchActive && (
               <div className="settings-search-results" role="region" aria-label="Settings search results">
@@ -212,7 +214,6 @@ export function SettingsDialog({
                 onArchiveInactiveRooms={onArchiveInactiveRooms}
               />
             )}
-            {tab === 'History' && <HistorySettingsTab preferences={preferences} onPreferenceChange={onPreferenceChange} />}
             {tab === 'Appearance' && <AppearanceSettingsTab preferences={preferences} onPreferenceChange={onPreferenceChange} />}
             {tab === 'Notifications' && <NotificationsSettingsTab preferences={preferences} onPreferenceChange={onPreferenceChange} />}
             {tab === 'Keyboard' && (
@@ -223,11 +224,21 @@ export function SettingsDialog({
               />
             )}
             {tab === 'Account' && (
-              <AccountSettingsTab profile={profile} preferences={preferences} onPreferenceChange={onPreferenceChange} onLogout={onLogout} />
+              <>
+                <AccountSettingsTab profile={profile} preferences={preferences} onPreferenceChange={onPreferenceChange} onLogout={onLogout} />
+                <SettingsAdvanced description="Active devices, encryption keys, and chat networks">
+                  <DevicesSettingsTab profile={profile} onClose={onClose} />
+                  <SecuritySettingsTab profile={profile} />
+                  <IntegrationsSettingsTab rooms={rooms} />
+                </SettingsAdvanced>
+              </>
             )}
-            {tab === 'Devices' && <DevicesSettingsTab profile={profile} onClose={onClose} />}
-            {tab === 'Storage' && <StorageSettingsTab />}
-            {tab === 'Security' && <SecuritySettingsTab profile={profile} />}
+            {tab === 'Storage' && (
+              <>
+                <HistorySettingsTab preferences={preferences} onPreferenceChange={onPreferenceChange} />
+                <StorageSettingsTab />
+              </>
+            )}
             {tab === 'AI' && (
               <AISettingsTab
                 preferences={preferences}
@@ -236,10 +247,14 @@ export function SettingsDialog({
                 onPreferencesChange={onPreferencesChange}
               />
             )}
-            {tab === 'Integrations' && <IntegrationsSettingsTab rooms={rooms} />}
-            {tab === 'Help' && <HelpSettingsTab onTabChange={onTabChange} />}
-            {tab === 'About' && <AboutSettingsTab />}
+            {tab === 'Help' && (
+              <>
+                <HelpSettingsTab onTabChange={onTabChange} />
+                <AboutSettingsTab />
+              </>
+            )}
           </div>
+          </SettingsAdvancedRevealContext.Provider>
         </DialogSurface>
       </div>
       {snippetManagerOpen && <SnippetSettingsModal

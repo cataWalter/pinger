@@ -48,13 +48,6 @@
   border-color: var(--line);
 }
 
-.app-shell[data-theme='bosco'] .settings-dialog,
-.app-shell[data-theme='rosa'] .settings-dialog,
-.app-shell[data-theme='solarized'] .settings-dialog,
-.app-shell[data-theme='sepia'] .settings-dialog,
-.app-shell[data-theme='dracula'] .settings-dialog,
-.app-shell[data-theme='midnight'] .settings-dialog,
-.app-shell[data-theme='slate'] .settings-dialog,
 .app-shell[data-theme='bosco'] .room-info-dialog,
 .app-shell[data-theme='rosa'] .room-info-dialog,
 .app-shell[data-theme='solarized'] .room-info-dialog,
@@ -88,20 +81,6 @@
   border-color: var(--line);
 }
 
-.app-shell[data-theme='bosco'] .settings-header,
-.app-shell[data-theme='rosa'] .settings-header,
-.app-shell[data-theme='solarized'] .settings-header,
-.app-shell[data-theme='sepia'] .settings-header,
-.app-shell[data-theme='dracula'] .settings-header,
-.app-shell[data-theme='midnight'] .settings-header,
-.app-shell[data-theme='slate'] .settings-header,
-.app-shell[data-theme='bosco'] .settings-tabs,
-.app-shell[data-theme='rosa'] .settings-tabs,
-.app-shell[data-theme='solarized'] .settings-tabs,
-.app-shell[data-theme='sepia'] .settings-tabs,
-.app-shell[data-theme='dracula'] .settings-tabs,
-.app-shell[data-theme='midnight'] .settings-tabs,
-.app-shell[data-theme='slate'] .settings-tabs,
 .app-shell[data-theme='bosco'] .room-info-header,
 .app-shell[data-theme='rosa'] .room-info-header,
 .app-shell[data-theme='solarized'] .room-info-header,
@@ -118,17 +97,6 @@
 .app-shell[data-theme='slate'] .room-info-footer {
   background: var(--paper);
   border-color: var(--line);
-}
-
-.app-shell[data-theme='bosco'] .settings-tabs button.is-active,
-.app-shell[data-theme='rosa'] .settings-tabs button.is-active,
-.app-shell[data-theme='solarized'] .settings-tabs button.is-active,
-.app-shell[data-theme='sepia'] .settings-tabs button.is-active,
-.app-shell[data-theme='dracula'] .settings-tabs button.is-active,
-.app-shell[data-theme='midnight'] .settings-tabs button.is-active,
-.app-shell[data-theme='slate'] .settings-tabs button.is-active {
-  color: var(--accent);
-  background: var(--signal-soft);
 }
 
 .app-shell[data-theme='bosco'] .settings-command,

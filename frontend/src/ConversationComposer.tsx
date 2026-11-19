@@ -1,11 +1,11 @@
-import { Bold, ChevronDown, Check, Clock3, Code, Paperclip, Pencil, Reply, Send, Smile, Sparkles, X, Heading1, Italic, Link, List, ListOrdered, Mic, Quote, Square, SquareCode, Strikethrough, Video } from 'lucide-react'
+import { Bold, ChevronDown, Check, Clock3, Code, Paperclip, Pencil, Reply, Send, Smile, X, Heading1, Italic, Link, List, ListOrdered, Mic, Quote, Square, SquareCode, Strikethrough, Video } from 'lucide-react'
 import EmojiPicker from 'emoji-picker-react'
 import { parseCustomEmoticonReplacements, replaceEmoticonsAtCursor } from './composerText'
 import { themeModeForPreference } from './themes'
 import { SnippetPopover } from './SnippetPopover'
 import { ActionMenu } from './appShared'
 import { SuggestedRepliesPicker } from './SuggestedRepliesPicker'
-import { initials, preferenceBoolean, preferenceString, IconTooltip } from './appShared'
+import { initials, preferenceBoolean, preferenceString, IconTooltip, primaryShiftShortcutHint } from './appShared'
 import type { AppState } from './appState'
 
 export function ConversationComposer({ app }: { app: AppState }) {
@@ -163,7 +163,14 @@ export function ConversationComposer({ app }: { app: AppState }) {
                 { label: replyTarget ? 'Schedule reply' : 'Schedule message', icon: <Clock3 size={15} />, onSelect: openScheduleMessage, disabled: !composeText.trim() || Boolean(editTarget) },
               ]} />
             </div>
-            <ActionMenu key={`ai:${activeAccountID}:${selectedRoomID}`} label="AI tools" icon={<Sparkles size={15} />} side="top" items={composerAIItems()} />
+            <div className="composer-tool-cluster composer-ai-cluster" role="group" aria-label="AI tools">
+              {composerAIItems().map((item) => {
+                const shortcut = item.primaryShiftKey ? primaryShiftShortcutHint(item.primaryShiftKey) : ''
+                return <IconTooltip key={item.label} label={item.label}>
+                  <button className="icon-button" type="button" aria-label={item.label} title={item.title} aria-keyshortcuts={item.primaryShiftKey ? `Control+Shift+${item.primaryShiftKey} Meta+Shift+${item.primaryShiftKey}` : undefined} disabled={item.disabled} onMouseDown={(event) => event.preventDefault()} onClick={() => item.onSelect()}>{item.icon}{shortcut && <kbd aria-hidden="true">{shortcut}</kbd>}</button>
+                </IconTooltip>
+              })}
+            </div>
             {imageRunHere && <IconTooltip label="Stop image generation"><button className="icon-button is-recording" type="button" aria-label="Stop image generation" onClick={stopImageGeneration}><Square size={15} /></button></IconTooltip>}
           </div>
         </div>

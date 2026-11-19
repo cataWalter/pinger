@@ -2,23 +2,16 @@ package matrix
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"go.mau.fi/gomuks/pkg/hicli/database"
-	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
-	"slices"
 	"sort"
 	"strings"
 	"time"
 )
 
-const (
-	maxRoomNameLength  = 255
-	maxRoomTopicLength = 1000
-	maxInvitesPerCall  = 50
-)
+const maxInvitesPerCall = 50
 
 // Invite is a pending room invitation built from the (untrusted) stripped invite state.
 type Invite struct {
@@ -30,14 +23,6 @@ type Invite struct {
 	InviterName string
 	Direct      bool
 	InvitedAt   time.Time
-}
-
-// GroupRoomRequest describes a new multi-person room.
-type GroupRoomRequest struct {
-	Name      string
-	Topic     string
-	Invitees  []string
-	Encrypted bool
 }
 
 func inviteFromInvitedRoom(room *database.InvitedRoom, self id.UserID) Invite {
@@ -153,81 +138,6 @@ func (c *Client) DeclineInvite(ctx context.Context, roomID string) error {
 	c.mu.Unlock()
 	c.publish([]string{matrixRoomID.String()}, "")
 	return nil
-}
-
-// parseJoinTarget accepts a room ID, a room alias, a matrix.to link or a matrix: URI.
-func parseJoinTarget(target string) (string, []string, error) {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return "", nil, errors.New("enter a room address")
-	}
-	if strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "matrix:") {
-		uri, err := id.ParseMatrixURIOrMatrixToURL(target)
-		if err != nil {
-			return "", nil, fmt.Errorf("not a Matrix room link: %w", err)
-		}
-		switch uri.Sigil1 {
-		case '!', '#':
-			target = uri.PrimaryIdentifier()
-			via := slices.DeleteFunc(slices.Clone(uri.Via), func(server string) bool { return strings.TrimSpace(server) == "" })
-			if _, err = validateJoinIdentifier(target); err != nil {
-				return "", nil, err
-			}
-			return target, via, nil
-		default:
-			return "", nil, errors.New("that link points to a person, not a room")
-		}
-	}
-	server, err := validateJoinIdentifier(target)
-	if err != nil {
-		return "", nil, err
-	}
-	if target[0] == '!' && server != "" {
-		return target, []string{server}, nil
-	}
-	return target, nil, nil
-}
-
-func validateJoinIdentifier(target string) (string, error) {
-	if len(target) > 255 || strings.ContainsAny(target, " \t\r\n") {
-		return "", fmt.Errorf("invalid room address %q", target)
-	}
-	sigil, localpart, server := id.ParseCommonIdentifier(target)
-	switch {
-	case sigil == '#' && localpart != "" && server != "":
-		return server, nil
-	case sigil == '!' && localpart != "":
-		// Room version 12 IDs have no server part.
-		return server, nil
-	case sigil == '@':
-		return "", errors.New("that is a person's Matrix ID, not a room")
-	default:
-		return "", fmt.Errorf("invalid room address %q: use #alias:server, !roomid or a matrix.to link", target)
-	}
-}
-
-// JoinRoom joins a public room or a room the user has the address of.
-func (c *Client) JoinRoom(ctx context.Context, target string) (string, error) {
-	roomIDOrAlias, via, err := parseJoinTarget(target)
-	if err != nil {
-		return "", err
-	}
-	ctx, finish, err := c.beginOperation(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer finish()
-	resp, err := c.engine.Client.JoinRoom(ctx, roomIDOrAlias, &mautrix.ReqJoinRoom{Via: via})
-	if err != nil {
-		return "", fmt.Errorf("join room: %w", err)
-	}
-	roomID := resp.RoomID.String()
-	name := ""
-	if roomIDOrAlias[0] == '#' {
-		name = roomIDOrAlias
-	}
-	c.markJoined(roomID, Room{Name: name})
-	return roomID, nil
 }
 
 func normalizeInvitees(userIDs []string, self string) ([]id.UserID, error) {

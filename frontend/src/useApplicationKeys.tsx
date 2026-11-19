@@ -5,7 +5,7 @@ import { isTextEntryTarget, preferenceBoolean } from './appShared'
 import type { useRoomChatExport } from './useRoomChatExport'
 
 export function useApplicationKeys(app: ReturnType<typeof useRoomChatExport>) {
-  const { appZoom, closeMessageSearch, contextMenuRooms, filteredRooms, handleAIShortcut, handleRoomActionShortcut, isActiveAccountRoom, jumpToLatest, localAIChatId, localAIChatOpen, messageContextMenu, openInboxRoom, preferences, quickSwitcherOpen, roomContextMenu, roomSearchInputRef, rooms, roomsRef, searchOpen, selectRoomByOffset, selectedRoomID, setPreference, setQuickSwitcherIndex, setQuickSwitcherOpen, setQuickSwitcherQuery, setRoomRefinements, setRoomScope, setSearchOpen, setSettingsOpen, setSettingsTab, snapshot, startLocalAIChat, switchAccount, undoAnswered, undoRoomID } = app
+  const { appZoom, closeMessageSearch, contextMenuRooms, filteredRooms, handleAIShortcut, handleRoomActionShortcut, jumpToLatest, localAIChatId, localAIChatOpen, messageContextMenu, openInboxRoom, preferences, quickSwitcherOpen, roomContextMenu, roomSearchInputRef, rooms, roomsRef, searchOpen, selectRoomByOffset, selectedRoomID, setPreference, setQuickSwitcherIndex, setQuickSwitcherOpen, setQuickSwitcherQuery, setRoomRefinements, setRoomScope, setSearchOpen, setSettingsOpen, setSettingsTab, startLocalAIChat, undoAnswered, undoRoomID } = app
 
   function handleApplicationKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented || hasOpenDialog() || quickSwitcherOpen) return
@@ -26,7 +26,7 @@ export function useApplicationKeys(app: ReturnType<typeof useRoomChatExport>) {
 
     const shortcutRooms = roomContextMenu
       ? contextMenuRooms
-      : rooms.filter((room) => room.id === selectedRoomID && isActiveAccountRoom(room))
+      : rooms.filter((room) => room.id === selectedRoomID)
     if (roomContextMenu) {
       handleRoomActionShortcut(event, shortcutRooms)
       return
@@ -35,15 +35,6 @@ export function useApplicationKeys(app: ReturnType<typeof useRoomChatExport>) {
 
     const key = event.key.toLowerCase()
     const hasPrimaryModifier = event.metaKey || event.ctrlKey
-    const accountShortcutNumber = event.code.match(/^Digit([1-9])$/)?.[1] ?? (/^[1-9]$/.test(event.key) ? event.key : '')
-    if (hasPrimaryModifier && event.altKey && accountShortcutNumber) {
-      const account = snapshot?.accounts?.[Number(accountShortcutNumber) - 1]
-      if (account) {
-        event.preventDefault()
-        void switchAccount(account.id)
-      }
-      return
-    }
     if (!hasPrimaryModifier && !event.altKey && event.key === '?') {
       event.preventDefault()
       setSettingsTab('Keyboard')

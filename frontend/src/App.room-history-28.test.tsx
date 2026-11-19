@@ -60,9 +60,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -189,6 +186,7 @@ describe('room history updates', () => {
 
     fireEvent.keyDown(appShell, { key: '?' })
     expect((await screen.findByRole('tab', { name: 'Keyboard' })).getAttribute('aria-selected')).toBe('true')
+    await user.click(await screen.findByText('Advanced'))
     expect(screen.getByText('Navigate the focused timeline')).toBeTruthy()
     expect(screen.getByText('Reply to the focused message')).toBeTruthy()
     expect(screen.getByText('Toggle content blur')).toBeTruthy()

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
-import { harness, room, secondRoom, message, menuCommand, suggestedReplyFixture, snapshot } from './appTestSetup'
+import { harness, room, message, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
   const { clipboardSetText, harness } = await import('./appTestSetup')
@@ -60,9 +60,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -177,14 +174,13 @@ describe('room history updates', () => {
     expect((await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('')
   })
 
-  it('removes saved drafts for an account on logout', async () => {
+  it('removes saved drafts on logout', async () => {
     const user = userEvent.setup()
     harness.service.Logout.mockResolvedValue(undefined)
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
     await user.type(await screen.findByRole('textbox', { name: 'Message' }), 'Private before logout')
     await waitFor(() => expect(window.localStorage.getItem(ROOM_DRAFTS_STORAGE_KEY) ?? '').toContain('Private before logout'))
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, activeAccountId: 'second' })
     await user.click(await screen.findByRole('button', { name: 'Settings' }))
     const settings = await screen.findByRole('dialog', { name: 'Settings' })
     await user.click(within(settings).getByRole('tab', { name: 'Account' }))
@@ -229,41 +225,5 @@ describe('room history updates', () => {
     render(<App />)
     expect(await screen.findByText('second new')).toBeTruthy()
     expect(screen.queryByRole('separator', { name: 'New messages' })).toBeNull()
-  })
-
-  it('cancels suggested replies when switching accounts in the same room', async () => {
-    const user = userEvent.setup()
-    let completeReplies!: (result: { suggestions: typeof suggestedReplyFixture }) => void
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
-    harness.service.AISuggestReplies.mockImplementationOnce(() => new Promise((resolve) => { completeReplies = resolve }))
-    harness.service.SwitchAccount.mockResolvedValue({ ...snapshot, activeAccountId: 'second', rooms: [room] })
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-    await user.click(menuCommand('Suggest replies'))
-    await waitFor(() => expect(harness.service.AISuggestReplies).toHaveBeenCalled())
-    const requestID = harness.service.AISuggestReplies.mock.calls[0][1]
-    act(() => harness.eventHandlers.get('notification:open-room')?.({ data: { accountId: 'second', roomId: room.id } }))
-    await waitFor(() => expect(harness.service.AICancel).toHaveBeenCalledWith(requestID))
-    await act(async () => completeReplies({ suggestions: suggestedReplyFixture }))
-    expect(screen.queryByRole('group', { name: 'Suggested replies' })).toBeNull()
-  })
-
-  it('switches to the owning account when a native notification is clicked', async () => {
-    const secondProfile = { ...snapshot.profile, userId: '@two:example.net', displayName: 'Two' }
-    harness.service.Snapshot.mockResolvedValue({
-      ...snapshot,
-      accounts: [{ id: 'primary', profile: snapshot.profile }, { id: 'second', profile: secondProfile }],
-    })
-    harness.service.SwitchAccount.mockResolvedValue({
-      ...snapshot,
-      activeAccountId: 'second',
-      profile: secondProfile,
-      rooms: [secondRoom],
-    })
-    render(<App />)
-    expect(await screen.findByText('latest message')).toBeTruthy()
-    act(() => harness.eventHandlers.get('notification:open-room')?.({ data: { accountId: 'second', roomId: secondRoom.id } }))
-    await waitFor(() => expect(harness.service.SwitchAccount).toHaveBeenCalledWith('second'))
-    await waitFor(() => expect(harness.service.History).toHaveBeenCalledWith(secondRoom.id, 0))
   })
 })

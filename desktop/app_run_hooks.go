@@ -52,9 +52,6 @@ func (s *desktopShell) wireMenuCallbacks() {
 			s.menus.applyState(state)
 		})
 	}
-	s.service.menuAccountsChanged = func() {
-		application.InvokeAsync(s.menus.refreshAccounts)
-	}
 }
 
 func (s *desktopShell) wireMenuBarAndDialogs() {
@@ -108,10 +105,6 @@ func (s *desktopShell) wireEventPumps() {
 }
 
 func (s *desktopShell) handleUpdate(update Update) {
-	if update.AccountID != s.service.currentAccountID() {
-		s.eventBatcher.EnqueueUpdate(update)
-		return
-	}
 	unread := 0
 	for _, room := range update.Rooms {
 		unread += room.Unread

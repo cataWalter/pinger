@@ -1,8 +1,7 @@
-import { useEffect, type FormEvent } from 'react'
+import { useEffect } from 'react'
 import { useRef, useState } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Room, type Snapshot } from '../bindings/mychat/desktop/models.js'
-import { useAccountSwitching } from './hooks/useAccountSwitching'
 import { isLocalAIRoomID, localAIChatIDFromRoomID } from './localAIChats'
 import { describeError, isNeedsReplyRoom, preferenceBoolean } from './appShared'
 import { roomActivityAt } from './rooms'
@@ -14,7 +13,7 @@ const AI_DRAFT_REQUEST_TIMEOUT_MS = 11 * 60 * 1000
 
 export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
   const { archivedPreferenceKey, composeTextRef, preferences, roomDrafts, rooms, setVolatileAIDrafts, volatileAIDrafts } = app
-  const { accountHomeserver, accountPassword, accountUsername, activeAIRequestRef, activeAccountID, aiEnabled, busy, cancelAIRequest, chatTranslationAIRequestRef, chatTranslationRequestRef, clearRoomSelection, closeLanguageTutor, editTarget, filteredRooms, forwardBusy, handleRoomKeyDown, historyRoomIDRef, imageSendRun, isActiveAccountRoom, languageTutorRequestRef, lastReadEventByRoom, leavingRoom, loadingOlderRef, newAIRequestID, openRoomContextMenu, pendingHistoryRefreshRoomIDRef, pendingSearchJumpRef, refreshScheduledJobs, roomButtonActionsRef, roomSelectionAnchorRef, scheduledBusyID, scheduledSaving, selectLocalAIChat, selectedRoomID, selectedRoomRef, setAIPanel, setAccountError, setAccountManagerOpen, setAccountPassword, setAccountUsername, setAddingAccount, setBusy, setChatTranslation, setComposeText, setEditTarget, setForwardingMessage, setGeneratedImageReview, setImageSendRun, setLanguageTutorState, setLeaveConfirmOpen, setLoadingOlder, setLocalAIChatOpen, setMediaApproval, setMentionBindings, setMessageContextMenu, setMessages, setMobilePane, setRedactTarget, setReplyTarget, setRoomContextMenu, setRoomInfoOpen, setRoomMembers, setScheduledDraft, setScheduledJobs, setScheduledJobsOpen, setScheduledTimes, setSearchNextBatch, setSearchOpen, setSearchResults, setSelectedRoomID, setSelectedRoomIDs, setSnapshot, setSuggestedReplies, setSummaryStatus, setTypingUsers, setUndoRoomID, showRoom, suggestedRepliesRequestRef, summaryLoadingRef, undoToastTimerRef, voiceCaptureStatus, workspaceGenerationRef } = app
+  const { activeAIRequestRef, activeAccountID, aiEnabled, busy, cancelAIRequest, chatTranslationAIRequestRef, chatTranslationRequestRef, clearRoomSelection, closeLanguageTutor, editTarget, filteredRooms, handleRoomKeyDown, historyRoomIDRef, imageSendRun, languageTutorRequestRef, lastReadEventByRoom, loadingOlderRef, newAIRequestID, openRoomContextMenu, pendingHistoryRefreshRoomIDRef, pendingSearchJumpRef, refreshScheduledJobs, roomButtonActionsRef, roomSelectionAnchorRef, selectLocalAIChat, selectedRoomID, selectedRoomRef, setAIPanel, setChatTranslation, setComposeText, setEditTarget, setForwardingMessage, setGeneratedImageReview, setImageSendRun, setLanguageTutorState, setLeaveConfirmOpen, setLoadingOlder, setLocalAIChatOpen, setMediaApproval, setMentionBindings, setMessageContextMenu, setMessages, setMobilePane, setRedactTarget, setReplyTarget, setRoomContextMenu, setRoomInfoOpen, setRoomMembers, setScheduledDraft, setScheduledJobs, setScheduledJobsOpen, setScheduledTimes, setSearchNextBatch, setSearchOpen, setSearchResults, setSelectedRoomID, setSelectedRoomIDs, setSnapshot, setSuggestedReplies, setSummaryStatus, setTypingUsers, setUndoRoomID, showRoom, suggestedRepliesRequestRef, summaryLoadingRef, undoToastTimerRef, workspaceGenerationRef } = app
   const [aiReplyDraftBatch, setAIReplyDraftBatch] = useState({
     status: 'idle' as 'idle' | 'running' | 'complete' | 'cancelled',
     completed: 0,
@@ -80,8 +79,7 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
 
   async function generateNeedsReplyDrafts() {
     if (!aiEnabled || busy || editTarget || replyDraftBatchRef.current) return
-    const candidates = rooms.filter((room) => isActiveAccountRoom(room)
-      && isNeedsReplyRoom(room)
+    const candidates = rooms.filter((room) => isNeedsReplyRoom(room)
       && !isArchivedRoom(room.accountId, room.id)
       && !getVolatileAIDraft(volatileAIDrafts, activeAccountID, room.id))
       .sort((left, right) => roomActivityAt(left) - roomActivityAt(right))
@@ -223,17 +221,6 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
     void refreshScheduledJobs()
   }
 
-  const switchAccount = useAccountSwitching({
-    activeAccountID,
-    blocked: busy || Boolean(voiceCaptureStatus) || scheduledSaving || Boolean(scheduledBusyID) || forwardBusy || leavingRoom,
-    resetAccountWorkspace,
-    showRoom,
-    setBusy,
-    setAccountError,
-    setAccountManagerOpen,
-  })
-
-  // Rooms from other accounts switch to their account before opening.
   function openInboxRoom(room: Room) {
     const chatID = localAIChatIDFromRoomID(room.id)
     if (chatID !== null) {
@@ -241,13 +228,12 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
       return
     }
     setLocalAIChatOpen(false)
-    if (isActiveAccountRoom(room)) showRoom(room.id)
-    else void switchAccount(room.accountId, room.id)
+    showRoom(room.id)
   }
 
   roomButtonActionsRef.current = {
     onSelect: (room, index, event) => {
-      if (event.shiftKey && isActiveAccountRoom(room) && !isLocalAIRoomID(room.id)) {
+      if (event.shiftKey && !isLocalAIRoomID(room.id)) {
         event.preventDefault()
         const anchorIndex = filteredRooms.findIndex((candidate) => candidate.id === roomSelectionAnchorRef.current)
         if (anchorIndex < 0) {
@@ -257,7 +243,7 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
         }
         const start = Math.min(anchorIndex, index)
         const end = Math.max(anchorIndex, index)
-        setSelectedRoomIDs(filteredRooms.slice(start, end + 1).filter((candidate) => isActiveAccountRoom(candidate) && !isLocalAIRoomID(candidate.id)).map((candidate) => candidate.id))
+        setSelectedRoomIDs(filteredRooms.slice(start, end + 1).filter((candidate) => !isLocalAIRoomID(candidate.id)).map((candidate) => candidate.id))
         return
       }
       clearRoomSelection()
@@ -267,41 +253,19 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
     onKeyDown: (room, index, event) => handleRoomKeyDown(event, room, index),
     onContextMenu: (room, event) => {
       event.preventDefault()
-      if (isActiveAccountRoom(room)) openRoomContextMenu(room.id, event.clientX, event.clientY)
+      openRoomContextMenu(room.id, event.clientX, event.clientY)
     },
   }
 
   function selectRoomByOffset(direction: number, unansweredOnly = false) {
     const availableRooms = filteredRooms.filter((room) => !unansweredOnly || isNeedsReplyRoom(room))
     if (availableRooms.length === 0) return
-    const currentIndex = availableRooms.findIndex((room) => room.id === selectedRoomRef.current && isActiveAccountRoom(room))
+    const currentIndex = availableRooms.findIndex((room) => room.id === selectedRoomRef.current)
     const nextIndex = currentIndex < 0
       ? direction > 0 ? 0 : availableRooms.length - 1
       : (currentIndex + direction + availableRooms.length) % availableRooms.length
     openInboxRoom(availableRooms[nextIndex])
   }
 
-  async function submitAddAccount(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setBusy(true)
-    setAccountError('')
-    try {
-      const state = await AppService.AddAccount(accountHomeserver.trim(), accountUsername.trim(), accountPassword)
-      resetAccountWorkspace(state)
-      setAccountPassword('')
-      setAccountUsername('')
-      setAddingAccount(false)
-      setAccountManagerOpen(false)
-    } catch (addError) {
-      setAccountError(describeError(addError))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  function openNotificationRoom(accountID: string, roomID: string) {
-    if (accountID && accountID !== activeAccountID) void switchAccount(accountID, roomID)
-    else showRoom(roomID)
-  }
-  return { ...app, openInboxRoom, selectRoomByOffset, resetAccountWorkspace, switchAccount, submitAddAccount, openNotificationRoom, aiReplyDraftBatch, generateNeedsReplyDrafts, cancelAIDraftBatch, suggestRepliesForRoom, cancelSuggestedReplies, closeAIResult }
+  return { ...app, openInboxRoom, selectRoomByOffset, resetAccountWorkspace, aiReplyDraftBatch, generateNeedsReplyDrafts, cancelAIDraftBatch, suggestRepliesForRoom, cancelSuggestedReplies, closeAIResult }
 }

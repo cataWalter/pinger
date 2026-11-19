@@ -10,7 +10,7 @@ import { deleteVolatileAIDraft, getVolatileAIDraft } from './volatileAIDrafts'
 import type { useMenuActions } from './useMenuActions'
 
 export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
-  const { agentEditor, aiEnabled, aiInstructions, analyzeWithLanguageTutor, cancelAIRequest, chatTranslationAIRequestRef, chatTranslationRequestRef, copyMessage, hasAIConversationContext, hasOlder, isActiveAccountRoom, loadingOlderRef, markRoomUnread, messages, newAIRequestID, olderCursor, openMessageForward, openReminder, openThreadPanel, preferences, preferencesRef, promptMessages, retryMessage, roomAgents, roomAgentsPreferenceKey, rooms, runAIRequest, selectedRoomID, selectedRoomRef, setAgentEditor, setAgentSettingsError, setChatTranslation, setComposeText, setEditTarget, setHasOlder, setLoadingOlder, setMentionBindings, setMentionStart, setMessages, setOlderCursor, setPreference, setRedactTarget, setReplyTarget, snapshot, startReaction, suggestRepliesForRoom, timelineHeightBeforePrepend, timelineRef, workspaceGenerationRef } = app
+  const { agentEditor, aiEnabled, aiInstructions, analyzeWithLanguageTutor, cancelAIRequest, chatTranslationAIRequestRef, chatTranslationRequestRef, copyMessage, hasAIConversationContext, hasOlder, loadingOlderRef, markRoomUnread, messages, newAIRequestID, olderCursor, openMessageForward, openReminder, openThreadPanel, preferences, preferencesRef, promptMessages, retryMessage, roomAgents, roomAgentsPreferenceKey, rooms, runAIRequest, selectedRoomID, selectedRoomRef, setAgentEditor, setAgentSettingsError, setChatTranslation, setComposeText, setEditTarget, setHasOlder, setLoadingOlder, setMentionBindings, setMentionStart, setMessages, setOlderCursor, setPreference, setRedactTarget, setReplyTarget, snapshot, startReaction, suggestRepliesForRoom, timelineHeightBeforePrepend, timelineRef, workspaceGenerationRef } = app
   const { activeAccountID, setVolatileAIDrafts, volatileAIDrafts } = app
 
   async function translateRecentMessages() {
@@ -151,7 +151,7 @@ export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
     const bookmarked = preferenceBoolean(preferences, bookmarkKey)
     const room = rooms.find((candidate) => candidate.id === selectedRoomID)
     const canMarkUnread = Boolean(room && room.unread === 0 && !room.markedUnread)
-    const canForward = rooms.some((candidate) => candidate.id !== selectedRoomID && isActiveAccountRoom(candidate))
+    const canForward = rooms.some((candidate) => candidate.id !== selectedRoomID)
     const receivedAt = message.timestamp > 0
       ? new Intl.DateTimeFormat(activeLocale(), { dateStyle: 'short', timeStyle: 'short' }).format(new Date(message.timestamp))
       : 'unknown time'

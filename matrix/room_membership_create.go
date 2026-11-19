@@ -5,60 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"maunium.net/go/mautrix"
-	"maunium.net/go/mautrix/event"
-	"maunium.net/go/mautrix/id"
-	"strings"
 	"time"
-	"unicode/utf8"
 )
-
-// CreateGroupRoom creates a private, invite-only room and invites the given people.
-func (c *Client) CreateGroupRoom(ctx context.Context, request GroupRoomRequest) (string, error) {
-	name := strings.TrimSpace(request.Name)
-	topic := strings.TrimSpace(request.Topic)
-	if name == "" {
-		return "", errors.New("enter a room name")
-	}
-	if utf8.RuneCountInString(name) > maxRoomNameLength {
-		return "", fmt.Errorf("room names can be at most %d characters", maxRoomNameLength)
-	}
-	if utf8.RuneCountInString(topic) > maxRoomTopicLength {
-		return "", fmt.Errorf("room topics can be at most %d characters", maxRoomTopicLength)
-	}
-	invitees, err := normalizeInvitees(request.Invitees, c.currentUserID())
-	if err != nil {
-		return "", err
-	}
-	ctx, finish, err := c.beginOperation(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer finish()
-	create := &mautrix.ReqCreateRoom{
-		Preset:     "private_chat",
-		Visibility: "private",
-		Name:       name,
-		Topic:      topic,
-		Invite:     invitees,
-	}
-	if request.Encrypted {
-		emptyStateKey := ""
-		create.InitialState = []*event.Event{{
-			Type:     event.StateEncryption,
-			StateKey: &emptyStateKey,
-			Content: event.Content{Parsed: &event.EncryptionEventContent{
-				Algorithm: id.AlgorithmMegolmV1,
-			}},
-		}}
-	}
-	resp, err := c.engine.Client.CreateRoom(ctx, create)
-	if err != nil {
-		return "", fmt.Errorf("create room: %w", err)
-	}
-	roomID := resp.RoomID.String()
-	c.markJoined(roomID, Room{Name: name, Topic: topic})
-	return roomID, nil
-}
 
 // InviteUsers invites people to a joined room. It tries everyone and reports every failure.
 func (c *Client) InviteUsers(ctx context.Context, roomID string, userIDs []string) error {

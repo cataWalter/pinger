@@ -29,7 +29,7 @@ export function DialogSurface({ children, className, role = 'dialog', labelledBy
     if (!dialog) return
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const focusableSelector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    const firstFocusable = dialog.querySelector<HTMLElement>(focusableSelector)
+    const firstFocusable = dialog.querySelector<HTMLElement>('[data-initial-focus]') ?? dialog.querySelector<HTMLElement>(focusableSelector)
       ; (firstFocusable ?? dialog).focus()
 
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { AppService } from '../../bindings/mychat/desktop'
 import type { Message } from '../../bindings/mychat/desktop/models.js'
 import { describeError, mergeTimelineMessages, type TimelineListHandle } from '../appShared'
+import { TIMELINE_KEEP_COUNT, TIMELINE_TRIM_THRESHOLD } from '../appConstants'
 
 type SearchJump = { roomID: string; eventID: string; timelineCursor: number }
 type MutableRef<T> = { current: T }
@@ -192,6 +193,18 @@ export function useRoomHistory({
     if (!timeline || timeline.clientHeight <= 0 || timeline.scrollHeight > timeline.clientHeight) return
     void loadOlderMessagesRef.current()
   }, [hasOlder, loadingHistory, loadingOlder, messages, selectedRoomID, timelineRef])
+
+  // Dropped messages are reloaded through olderCursor, so trimming only the oldest rows is lossless.
+  useEffect(() => {
+    if (!selectedRoomID || loadingHistory || loadingOlder || loadingOlderRef.current || pendingSearchJumpRef.current) return
+    if (!stickToBottomRef.current || messages.length <= TIMELINE_TRIM_THRESHOLD) return
+    const kept = messages.slice(-TIMELINE_KEEP_COUNT)
+    const boundary = kept[0]?.timelineCursor ?? 0
+    if (boundary <= 0) return
+    setMessages(kept)
+    setOlderCursor(boundary)
+    setHasOlder(true)
+  }, [loadingHistory, loadingOlder, loadingOlderRef, messages, pendingSearchJumpRef, selectedRoomID, setMessages, stickToBottomRef])
 
   return {
     loadingHistory,

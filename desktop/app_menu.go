@@ -18,7 +18,6 @@ const (
 
 // Action IDs sent on applicationMenuActionEventName; the frontend maps each one to an existing command.
 const (
-	menuActionAccountPrefix      = "account:"
 	menuActionFilterPrefix       = "filter:"
 	menuActionSettingsPrefix     = "settings:"
 	menuActionJumpToLatest       = "jump-latest"
@@ -48,7 +47,7 @@ const (
 )
 
 // applicationMenuSettingsTabs matches the settings sections in the frontend tab list.
-var applicationMenuSettingsTabs = []string{"General", "Account", "Appearance", "Notifications", "Keyboard", "History", "Devices", "Storage", "Security", "Help", "About", "AI", "Integrations"}
+var applicationMenuSettingsTabs = []string{"General", "Account", "Appearance", "Notifications", "Keyboard", "Storage", "AI", "Help"}
 
 // menuFilters lists the room filters in the Messages menu, in display order.
 var menuFilters = []struct {
@@ -87,7 +86,6 @@ type applicationMenus struct {
 	markAllRead    func()
 	root           *application.Menu
 	tray           *application.Menu
-	accounts       *application.Menu
 	items          map[string]*application.MenuItem
 	originalLabels map[*application.MenuItem]string
 	language       string
@@ -131,13 +129,6 @@ func setNeedsReplyDockBadge(badge needsReplyDockBadge, count int) error {
 		return badge.RemoveBadge()
 	}
 	return badge.SetBadge(needsReplyCounterLabel(count))
-}
-
-// notifyAccountsChanged asks the native menu to rebuild the account submenu.
-func (s *AppService) notifyAccountsChanged() {
-	if s.menuAccountsChanged != nil {
-		s.menuAccountsChanged()
-	}
 }
 
 // trayMenu builds the menu-bar icon menu.

@@ -1,9 +1,10 @@
-import type { FormEvent } from 'react'
+import { useState, type FormEvent, type KeyboardEvent } from 'react'
 import { ShieldCheck, X } from 'lucide-react'
 import { endsWithAssistantTurn } from './aiPrompts'
-import { languageName, type LanguageRoles } from './aiSettings'
+import { languageName, type LanguageEntry, type LanguageRoles } from './aiSettings'
+import { primaryModifierLabel } from './dom'
 import { DialogSurface } from './DialogSurface'
-import { LanguageTutorAnalysisDetails, type AIPanel, type LanguageTutorState } from './appShared'
+import { LanguageTutorAnalysisDetails, LanguageTutorDraftCorrection, type AIPanel, type LanguageTutorState } from './appShared'
 
 export type AIResultDialogsProps = {
   aiPanel: AIPanel | null
@@ -17,7 +18,8 @@ export type AIResultDialogsProps = {
   onFollowUpChange: (followUp: string) => void
   onSendFollowUp: (event: FormEvent<HTMLFormElement>) => void
   onCloseLanguageTutor: () => void
-  onUseLanguageTutorDraft: () => void
+  onCheckLanguageTutorDraft: (text: string) => void
+  onUseLanguageTutorDraft: (text: string) => void
 }
 
 // AIResultDialogs renders the AI result panel and the Language Tutor panel. It is lazy-loaded by App.
@@ -33,6 +35,7 @@ export function AIResultDialogs({
   onFollowUpChange,
   onSendFollowUp,
   onCloseLanguageTutor,
+  onCheckLanguageTutorDraft,
   onUseLanguageTutorDraft,
 }: AIResultDialogsProps) {
   return (
@@ -68,30 +71,75 @@ export function AIResultDialogs({
           </footer>
         </DialogSurface>
       </div>}
-      {languageTutorState && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCloseLanguageTutor() }} onKeyDown={(event) => {
-          if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
-          if (languageTutorState.mode !== 'draft' || languageTutorState.busy || hasEditTarget || !languageTutorState.analysis?.text_to_insert.trim()) return
-          event.preventDefault()
-          onUseLanguageTutorDraft()
-        }}>
-        <DialogSurface className="room-info-dialog ai-result-dialog language-tutor-dialog" labelledBy="language-tutor-title" onClose={onCloseLanguageTutor} onClick={(event) => event.stopPropagation()}>
-          <header className="room-info-header ai-result-header">
-            <div><span className="eyebrow">LANGUAGE TUTOR</span><h2 id="language-tutor-title">{languageTutorState.mode === 'draft' ? 'Tutor this draft' : 'Analyze message'}</h2></div>
-            <button className="icon-button" type="button" aria-label="Close Language Tutor" title="Close Language Tutor" onClick={onCloseLanguageTutor}><X size={16} /></button>
-          </header>
-          <div className="ai-result-content language-tutor-content" aria-live="polite" aria-busy={languageTutorState.busy}>
-            {languageTutorState.mode !== 'draft' && <p className="language-tutor-explained-in">Explained in {languageName(languageTutorState.explanationLanguage, languageRoles.languages)}</p>}
-            {languageTutorState.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with the local model…</p>}
-            {languageTutorState.busy && languageTutorState.preview !== '' && <pre className="language-tutor-preview">{languageTutorState.preview}</pre>}
-            {languageTutorState.error && <p className="settings-error" role="alert">{languageTutorState.error}</p>}
-            {languageTutorState.analysis && <LanguageTutorAnalysisDetails analysis={languageTutorState.analysis} mode={languageTutorState.mode} originalText={languageTutorState.originalText} learningCode={languageTutorState.learningLanguage} explanationCode={languageTutorState.explanationLanguage} languages={languageRoles.languages} />}
-          </div>
-          <footer className="room-info-footer ai-result-footer">
-            {languageTutorState.mode === 'draft' && <button className="settings-command ai-result-primary" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" title={`Replace draft with ${languageName(languageTutorState.learningLanguage, languageRoles.languages)} (Ctrl / ⌘ + Enter)`} disabled={!languageTutorState.analysis || languageTutorState.busy || hasEditTarget} onClick={onUseLanguageTutorDraft}>Replace draft with {languageName(languageTutorState.learningLanguage, languageRoles.languages)}</button>}
-            <button className="settings-command" type="button" onClick={onCloseLanguageTutor}>Close</button>
-          </footer>
-        </DialogSurface>
-      </div>}
+      {languageTutorState && <LanguageTutorDialog state={languageTutorState} hasEditTarget={hasEditTarget} languages={languageRoles.languages} onClose={onCloseLanguageTutor} onCheck={onCheckLanguageTutorDraft} onUseDraft={onUseLanguageTutorDraft} />}
     </>
+  )
+}
+
+type LanguageTutorDialogProps = {
+  state: LanguageTutorState
+  hasEditTarget: boolean
+  languages: readonly LanguageEntry[]
+  onClose: () => void
+  onCheck: (text: string) => void
+  onUseDraft: (text: string) => void
+}
+
+// LanguageTutorDialog keeps the draft in local state so typing does not re-render the app. It mounts only while a tutor session is open.
+function LanguageTutorDialog({ state, hasEditTarget, languages, onClose, onCheck, onUseDraft }: LanguageTutorDialogProps) {
+  const [draft, setDraft] = useState(state.originalText)
+  const isDraft = state.mode === 'draft'
+  const draftText = draft.trim()
+  const learningName = languageName(state.learningLanguage, languages)
+  // The result describes originalText, so an edited draft is marked stale until it is checked again.
+  const stale = isDraft && draftText !== state.originalText
+  const correctedText = state.analysis?.corrected_text.trim() ?? ''
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
+    if (!isDraft || !draftText) return
+    event.preventDefault()
+    onCheck(draft)
+  }
+
+  return (
+    <div className="ai-result-scrim language-tutor-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }} onKeyDown={handleKeyDown}>
+      <DialogSurface className="room-info-dialog ai-result-dialog language-tutor-dialog" labelledBy="language-tutor-title" onClose={onClose} onClick={(event) => event.stopPropagation()}>
+        <header className="room-info-header ai-result-header">
+          <div><span className="eyebrow">LANGUAGE TUTOR</span><h2 id="language-tutor-title">{isDraft ? 'Tutor this draft' : 'Analyze message'}</h2></div>
+          <button className="icon-button" type="button" aria-label="Close Language Tutor" title="Close Language Tutor" onClick={onClose}><X size={16} /></button>
+        </header>
+        {isDraft
+          ? <div className="language-tutor-workspace">
+            <section className="language-tutor-editor">
+              <span className="eyebrow">YOUR TEXT · {learningName.toUpperCase()}</span>
+              <textarea data-initial-focus aria-label="Your text" lang={state.learningLanguage} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={draft} onChange={(event) => setDraft(event.target.value)} />
+              {stale && <p className="language-tutor-stale">Changed since the last check. Press Check to update.</p>}
+            </section>
+            <div className="ai-result-content language-tutor-content" aria-live="polite" aria-busy={state.busy}>
+              {state.error && <p className="settings-error" role="alert">{state.error}</p>}
+              <LanguageTutorDraftCorrection analysis={state.analysis} busy={state.busy} preview={state.preview} originalText={state.originalText} learningCode={state.learningLanguage} languages={languages} />
+            </div>
+          </div>
+          : <div className="ai-result-content language-tutor-content" aria-live="polite" aria-busy={state.busy}>
+            <p className="language-tutor-explained-in">Explained in {languageName(state.explanationLanguage, languages)}</p>
+            {state.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with the local model…</p>}
+            {state.busy && state.preview !== '' && <pre className="language-tutor-preview">{state.preview}</pre>}
+            {state.error && <p className="settings-error" role="alert">{state.error}</p>}
+            {state.analysis && <LanguageTutorAnalysisDetails analysis={state.analysis} originalText={state.originalText} learningCode={state.learningLanguage} explanationCode={state.explanationLanguage} languages={languages} />}
+          </div>}
+        <footer className="room-info-footer ai-result-footer">
+          {isDraft
+            ? <>
+              <button className="settings-command" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" title={`Check draft (${primaryModifierLabel()} + Enter)`} disabled={!draftText} onClick={() => onCheck(draft)}>
+                Check <kbd aria-hidden="true">{primaryModifierLabel()} Enter</kbd>
+              </button>
+              <button className="settings-command" type="button" title="Put your edited text in the composer" disabled={!draftText || hasEditTarget} onClick={() => onUseDraft(draft)}>Keep my draft</button>
+              <button className="settings-command ai-result-primary" type="button" title={`Put the ${learningName} correction in the composer`} disabled={!correctedText || state.busy || hasEditTarget} onClick={() => onUseDraft(correctedText)}>Replace draft with {learningName}</button>
+            </>
+            : <button className="settings-command" type="button" onClick={onClose}>Close</button>}
+        </footer>
+      </DialogSurface>
+    </div>
   )
 }

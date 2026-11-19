@@ -18,6 +18,7 @@ func (s *AppService) Snapshot() (Snapshot, error) {
 	rooms := mapRoomsWithPreferences(client.Rooms(), preferences)
 	tagRooms(rooms, s.currentAccountID())
 	return Snapshot{
+		AccountID:             s.currentAccountID(),
 		LoggedIn:              client.IsLoggedIn(),
 		NeedsVerification:     client.NeedsVerification(),
 		Verification:          mapVerification(client.Verification()),
@@ -32,11 +33,9 @@ func (s *AppService) Snapshot() (Snapshot, error) {
 			AvatarURI:   profile.AvatarURI,
 			Verified:    profile.Verified,
 		},
-		Accounts:        s.Accounts(),
-		ActiveAccountID: s.currentAccountID(),
-		Rooms:           rooms,
-		Invites:         mapInvites(client.Invites()),
-		Preferences:     preferences,
+		Rooms:       rooms,
+		Invites:     mapInvites(client.Invites()),
+		Preferences: preferences,
 	}, nil
 }
 

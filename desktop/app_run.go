@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"mychat/matrix"
 	"mychat/notifications"
 	"path/filepath"
 )
 
-func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, defaultDataDir, preferencesPath, mediaCacheDir string) error {
+func Run(assets fs.FS, applicationIcon []byte, dataDir, defaultDataDir, preferencesPath, mediaCacheRoot string) error {
 	frontend, err := fs.Sub(assets, "frontend/dist")
 	if err != nil {
 		return fmt.Errorf("open embedded frontend assets: %w", err)
@@ -27,16 +26,15 @@ func Run(client *matrix.Client, assets fs.FS, applicationIcon []byte, dataDir, d
 
 	ctx, cancel := context.WithCancel(context.Background())
 	notifier := notifications.New()
-	service := &AppService{client: client, dataDir: dataDir, defaultDataDir: defaultDataDir, sharedPreferences: sharedPreferences, notifier: notifier, ctx: ctx, cancel: cancel, scheduled: scheduledJobs}
+	service := &AppService{dataDir: dataDir, defaultDataDir: defaultDataDir, sharedPreferences: sharedPreferences, notifier: notifier, ctx: ctx, cancel: cancel, scheduled: scheduledJobs}
 	service.imageEngine.stateFile = imageEngineRecordPath(defaultDataDir)
 	if reapErr := reapOrphanedImageEngine(service.imageEngine.stateFile); reapErr != nil {
 		log.Printf("reap orphaned image engine: %v", reapErr)
 	}
-	if err = service.initializeAccounts(dataDir, mediaCacheDir); err != nil {
+	if err = service.initializeAccounts(dataDir, mediaCacheRoot); err != nil {
 		cancel()
 		_ = sharedPreferences.Close()
-		client.Close()
-		return fmt.Errorf("initialize Matrix accounts: %w", err)
+		return fmt.Errorf("initialize Matrix account: %w", err)
 	}
 	shutdown := newShutdown(service, notifier)
 	app := newApplication(service, frontend, applicationIcon, shutdown)

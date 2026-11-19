@@ -5,7 +5,7 @@ import { describeError, preferenceBoolean, preferenceString, isNeedsReplyRoom, r
 import type { useLocalAIChats } from './useLocalAIChats'
 
 export function useRoomActions(app: ReturnType<typeof useLocalAIChats>) {
-  const { archivedPreferenceKey, automaticArchiveEnabled, automaticArchiveInFlightRef, clearNeedsReply, clearRoomSelection, filteredRooms, isActiveAccountRoom, markRoomAnsweredRef, nextRoomAfterArchive, nextRoomByBehavior, preferences, rooms, roomsRef, selectedRoomID, selectedRoomRef, setError, setForwardError, setForwardTargetRoomID, setForwardingMessage, setMessageContextMenu, setPreference, setRoomContextMenu, setSnapshot, showRoom, showUndoToast, snapshot, triageBusyRef } = app
+  const { archivedPreferenceKey, automaticArchiveEnabled, automaticArchiveInFlightRef, clearNeedsReply, clearRoomSelection, filteredRooms, markRoomAnsweredRef, nextRoomAfterArchive, nextRoomByBehavior, preferences, rooms, roomsRef, selectedRoomID, selectedRoomRef, setError, setForwardError, setForwardTargetRoomID, setForwardingMessage, setMessageContextMenu, setPreference, setRoomContextMenu, setSnapshot, showRoom, showUndoToast, triageBusyRef } = app
 
   async function markRoomRead(roomID: string) {
     const room = rooms.find((candidate) => candidate.id === roomID)
@@ -66,14 +66,6 @@ export function useRoomActions(app: ReturnType<typeof useLocalAIChats>) {
     }
   }
 
-  async function archiveAllReadRooms() {
-    const readRooms = rooms.filter((room) => room.unread === 0 && !room.markedUnread && !preferenceBoolean(preferences, archivedPreferenceKey(room.id)))
-    for (const room of readRooms) await setPreference(archivedPreferenceKey(room.id), true)
-    if (readRooms.some((room) => room.id === selectedRoomID)) {
-      showRoom(nextRoomAfterArchive(new Set(readRooms.map((room) => room.id))))
-    }
-  }
-
   async function archiveInactiveRooms() {
     const ageDays = Number(preferenceString(preferences, 'archive.older_than_days', '90'))
     const cutoff = Date.now() - ageDays * 24 * 60 * 60 * 1000
@@ -115,10 +107,10 @@ export function useRoomActions(app: ReturnType<typeof useLocalAIChats>) {
     runArchive()
     const timer = window.setInterval(runArchive, 60 * 60 * 1000)
     return () => window.clearInterval(timer)
-  }, [automaticArchiveEnabled, preferences, rooms, selectedRoomID, snapshot?.activeAccountId, automaticArchiveInFlightRef])
+  }, [automaticArchiveEnabled, preferences, rooms, selectedRoomID, automaticArchiveInFlightRef])
 
   function openMessageForward(message: Message) {
-    const destination = rooms.find((candidate) => candidate.id !== selectedRoomID && isActiveAccountRoom(candidate))
+    const destination = rooms.find((candidate) => candidate.id !== selectedRoomID)
     if (!destination) return
     setMessageContextMenu(null)
     setForwardTargetRoomID(destination.id)
@@ -141,7 +133,7 @@ export function useRoomActions(app: ReturnType<typeof useLocalAIChats>) {
     try {
       await clearNeedsReply(targetRoom)
       showUndoToast(roomID)
-      if (wasSelected && nextRoom && isActiveAccountRoom(nextRoom)) showRoom(nextRoom.id)
+      if (wasSelected && nextRoom) showRoom(nextRoom.id)
     } catch (triageError) {
       setError(describeError(triageError))
     } finally {
@@ -149,5 +141,5 @@ export function useRoomActions(app: ReturnType<typeof useLocalAIChats>) {
     }
   }
   markRoomAnsweredRef.current = markRoomAnswered
-  return { ...app, markRoomRead, markRoomUnread, setRoomArchived, archiveAllReadRooms, archiveInactiveRooms, archiveInactiveRoomsRef, openMessageForward, markRoomAnswered }
+  return { ...app, markRoomRead, markRoomUnread, setRoomArchived, archiveInactiveRooms, archiveInactiveRoomsRef, openMessageForward, markRoomAnswered }
 }

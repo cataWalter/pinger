@@ -1,7 +1,6 @@
 package desktop
 
 import (
-	cryptorand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -10,6 +9,7 @@ import (
 	"mychat/matrix"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -100,119 +100,114 @@ func (r *accountRegistry) SetActive(id string) error {
 	return r.saveOrRestore(previous)
 }
 
-func (r *accountRegistry) UpsertAndActivate(account AccountSummary) error {
-	if account.ID == "" || account.Profile.UserID == "" {
-		return errors.New("account ID and Matrix user ID are required")
-	}
+// KeepOnly removes every registered account except keepID. It leaves the active ID alone and saves only when something was removed.
+func (r *accountRegistry) KeepOnly(keepID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	previous := r.data
-	r.data.Accounts = append([]AccountSummary(nil), r.data.Accounts...)
-	updated := false
-	for index := range r.data.Accounts {
-		if r.data.Accounts[index].ID == account.ID {
-			r.data.Accounts[index] = account
-			updated = true
-			break
+	kept := []AccountSummary{}
+	for _, account := range r.data.Accounts {
+		if account.ID == keepID {
+			kept = append(kept, account)
 		}
 	}
-	if !updated {
-		r.data.Accounts = append(r.data.Accounts, account)
+	if len(kept) == len(r.data.Accounts) {
+		return nil
 	}
-	r.data.ActiveAccountID = account.ID
+	previous := r.data
+	r.data.Accounts = kept
 	return r.saveOrRestore(previous)
+}
+
+func (r *accountRegistry) saveOrRestore(previous accountRegistryData) error {
+	if err := r.saveLocked(); err != nil {
+		r.data = previous
+		return err
+	}
+	return nil
+}
+
+func validAccountID(accountID string) bool {
+	decoded, err := hex.DecodeString(accountID)
+	return err == nil && len(decoded) == 16
 }
 
 func accountDatabasePath(dataDir, accountID string) (string, error) {
 	if accountID == primaryAccountID {
 		return filepath.Join(dataDir, "matrix.db"), nil
 	}
-	decoded, err := hex.DecodeString(accountID)
-	if err != nil || len(decoded) != 16 {
+	if !validAccountID(accountID) {
 		return "", fmt.Errorf("invalid account ID %q", accountID)
 	}
 	return filepath.Join(dataDir, "accounts", accountID, "matrix.db"), nil
 }
 
-func newAccountID() (string, error) {
-	var id [16]byte
-	if _, err := cryptorand.Read(id[:]); err != nil {
-		return "", fmt.Errorf("generate account ID: %w", err)
+// mediaCacheDirFor returns the media directory for an account. The primary account uses the root itself, and other accounts use a subdirectory.
+func mediaCacheDirFor(root, accountID string) string {
+	if root == "" || accountID == primaryAccountID {
+		return root
 	}
-	return hex.EncodeToString(id[:]), nil
+	return filepath.Join(root, accountID)
 }
 
-func (s *AppService) initializeAccounts(dataDir, mediaCacheDir string) error {
+// initializeAccounts opens the one surviving account, deletes every other account's data, and records the survivor in the registry.
+func (s *AppService) initializeAccounts(dataDir, mediaCacheRoot string) error {
 	registry, err := newAccountRegistry(filepath.Join(dataDir, "accounts.json"))
 	if err != nil {
 		return err
 	}
-	s.accountMu.RLock()
-	primary := s.client
-	s.accountMu.RUnlock()
-	clients := make(map[string]*matrix.Client, 1)
-	activeID := registry.ActiveID()
-	if activeID == "" {
-		activeID = primaryAccountID
+	survivorID := registry.ActiveID()
+	if survivorID == "" {
+		survivorID = primaryAccountID
 	}
-	activeClient := primary
-	if activeID != primaryAccountID {
-		databasePath, pathErr := accountDatabasePath(dataDir, activeID)
-		if pathErr != nil {
-			return pathErr
-		}
-		activeClient, err = matrix.New(databasePath)
-		if err != nil {
-			return fmt.Errorf("open account %s: %w", activeID, err)
-		}
-		if mediaCacheDir != "" {
-			activeClient.SetMediaCacheDir(filepath.Join(mediaCacheDir, activeID))
-		}
-		if activeClient.IsLoggedIn() {
-			for _, stored := range registry.All() {
-				if stored.ID != activeID || stored.Profile.UserID == "" {
-					continue
-				}
-				actual := accountSummary(activeID, activeClient)
-				if stored.Profile.UserID != actual.Profile.UserID {
-					activeClient.Close()
-					return fmt.Errorf("account %s database belongs to %s, not %s", activeID, actual.Profile.UserID, stored.Profile.UserID)
-				}
-				break
+	databasePath, err := accountDatabasePath(dataDir, survivorID)
+	if err != nil {
+		return err
+	}
+	client, err := matrix.New(databasePath)
+	if err != nil {
+		return fmt.Errorf("open account %s: %w", survivorID, err)
+	}
+	if dir := mediaCacheDirFor(mediaCacheRoot, survivorID); dir != "" {
+		client.SetMediaCacheDir(dir)
+	}
+	if client.IsLoggedIn() && survivorID != primaryAccountID {
+		for _, stored := range registry.All() {
+			if stored.ID != survivorID || stored.Profile.UserID == "" {
+				continue
 			}
+			actual := accountSummary(survivorID, client)
+			if stored.Profile.UserID != actual.Profile.UserID {
+				client.Close()
+				return fmt.Errorf("account %s database belongs to %s, not %s", survivorID, actual.Profile.UserID, stored.Profile.UserID)
+			}
+			break
 		}
 	}
-	clients[activeID] = activeClient
 
-	if activeClient.IsLoggedIn() {
-		if err = registry.Upsert(accountSummary(activeID, activeClient)); err != nil {
-			closeAccountClientMap(clients)
-			return err
-		}
-		if err = registry.SetActive(activeID); err != nil {
-			closeAccountClientMap(clients)
-			return err
-		}
+	s.removeOtherAccounts(dataDir, survivorID, mediaCacheRoot)
+	if err = registry.KeepOnly(survivorID); err != nil {
+		client.Close()
+		return err
 	}
-	if primary != activeClient {
-		primary.Close()
+	if client.IsLoggedIn() {
+		if err = registry.Upsert(accountSummary(survivorID, client)); err != nil {
+			client.Close()
+			return err
+		}
+		if err = registry.SetActive(survivorID); err != nil {
+			client.Close()
+			return err
+		}
 	}
 
 	s.accountMu.Lock()
 	s.accountRegistry = registry
-	s.accountClients = clients
-	s.activeAccountID = activeID
+	s.activeAccountID = survivorID
 	s.dataDir = dataDir
-	s.accountMediaCacheDir = mediaCacheDir
-	s.client = activeClient
+	s.mediaCacheRoot = mediaCacheRoot
+	s.client = client
 	s.accountMu.Unlock()
 	return nil
-}
-
-func closeAccountClientMap(clients map[string]*matrix.Client) {
-	for _, client := range clients {
-		client.Close()
-	}
 }
 
 func accountSummary(id string, client *matrix.Client) AccountSummary {
@@ -230,12 +225,29 @@ func accountSummary(id string, client *matrix.Client) AccountSummary {
 	}
 }
 
-func (s *AppService) Accounts() []AccountSummary {
+func (s *AppService) currentClient() *matrix.Client {
 	s.accountMu.RLock()
-	registry := s.accountRegistry
+	defer s.accountMu.RUnlock()
+	return s.client
+}
+
+func (s *AppService) currentAccountID() string {
+	s.accountMu.RLock()
+	id := s.activeAccountID
 	s.accountMu.RUnlock()
-	if registry == nil {
-		return []AccountSummary{}
+	return id
+}
+
+func mapAccountUpdate(update matrix.Update, accountID string, preferences map[string]any) Update {
+	mapped := mapUpdate(update, preferences)
+	mapped.AccountID = accountID
+	mapped.NotificationPreferences = make(map[string]any)
+	for key, value := range preferences {
+		if strings.HasPrefix(key, "notifications.") || strings.HasPrefix(key, "room.muted.") || key == "sounds.effects" {
+			mapped.NotificationPreferences[key] = value
+		}
 	}
-	return registry.All()
+	tagRooms(mapped.Rooms, accountID)
+	tagNotifications(mapped.Notifications, accountID)
+	return mapped
 }

@@ -8,7 +8,7 @@ import type { useNotificationDelivery } from './useNotificationDelivery'
 import { sameVerificationState, base64ToBytes } from './appHelpers'
 
 export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelivery>) {
-  const { historyRoomIDRef, matrixUpdateHandlerRef, matrixUpdateHandlersRef, menuActionRef, messagesRef, nativeNotificationsRef, preferencesRef, refreshScheduledJobs, roomsRef, selectedRoomRef, setError, setHistoryRevision, setOtherAccountRooms, setPreferenceRef, setScheduledJobsError, setScheduledJobsOpen, setSearchOpen, setSelectedRoomID, setSettingsOpen, setSettingsTab, setSnapshot, setTypingUsers, showScheduledNotice, stageDroppedFilesRef } = app
+  const { historyRoomIDRef, matrixUpdateHandlerRef, matrixUpdateHandlersRef, menuActionRef, messagesRef, nativeNotificationsRef, preferencesRef, refreshScheduledJobs, roomsRef, selectedRoomRef, setError, setHistoryRevision, setPreferenceRef, setScheduledJobsError, setScheduledJobsOpen, setSearchOpen, setSelectedRoomID, setSettingsOpen, setSettingsTab, setSnapshot, setTypingUsers, showScheduledNotice, stageDroppedFilesRef } = app
 
   useEffect(() => {
     let active = true
@@ -21,10 +21,6 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
         playNotificationSound(preferenceNumber(soundPreferences, 'notifications.volume', 50), 'Chime')
       }
       matrixUpdateHandlersRef.current.deliverMatrixNotifications(update)
-      if (update.accountId && update.accountId !== matrixUpdateHandlersRef.current.activeAccountID) {
-        setOtherAccountRooms((current) => [...current.filter((room) => room.accountId !== update.accountId), ...(update.rooms ?? [])])
-        return
-      }
       const previousRooms = roomsRef.current
       const nextTypingUsers = update.typingUsers?.[selectedRoomRef.current] ?? []
       setSnapshot((current) => {
@@ -107,7 +103,7 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
     })
     const unsubscribeMenuAbout = Events.On('application-menu:about', () => {
       if (!active) return
-      setSettingsTab('About')
+      setSettingsTab('Help')
       setSettingsOpen(true)
     })
     const unsubscribeMenuSettings = Events.On('application-menu:settings', () => {
@@ -122,10 +118,10 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
       if (active) menuActionRef.current(String(event.data))
     })
     const unsubscribeNotificationOpenRoom = Events.On('notification:open-room', (event: { data: unknown }) => {
-      const target = typeof event.data === 'string' ? { roomId: event.data, accountId: '' } : event.data as { roomId?: string; accountId?: string } | undefined
+      const target = typeof event.data === 'string' ? { roomId: event.data } : event.data as { roomId?: string } | undefined
       if (active && target?.roomId) {
         window.focus()
-        matrixUpdateHandlersRef.current.openNotificationRoom(target.accountId ?? '', target.roomId)
+        matrixUpdateHandlersRef.current.showRoom(target.roomId)
       }
     })
     const unsubscribeFilesDropped = Events.On('matrix:files-dropped', (event: { data: unknown }) => {
@@ -148,7 +144,7 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
           const notification = new Notification(`Reminder · ${roomName}`, { body })
           notification.onclick = () => {
             window.focus()
-            matrixUpdateHandlersRef.current.openNotificationRoom(reminder.accountId, reminder.roomId)
+            matrixUpdateHandlersRef.current.showRoom(reminder.roomId)
             setScheduledJobsOpen(true)
           }
         } catch (notificationError) {
@@ -183,6 +179,6 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
       unsubscribeScheduledReminder()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- showScheduledNotice is recreated each render; this subscription should not re-register on each render
-  }, [historyRoomIDRef, refreshScheduledJobs, setHistoryRevision, setScheduledJobsError, setScheduledJobsOpen, setSettingsOpen, setSettingsTab, matrixUpdateHandlerRef, matrixUpdateHandlersRef, menuActionRef, messagesRef, nativeNotificationsRef, preferencesRef, roomsRef, selectedRoomRef, setError, setOtherAccountRooms, setPreferenceRef, setSearchOpen, setSelectedRoomID, setSnapshot, setTypingUsers, stageDroppedFilesRef])
+  }, [historyRoomIDRef, refreshScheduledJobs, setHistoryRevision, setScheduledJobsError, setScheduledJobsOpen, setSettingsOpen, setSettingsTab, matrixUpdateHandlerRef, matrixUpdateHandlersRef, menuActionRef, messagesRef, nativeNotificationsRef, preferencesRef, roomsRef, selectedRoomRef, setError, setPreferenceRef, setSearchOpen, setSelectedRoomID, setSnapshot, setTypingUsers, stageDroppedFilesRef])
   return { ...app }
 }

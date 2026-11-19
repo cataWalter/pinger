@@ -180,6 +180,37 @@ func TestAIChatCompletionSendsMessagesAndReturnsReply(t *testing.T) {
 	}
 }
 
+func TestAIStreamChatCompletionEmitsDeltasInOrder(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Stream bool `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if !body.Stream {
+			t.Errorf("request stream = false, want true")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	var chunks []string
+	reply, err := aiStreamChatCompletion(context.Background(), server.Client(), server.URL, "local.gguf", []AIMessage{{Role: "user", Content: "Say hello"}}, 0, aiThinkingDisabled(), func(text string) {
+		chunks = append(chunks, text)
+	})
+	if err != nil {
+		t.Fatalf("aiStreamChatCompletion() error = %v", err)
+	}
+	if reply != "Hello" {
+		t.Fatalf("reply = %q, want %q", reply, "Hello")
+	}
+	if !reflect.DeepEqual(chunks, []string{"Hel", "lo"}) {
+		t.Fatalf("chunks = %q, want [Hel lo]", chunks)
+	}
+}
+
 func TestAICompletionTimeoutGrowsWithPromptSizeUpToCap(t *testing.T) {
 	short := []AIMessage{{Role: "user", Content: "Summarize this"}}
 	if got := aiCompletionTimeoutFor(short); got != aiCompletionTimeout {

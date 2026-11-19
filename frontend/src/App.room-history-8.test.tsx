@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { type AccountSummary } from '../bindings/mychat/desktop/models.js'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
 import { harness, room, message, menuCommand, snapshot } from './appTestSetup'
@@ -61,9 +60,6 @@ describe('room history updates', () => {
     harness.markdownRenderCount = 0
     harness.eventHandlers.clear()
     harness.service.Snapshot.mockResolvedValue(snapshot)
-    harness.service.AccountRooms.mockResolvedValue([])
-    harness.service.AddAccount.mockResolvedValue(snapshot)
-    harness.service.SwitchAccount.mockResolvedValue(snapshot)
     harness.service.RoomMembers.mockResolvedValue([])
     harness.service.SearchMessages.mockResolvedValue({ results: [], nextBatch: '' })
     harness.service.ScheduledJobs.mockResolvedValue([])
@@ -141,43 +137,6 @@ describe('room history updates', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('loads chat agent preferences from the active account when room IDs overlap', async () => {
-    const user = userEvent.setup()
-    const secondProfile = {
-      userId: '@two:example.net',
-      displayName: 'Two',
-      homeserver: 'https://example.net',
-      deviceId: 'DEVICE_TWO',
-      avatarUri: '',
-      verified: true,
-    }
-    const secondAccount: AccountSummary = { id: 'second', profile: secondProfile }
-    const preferenceKey = `room.ai_agents.${room.id}`
-    const agentValue = (id: string, name: string) => JSON.stringify({ agents: [{ id, name, instructions: 'Offer a suggestion.' }], defaultAgentId: id })
-    harness.service.Snapshot.mockResolvedValue({
-      ...snapshot,
-      accounts: [{ id: 'primary', profile: snapshot.profile }, secondAccount],
-      preferences: { [preferenceKey]: agentValue('primary-agent', 'Primary profile') },
-    })
-    harness.service.SwitchAccount.mockResolvedValue({
-      ...snapshot,
-      activeAccountId: secondAccount.id,
-      profile: secondProfile,
-      rooms: [{ ...room, accountId: 'second' }],
-      preferences: { [preferenceKey]: agentValue('second-agent', 'Second profile') },
-    })
-    render(<App />)
-    await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Manage Matrix accounts' }))
-    await user.click(await screen.findByRole('button', { name: /@two:example\.net/ }))
-    await waitFor(() => expect(harness.service.SwitchAccount).toHaveBeenCalledWith('second'))
-    await user.click(await screen.findByRole('button', { name: 'Room details' }))
-
-    const roomDialog = await screen.findByRole('dialog', { name: 'Test room' })
-    expect(within(roomDialog).getByRole('option', { name: 'Second profile' })).toBeTruthy()
-    expect(within(roomDialog).queryByRole('option', { name: 'Primary profile' })).toBeNull()
-  })
-
   it.each(['menu', 'ctrlKey', 'metaKey'])('opens a Local AI summary chat with %s and an editable full-conversation prompt', async (activation) => {
     const user = userEvent.setup()
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
@@ -251,6 +210,7 @@ describe('room history updates', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Settings' }))
     await user.click(await screen.findByRole('tab', { name: 'AI' }))
+    await user.click(await screen.findByText('Advanced'))
 
     const imageForm = await screen.findByRole('form', { name: 'Image generation settings' })
     await user.type(within(imageForm).getByRole('textbox', { name: 'Image engine binary' }), '/usr/local/bin/sd-server')
