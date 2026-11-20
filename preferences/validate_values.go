@@ -105,15 +105,27 @@ func validatePreference(key string, value any, languages LanguageLookup) error {
 		if !oneOf(value, "none", "low", "medium", "high") {
 			return errors.New("AI thinking level has an unsupported value")
 		}
+	case "ai.provider":
+		if !oneOf(value, "local", "online") {
+			return errors.New("AI provider must be local or online")
+		}
 	case "ai.endpoint":
 		endpoint, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("preference %q must be a string", key)
 		}
 		if endpoint != "" {
-			return ValidateAIEndpoint(endpoint)
+			return ValidateLocalHTTPEndpoint(endpoint)
 		}
-	case "ai.model", "ai.transcription_model", "appearance.bubble_color", "audio.input_device":
+	case "ai.online.endpoint":
+		endpoint, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("preference %q must be a string", key)
+		}
+		if endpoint != "" {
+			return ValidateOnlineAIEndpoint(endpoint)
+		}
+	case "ai.model", "ai.transcription_model", "ai.online.model", "ai.online.consent_endpoint", "appearance.bubble_color", "audio.input_device":
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("preference %q must be a string", key)
 		}

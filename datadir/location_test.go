@@ -203,6 +203,24 @@ func TestCopyDataCopiesAccountDatabases(t *testing.T) {
 	}
 }
 
+func TestCopyDataSkipsSQLiteSidecars(t *testing.T) {
+	source := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	writeApplicationData(t, source, "hello")
+	writeFile(t, filepath.Join(source, "matrix.db-wal"), "stale wal")
+	writeFile(t, filepath.Join(source, "matrix.db-shm"), "stale shm")
+
+	if err := CopyData(source, target); err != nil {
+		t.Fatalf("CopyData() error = %v", err)
+	}
+	if exists(t, filepath.Join(target, "matrix.db-wal")) || exists(t, filepath.Join(target, "matrix.db-shm")) {
+		t.Fatal("CopyData() copied the raw SQLite sidecars")
+	}
+	if got := readMessage(t, filepath.Join(target, "matrix.db")); got != "hello" {
+		t.Fatalf("copied database message = %q, want the backed-up message", got)
+	}
+}
+
 func writeApplicationData(t *testing.T, directory, message string) {
 	t.Helper()
 	if err := os.MkdirAll(directory, 0o700); err != nil {

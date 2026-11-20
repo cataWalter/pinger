@@ -21,6 +21,13 @@ import (
 
 func loadOrCreatePickleKey(path string) ([]byte, error) {
 	key, err := os.ReadFile(path)
+	if err == nil && len(key) == 0 {
+		// A crash between create and write leaves an empty key. No data can be encrypted with it yet.
+		if err = os.Remove(path); err != nil {
+			return nil, fmt.Errorf("remove incomplete gomuks crypto key: %w", err)
+		}
+		return createPickleKey(path)
+	}
 	if err == nil {
 		if len(key) != 32 {
 			return nil, fmt.Errorf("invalid gomuks crypto key at %q: expected 32 bytes", path)
@@ -30,9 +37,12 @@ func loadOrCreatePickleKey(path string) ([]byte, error) {
 	if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("read gomuks crypto key: %w", err)
 	}
+	return createPickleKey(path)
+}
 
-	key = make([]byte, 32)
-	if _, err = io.ReadFull(rand.Reader, key); err != nil {
+func createPickleKey(path string) ([]byte, error) {
+	key := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, key); err != nil {
 		return nil, fmt.Errorf("generate gomuks crypto key: %w", err)
 	}
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -49,6 +59,9 @@ func loadOrCreatePickleKey(path string) ([]byte, error) {
 	written, err := file.Write(key)
 	if err == nil && written != len(key) {
 		err = io.ErrShortWrite
+	}
+	if err == nil {
+		err = file.Sync()
 	}
 	if err != nil {
 		_ = file.Close()

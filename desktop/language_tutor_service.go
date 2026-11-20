@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	sharedpreferences "mychat/preferences"
-	"net/http"
 	"slices"
 	"strings"
 )
@@ -43,13 +42,13 @@ const (
 	languageTutorRetryMaxTokens = 1024
 )
 
-// languageTutorDraftSchema asks only for the corrected draft, so drafts skip the translation, notes, and vocabulary.
-var languageTutorDraftSchema = json.RawMessage(`{"type":"object","properties":{"detected_language":{"type":"string"},"corrected_text":{"type":"string"}},"required":["detected_language","corrected_text"],"additionalProperties":false}`)
+// languageTutorDraftSchema asks for the corrected draft and its meaning, so drafts skip notes and vocabulary.
+var languageTutorDraftSchema = json.RawMessage(`{"type":"object","properties":{"detected_language":{"type":"string"},"corrected_text":{"type":"string"},"translation":{"type":"string"}},"required":["detected_language","corrected_text","translation"],"additionalProperties":false}`)
 
 var languageTutorSchema = json.RawMessage(`{"type":"object","properties":{"detected_language":{"type":"string"},"corrected_text":{"type":"string"},"translation":{"type":"string"},"grammar_notes":{"type":"array","items":{"type":"string"},"maxItems":2},"vocabulary":{"type":"array","items":{"type":"object","properties":{"term":{"type":"string"},"meaning":{"type":"string"},"example":{"type":"string"}},"required":["term","meaning","example"],"additionalProperties":false},"maxItems":3}},"required":["detected_language","corrected_text","translation","grammar_notes","vocabulary"],"additionalProperties":false}`)
 
-// TutorAnalysis is the Language Tutor result. Drafts fill only DetectedLanguage and CorrectedText, plus TextToInsert,
-// which the dialog does not read. Incoming messages get a translation and may get notes and vocabulary.
+// TutorAnalysis is the Language Tutor result. Drafts fill DetectedLanguage, CorrectedText, and Translation (the meaning
+// of the correction), plus TextToInsert, which the dialog does not read. Incoming messages get a translation and may get notes and vocabulary.
 type TutorAnalysis struct {
 	DetectedLanguage string                `json:"detected_language"`
 	CorrectedText    string                `json:"corrected_text"`
@@ -106,7 +105,7 @@ func (s *LanguageTutorService) Analyze(text, mode, learning, explanation, reques
 	if err != nil {
 		return TutorAnalysis{}, err
 	}
-	endpoint, model, err := s.appService.aiEndpointSettings()
+	route, err := aiFeatureRoute(preferences)
 	if err != nil {
 		return TutorAnalysis{}, err
 	}
@@ -120,7 +119,7 @@ func (s *LanguageTutorService) Analyze(text, mode, learning, explanation, reques
 			s.appService.emitAIStream(AIStreamEvent{RequestID: requestID, Text: text, Reset: reset})
 		}
 	}
-	analysis, err := analyzeLanguageTutor(ctx, aiLocalHTTPClient, endpoint, model, tuning, request, onChunk)
+	analysis, err := analyzeLanguageTutor(ctx, route, tuning, request, onChunk)
 	if err != nil && ctx.Err() == context.Canceled {
 		return TutorAnalysis{}, errAIRunStopped
 	}
@@ -206,13 +205,7 @@ func newLanguageTutorRequest(text, mode, learning, explanation string, languages
 	return languageTutorRequest{Text: text, Mode: mode, Learning: learning, Explanation: explanation, Languages: languages}, nil
 }
 
-func analyzeLanguageTutor(ctx context.Context, client *http.Client, endpoint, model string, tuning aiFeatureTuning, request languageTutorRequest, onChunk func(text string, reset bool)) (TutorAnalysis, error) {
-	if client == nil {
-		return TutorAnalysis{}, errors.New("Language Tutor AI client is unavailable")
-	}
-	if err := sharedpreferences.ValidateLocalHTTPEndpoint(endpoint); err != nil {
-		return TutorAnalysis{}, errors.New("Language Tutor requires a localhost HTTP endpoint")
-	}
+func analyzeLanguageTutor(ctx context.Context, route aiRoute, tuning aiFeatureTuning, request languageTutorRequest, onChunk func(text string, reset bool)) (TutorAnalysis, error) {
 	userPrompt, err := languageTutorUserPrompt(request)
 	if err != nil {
 		return TutorAnalysis{}, err
@@ -240,7 +233,7 @@ func analyzeLanguageTutor(ctx context.Context, client *http.Client, endpoint, mo
 			}
 			onChunkText = func(text string) { onChunk(text, false) }
 		}
-		return aiProviderCompletion(callCtx, client, AIProviderOpenAICompatible, endpoint, model, chat, aiCompletionOptions{
+		return route.complete(callCtx, chat, aiCompletionOptions{
 			Temperature:        tuning.Temperature,
 			MaxTokens:          maxTokens,
 			ChatTemplateKwargs: aiThinkingDisabled(),

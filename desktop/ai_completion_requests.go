@@ -3,13 +3,11 @@ package desktop
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 )
 
@@ -42,27 +40,33 @@ func encodeAICompletionRequest(provider AIProvider, model string, messages []AIM
 			return nil, "", fmt.Errorf("encode Ollama request: %w", err)
 		}
 		return body, requestPath, nil
-	case AIProviderOpenAICompatible:
+	case AIProviderOpenAICompatible, AIProviderOnline:
 		responseFormat, err := aiOpenAIResponseFormat(options)
 		if err != nil {
 			return nil, "", fmt.Errorf("encode response format: %w", err)
 		}
-		body, err := json.Marshal(aiChatRequest{
-			Model:              model,
-			Messages:           aiOpenAIMessages(messages),
-			Stream:             stream,
-			Temperature:        aiSamplingTemperature,
-			TopP:               aiSamplingTopP,
-			TopK:               aiSamplingTopK,
-			MaxTokens:          options.MaxTokens,
-			Stop:               options.Stop,
-			ResponseFormat:     responseFormat,
-			ChatTemplateKwargs: options.ChatTemplateKwargs,
-		})
+		request := aiChatRequest{
+			Model:          model,
+			Messages:       aiOpenAIMessages(messages),
+			Stream:         stream,
+			Temperature:    aiSamplingTemperature,
+			TopP:           aiSamplingTopP,
+			MaxTokens:      options.MaxTokens,
+			Stop:           options.Stop,
+			ResponseFormat: responseFormat,
+		}
+		requestPath := "/chat/completions"
+		if provider == AIProviderOpenAICompatible {
+			// top_k and chat_template_kwargs are llama-server extensions, so only local requests send them.
+			request.TopK = aiSamplingTopK
+			request.ChatTemplateKwargs = options.ChatTemplateKwargs
+			requestPath = "/v1/chat/completions"
+		}
+		body, err := json.Marshal(request)
 		if err != nil {
 			return nil, "", fmt.Errorf("encode OpenAI-compatible request: %w", err)
 		}
-		return body, "/v1/chat/completions", nil
+		return body, requestPath, nil
 	default:
 		return nil, "", errors.New("unsupported AI provider")
 	}
@@ -141,14 +145,6 @@ func aiOpenAIResponseFormat(options aiCompletionOptions) (json.RawMessage, error
 		return json.RawMessage(`{"type":"json_object"}`), nil
 	}
 	return nil, nil
-}
-
-// runLocalAICompletion runs a request against the local model endpoint configured in AI settings.
-func runLocalAICompletion(ctx context.Context, client *http.Client, provider AIProvider, endpoint *url.URL, model string, messages []AIMessage, options aiCompletionOptions, onChunk func(string)) (string, error) {
-	if endpoint == nil {
-		return "", errors.New("local AI endpoint is unavailable")
-	}
-	return aiProviderCompletion(ctx, client, provider, endpoint.String(), model, messages, options, onChunk)
 }
 
 func isEventStreamResponse(response *http.Response) bool {

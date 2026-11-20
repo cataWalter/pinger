@@ -83,7 +83,7 @@ func TestRequestSuggestedRepliesStopsWhenCancelled(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	_, err := requestSuggestedReplies(ctx, server.Client(), server.URL, "local.gguf", testSuggestedRepliesTuning(), suggestedRepliesInput{Transcript: "Alice: hi\n", Latest: "Alice: hi"})
+	_, err := requestSuggestedReplies(ctx, testLocalAIRoute(server, "local.gguf"), testSuggestedRepliesTuning(), suggestedRepliesInput{Transcript: "Alice: hi\n", Latest: "Alice: hi"})
 	if !errors.Is(err, errAIRunStopped) {
 		t.Fatalf("error = %v, want errAIRunStopped", err)
 	}

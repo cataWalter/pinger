@@ -46,7 +46,7 @@ type aiFeatureTuning struct {
 var aiBackendFeatureDefaults = []AIFeatureDefault{
 	{
 		ID:          aiFeatureLocalChat,
-		Label:       "Local AI chat",
+		Label:       "AI chat",
 		Description: "The private local AI chat in the main window.",
 		Prompt:      localChatDefaultInstructions,
 		Temperature: aiSamplingTemperature,

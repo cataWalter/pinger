@@ -68,6 +68,7 @@ type AIProvider string
 const (
 	AIProviderOllama           AIProvider = "ollama"
 	AIProviderOpenAICompatible AIProvider = "openai-compatible"
+	AIProviderOnline           AIProvider = "online"
 )
 
 func stringPreference(preferences map[string]any, key, fallback string) string {

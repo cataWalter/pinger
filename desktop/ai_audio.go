@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -104,32 +103,27 @@ func aiCompletionTimeoutFor(messages []AIMessage) time.Duration {
 	return min(aiCompletionTimeout+extra, aiMaxCompletionTimeout)
 }
 
-// AIComplete sends chat messages to the configured local endpoint and returns the reply text.
+// AIComplete sends chat messages to the configured AI provider and returns the reply text.
 // Each reply delta is emitted as an ai:stream event while the model writes, so the panel shows text early.
 // The temperature argument is kept for the frontend binding; every request uses the fixed sampling values.
 func (s *AppService) AIComplete(messages []AIMessage, requestID string, temperature float64, maxTokens int) (string, error) {
-	endpoint, model, err := s.aiEndpointSettings()
+	preferences := s.preferenceValues()
+	route, err := aiFeatureRoute(preferences)
 	if err != nil {
 		return "", err
 	}
-	thinkingLevel := stringPreference(s.preferenceValues(), aiThinkingLevelPreference, aiThinkingLevelDefault)
+	thinkingLevel := stringPreference(preferences, aiThinkingLevelPreference, aiThinkingLevelDefault)
 	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
 	defer release()
+	ctx, cancel := context.WithTimeout(ctx, aiCompletionTimeoutFor(messages))
+	defer cancel()
 	var onChunk func(string)
 	if requestID != "" && s.emitAIStream != nil {
 		onChunk = func(text string) {
 			s.emitAIStream(AIStreamEvent{RequestID: requestID, Text: text})
 		}
 	}
-	return aiStreamChatCompletion(ctx, aiHTTPClient, endpoint, model, messages, maxTokens, aiThinkingOptions(thinkingLevel), onChunk)
-}
-
-// aiStreamChatCompletion requests an OpenAI-compatible reply as a stream and passes each text delta to onChunk.
-// A nil onChunk makes the request non-streaming.
-func aiStreamChatCompletion(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage, maxTokens int, chatTemplateKwargs map[string]any, onChunk func(string)) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, aiCompletionTimeoutFor(messages))
-	defer cancel()
-	return aiProviderCompletion(ctx, client, AIProviderOpenAICompatible, endpoint, model, messages, aiCompletionOptions{MaxTokens: maxTokens, ChatTemplateKwargs: chatTemplateKwargs}, onChunk)
+	return route.complete(ctx, messages, aiCompletionOptions{MaxTokens: maxTokens, ChatTemplateKwargs: aiThinkingOptions(thinkingLevel)}, onChunk)
 }
 
 // AICancel stops a running AI request.
@@ -139,23 +133,23 @@ func (s *AppService) AICancel(requestID string) bool {
 
 // CheckMessageTone classifies a draft using only a local loopback AI endpoint.
 func (s *AppService) CheckMessageTone(messages []AIMessage) (string, error) {
-	endpoint, model, err := s.aiEndpointSettings()
+	route, err := aiLocalRoute(s.preferenceValues())
 	if err != nil {
 		return "", err
 	}
-	return aiToneGuardCompletion(s.aiContext(), aiLocalHTTPClient, endpoint, model, messages)
+	return aiToneGuardCompletion(s.aiContext(), route.client, route.endpoint, route.model, messages)
 }
 
-// AITranscribeMedia transcribes cached Matrix audio with the configured OpenAI-compatible endpoint.
+// AITranscribeMedia transcribes cached Matrix audio with the local loopback AI endpoint. Audio never goes to an online provider.
 func (s *AppService) AITranscribeMedia(mxcURI, filename, contentType string) (string, error) {
-	endpoint, model, err := s.aiEndpointSettings()
+	preferences := s.preferenceValues()
+	route, err := aiLocalRoute(preferences)
 	if err != nil {
 		return "", err
 	}
-	preferences := s.preferenceValues()
 	transcriptionModel, _ := preferences["ai.transcription_model"].(string)
 	if transcriptionModel == "" {
-		transcriptionModel = model
+		transcriptionModel = route.model
 	}
 	audio, err := s.currentClient().CachedMediaBytes(s.aiContext(), mxcURI)
 	if err != nil {
@@ -165,16 +159,30 @@ func (s *AppService) AITranscribeMedia(mxcURI, filename, contentType string) (st
 	if err != nil {
 		return "", err
 	}
-	return aiAudioTranscription(s.aiContext(), aiHTTPClient, endpoint, transcriptionModel, filename, contentType, audio)
+	return aiAudioTranscription(s.aiContext(), route.client, route.endpoint, transcriptionModel, filename, contentType, audio)
 }
 
-// TestAIEndpoint checks that the configured endpoint is reachable and its model is loaded.
+// TestAIEndpoint checks the configured AI provider. Local checks that the server is up and the model is loaded.
+// Online sends one short request, which also verifies the key and model.
 func (s *AppService) TestAIEndpoint() error {
-	endpoint, _, err := s.aiEndpointSettings()
+	preferences := s.preferenceValues()
+	if stringPreference(preferences, aiProviderPreference, aiProviderLocal) == aiProviderOnline {
+		route, err := aiOnlineRoute(preferences)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(s.aiContext(), aiCompletionTimeout)
+		defer cancel()
+		_, err = route.complete(ctx, []AIMessage{{Role: "user", Content: "Reply with OK."}}, aiCompletionOptions{MaxTokens: 16}, nil)
+		if errors.Is(err, errAIEmptyResponse) {
+			// The key and model were accepted. Some models use a small token budget on reasoning and return no text.
+			return nil
+		}
+		return err
+	}
+	route, err := aiLocalRoute(preferences)
 	if err != nil {
 		return err
 	}
-	return aiHealthCheck(s.aiContext(), aiHTTPClient, endpoint)
+	return aiHealthCheck(s.aiContext(), route.client, route.endpoint)
 }
-
-var aiHTTPClient = &http.Client{}

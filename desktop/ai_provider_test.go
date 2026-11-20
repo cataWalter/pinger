@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -128,5 +129,26 @@ func TestAILocalCompletionAcceptsLoopbackResponse(t *testing.T) {
 	completion, err := aiProviderCompletion(context.Background(), aiLocalHTTPClient, AIProviderOpenAICompatible, local.URL, "test", messages, aiCompletionOptions{}, nil)
 	if err != nil || completion != "world" {
 		t.Fatalf("local completion = %q, %v; want world", completion, err)
+	}
+}
+
+func TestAILocalStreamAllowsFramingLargerThanReplyCap(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Repeat(": keepalive\n\n", 100)))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer local.Close()
+	var chunks []string
+	messages := []AIMessage{{Role: "user", Content: "hello"}}
+	completion, err := aiProviderCompletion(context.Background(), aiLocalHTTPClient, AIProviderOpenAICompatible, local.URL, "test", messages, aiCompletionOptions{MaxResponseBytes: 64}, func(chunk string) {
+		chunks = append(chunks, chunk)
+	})
+	if err != nil || completion != "hi" {
+		t.Fatalf("stream completion = %q, %v; want hi with the framing ignored by the reply cap", completion, err)
+	}
+	if len(chunks) != 1 || chunks[0] != "hi" {
+		t.Fatalf("stream chunks = %q, want [hi]", chunks)
 	}
 }

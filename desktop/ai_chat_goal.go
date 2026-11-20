@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	sharedpreferences "mychat/preferences"
-	"net/http"
 	"strings"
 	"unicode/utf8"
 )
@@ -44,11 +43,11 @@ func (s *AppService) AIInferChatGoal(roomID, requestID string) (string, error) {
 	if strings.TrimSpace(roomID) == "" {
 		return "", errors.New("choose a room first")
 	}
-	endpoint, model, err := s.aiEndpointSettings()
+	preferences := s.preferenceValues()
+	route, err := aiFeatureRoute(preferences)
 	if err != nil {
 		return "", err
 	}
-	preferences := s.preferenceValues()
 	explanation, languages := suggestedReplyLanguages(preferences, roomID)
 	tuning := aiFeatureTuningFor(preferences, aiFeatureSuggestedReplies)
 	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
@@ -70,17 +69,11 @@ func (s *AppService) AIInferChatGoal(roomID, requestID string) (string, error) {
 	}
 	input.ExplanationLanguage = explanation
 	input.Languages = languages
-	return requestChatGoal(ctx, aiLocalHTTPClient, endpoint, model, tuning, input)
+	return requestChatGoal(ctx, route, tuning, input)
 }
 
 // requestChatGoal asks the local endpoint for a short description of the chat's long-term goal.
-func requestChatGoal(ctx context.Context, client *http.Client, endpoint, model string, tuning aiFeatureTuning, input suggestedRepliesInput) (string, error) {
-	if client == nil {
-		return "", errors.New("chat goal AI client is unavailable")
-	}
-	if err := sharedpreferences.ValidateLocalHTTPEndpoint(endpoint); err != nil {
-		return "", errors.New("chat goal inference requires a localhost HTTP endpoint")
-	}
+func requestChatGoal(ctx context.Context, route aiRoute, tuning aiFeatureTuning, input suggestedRepliesInput) (string, error) {
 	maxTokens := tuning.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = suggestedRepliesMaxTokens
@@ -93,7 +86,7 @@ func requestChatGoal(ctx context.Context, client *http.Client, endpoint, model s
 	}
 	callCtx, cancel := context.WithTimeout(ctx, aiCompletionTimeoutFor(chat))
 	defer cancel()
-	response, err := aiProviderCompletion(callCtx, client, AIProviderOpenAICompatible, endpoint, model, chat, aiCompletionOptions{
+	response, err := route.complete(callCtx, chat, aiCompletionOptions{
 		Temperature:        tuning.Temperature,
 		MaxTokens:          maxTokens,
 		ChatTemplateKwargs: aiThinkingDisabled(),

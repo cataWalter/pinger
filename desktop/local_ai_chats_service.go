@@ -140,7 +140,7 @@ func (s *AppService) LocalAIChat(request LocalAIChatRequest) (string, error) {
 		return "", fmt.Errorf("agent instructions must be %d characters or fewer", localAIChatAgentLimit)
 	}
 	preferences := s.preferenceValues()
-	provider, endpoint, model, err := aiModelConfig(preferences)
+	route, err := aiChatRoute(preferences)
 	if err != nil {
 		return "", err
 	}
@@ -165,7 +165,7 @@ func (s *AppService) LocalAIChat(request LocalAIChatRequest) (string, error) {
 		}
 	}
 	thinkingLevel := stringPreference(preferences, aiThinkingLevelPreference, aiThinkingLevelDefault)
-	reply, err := runLocalAICompletion(ctx, aiLocalHTTPClient, provider, endpoint, model, conversation, localAIChatCompletionOptions(tuning, thinkingLevel), onChunk)
+	reply, err := route.complete(ctx, conversation, localAIChatCompletionOptions(tuning, thinkingLevel), onChunk)
 	if err != nil && ctx.Err() == context.Canceled {
 		return "", errAIRunStopped
 	}

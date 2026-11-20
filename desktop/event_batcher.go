@@ -122,16 +122,6 @@ func (b *EventBatcher) EnqueueReceipt(receipt ReadReceiptItem) {
 	}
 }
 
-func (b *EventBatcher) EnqueueTyping(typing TypingItem) {
-	b.mu.Lock()
-	b.buffer.TypingUpdates = append(b.buffer.TypingUpdates, typing)
-	flush := b.recordEventLocked()
-	b.mu.Unlock()
-	if flush {
-		b.requestFlush()
-	}
-}
-
 func (b *EventBatcher) EnqueueRoomDelta(delta RoomDeltaItem) {
 	b.mu.Lock()
 	b.buffer.RoomStateDeltas = append(b.buffer.RoomStateDeltas, delta)

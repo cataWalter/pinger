@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"maunium.net/go/mautrix/event"
 	"mychat/matrix"
-	sharedpreferences "mychat/preferences"
-	"net/http"
 	"strings"
 	"unicode/utf8"
 )
@@ -83,11 +81,11 @@ func (s *AppService) AISuggestReplies(roomID, requestID string) (SuggestedReplie
 	if strings.TrimSpace(roomID) == "" {
 		return SuggestedReplies{}, errors.New("choose a room first")
 	}
-	endpoint, model, err := s.aiEndpointSettings()
+	preferences := s.preferenceValues()
+	route, err := aiFeatureRoute(preferences)
 	if err != nil {
 		return SuggestedReplies{}, err
 	}
-	preferences := s.preferenceValues()
 	explanation, languages := suggestedReplyLanguages(preferences, roomID)
 	tuning := aiFeatureTuningFor(preferences, aiFeatureSuggestedReplies)
 	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
@@ -107,7 +105,7 @@ func (s *AppService) AISuggestReplies(roomID, requestID string) (SuggestedReplie
 	input.ExplanationLanguage = explanation
 	input.Languages = languages
 	input.ChatGoal = chatGoalFromPreferences(preferences, roomID)
-	return requestSuggestedReplies(ctx, aiLocalHTTPClient, endpoint, model, tuning, input)
+	return requestSuggestedReplies(ctx, route, tuning, input)
 }
 
 // AIGenerateReplyDraft reads the latest 50 room messages and returns one reply without sending it.
@@ -115,11 +113,11 @@ func (s *AppService) AIGenerateReplyDraft(roomID, requestID string) (string, err
 	if strings.TrimSpace(roomID) == "" {
 		return "", errors.New("choose a room first")
 	}
-	endpoint, model, err := s.aiEndpointSettings()
+	preferences := s.preferenceValues()
+	route, err := aiFeatureRoute(preferences)
 	if err != nil {
 		return "", err
 	}
-	preferences := s.preferenceValues()
 	tuning := aiFeatureTuningFor(preferences, aiFeatureSuggestedReplies)
 	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
 	defer release()
@@ -143,7 +141,7 @@ func (s *AppService) AIGenerateReplyDraft(roomID, requestID string) (string, err
 	}
 	input.ReplyLanguage = replyDraftLanguage(preferences, roomID)
 	input.ChatGoal = chatGoalFromPreferences(preferences, roomID)
-	return requestAIReplyDraft(ctx, aiLocalHTTPClient, endpoint, model, tuning, input)
+	return requestAIReplyDraft(ctx, route, tuning, input)
 }
 
 func latestAIDraftMessages(messages []matrix.Message) []matrix.Message {
@@ -153,13 +151,7 @@ func latestAIDraftMessages(messages []matrix.Message) []matrix.Message {
 	return messages
 }
 
-func requestAIReplyDraft(ctx context.Context, client *http.Client, endpoint, model string, tuning aiFeatureTuning, input suggestedRepliesInput) (string, error) {
-	if client == nil {
-		return "", errors.New("reply draft AI client is unavailable")
-	}
-	if err := sharedpreferences.ValidateLocalHTTPEndpoint(endpoint); err != nil {
-		return "", errors.New("reply drafts require a localhost HTTP endpoint")
-	}
+func requestAIReplyDraft(ctx context.Context, route aiRoute, tuning aiFeatureTuning, input suggestedRepliesInput) (string, error) {
 	if input.Latest == "" {
 		return "", errors.New("no incoming text message to reply to")
 	}
@@ -178,7 +170,7 @@ func requestAIReplyDraft(ctx context.Context, client *http.Client, endpoint, mod
 	}
 	callCtx, cancel := context.WithTimeout(ctx, aiCompletionTimeoutFor(chat))
 	defer cancel()
-	response, err := aiProviderCompletion(callCtx, client, AIProviderOpenAICompatible, endpoint, model, chat, aiCompletionOptions{
+	response, err := route.complete(callCtx, chat, aiCompletionOptions{
 		Temperature:        tuning.Temperature,
 		MaxTokens:          maxTokens,
 		ChatTemplateKwargs: aiThinkingDisabled(),
@@ -308,13 +300,7 @@ func suggestedRepliesIsMedia(message matrix.Message) bool {
 }
 
 // requestSuggestedReplies asks the local endpoint for ten options and, when no chat goal is saved, the goal inferred from the chat. A reply that fails validation is retried once with the error included in the prompt.
-func requestSuggestedReplies(ctx context.Context, client *http.Client, endpoint, model string, tuning aiFeatureTuning, input suggestedRepliesInput) (SuggestedReplies, error) {
-	if client == nil {
-		return SuggestedReplies{}, errors.New("suggested replies AI client is unavailable")
-	}
-	if err := sharedpreferences.ValidateLocalHTTPEndpoint(endpoint); err != nil {
-		return SuggestedReplies{}, errors.New("suggested replies require a localhost HTTP endpoint")
-	}
+func requestSuggestedReplies(ctx context.Context, route aiRoute, tuning aiFeatureTuning, input suggestedRepliesInput) (SuggestedReplies, error) {
 	maxTokens := tuning.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = suggestedRepliesMaxTokens
@@ -337,7 +323,7 @@ func requestSuggestedReplies(ctx context.Context, client *http.Client, endpoint,
 	complete := func(messages []AIMessage) (string, error) {
 		callCtx, cancel := context.WithTimeout(ctx, aiCompletionTimeoutFor(messages))
 		defer cancel()
-		return aiProviderCompletion(callCtx, client, AIProviderOpenAICompatible, endpoint, model, messages, aiCompletionOptions{
+		return route.complete(callCtx, messages, aiCompletionOptions{
 			Temperature:        tuning.Temperature,
 			MaxTokens:          maxTokens,
 			ChatTemplateKwargs: aiThinkingDisabled(),

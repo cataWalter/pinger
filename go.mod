@@ -9,6 +9,7 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/tc-hib/winres v0.3.1
 	github.com/wailsapp/wails/v3 v3.0.0-beta.30
+	github.com/zalando/go-keyring v0.2.8
 	go.mau.fi/gomuks v0.2609.0
 	go.mau.fi/util v0.10.1
 	maunium.net/go/mautrix v0.31.0
@@ -20,6 +21,7 @@ require (
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
+	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect

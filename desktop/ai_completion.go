@@ -238,7 +238,8 @@ func aiProviderCompletion(ctx context.Context, client *http.Client, provider AIP
 	limited := &io.LimitedReader{R: response.Body, N: maxBytes + 1}
 	var completion string
 	if streaming && (provider == AIProviderOllama || isEventStreamResponse(response)) {
-		completion, err = streamAICompletion(limited, provider, options.Chat, maxBytes, onChunk)
+		// The stream readers cap decoded text, so SSE framing does not count against the reply size.
+		completion, err = streamAICompletion(response.Body, provider, options.Chat, maxBytes, onChunk)
 	} else {
 		data, readErr := io.ReadAll(limited)
 		if readErr != nil {

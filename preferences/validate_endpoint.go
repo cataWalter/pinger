@@ -3,22 +3,14 @@ package preferences
 import (
 	"errors"
 	_ "github.com/mattn/go-sqlite3"
-	"net"
 	"net/url"
 	"strings"
 )
 
-func ValidateAIEndpoint(raw string) error {
+func ValidateOnlineAIEndpoint(raw string) error {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return errors.New("AI endpoint must be an http or https URL")
-	}
-	if parsed.Scheme == "http" {
-		host := strings.ToLower(parsed.Hostname())
-		ip := net.ParseIP(host)
-		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-			return errors.New("AI endpoints outside localhost must use HTTPS")
-		}
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("online AI endpoint must be an HTTPS URL without credentials, query, or fragment")
 	}
 	return nil
 }

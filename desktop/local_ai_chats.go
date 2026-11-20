@@ -138,14 +138,13 @@ func (s *AppService) GenerateLocalAIChatTitle(chatID string) (string, error) {
 		return input.title, nil
 	}
 
-	preferences := s.preferenceValues()
-	provider, endpoint, model, err := aiModelConfig(preferences)
+	route, err := aiChatRoute(s.preferenceValues())
 	if err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(s.aiContext(), localAIChatTitleTimeout)
 	defer cancel()
-	reply, err := runLocalAICompletion(ctx, aiLocalHTTPClient, provider, endpoint, model, localAIChatTitleMessages(input), localAIChatTitleOptions(), nil)
+	reply, err := route.complete(ctx, localAIChatTitleMessages(input), localAIChatTitleOptions(), nil)
 	if err != nil {
 		return "", err
 	}

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	sharedpreferences "mychat/preferences"
-	"net/http"
 	"strings"
 )
 
@@ -25,6 +24,12 @@ type chatLanguageResponse struct {
 	Language string `json:"language"`
 }
 
+// chatLanguageRoute always targets the local endpoint. Detection runs in the background, so it never sends chat content
+// to an online provider, even when one is selected for replies.
+func chatLanguageRoute(preferences map[string]any) (aiRoute, error) {
+	return aiLocalRoute(preferences)
+}
+
 // AIDetectChatLanguage reads the latest chatLanguageHistoryLimit messages in roomID and returns the ISO 639-1 code of
 // the language the chat is written in. It returns an empty string when the chat has no text to read, the model cannot
 // tell, or the model names a language Pinger does not support. The result is not sent to the chat.
@@ -32,11 +37,12 @@ func (s *AppService) AIDetectChatLanguage(roomID, requestID string) (string, err
 	if strings.TrimSpace(roomID) == "" {
 		return "", errors.New("choose a room first")
 	}
-	endpoint, model, err := s.aiEndpointSettings()
+	preferences := s.preferenceValues()
+	route, err := chatLanguageRoute(preferences)
 	if err != nil {
 		return "", err
 	}
-	languages := tutorLanguagesFromPreferences(s.preferenceValues())
+	languages := tutorLanguagesFromPreferences(preferences)
 	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
 	defer release()
 	// Bound the whole detection, including the history read, so a stuck call always returns.
@@ -55,7 +61,7 @@ func (s *AppService) AIDetectChatLanguage(roomID, requestID string) (string, err
 		// A chat with no text messages has no language to detect.
 		return "", nil
 	}
-	response, err := requestChatLanguage(ctx, aiLocalHTTPClient, endpoint, model, input.Transcript)
+	response, err := requestChatLanguage(ctx, route, input.Transcript)
 	if err != nil {
 		if ctx.Err() == context.Canceled {
 			return "", errAIRunStopped
@@ -65,21 +71,15 @@ func (s *AppService) AIDetectChatLanguage(roomID, requestID string) (string, err
 	return parseChatLanguage(response, languages.Names)
 }
 
-// requestChatLanguage asks the local endpoint which language transcript is written in and returns the raw JSON response.
-func requestChatLanguage(ctx context.Context, client *http.Client, endpoint, model, transcript string) (string, error) {
-	if client == nil {
-		return "", errors.New("language detection AI client is unavailable")
-	}
-	if err := sharedpreferences.ValidateLocalHTTPEndpoint(endpoint); err != nil {
-		return "", errors.New("language detection requires a localhost HTTP endpoint")
-	}
+// requestChatLanguage asks the configured AI provider which language transcript is written in and returns the raw JSON response.
+func requestChatLanguage(ctx context.Context, route aiRoute, transcript string) (string, error) {
 	chat := []AIMessage{
 		{Role: "system", Content: chatLanguageSystemPrompt},
 		{Role: "user", Content: "Chat transcript, oldest first:\n<chat_transcript>\n" + transcript + "</chat_transcript>\nWhich language is this chat written in?"},
 	}
 	callCtx, cancel := context.WithTimeout(ctx, aiCompletionTimeoutFor(chat))
 	defer cancel()
-	return aiProviderCompletion(callCtx, client, AIProviderOpenAICompatible, endpoint, model, chat, aiCompletionOptions{
+	return route.complete(callCtx, chat, aiCompletionOptions{
 		Temperature:        chatLanguageTemperature,
 		MaxTokens:          chatLanguageMaxTokens,
 		ChatTemplateKwargs: aiThinkingDisabled(),

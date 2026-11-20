@@ -17,13 +17,13 @@ func languageTutorUserPrompt(request languageTutorRequest) (string, error) {
 	source := fmt.Sprintf("<source_text>%s</source_text>", quotedText)
 	explanation := languageTutorLabel(request.Languages.Names, request.Explanation)
 	if request.Mode == languageTutorModeDraft {
-		return fmt.Sprintf(`Learning language: %s. The source text is an outgoing draft. Return its corrected form in the learning language: if it is already in the learning language, correct its grammar, spelling, and word choice; otherwise translate it. Ignore missing diacritics that come from keyboard limits. Return only the corrected text, with no explanation.
+		return fmt.Sprintf(`Learning language: %s. Explanation language: %s. The source text is an outgoing draft. Return its corrected form in the learning language: if it is already in the learning language, correct its grammar, spelling, and word choice; otherwise translate it. Ignore missing diacritics that come from keyboard limits. Then give translation: the meaning of corrected_text in the explanation language, so the learner can confirm what they are sending. Leave translation empty when the explanation language is the learning language. Return no other text.
 
 Return exactly this JSON object and nothing else:
-{"detected_language":"<ISO 639-1 code of the source text>","corrected_text":"<result in the learning language>"}
+{"detected_language":"<ISO 639-1 code of the source text>","corrected_text":"<result in the learning language>","translation":"<meaning of corrected_text in the explanation language, or an empty string>"}
 
 Source text (JSON string inside <source_text> tags):
-%s`, learning, source), nil
+%s`, learning, explanation, source), nil
 	}
 	return fmt.Sprintf(`Learning language: %s. Explanation language: %s. The source text is an incoming message the learner wants to understand.
 
@@ -130,10 +130,15 @@ func normalizeTutorAnalysis(analysis *TutorAnalysis, request languageTutorReques
 	}
 	if request.Mode == languageTutorModeDraft {
 		analysis.CorrectedText = unwrapTutorQuotes(analysis.CorrectedText)
-		// Drafts ask only for corrected text, so drop any other fields a model returns anyway.
-		analysis.Translation = ""
+		// Drafts ask only for corrected text and its translation, so drop notes and vocabulary a model returns anyway.
 		analysis.GrammarNotes = nil
 		analysis.Vocabulary = nil
+		// The translation exists to confirm meaning, so it is useless when it would repeat the learning language.
+		if sameLanguage(request.Explanation, request.Learning) {
+			analysis.Translation = ""
+		} else if analysis.Translation == "" {
+			return errors.New("Language Tutor returned no translation")
+		}
 		// A draft in another language must be translated; returning the source unchanged is a failed reply.
 		if !sameLanguage(detected, request.Learning) && analysis.CorrectedText == strings.TrimSpace(request.Text) {
 			return errors.New("Language Tutor returned the draft without translating it")

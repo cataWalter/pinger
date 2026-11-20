@@ -237,6 +237,10 @@ func copyDirectory(source, target string) error {
 		if entry.Name() == locationFileName {
 			continue
 		}
+		if strings.HasSuffix(entry.Name(), ".db-wal") || strings.HasSuffix(entry.Name(), ".db-shm") {
+			// copyFile backs up the database; a raw copy could replay a stale WAL.
+			continue
+		}
 		sourcePath := filepath.Join(source, entry.Name())
 		targetPath := filepath.Join(target, entry.Name())
 		if entry.IsDir() {

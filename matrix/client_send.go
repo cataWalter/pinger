@@ -99,8 +99,8 @@ func (c *Client) React(ctx context.Context, roomID, eventID, emoji string) error
 	if err != nil {
 		return fmt.Errorf("send Matrix reaction: %w", err)
 	}
-	if evt.SendError != "" {
-		return fmt.Errorf("send Matrix reaction: %s", evt.SendError)
+	if message := mapSendError(evt.SendError); message != "" {
+		return fmt.Errorf("send Matrix reaction: %s", message)
 	}
 	c.publishTimeline([]string{roomID}, "")
 	return nil

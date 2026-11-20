@@ -180,7 +180,7 @@ func TestAIChatCompletionSendsMessagesAndReturnsReply(t *testing.T) {
 	}
 }
 
-func TestAIStreamChatCompletionEmitsDeltasInOrder(t *testing.T) {
+func TestLocalAIRouteStreamsDeltasInOrder(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Stream bool `json:"stream"`
@@ -197,11 +197,11 @@ func TestAIStreamChatCompletionEmitsDeltasInOrder(t *testing.T) {
 	defer server.Close()
 
 	var chunks []string
-	reply, err := aiStreamChatCompletion(context.Background(), server.Client(), server.URL, "local.gguf", []AIMessage{{Role: "user", Content: "Say hello"}}, 0, aiThinkingDisabled(), func(text string) {
+	reply, err := testLocalAIRoute(server, "local.gguf").complete(context.Background(), []AIMessage{{Role: "user", Content: "Say hello"}}, aiCompletionOptions{ChatTemplateKwargs: aiThinkingDisabled()}, func(text string) {
 		chunks = append(chunks, text)
 	})
 	if err != nil {
-		t.Fatalf("aiStreamChatCompletion() error = %v", err)
+		t.Fatalf("complete() error = %v", err)
 	}
 	if reply != "Hello" {
 		t.Fatalf("reply = %q, want %q", reply, "Hello")

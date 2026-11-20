@@ -54,7 +54,7 @@ type aiChatRequest struct {
 	Stream             bool              `json:"stream"`
 	Temperature        float64           `json:"temperature"`
 	TopP               float64           `json:"top_p"`
-	TopK               int               `json:"top_k"`
+	TopK               int               `json:"top_k,omitempty"`
 	MaxTokens          int               `json:"max_tokens,omitempty"`
 	Stop               []string          `json:"stop,omitempty"`
 	ResponseFormat     json.RawMessage   `json:"response_format,omitempty"`
@@ -258,16 +258,6 @@ func aiHealthCheck(ctx context.Context, client *http.Client, endpoint string) er
 	default:
 		return fmt.Errorf("AI endpoint health check returned %d", response.StatusCode)
 	}
-}
-
-func (s *AppService) aiEndpointSettings() (string, string, error) {
-	preferences := s.preferenceValues()
-	endpoint, _ := preferences["ai.endpoint"].(string)
-	model, _ := preferences["ai.model"].(string)
-	if endpoint == "" {
-		return "", "", errors.New("set an AI endpoint in Settings > AI")
-	}
-	return endpoint, model, nil
 }
 
 func (s *AppService) aiContext() context.Context {
