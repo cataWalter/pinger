@@ -107,23 +107,6 @@
   border-radius: 50%;
 }
 
-.sidebar-icon {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  color: #c4d3ca;
-  background: transparent;
-  border: 1px solid rgba(230, 244, 235, 0.14);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.sidebar-icon:hover {
-  color: #f4faf6;
-  background: rgba(255, 255, 255, 0.08);
-}
-
 .conversation {
   position: relative;
   display: flex;

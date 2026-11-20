@@ -1,4 +1,5 @@
 /bin/
+/.build/
 /.task/
 /mychat
 /dist/

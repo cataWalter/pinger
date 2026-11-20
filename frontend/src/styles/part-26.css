@@ -197,45 +197,6 @@
   box-shadow: 0 0 0 3px var(--signal-soft);
 }
 
-.room-search {
-  color: #b7cbc0;
-  background: #1c3a30;
-  border-color: #345044;
-  border-radius: var(--radius-sm);
-}
-
-.room-search:focus-within {
-  background: #24483a;
-  border-color: var(--forest-bright);
-  box-shadow: 0 0 0 2px var(--green-soft);
-}
-
-.room-search input {
-  color: #f2f7f3;
-}
-
-.room-filters {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 4px;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-}
-
-.room-scope-filters {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 3px;
-}
-
-.room-refinement-filters {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 3px;
-}
-
 .local-ai-chat {
   display: flex;
   flex: 1;

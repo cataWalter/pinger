@@ -1,29 +1,11 @@
 
-.app-shell[data-ui='desktop'] .local-ai-folder-bar button.is-active {
-  color: var(--sidebar-ink);
-  background: var(--sidebar-active);
-}
-
 .app-shell[data-ui='desktop'] .room-empty {
   color: var(--sidebar-muted);
   opacity: 1;
 }
 
-.app-shell[data-ui='desktop'] .room-filters button:focus-visible,
 .app-shell[data-ui='desktop'] .sidebar button:focus-visible {
   outline-color: var(--sidebar-accent);
-}
-
-.app-shell[data-ui='desktop'] .room-filters kbd {
-  color: inherit;
-  opacity: 0.85;
-  background: transparent;
-}
-
-.app-shell[data-ui='desktop'] .sidebar-icon {
-  color: var(--sidebar-ink);
-  background: transparent;
-  border-color: var(--sidebar-border);
 }
 
 .app-shell[data-ui='desktop'] :is(.room-info-dialog, .confirm-dialog, .quick-switcher) {

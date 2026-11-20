@@ -16,15 +16,6 @@
   background: transparent;
 }
 
-.boot-mark {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-xl);
-  background: linear-gradient(135deg, color-mix(in srgb, var(--forest) 78%, #000) 0%, var(--forest) 55%, var(--forest-deep) 100%);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  animation: float-soft 2.8s ease-in-out infinite;
-}
-
 .brand-glyph {
   border-radius: var(--radius-xl);
   background: linear-gradient(135deg, color-mix(in srgb, var(--forest) 78%, #000) 0%, var(--forest) 55%, var(--forest-deep) 100%);
@@ -122,40 +113,6 @@
 
 .connection-badge.is-online {
   box-shadow: 0 0 0 4px rgba(158, 216, 184, 0.12);
-}
-
-.room-search {
-  height: 40px;
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.08);
-  transition: border-color var(--motion-standard), background var(--motion-standard), box-shadow var(--motion-standard);
-}
-
-.room-search:focus-within {
-  background: rgba(255, 255, 255, 0.11);
-  border-color: color-mix(in srgb, var(--accent-bright) 45%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-bright) 14%, transparent);
-}
-
-.room-filters {
-  gap: 4px;
-  padding: 3px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: var(--radius-xl);
-}
-
-.room-filters button {
-  min-height: 30px;
-  border-radius: var(--radius-md);
-  font-weight: 600;
-  transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast), opacity var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast);
-}
-
-.room-filters button.is-active {
-  background: color-mix(in srgb, var(--accent-bright) 18%, transparent);
-  border-color: color-mix(in srgb, var(--accent-bright) 18%, transparent);
-  box-shadow: var(--shadow-xs);
 }
 
 .room-button {

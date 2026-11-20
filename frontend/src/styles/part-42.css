@@ -174,7 +174,7 @@
 }
 
 .app-shell[data-ui='desktop'] {
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width, 280px) minmax(0, 1fr);
   color: var(--ink);
   background: var(--canvas);
 }
@@ -219,7 +219,7 @@
 }
 
 :root[data-liquid-glass='true'] .app-shell[data-ui='desktop'] .sidebar {
-  background: color-mix(in srgb, var(--sidebar-bg) 72%, transparent);
+  background: color-mix(in srgb, var(--sidebar-bg) 55%, transparent);
 }
 
 .app-shell[data-ui='desktop'] :is(.brand-name, .room-name) {
@@ -228,13 +228,4 @@
 
 .app-shell[data-ui='desktop'] :is(.room-section-label, .room-preview, .room-time, .sidebar-footnote) {
   color: var(--sidebar-muted);
-}
-
-.app-shell[data-ui='desktop'] .room-search {
-  min-height: 36px;
-  color: var(--sidebar-muted);
-  background: var(--sidebar-panel);
-  border: 1px solid var(--sidebar-border);
-  border-radius: var(--radius-sm);
-  box-shadow: none;
 }

@@ -125,10 +125,6 @@
     padding-left: 9px;
   }
 
-  .room-filters button {
-    font-size: 8px;
-  }
-
   .room-button {
     grid-template-columns: 32px minmax(0, 1fr);
     gap: 7px;

@@ -181,26 +181,3 @@
   border-color: var(--line);
   border-radius: var(--radius-md);
 }
-
-.app-shell[data-ui='desktop'] .room-filters button {
-  color: var(--sidebar-muted);
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-}
-
-.app-shell[data-ui='desktop'] .room-filters button:hover {
-  color: var(--sidebar-ink);
-  background: var(--sidebar-hover);
-}
-
-.app-shell[data-ui='desktop'] .room-filters button.is-active {
-  color: var(--sidebar-ink);
-  background: var(--sidebar-active);
-  box-shadow: inset 0 -2px var(--sidebar-accent);
-}
-
-.app-shell[data-ui='desktop'] .local-ai-folder-bar button {
-  color: var(--sidebar-muted);
-  background: var(--sidebar-panel);
-}

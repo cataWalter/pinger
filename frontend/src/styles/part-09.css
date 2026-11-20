@@ -112,11 +112,19 @@
 }
 
 .message-seen-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   align-self: flex-end;
   margin-top: 4px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
   line-height: 1.2;
+}
+
+.message-seen-status svg {
+  color: var(--accent-bright);
 }
 
 .message-meta time,

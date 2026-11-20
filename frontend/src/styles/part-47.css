@@ -141,7 +141,7 @@
 
 @media (min-width: 521px) and (max-width: 959px) {
   .app-shell[data-ui='desktop'] {
-    grid-template-columns: 248px minmax(0, 1fr);
+    grid-template-columns: var(--sidebar-width, 248px) minmax(0, 1fr);
   }
 
   .app-shell[data-ui='desktop'] .conversation-header {

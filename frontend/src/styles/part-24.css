@@ -17,7 +17,7 @@
 }
 
 .day-divider::before,
-day-divider::after,
+.day-divider::after,
 .timeline-new-divider::before,
 .timeline-new-divider::after {
   opacity: 0.7;

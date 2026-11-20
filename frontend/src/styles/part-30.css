@@ -19,38 +19,6 @@
   }
 }
 
-.room-filters button {
-  min-height: 30px;
-  color: #aeb8c7;
-  font-size: 10px;
-}
-
-.room-scope-filters button,
-.room-refinement-filters button {
-  background: var(--sidebar-panel, #1c3a30);
-  border-color: transparent;
-  border-radius: var(--radius-sm);
-}
-
-.room-refinement-filters button.is-active {
-  color: var(--forest-deep);
-  background: var(--signal);
-  border-color: var(--signal);
-}
-
-.room-filters button .filter-count {
-  color: var(--forest-deep);
-  background: var(--signal);
-}
-
-.room-filters button.is-active {
-  color: var(--forest-deep);
-  background: var(--signal);
-  border-color: var(--signal);
-  box-shadow: none;
-}
-
-.room-filters button .filter-count,
 .unread-count {
   color: var(--forest-deep);
   background: var(--signal);
@@ -66,16 +34,16 @@
 }
 
 .room-button:hover {
-  background: var(--sidebar-panel, #1c3a30);
-  border: 1px solid var(--sidebar-border, #345044);
+  background: var(--sidebar-hover);
+  border: 1px solid var(--sidebar-border);
   transform: none;
 }
 
 .room-button.is-active {
-  color: #fff;
-  background: #294b3b;
-  border-color: #3a5c4b;
-  box-shadow: inset 3px 0 0 var(--signal);
+  color: var(--sidebar-ink);
+  background: var(--sidebar-active);
+  border-color: var(--sidebar-border);
+  box-shadow: inset 3px 0 var(--signal);
 }
 
 .room-button.has-unread .room-name {
@@ -117,17 +85,6 @@
 
 .profile-verified {
   color: var(--signal);
-}
-
-.sidebar-icon {
-  color: #c4d6cb;
-  border-color: #456052;
-  border-radius: var(--radius-sm);
-}
-
-.sidebar-icon:hover {
-  color: var(--signal);
-  background: #294b3b;
 }
 
 .conversation {

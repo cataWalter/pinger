@@ -153,18 +153,6 @@
   background: #151c18;
 }
 
-@keyframes float-soft {
-
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-4px);
-  }
-}
-
 @keyframes scrim-enter {
   from {
     opacity: 0;
