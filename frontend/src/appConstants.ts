@@ -19,6 +19,11 @@ export const MAX_MISSING_AVATARS = 512
 
 export const ROOM_LIST_VIRTUALIZATION_THRESHOLD = 100
 
+// Row pitch in px, including the 4px gap. Must match the desktop row CSS in part-43.css.
+export const ROOM_ROW_HEIGHT = 52
+
+export const ROOM_ROW_HEIGHT_COMPACT = 46
+
 export const ROOM_LIST_RANGE_PREFETCH = 20
 
 export const ROOM_LIST_MAX_SYNC_RANGE = 200

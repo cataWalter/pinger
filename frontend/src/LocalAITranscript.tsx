@@ -41,7 +41,7 @@ export default function LocalAITranscript({
   onRetry,
 }: LocalAITranscriptProps) {
   return (
-    <div className="local-ai-transcript" ref={transcriptRef} onScroll={onScroll} role="log" aria-label="Local AI conversation" aria-live="polite" aria-busy={activeRun !== null || activeImage !== null}>
+    <div className="local-ai-transcript" ref={transcriptRef} onScroll={onScroll} role="log" aria-label="AI conversation" aria-live="polite" aria-busy={activeRun !== null || activeImage !== null}>
       {trimmed && <p className="local-ai-notice">Only the latest {LOCAL_AI_HISTORY_TURN_LIMIT} messages are sent to the model.</p>}
       {loading && messages.length === 0 && <p className="local-ai-status" role="status">Loading chat…</p>}
       {!loading && messages.length === 0 && !activeRun && !activeImage && (
@@ -67,17 +67,17 @@ export default function LocalAITranscript({
       ))}
       {activeRun && (
         <article className="local-ai-message is-assistant">
-          <span className="local-ai-message-label">Local AI</span>
+          <span className="local-ai-message-label">AI</span>
           {activeRun.text ? (
             <LocalAIMarkdown body={activeRun.text} />
           ) : (
-            <p className="local-ai-status" role="status">{activeRun.stopping ? 'Stopping…' : 'Waiting for the local model…'}</p>
+            <p className="local-ai-status" role="status">{activeRun.stopping ? 'Stopping…' : 'Waiting for the model…'}</p>
           )}
         </article>
       )}
       {activeImage && (
         <article className="local-ai-message is-assistant local-ai-image-run">
-          <span className="local-ai-message-label">Local AI</span>
+          <span className="local-ai-message-label">AI</span>
           <p className="local-ai-status" role="status">{imageRunStatus(activeImage)}</p>
           {activeImage.totalSteps > 0 && <progress className="local-ai-image-progress" value={activeImage.step} max={activeImage.totalSteps} aria-label="Image generation progress" />}
           {activeImage.preview && <img className="local-ai-image-preview" src={`data:image/png;base64,${activeImage.preview}`} alt="Image generation preview" />}
@@ -87,7 +87,7 @@ export default function LocalAITranscript({
         <div className="local-ai-error" role="alert">
           <CircleAlert size={16} aria-hidden="true" />
           <div className="local-ai-error-body">
-            <p className="local-ai-error-title">Local AI could not reply</p>
+            <p className="local-ai-error-title">AI could not reply</p>
             <p className="local-ai-error-message">{failure.message}</p>
           </div>
           <button className="local-ai-retry" type="button" onClick={onRetry} disabled={busy}><RotateCcw size={14} />Retry</button>

@@ -37,7 +37,7 @@ export default function LocalAIToolbar({ agents, agentId, busy, loading, hasMess
         <Plus size={13} />
         <span>New agent</span>
       </button>
-      <button className="icon-button" type="button" aria-label="Export local AI chat" title="Export chat" onClick={onExport} disabled={!hasMessages || loading}>
+      <button className="icon-button" type="button" aria-label="Export AI chat" title="Export chat" onClick={onExport} disabled={!hasMessages || loading}>
         <Download size={15} />
       </button>
     </div>

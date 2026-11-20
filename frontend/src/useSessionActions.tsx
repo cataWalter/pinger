@@ -2,6 +2,7 @@ import { type FormEvent, type KeyboardEvent } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Room } from '../bindings/mychat/desktop/models.js'
 import { describeError, preferenceBoolean, preferenceString, isUnansweredRoom, isNeedsReplyRoom, isUnreadRoom } from './appShared'
+import { ROOM_ROW_HEIGHT, ROOM_ROW_HEIGHT_COMPACT } from './appConstants'
 import type { useRoomActions } from './useRoomActions'
 
 export function useSessionActions(app: ReturnType<typeof useRoomActions>) {
@@ -168,7 +169,7 @@ export function useSessionActions(app: ReturnType<typeof useRoomActions>) {
       nextButton.focus()
     } else if (list && nextIndex >= 0 && nextIndex < filteredRooms.length) {
       event.preventDefault()
-      const rowHeight = preferenceBoolean(preferences, 'sidebar.compact_chat_list') ? 46 : 62
+      const rowHeight = preferenceBoolean(preferences, 'sidebar.compact_chat_list') ? ROOM_ROW_HEIGHT_COMPACT : ROOM_ROW_HEIGHT
       list.scrollTop = nextIndex * rowHeight
       list.dispatchEvent(new Event('scroll'))
       window.requestAnimationFrame(() => window.requestAnimationFrame(() => {

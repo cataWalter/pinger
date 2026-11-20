@@ -225,7 +225,7 @@ describe('room history updates', () => {
 
     if (activation === 'menu') {
       openMessageMenu(container)
-      await user.click(await screen.findByRole('menuitem', { name: 'Draft reply with local AI' }))
+      await user.click(await screen.findByRole('menuitem', { name: 'Draft reply with AI' }))
     } else {
       const row = screen.getByText('selected message').closest<HTMLElement>('[data-event-id]')!
       row.focus()

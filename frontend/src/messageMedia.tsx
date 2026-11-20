@@ -218,12 +218,12 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
       </div>}
       {isAudio && savedPath && <small className="audio-download-status" role="status">{renderSavedFile()}</small>}
       {isAudio && <div className="audio-transcription-controls">
-        <button className="audio-transcribe-button" type="button" aria-label={transcriptionLoading ? 'Transcribing audio' : 'Transcribe with AI'} aria-keyshortcuts={`Control+Shift+${AI_ACTION_SHORTCUTS.transcribeAudio.key} Meta+Shift+${AI_ACTION_SHORTCUTS.transcribeAudio.key}`} title={`${aiEnabled ? 'Upload this audio to the configured endpoint for transcription.' : 'Set an AI endpoint in Settings > AI.'} (${primaryShiftShortcutLabel(AI_ACTION_SHORTCUTS.transcribeAudio.key)})`} disabled={!aiEnabled || transcriptionLoading} onClick={() => void transcribeAudio()}>
+        <button className="audio-transcribe-button" type="button" aria-label={transcriptionLoading ? 'Transcribing audio' : 'Transcribe with AI'} aria-keyshortcuts={`Control+Shift+${AI_ACTION_SHORTCUTS.transcribeAudio.key} Meta+Shift+${AI_ACTION_SHORTCUTS.transcribeAudio.key}`} title={`${aiEnabled ? 'Transcribe this audio with the local AI endpoint on this computer.' : 'Set a local AI endpoint in Settings > AI.'} (${primaryShiftShortcutLabel(AI_ACTION_SHORTCUTS.transcribeAudio.key)})`} disabled={!aiEnabled || transcriptionLoading} onClick={() => void transcribeAudio()}>
           {transcriptionLoading ? <span className="loading-mark" /> : <Sparkles size={14} />}
           {transcriptionLoading ? 'Transcribing…' : 'Transcribe with AI'}
           <kbd aria-hidden="true">{primaryShiftShortcutLabel(AI_ACTION_SHORTCUTS.transcribeAudio.key)}</kbd>
         </button>
-        <small>{aiEnabled ? 'Audio is sent to the configured endpoint, which may be remote.' : 'Set an AI endpoint in Settings > AI to transcribe audio.'}</small>
+        <small>{aiEnabled ? 'Audio is transcribed by the local AI endpoint on this computer.' : 'Set a local AI endpoint in Settings > AI to transcribe audio.'}</small>
       </div>}
       {transcriptionLoading && <p className="audio-transcription-status" role="status">Transcribing audio…</p>}
       {transcriptionError && <span className="media-error" role="alert">{transcriptionError}</span>}

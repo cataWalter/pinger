@@ -125,7 +125,7 @@ export function buildLocalAIModelMessages(history: LocalAIChatMessage[]): AIMess
 export function chatToText(messages: LocalAIChatMessage[]) {
     return messages.map((message) => {
         const time = message.createdAt > 0 ? `[${localTimestamp(message.createdAt)}] ` : ''
-        const speaker = message.role === 'user' ? 'You' : 'Local AI'
+        const speaker = message.role === 'user' ? 'You' : 'AI'
         const attachments = (message.attachments ?? []).map((attachment) => ` [attached: ${attachment.name}]`).join('')
         const stopped = message.status === 'stopped' ? ' [stopped before completion]' : ''
         return `${time}${speaker}: ${message.content}${attachments}${stopped}\n`
@@ -183,7 +183,7 @@ export async function readLocalAIAttachment(file: File): Promise<LocalAIChatAtta
 export function localAIErrorMessage(error: unknown, fallback: string) {
     const message = typeof error === 'string' ? error : error instanceof Error ? error.message : ''
     // Wails reports these when the running backend and the frontend bindings disagree on a method's shape.
-    if (/unknown bound method|could not parse argument|expects \d+ arguments/i.test(message)) return 'Local AI is out of date. Quit and reopen the app to load it.'
+    if (/unknown bound method|could not parse argument|expects \d+ arguments/i.test(message)) return 'AI chat is out of date. Quit and reopen the app to load it.'
     return message || fallback
 }
 

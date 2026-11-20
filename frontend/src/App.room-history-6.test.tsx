@@ -348,7 +348,7 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     openMessageMenu(container)
-    await user.click(await screen.findByRole('menuitem', { name: 'Suggest ten replies with local AI' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Suggest ten replies with AI' }))
 
     const picker = await screen.findByRole('group', { name: 'Suggested replies' })
     expect(within(picker).getByRole('button', { name: /Maybe later\?/ })).toBeTruthy()
@@ -605,7 +605,7 @@ describe('room history updates', () => {
 
     if (activation === 'menu') {
       openMessageMenu(container)
-      await user.click(await screen.findByRole('menuitem', { name: 'Explain message with local AI' }))
+      await user.click(await screen.findByRole('menuitem', { name: 'Explain message with AI' }))
     } else if (activation === 'metaKey') {
       openMessageMenu(container)
       fireEvent.keyDown(await screen.findByRole('menu', { name: 'Message actions' }), { key: 'E', code: 'KeyE', metaKey: true, shiftKey: true })

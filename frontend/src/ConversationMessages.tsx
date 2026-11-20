@@ -1,14 +1,20 @@
-import { Fragment } from 'react'
-import { ArrowUp, BellRing, Check, CircleAlert, MessageCircleMore, RotateCcw, Search, UsersRound, X, Download } from 'lucide-react'
+import { Fragment, useCallback } from 'react'
+import { ArrowUp, BellRing, Check, CircleAlert, MessageCircleMore, RotateCcw, Search, X, Download } from 'lucide-react'
 import { activeLocale } from './i18n'
 import { DialogPresence } from './DialogPresence'
 import { primaryShiftShortcutLabel, VIRTUAL_TIMELINE_THRESHOLD } from './appShared'
 import { chatExportStatusText, preferenceBoolean, isDirectLikeRoom, TimelineMessageList } from './appShared'
 import { themeModeForPreference } from './themes'
+import { dropUnloadedChatTranslations } from './chatTranslationStash'
 import type { AppState } from './appState'
 
 export function ConversationMessages({ app }: { app: AppState }) {
-  const { activeAccountID, activeUnreadMarker, appZoom, autoPlayNextMessageId, cancelChatExport, chatExportForSelectedRoom, chatTranslation, clearScheduledNotice, clearUndoToast, closeMessageSearch, dismissChatExport, editTarget, error, focusTimelineMessage, handleTimelineKeyDown, hasOlder, hasOlderRef, isNearBottom, isNearTop, loadMoreSearchResults, loadOlderMessages, loadingHistory, loadingOlder, loadingOlderRef, messageContextMenu, messageContextMenuItems, messageSearch, messages, observeUnreadDivider, openScheduledJobs, openSearchResult, pinnedScrollTopRef, preferences, reactingMessageID, revealChatExport, rooms, scheduledNotice, searchFrom, searchNextBatch, searchOpen, searchResults, searchRoomID, searchSender, searchStatus, searchTo, searching, selectedRoom, selectedRoomID, setError, setMessageContextMenu, setMessageSearch, setSearchFrom, setSearchRoomID, setSearchSender, setSearchTo, setUnreadMarker, snapshot, stickToBottomRef, submitMessageSearch, threadSummaries, timelineListRef, timelineMessageActionsRef, timelineMessages, timelineRef, typingStatus, undoAnswered, undoRoomID, unreadMarkerID, visibleMessages } = app
+  const { activeAccountID, activeUnreadMarker, appZoom, autoPlayNextMessageId, cancelChatExport, chatExportForSelectedRoom, chatTranslation, clearScheduledNotice, clearUndoToast, closeMessageSearch, dismissChatExport, editTarget, error, focusTimelineMessage, handleTimelineKeyDown, hasOlder, hasOlderRef, isNearBottom, isNearTop, loadMoreSearchResults, loadOlderMessages, loadingHistory, loadingOlder, loadingOlderRef, messageContextMenu, messageContextMenuItems, messageSearch, messages, observeUnreadDivider, openScheduledJobs, openSearchResult, pinnedScrollTopRef, preferences, reactingMessageID, revealChatExport, rooms, scheduledNotice, searchFrom, searchNextBatch, searchOpen, searchResults, searchRoomID, searchSender, searchStatus, searchTo, searching, selectedRoom, selectedRoomID, setChatTranslation, setError, setMessageContextMenu, setMessageSearch, setSearchFrom, setSearchRoomID, setSearchSender, setSearchTo, setUnreadMarker, snapshot, stickToBottomRef, submitMessageSearch, threadSummaries, timelineListRef, timelineMessageActionsRef, timelineMessages, timelineRef, typingStatus, undoAnswered, undoRoomID, unreadMarkerID, visibleMessages } = app
+  // Finished translations for rows that virtual loading unloads are discarded from RAM.
+  // Stable identity keeps the memoized TimelineMessageList from re-rendering on every composer keystroke.
+  const discardUnloadedTranslations = useCallback((messageIDs: string[]) => {
+    setChatTranslation((current) => dropUnloadedChatTranslations(current, selectedRoomID, messageIDs))
+  }, [selectedRoomID, setChatTranslation])
   return (
     <>
       {(chatExportForSelectedRoom || scheduledNotice || undoRoomID) && <div className="chat-notice-stack" aria-label="Notifications">
@@ -158,13 +164,14 @@ export function ConversationMessages({ app }: { app: AppState }) {
           listHandleRef={timelineListRef}
           unreadMarkerID={unreadMarkerID}
           unreadDividerRef={observeUnreadDivider}
+          onAnalysesUnloaded={discardUnloadedTranslations}
         />
         {chatTranslation?.roomID === selectedRoomID && <div className="chat-translation-status">
           {chatTranslation.busy && <p role="status">{chatTranslation.status}</p>}
           {chatTranslation.error && <p role="alert">{chatTranslation.error}</p>}
         </div>}
       </div>
-      {typingStatus && <div className="typing-indicator" aria-live="polite"><UsersRound size={13} />{typingStatus}</div>}
+      {typingStatus && <div className="typing-indicator" aria-live="polite"><span className="typing-indicator-dots" aria-hidden="true"><span /><span /><span /></span><span>{typingStatus}</span></div>}
       {messageContextMenu && <div className="message-context-scrim" aria-hidden="true">
         <div className="message-context-scrim-panel message-context-scrim-top" style={{ height: messageContextMenu.targetBounds.top }} />
         <div className="message-context-scrim-panel message-context-scrim-left" style={{ top: messageContextMenu.targetBounds.top, width: messageContextMenu.targetBounds.left, height: messageContextMenu.targetBounds.bottom - messageContextMenu.targetBounds.top }} />

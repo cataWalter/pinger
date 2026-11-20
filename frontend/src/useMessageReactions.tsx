@@ -4,6 +4,7 @@ import { type MenuState, type Message } from '../bindings/mychat/desktop/models.
 import { emojiQueryAt, suggestEmoji } from './composerText'
 import { isLocalAIRoomID, localAIIncludeInAllPreference } from './localAIChats'
 import { describeError, preferenceBoolean, preferenceString, isUnansweredRoom, isNeedsReplyRoom, isUnreadRoom } from './appShared'
+import { textAIConfigured } from './aiProvider'
 import type { useComposerActions } from './useComposerActions'
 
 export function useMessageReactions(app: ReturnType<typeof useComposerActions>) {
@@ -146,8 +147,7 @@ export function useMessageReactions(app: ReturnType<typeof useComposerActions>) 
     setEmojiActiveIndex(0)
   }
 
-  const aiEndpoint = preferenceString(preferences, 'ai.endpoint', '')
-  const aiEnabled = aiEndpoint !== ''
+  const aiEnabled = textAIConfigured(preferences)
   // Native menu state mirrors the selected room and filters; menu actions reuse the keyboard handlers.
   const menuRoom = selectedRoom && !isLocalAIRoomID(selectedRoom.id) ? selectedRoom : undefined
   const menuRoomSelected = Boolean(menuRoom)
@@ -193,5 +193,5 @@ export function useMessageReactions(app: ReturnType<typeof useComposerActions>) 
       favorite: false,
     }))
   }
-  return { ...app, startReaction, handleMessageDoubleClick, handleComposerPaste, changeReaction, sendReaction, startDirectChat, removeReaction, redactMessage, retryMessage, openRoomInfo, emojiOptions, updateMentionQuery, updateEmojiQuery, aiEndpoint, aiEnabled, menuRoom, menuRoomSelected, menuRoomUnread, menuRoomArchived, menuRoomFavorite, menuRoomUnanswered, menuRoomNeedsReply, menuPrivateChatOpen, menuPrivateChatInAll, menuDraftReady, menuFilter, applyMenuFilter, toggleRoomRefinement }
+  return { ...app, startReaction, handleMessageDoubleClick, handleComposerPaste, changeReaction, sendReaction, startDirectChat, removeReaction, redactMessage, retryMessage, openRoomInfo, emojiOptions, updateMentionQuery, updateEmojiQuery, aiEnabled, menuRoom, menuRoomSelected, menuRoomUnread, menuRoomArchived, menuRoomFavorite, menuRoomUnanswered, menuRoomNeedsReply, menuPrivateChatOpen, menuPrivateChatInAll, menuDraftReady, menuFilter, applyMenuFilter, toggleRoomRefinement }
 }

@@ -16,7 +16,7 @@ describe('LocalAIChat composer', () => {
   it('attaches a pasted screenshot and sends it with the message', async () => {
     service.LocalAIChat.mockResolvedValueOnce('The screenshot shows a chart.')
     renderChat({ chatId: 'chat-1' })
-    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
     await waitFor(() => expect(composer.disabled).toBe(false))
 
     const screenshot = new File(['png-bytes'], '', { type: 'image/png' })
@@ -26,7 +26,7 @@ describe('LocalAIChat composer', () => {
     await waitFor(() => expect(pending.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/png;base64,/))
     expect(pending.textContent).toContain('pasted-image-')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Send to local AI' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Send to AI' }))
 
     await waitFor(() => expect(service.AppendLocalAIChatMessage).toHaveBeenCalledWith('chat-1', expect.objectContaining({
       role: 'user',
@@ -40,7 +40,7 @@ describe('LocalAIChat composer', () => {
 
   it('leaves plain-text paste to the textarea', async () => {
     renderChat({ chatId: 'chat-1' })
-    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
     await waitFor(() => expect(composer.disabled).toBe(false))
 
     const notPrevented = fireEvent.paste(composer, { clipboardData: { items: [{ kind: 'string', type: 'text/plain', getAsFile: () => null }], files: [] } })
@@ -51,7 +51,7 @@ describe('LocalAIChat composer', () => {
 
   it('keeps each chat draft and attachments separate when switching chats', async () => {
     const { props, rerender } = renderChat({ chatId: 'chat-1' })
-    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
     await waitFor(() => expect(composer.disabled).toBe(false))
     fireEvent.change(composer, { target: { value: 'Draft for the first chat' } })
     const screenshot = new File(['png-bytes'], 'first.png', { type: 'image/png' })
@@ -77,7 +77,7 @@ describe('LocalAIChat composer', () => {
     const { props, rerender } = renderChat({ chatId: 'chat-1' })
     await sendDraft('Message that will fail')
     await waitFor(() => expect(service.AppendLocalAIChatMessage).toHaveBeenCalledTimes(1))
-    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
 
     rerender(<LocalAIChat {...props} chatId="chat-2" />)
     await waitFor(() => expect(service.LoadLocalAIChatMessages).toHaveBeenCalledWith('chat-2'))
@@ -91,7 +91,7 @@ describe('LocalAIChat composer', () => {
 
   it('keeps a starting draft when a new chat opens with one', async () => {
     const { props, rerender } = renderChat({ chatId: 'chat-1' })
-    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
     await waitFor(() => expect(composer.disabled).toBe(false))
     fireEvent.change(composer, { target: { value: 'Unsent text in chat one' } })
 
@@ -104,7 +104,7 @@ describe('LocalAIChat composer', () => {
 
   it('creates an agent from the chat and selects it for that chat', async () => {
     const { props } = renderChat({ chatId: 'chat-1' })
-    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
     await waitFor(() => expect(composer.disabled).toBe(false))
 
     fireEvent.click(screen.getByRole('button', { name: 'New agent' }))

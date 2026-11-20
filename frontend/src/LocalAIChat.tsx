@@ -224,7 +224,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
   }
 
   return (
-    <section className="local-ai-chat" aria-label="Local AI chat" hidden={hidden}>
+    <section className="local-ai-chat" aria-label="AI chat" hidden={hidden}>
       <LocalAIToolbar
         agents={agents}
         agentId={agentId}

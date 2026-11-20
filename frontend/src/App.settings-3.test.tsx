@@ -308,7 +308,7 @@ describe('settings storage, integrations, help, and about', () => {
     expect(within(aiTools).getByRole('button', { name: 'Analyze draft with Language Tutor' })).toBeTruthy()
     expect(within(aiTools).getByRole('button', { name: 'Generate image from draft' })).toBeTruthy()
     expect(within(aiTools).getByRole('button', { name: 'Suggest replies' })).toBeTruthy()
-    expect(within(aiTools).getByRole('button', { name: 'Summarize with Local AI' })).toBeTruthy()
+    expect(within(aiTools).getByRole('button', { name: 'Summarize with AI' })).toBeTruthy()
     expect(within(aiTools).queryByRole('button', { name: 'Analyze chat topics' })).toBeNull()
     expect(within(aiTools).queryByRole('button', { name: 'Analyze conversation' })).toBeNull()
     expect(within(aiTools).queryByRole('button', { name: 'Attach file' })).toBeNull()

@@ -46,7 +46,7 @@ export const AI_ACTION_SHORTCUTS = {
   analyzeDraft: { key: 'T', description: 'Analyze draft with Language Tutor' },
   suggestReplies: { key: 'B', description: 'Suggest replies' },
   generateImage: { key: 'J', description: 'Generate image from draft' },
-  summarize: { key: 'O', description: 'Summarize with Local AI' },
+  summarize: { key: 'O', description: 'Summarize with AI' },
   translate: { key: 'Y', description: 'Translate recent messages' },
   clearTranslations: { key: 'X', description: 'Clear message translations' },
   analyzeMessage: { key: 'C', description: 'Analyze focused message with Language Tutor' },

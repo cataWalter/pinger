@@ -4,10 +4,17 @@ import { InviteList } from './RoomMembership'
 import { ConnectionStatusBanner } from './ConnectionStatusBanner'
 import { localAIFavoritePreference, localAIIncludeInAllPreference, LOCAL_AI_FOLDER_NAME_CHARACTERS } from './localAIChats'
 import { preferenceBoolean, isNeedsReplyRoom, primaryModifierLabel, RoomButton, reportRoomListVisibleRange, VirtualRoomList } from './appShared'
+import { ROOM_ROW_HEIGHT, ROOM_ROW_HEIGHT_COMPACT } from './appConstants'
+import { SidebarResizeHandle } from './SidebarResizeHandle'
 import type { AppState } from './appState'
 import { getVolatileAIDraft } from './volatileAIDrafts'
 
-export function AppSidebar({ app }: { app: AppState }) {
+export function AppSidebar({ app, sidebarWidth, sidebarZoom, onSidebarWidthChange }: {
+  app: AppState
+  sidebarWidth: number | null
+  sidebarZoom: number
+  onSidebarWidthChange: (width: number) => void
+}) {
   const { acceptInvite, activeAccountID, activeListRoomID, answeredShortcut, applyBulkRoomAction, applyMenuFilter, clearRoomSelection, connectionProblem, contextMenuChatID, contextMenuHasUnread, contextMenuIsBulk, contextMenuLocalAIFolderID, contextMenuLocalAIInAll, contextMenuLocalAIRoom, contextMenuNeedsArchive, contextMenuNeedsFavorite, contextMenuNeedsMute, contextMenuNeedsReplyAddCount, contextMenuNeedsReplyAddRooms, contextMenuRooms, declineInvite, deleteLocalAIChat, deleteLocalAIFolder, filteredRooms, handleMarkAnsweredKeyDown, inviteBusyRoomID, isLastMessageByCurrentUser, listRooms, localAIActiveFolder, localAIChatList, localAIDeleteArmedID, localAIFolderDeleteArmedID, localAIFolderDraft, localAIFolderFilter, localAIIconByRoomID, markRoomAnswered, markRoomRead, markRoomUnread, menuFilter, moveLocalAIChatToFolder, needsReplyCount, preferences, roomButtonActionsRef, roomContextMenu, roomListRef, roomRefinements, roomScope, roomSearchInputRef, saveLocalAIFolderDraft, search, selectLocalAIChat, selectedRoomID, selectedRoomIDs, selectedRoomListIndex, setLocalAIDeleteArmedID, setLocalAIFolderDeleteArmedID, setLocalAIFolderDraft, setLocalAIFolderFilter, setLocalAIRenameDraft, setPreference, setRoomArchived, setRoomContextMenu, setRoomScope, setSearch, setSettingsOpen, snapshot, startLocalAIChat, toggleRoomRefinement } = app
   const { aiEnabled, aiReplyDraftBatch, busy, cancelAIDraftBatch, editTarget, generateNeedsReplyDrafts, volatileAIDrafts } = app
   const draftBatchTitle = aiReplyDraftBatch.status === 'running'
@@ -39,14 +46,14 @@ export function AppSidebar({ app }: { app: AppState }) {
         </div>
         <div className="room-filters" role="group" aria-label="Filter rooms">
           <div className="room-scope-filters" role="group" aria-label="Room visibility">
-            <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-label="All" aria-pressed={roomScope === 'all'} aria-keyshortcuts="Control+Shift+A Meta+Shift+A" title="All rooms (Ctrl / ⌘ + Shift + A)" onClick={() => setRoomScope('all')}><MessageCircleMore size={13} /><span className="filter-label">All</span></button>
-            <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => applyMenuFilter('archived')}><Archive size={13} /><span className="filter-label">Archive</span></button>
-            <button type="button" className={roomScope === 'local-ai' ? 'is-active' : ''} aria-label="Local AI chats" aria-pressed={roomScope === 'local-ai'} title="Private model chats" onClick={() => applyMenuFilter('private')}><Sparkles size={14} /><span className="filter-label">Local AI</span></button>
+            <button type="button" className={roomScope === 'all' ? 'is-active' : ''} aria-label="All" aria-pressed={roomScope === 'all'} aria-keyshortcuts="Control+Shift+A Meta+Shift+A" title="All rooms (Ctrl / ⌘ + Shift + A)" onClick={() => setRoomScope('all')}><span className="filter-symbol"><MessageCircleMore size={14} /></span><span className="filter-label">All</span></button>
+            <button type="button" className={roomScope === 'archived' ? 'is-active' : ''} aria-label="Archived rooms" aria-pressed={roomScope === 'archived'} aria-keyshortcuts="Control+Shift+H Meta+Shift+H" title="Archived rooms (Ctrl / ⌘ + Shift + H)" onClick={() => applyMenuFilter('archived')}><span className="filter-symbol"><Archive size={14} /></span><span className="filter-label">Archive</span></button>
+            <button type="button" className={roomScope === 'local-ai' ? 'is-active' : ''} aria-label="AI chats" aria-pressed={roomScope === 'local-ai'} title="Private AI chats" onClick={() => applyMenuFilter('private')}><span className="filter-symbol"><Sparkles size={14} /></span><span className="filter-label">AI chats</span></button>
           </div>
           <div className="room-refinement-filters" role="group" aria-label="Room categories">
             <button type="button" className={roomRefinements.unanswered ? 'is-active' : ''} aria-label="Unanswered rooms" aria-pressed={roomRefinements.unanswered} aria-keyshortcuts="Control+Shift+R Meta+Shift+R" title="Unanswered rooms (Ctrl / ⌘ + Shift + R)" onClick={() => toggleRoomRefinement('unanswered')}><span className="filter-symbol"><Reply size={14} /></span><span className="filter-label">Unanswered</span></button>
             <button type="button" className={roomRefinements.needsReply ? 'is-active' : ''} aria-label="Needs reply" aria-pressed={roomRefinements.needsReply} aria-keyshortcuts={`${answeredShortcut} Control+Shift+U Meta+Shift+U`} title={`Needs reply (Ctrl / ⌘ + Shift + U; ${answeredShortcut} marks answered)`} onClick={() => toggleRoomRefinement('needsReply')} onKeyDown={(event) => handleMarkAnsweredKeyDown(event, selectedRoomID)}>
-              <span className="filter-symbol"><CircleDot size={14} />{needsReplyCount > 0 && <span className="filter-count">{needsReplyCount}</span>}</span><span className="filter-label">Needs reply</span>
+              <span className="filter-symbol"><CircleDot size={14} /></span><span className="filter-label">Needs reply</span>{needsReplyCount > 0 && <span className="filter-count">{needsReplyCount}</span>}
             </button>
             <button type="button" className={roomRefinements.favorite ? 'is-active' : ''} aria-label="Favorite rooms" aria-pressed={roomRefinements.favorite} aria-keyshortcuts="Control+Shift+F Meta+Shift+F" title="Favorites (Ctrl / ⌘ + Shift + F)" onClick={() => applyMenuFilter('favorites')}><span className="filter-symbol"><Star size={14} /></span><span className="filter-label">Favorites</span></button>
           </div>
@@ -99,7 +106,7 @@ export function AppSidebar({ app }: { app: AppState }) {
           listRef={roomListRef}
           rooms={filteredRooms}
           selectedRoomIndex={selectedRoomListIndex}
-          rowHeight={preferenceBoolean(preferences, 'sidebar.compact_chat_list') ? 46 : 62}
+          rowHeight={preferenceBoolean(preferences, 'sidebar.compact_chat_list') ? ROOM_ROW_HEIGHT_COMPACT : ROOM_ROW_HEIGHT}
           listCount={Math.max(filteredRooms.length, snapshot?.slidingSyncListCounts?.main ?? 0)}
           rangeKey={snapshot?.accountId ?? ''}
           onVisibleRange={reportRoomListVisibleRange}
@@ -226,6 +233,7 @@ export function AppSidebar({ app }: { app: AppState }) {
           </button>}
         </div>}
       </>
+      <SidebarResizeHandle width={sidebarWidth} zoom={sidebarZoom} onWidthChange={onSidebarWidthChange} />
     </aside>
   )
 }

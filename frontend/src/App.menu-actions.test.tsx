@@ -147,7 +147,7 @@ describe('native application menu actions', () => {
 
     act(() => dispatchMenuAction('private-chat-new'))
 
-    expect(await screen.findByRole('heading', { name: 'Local AI' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'AI chat' })).toBeTruthy()
   })
 
   it('adds the open private chat to All rooms from the native menu', async () => {
@@ -155,7 +155,7 @@ describe('native application menu actions', () => {
     harness.service.ListLocalAIChats.mockResolvedValue([{ id: 'chat-1', title: 'Trip plan', agentId: '', updatedAt: 1_700_000_000_000, preview: '' }])
     render(<App />)
     await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
     await user.click(await screen.findByRole('button', { name: /Trip plan/ }))
     await waitFor(() => expect(harness.service.SetMenuState).toHaveBeenLastCalledWith(expect.objectContaining({ privateChatOpen: true, privateChatInAll: false })))
 

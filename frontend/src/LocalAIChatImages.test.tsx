@@ -22,7 +22,7 @@ describe('LocalAIChat image generation', () => {
   }
 
   async function startImage(prompt: string) {
-    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
     await waitFor(() => expect(composer.disabled).toBe(false))
     fireEvent.change(composer, { target: { value: prompt } })
     fireEvent.click(screen.getByRole('button', { name: 'Generate image' }))
@@ -37,12 +37,12 @@ describe('LocalAIChat image generation', () => {
     expect(await screen.findByRole('img', { name: 'generated-image.png' })).toBeTruthy()
     expect(service.LocalAIChatGenerateImage).toHaveBeenCalledWith('chat-1', 'A red fox', expect.any(String))
     expect(service.LocalAIChat).not.toHaveBeenCalled()
-    expect((screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement).value).toBe('')
+    expect((screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement).value).toBe('')
   })
 
   it('enables the image button only when the draft has a prompt', async () => {
     renderChat({ chatId: 'chat-1' })
-    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
     await waitFor(() => expect(composer.disabled).toBe(false))
     const button = screen.getByRole('button', { name: 'Generate image' }) as HTMLButtonElement
 
@@ -95,7 +95,7 @@ describe('LocalAIChat image generation', () => {
 
     await waitFor(() => expect(service.AICancel).toHaveBeenCalledWith(requestID))
     expect(await screen.findByText('Image generation stopped.')).toBeTruthy()
-    expect((screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement).value).toBe('A lighthouse at dusk')
+    expect((screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement).value).toBe('A lighthouse at dusk')
   })
 
   it('restores the prompt and shows the error when generation fails', async () => {
@@ -105,7 +105,7 @@ describe('LocalAIChat image generation', () => {
     await startImage('A lighthouse')
 
     expect(await screen.findByText('image engine failed to start')).toBeTruthy()
-    expect((screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement).value).toBe('A lighthouse')
+    expect((screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement).value).toBe('A lighthouse')
   })
 
   it('hides edit and regenerate on image turns', async () => {

@@ -37,8 +37,8 @@ describe('LocalAIChat', () => {
     ].join('\n'))
     const { container, props } = renderChat()
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Message local AI' }), { target: { value: 'Explain this formula' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Send to local AI' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message AI' }), { target: { value: 'Explain this formula' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to AI' }))
 
     expect(await screen.findByRole('heading', { name: 'A useful answer' }, { timeout: 5000 })).toBeTruthy()
     expect(container.querySelector('strong')?.textContent).toBe('important')
@@ -61,7 +61,7 @@ describe('LocalAIChat', () => {
     }))
     emitChunk('stale-request', 'ignored')
     expect(container.textContent).not.toContain('ignored')
-    expect(container.querySelector('.local-ai-message.is-assistant')?.textContent).toContain('Waiting for the local model')
+    expect(container.querySelector('.local-ai-message.is-assistant')?.textContent).toContain('Waiting for the model')
 
     emitChunk(requestID, 'The reply is arriving')
     await waitFor(() => expect(container.querySelector('.local-ai-message.is-assistant')?.textContent).toContain('The reply is arriving'))
@@ -123,7 +123,7 @@ describe('LocalAIChat', () => {
 
     await sendDraft('Summarize the room')
     await waitFor(() => expect(service.LocalAIChat).toHaveBeenCalledTimes(1))
-    const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
     expect(screen.getByRole('button', { name: 'Stop generating' })).toBeTruthy()
 
     fireEvent.change(composer, { target: { value: 'Summarize only the decisions' } })
@@ -163,8 +163,8 @@ describe('LocalAIChat', () => {
     await sendDraft('Ciao')
 
     const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('Local AI could not reply')
-    expect(alert.textContent).toContain('Local AI is out of date. Quit and reopen the app to load it.')
+    expect(alert.textContent).toContain('AI could not reply')
+    expect(alert.textContent).toContain('AI chat is out of date. Quit and reopen the app to load it.')
     expect(alert.textContent).not.toContain('could not parse argument')
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
@@ -194,7 +194,7 @@ describe('LocalAIChat', () => {
 
     await waitFor(() => expect(service.AppendLocalAIChatMessage).toHaveBeenCalledWith('chat-1', expect.objectContaining({ role: 'assistant', content: 'Partial answer', status: 'stopped' })))
     expect(service.AICancel).toHaveBeenCalledWith(requestID)
-    expect(await screen.findByText('Local AI · Stopped')).toBeTruthy()
+    expect(await screen.findByText('AI · Stopped')).toBeTruthy()
   })
 
   it('edits a user turn and resends from that point', async () => {

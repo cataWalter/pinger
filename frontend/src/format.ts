@@ -63,10 +63,6 @@ export function formatTimeOrDate(timestamp: number, use24Hour = false) {
   return new Intl.DateTimeFormat(activeLocale(), { dateStyle: 'short' }).format(new Date(timestamp))
 }
 
-export function formatTimelineTime(timestamp: number, preferences: PreferenceValues) {
-  return createTimelineTimeFormatter(preferences)(timestamp)
-}
-
 export function createTimelineTimeFormatter(preferences: PreferenceValues): (timestamp: number) => string {
   const useRelativeTime = preferenceBoolean(preferences, 'appearance.relative_timestamps')
   const use24Hour = preferenceBoolean(preferences, 'appearance.time_24_hour')

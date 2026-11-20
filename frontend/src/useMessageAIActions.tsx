@@ -146,6 +146,7 @@ export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
   function messageContextMenuItems(message: Message): MessageMenuItem[] {
     const unsent = !message.id || message.id.startsWith('~')
     const manageable = !unsent && !message.redacted
+    const hasMedia = Boolean(message.mediaUri || message.mediaType || message.mediaMime)
     const body = displayMessageBody(message).trim()
     const bookmarkKey = `message.bookmark.${encodeURIComponent(selectedRoomID)}.${encodeURIComponent(message.id)}`
     const bookmarked = preferenceBoolean(preferences, bookmarkKey)
@@ -163,16 +164,18 @@ export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
       { key: 'mark-unread', label: 'Mark as unread', ariaLabel: 'Mark room as unread', icon: <CircleDot size={14} />, disabled: !canMarkUnread, run: () => void markRoomUnread(selectedRoomID) },
       { key: 'copy', label: 'Copy message', ariaLabel: 'Copy message', icon: <Copy size={14} />, disabled: !body, separatorBefore: true, run: () => void copyMessage(message) },
       { key: 'copy-timestamp', label: 'Copy with timestamp', ariaLabel: 'Copy message with timestamp', icon: <Clock3 size={14} />, disabled: !body, run: () => void copyMessage(message, true) },
-      { key: 'forward', label: 'Forward...', ariaLabel: 'Forward message', icon: <ArrowUpRight size={14} />, disabled: !manageable || !body || Boolean(message.mediaUri || message.mediaType || message.mediaMime) || !canForward, run: () => openMessageForward(message) },
+      { key: 'forward', label: 'Forward...', ariaLabel: 'Forward message', icon: <ArrowUpRight size={14} />, disabled: !manageable || !body || hasMedia || !canForward, run: () => openMessageForward(message) },
       { key: 'received-at', label: `Received at ${receivedAt}`, ariaLabel: `Received at ${receivedAt}`, icon: <Clock3 size={14} />, meta: true, separatorBefore: true, run: () => { } },
       { key: 'remind', label: 'Set reminder', ariaLabel: 'Set reminder for message', icon: <BellRing size={14} />, disabled: !manageable, separatorBefore: true, run: () => openReminder(message) },
       { key: 'language-tutor', label: 'Analyze with Language Tutor', ariaLabel: 'Analyze message with Language Tutor', primaryShiftKey: AI_ACTION_SHORTCUTS.analyzeMessage.key, icon: <Languages size={14} />, disabled: !aiEnabled || !body || Boolean(message.redacted), separatorBefore: true, run: () => void analyzeWithLanguageTutor(body, 'message') },
-      { key: 'ai-reply', label: 'Draft reply with AI', ariaLabel: 'Draft reply with local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.draftReply.key, icon: <Reply size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => draftAIReply(message) },
-      { key: 'ai-suggest-replies', label: 'Suggest replies with AI', ariaLabel: 'Suggest ten replies with local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.suggestReplies.key, icon: <ListChecks size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => void suggestRepliesForRoom(selectedRoomID) },
-      { key: 'ai-explain', label: 'Explain message', ariaLabel: 'Explain message with local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.explainMessage.key, icon: <Sparkles size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => explainMessage(message) },
+      { key: 'ai-reply', label: 'Draft reply with AI', ariaLabel: 'Draft reply with AI', primaryShiftKey: AI_ACTION_SHORTCUTS.draftReply.key, icon: <Reply size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => draftAIReply(message) },
+      { key: 'ai-suggest-replies', label: 'Suggest replies with AI', ariaLabel: 'Suggest ten replies with AI', primaryShiftKey: AI_ACTION_SHORTCUTS.suggestReplies.key, icon: <ListChecks size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => void suggestRepliesForRoom(selectedRoomID) },
+      { key: 'ai-explain', label: 'Explain message', ariaLabel: 'Explain message with AI', primaryShiftKey: AI_ACTION_SHORTCUTS.explainMessage.key, icon: <Sparkles size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => explainMessage(message) },
     ]
     if (message.own && manageable) {
-      items.push({ key: 'edit', label: 'Edit', ariaLabel: 'Edit message', icon: <Pencil size={13} />, run: () => editMessage(message) })
+      if (!hasMedia) {
+        items.push({ key: 'edit', label: 'Edit', ariaLabel: 'Edit message', icon: <Pencil size={13} />, run: () => editMessage(message) })
+      }
       items.push({ key: 'delete', label: 'Delete', ariaLabel: 'Delete message', danger: true, icon: <Trash2 size={13} />, run: () => setRedactTarget(message) })
     }
     if (message.sendError && message.sendError !== 'not sent' && message.transactionId) {

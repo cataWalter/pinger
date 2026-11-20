@@ -141,7 +141,7 @@ describe('room history updates', () => {
     })
     render(<App />)
     await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
 
     await user.click(await screen.findByRole('button', { name: 'Work' }))
     expect(await screen.findByRole('button', { name: /Trip plan/ })).toBeTruthy()
@@ -167,7 +167,7 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     render(<App />)
     await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
 
     await user.click(await screen.findByRole('button', { name: 'New folder' }))
     await user.type(await screen.findByRole('textbox', { name: 'New folder name' }), 'Discarded{Escape}')
@@ -176,7 +176,7 @@ describe('room history updates', () => {
     expect(harness.service.CreateLocalAIChatFolder).not.toHaveBeenCalled()
   })
 
-  it('labels each room filter with an icon', async () => {
+  it('labels each room filter and keeps icons on the category chips', async () => {
     render(<App />)
     await screen.findByText('latest message')
 
@@ -186,8 +186,9 @@ describe('room history updates', () => {
     expect(within(filters).getByText('Needs reply')).toBeTruthy()
     expect(within(filters).getByText('Favorites')).toBeTruthy()
     expect(within(filters).getByText('Unanswered')).toBeTruthy()
-    expect(within(filters).getByText('Local AI')).toBeTruthy()
-    expect(filters.querySelectorAll('button svg')).toHaveLength(6)
+    expect(within(filters).getByText('AI chats')).toBeTruthy()
+    const categories = within(filters).getByRole('group', { name: 'Room categories' })
+    expect(categories.querySelectorAll('button svg')).toHaveLength(3)
   })
 
   it('adds a chat to Favorites from the room menu', async () => {

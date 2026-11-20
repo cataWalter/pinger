@@ -154,7 +154,7 @@ describe('room history updates', () => {
     openMessageMenu(container)
 
     expect(await screen.findByRole('menuitem', { name: 'Analyze message with Language Tutor' })).toBeTruthy()
-    expect(screen.queryByRole('menuitem', { name: 'Translate message with local AI' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Translate message with AI' })).toBeNull()
   })
 
   it('analyzes an outgoing draft and replaces the composer with the Turkish correction', async () => {
@@ -311,6 +311,34 @@ describe('room history updates', () => {
 
     act(() => resolveAnalysis({ detected_language: 'it', corrected_text: 'Merhaba, nasılsın?' }))
     expect(await within(dialog).findByRole('button', { name: 'Copy corrected · turkish' })).toBeTruthy()
+  })
+
+  it('shows the English meaning of the correction and still inserts only the correction', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.endpoint': 'http://localhost:11434' },
+    })
+    let resolveAnalysis: (analysis: unknown) => void = () => { }
+    harness.tutorService.Analyze.mockReturnValueOnce(new Promise((resolve) => { resolveAnalysis = resolve }))
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'Ciao, come stai?' } })
+    await user.click(menuCommand('Analyze draft with Language Tutor'))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
+    const calls = harness.tutorService.Analyze.mock.calls
+    const requestID = calls[calls.length - 1][4]
+    act(() => harness.eventHandlers.get('ai:stream')?.({ data: { requestId: requestID, text: '{"detected_language":"it","corrected_text":"Merhaba, nasılsın?","translation":"Hello, how ar' } }))
+    expect(await within(dialog).findByText('Hello, how ar')).toBeTruthy()
+
+    act(() => resolveAnalysis({ detected_language: 'it', corrected_text: 'Merhaba, nasılsın?', translation: 'Hello, how are you?' }))
+    expect(await within(dialog).findByText('Hello, how are you?')).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Copy translation · english' })).toBeTruthy()
+    await user.click(within(dialog).getByRole('button', { name: 'Replace draft with Turkish' }))
+
+    expect(composer.value).toBe('Merhaba, nasılsın?')
   })
 
   it.each(['ctrlKey', 'metaKey'])('analyzes the composer draft with %s+Shift+T', async (modifier) => {

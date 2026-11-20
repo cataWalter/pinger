@@ -1,6 +1,6 @@
 import { Fragment, lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
-import { MessagesSquare } from 'lucide-react'
+import { Virtuoso, type ListItem, type VirtuosoHandle } from 'react-virtuoso'
+import { CheckCheck, MessagesSquare } from 'lucide-react'
 import { type Message } from '../bindings/mychat/desktop/models.js'
 import { firstPreviewableURL, LinkPreviewCard } from './LinkPreview'
 import { type ThreadSummary } from './threads'
@@ -42,6 +42,7 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   unreadMarkerID = '',
   unreadDividerRef,
   threadSummaries,
+  onAnalysesUnloaded,
 }: {
   messages: Message[]
   header?: ReactNode
@@ -63,6 +64,7 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   unreadMarkerID?: string
   unreadDividerRef?: (element: HTMLDivElement | null) => void
   threadSummaries?: Map<string, ThreadSummary>
+  onAnalysesUnloaded?: (messageIDs: string[]) => void
 }) {
   const visibleMessages = hideDeleted ? messages.filter((message) => !message.redacted) : messages
   const scope = `${accountID}:${selectedRoomID}`
@@ -73,6 +75,9 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   const firstRowRef = useRef<HTMLElement>(null)
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null)
   const virtualRef = useRef<VirtuosoHandle>(null)
+  const renderedReportRef = useRef<{ scope: string; messageIDs: Set<string> } | null>(null)
+  const latestReportRef = useRef({ scope, onAnalysesUnloaded })
+  latestReportRef.current = { scope, onAnalysesUnloaded }
   const focusFrameRef = useRef<number | null>(null)
   const [anchor, setAnchor] = useState({ scope, source: messages, visible: visibleMessages, hideDeleted, firstIndex: 1000000 })
   const previousRef = useRef<{ scope: string; messages: Message[] } | null>(null)
@@ -228,6 +233,7 @@ export const TimelineMessageList = memo(function TimelineMessageList({
               />
             )}
             {ownMessage && message.seenAt > 0 && <time className="message-seen-status" dateTime={new Date(message.seenAt).toISOString()}>
+              <CheckCheck size={12} aria-hidden="true" />
               Seen at {formatTime(message.seenAt, preferenceBoolean(preferences, 'appearance.time_24_hour'))}
             </time>}
             {Object.keys(message.reactions ?? {}).length > 0 && <div className="message-reactions">
@@ -259,6 +265,19 @@ export const TimelineMessageList = memo(function TimelineMessageList({
 
   if (virtualized) {
     if (!scrollParent) return null
+    // reportRenderedMessages compares each rendered set with the previous one. Rows that dropped out are unloaded by virtual loading.
+    function reportRenderedMessages(items: ListItem<Message>[]) {
+      const { scope: currentScope, onAnalysesUnloaded: notifyUnloaded } = latestReportRef.current
+      const messageIDs = new Set<string>()
+      for (const item of items) {
+        if ('data' in item && item.data) messageIDs.add(timelineMessageID(item.data))
+      }
+      const previous = renderedReportRef.current
+      renderedReportRef.current = { scope: currentScope, messageIDs }
+      if (!previous || previous.scope !== currentScope || !notifyUnloaded) return
+      const unloaded = Array.from(previous.messageIDs).filter((messageID) => !messageIDs.has(messageID))
+      if (unloaded.length > 0) notifyUnloaded(unloaded)
+    }
     return <Virtuoso<Message, { header?: ReactNode; zoom?: number }>
       ref={virtualRef}
       className="virtual-timeline"
@@ -268,6 +287,7 @@ export const TimelineMessageList = memo(function TimelineMessageList({
       data={visibleMessages}
       firstItemIndex={anchor.firstIndex}
       computeItemKey={(_index, message) => timelineMessageID(message)}
+      itemsRendered={reportRenderedMessages}
       itemSize={(element, field) => element[field]}
       defaultItemHeight={48}
       increaseViewportBy={{ top: 240, bottom: 240 }}

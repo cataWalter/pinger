@@ -52,7 +52,7 @@ export default function LocalAIComposer({
   return (
     <form className="local-ai-composer" onSubmit={onSubmit}>
       {composerError && <p className="local-ai-composer-error" role="alert">{composerError}</p>}
-      {runElsewhere && <p className="local-ai-notice" role="status">Local AI is replying in another chat.</p>}
+      {runElsewhere && <p className="local-ai-notice" role="status">AI is replying in another chat.</p>}
       {imageElsewhere && <p className="local-ai-notice" role="status">Image generation is running in another chat.</p>}
       <div className="local-ai-composer-row">
         {attachments.length > 0 && (
@@ -76,11 +76,11 @@ export default function LocalAIComposer({
           onChange={(event) => onDraftChange(event.currentTarget.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          placeholder="Message your local model"
+          placeholder="Message your AI"
           spellCheck={false}
           autoCorrect="off"
           autoCapitalize="off"
-          aria-label="Message local AI"
+          aria-label="Message AI"
           rows={1}
           disabled={loading}
         />
@@ -99,7 +99,7 @@ export default function LocalAIComposer({
               <Square size={13} />
             </button>
           ) : (
-            <button className="send-button" type="submit" aria-label="Send to local AI" disabled={!canSend}>
+            <button className="send-button" type="submit" aria-label="Send to AI" disabled={!canSend}>
               <Send size={17} />
             </button>
           )}

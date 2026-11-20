@@ -30,9 +30,9 @@ export function LanguageTutorAnalysisDetails({ analysis, originalText, learningC
 
 const jsonEscapes = new Map([['"', '"'], ['\\', '\\'], ['/', '/'], ['b', '\b'], ['f', '\f'], ['n', '\n'], ['r', '\r'], ['t', '\t']])
 
-// streamedCorrectedText decodes the corrected_text value from a partial JSON stream, so the draft correction can appear before the check finishes.
-export function streamedCorrectedText(preview: string): string {
-  const start = /"corrected_text"\s*:\s*"/.exec(preview)
+// streamedJSONString decodes one string field from a partial JSON stream, so draft results can appear before the check finishes.
+export function streamedJSONString(preview: string, field: string): string {
+  const start = new RegExp(`"${field}"\\s*:\\s*"`).exec(preview)
   if (!start) return ''
   let text = ''
   for (let index = start.index + start[0].length; index < preview.length; index++) {
@@ -58,20 +58,28 @@ export function streamedCorrectedText(preview: string): string {
   return text
 }
 
-// LanguageTutorDraftCorrection shows the corrected draft while it streams and after the check completes.
-export function LanguageTutorDraftCorrection({ analysis, busy, preview, originalText, learningCode, languages }: { analysis: TutorAnalysis | null; busy: boolean; preview: string; originalText: string; learningCode: string; languages: readonly LanguageEntry[] }) {
+// LanguageTutorDraftCorrection shows the corrected draft and its meaning while they stream and after the check completes.
+export function LanguageTutorDraftCorrection({ analysis, busy, preview, originalText, learningCode, explanationCode, languages }: { analysis: TutorAnalysis | null; busy: boolean; preview: string; originalText: string; learningCode: string; explanationCode: string; languages: readonly LanguageEntry[] }) {
   const label = `CORRECTED · ${languageName(learningCode, languages).toUpperCase()}`
+  const translationLabel = `TRANSLATION · ${languageName(explanationCode, languages).toUpperCase()}`
   if (analysis) {
     if (!analysis.corrected_text) return null
     const unchanged = collapseSpaces(analysis.corrected_text) === collapseSpaces(originalText)
-    return <TutorResultSection label={label} lang={learningCode} text={analysis.corrected_text} primary>
-      {unchanged && <p className="language-tutor-note">No changes needed. The text is already correct.</p>}
-    </TutorResultSection>
+    return <>
+      <TutorResultSection label={label} lang={learningCode} text={analysis.corrected_text} primary>
+        {unchanged && <p className="language-tutor-note">No changes needed. The text is already correct.</p>}
+      </TutorResultSection>
+      {analysis.translation && <TutorResultSection label={translationLabel} lang={explanationCode} text={analysis.translation} primary />}
+    </>
   }
   if (!busy) return null
-  const streamed = streamedCorrectedText(preview)
-  if (!streamed) return <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with the local model…</p>
-  return <TutorResultSection label={label} lang={learningCode} text={streamed} primary copyable={false} />
+  const streamed = streamedJSONString(preview, 'corrected_text')
+  if (!streamed) return <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with AI…</p>
+  const streamedTranslation = streamedJSONString(preview, 'translation')
+  return <>
+    <TutorResultSection label={label} lang={learningCode} text={streamed} primary copyable={false} />
+    {streamedTranslation && <TutorResultSection label={translationLabel} lang={explanationCode} text={streamedTranslation} primary copyable={false} />}
+  </>
 }
 
 // TutorResultSection renders one labeled tutor text with an optional copy action.

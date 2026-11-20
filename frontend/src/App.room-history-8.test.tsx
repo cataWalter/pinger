@@ -148,10 +148,10 @@ describe('room history updates', () => {
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
 
-    if (activation === 'menu') await user.click(menuCommand('Summarize with Local AI'))
+    if (activation === 'menu') await user.click(menuCommand('Summarize with AI'))
     else fireEvent.keyDown(await screen.findByRole('textbox', { name: 'Message' }), { key: 'O', code: 'KeyO', [activation]: true, shiftKey: true })
-    expect(await screen.findByRole('heading', { name: 'Local AI' })).toBeTruthy()
-    const draft = await screen.findByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+    expect(await screen.findByRole('heading', { name: 'AI chat' })).toBeTruthy()
+    const draft = await screen.findByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
     await waitFor(() => expect(draft.value).toContain('Alice: older history'))
     expect(draft.value).toContain('Summarize')
     expect(draft.value).toContain('Alice: latest message')
@@ -163,7 +163,7 @@ describe('room history updates', () => {
     const editedDraft = `${draft.value}\nAlso note the dates mentioned.`
     fireEvent.change(draft, { target: { value: editedDraft } })
     expect(draft.value).toBe(editedDraft)
-    await user.click(await screen.findByRole('button', { name: 'Send to local AI' }))
+    await user.click(await screen.findByRole('button', { name: 'Send to AI' }))
     await waitFor(() => expect(harness.service.LocalAIChat).toHaveBeenCalled())
     expect(harness.service.CreateLocalAIChat).toHaveBeenCalledWith('', 'summary')
     expect(harness.service.AppendLocalAIChatMessage).toHaveBeenCalledWith('summary-chat', expect.objectContaining({ role: 'user', content: editedDraft }))
@@ -203,7 +203,39 @@ describe('room history updates', () => {
     expect(harness.service.SetStringPreference).toHaveBeenCalledWith('ai.transcription_model', 'whisper-test')
   })
 
-  it('saves image generation settings under the ai.image preference keys', async () => {
+  it('keeps online consent locked until a model is saved, then stores it for the saved endpoint', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.provider': 'online', 'ai.online.endpoint': 'https://openrouter.ai/api/v1' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.click(await screen.findByRole('tab', { name: 'AI' }))
+
+    const consent = await screen.findByRole('checkbox', { name: 'Allow Pinger to send chat content to this online service' }) as HTMLInputElement
+    expect(consent.disabled).toBe(true)
+    expect(harness.service.SetStringPreference).not.toHaveBeenCalledWith('ai.online.consent_endpoint', expect.anything())
+  })
+
+  it('grants online consent for the saved endpoint only', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      preferences: { 'ai.provider': 'online', 'ai.online.endpoint': 'https://openrouter.ai/api/v1', 'ai.online.model': 'openai/gpt-4o-mini' },
+    })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.click(await screen.findByRole('tab', { name: 'AI' }))
+
+    const consent = await screen.findByRole('checkbox', { name: 'Allow Pinger to send chat content to this online service' }) as HTMLInputElement
+    expect(consent.disabled).toBe(false)
+    await user.click(consent)
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith('ai.online.consent_endpoint', 'https://openrouter.ai/api/v1'))
+  })
+
+  it('saves the image generation settings under the ai.image preference keys', async () => {
     const user = userEvent.setup()
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()

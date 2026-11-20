@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Room, type Snapshot } from '../bindings/mychat/desktop/models.js'
 import { isLocalAIRoomID, localAIChatIDFromRoomID } from './localAIChats'
+import { clearParkedChatTranslations } from './chatTranslationStash'
 import { describeError, isNeedsReplyRoom, preferenceBoolean } from './appShared'
 import { roomActivityAt } from './rooms'
 import { appendAIDraft, dropArchivedVolatileAIDrafts, getVolatileAIDraft, setVolatileAIDraft } from './volatileAIDrafts'
@@ -189,6 +190,7 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
     chatTranslationAIRequestRef.current = ''
     chatTranslationRequestRef.current++
     setChatTranslation(null)
+    clearParkedChatTranslations()
     setImageSendRun(null)
     setGeneratedImageReview(null)
     setMediaApproval(null)

@@ -177,7 +177,7 @@ describe('room history updates', () => {
     harness.tutorService.Analyze.mockResolvedValueOnce({
       detected_language: 'en',
       corrected_text: 'Bonjour, comment ça va ?',
-      translation: 'Hello, how are you?',
+      translation: 'Hallo, wie geht es dir?',
       grammar_notes: ['Use the contraction “ça va” in this expression.'],
       vocabulary: [{ term: 'bonjour', meaning: 'hello', example: 'Bonjour, Aline.' }],
       text_to_insert: 'Bonjour, comment ça va ?',
@@ -191,7 +191,8 @@ describe('room history updates', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
     expect(await within(dialog).findByText('CORRECTED · FRENCH')).toBeTruthy()
     expect(dialog.querySelector('p[lang="fr"]')?.textContent).toBe('Bonjour, comment ça va ?')
-    expect(within(dialog).queryByText('TRANSLATION · GERMAN')).toBeNull()
+    expect(within(dialog).getByText('TRANSLATION · GERMAN')).toBeTruthy()
+    expect(within(dialog).getByText('Hallo, wie geht es dir?')).toBeTruthy()
     expect(within(dialog).queryByText('Use the contraction “ça va” in this expression.')).toBeNull()
     expect(within(dialog).queryByText('bonjour')).toBeNull()
     expect(within(dialog).getByRole('button', { name: 'Replace draft with French' })).toBeTruthy()

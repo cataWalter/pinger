@@ -2,24 +2,26 @@ import { useEffect, useRef } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Room } from '../bindings/mychat/desktop/models.js'
 import { chatLanguageChange, detectedChatLanguageKey, resolveLanguageRoles, roomLearningLanguageKey } from './aiLanguages'
+import { localAIEndpointConfigured } from './aiProvider'
 import { preferenceBoolean, preferenceString } from './appShared'
 import { useWorkspaceEffects } from './useWorkspaceEffects'
 
 export const CHAT_LANGUAGE_DETECTION_PREFERENCE = 'ai.detect_chat_language'
 
 // useChatLanguageDetection sets the learning language of each unarchived chat from its latest messages, one chat at a
-// time in the background. It needs the setting on and an AI endpoint, and it leaves archived chats alone.
+// time in the background. It needs the setting on and the local model endpoint, even when replies use an online
+// provider, because chat content is never sent online automatically. It leaves archived chats alone.
 export function useChatLanguageDetection(app: ReturnType<typeof useWorkspaceEffects>) {
   const { activeAccountID, archivedPreferenceKey, newAIRequestID, preferences, preferencesRef, rooms, roomsRef, setPreferences } = app
   const accountIDRef = useRef(activeAccountID)
   accountIDRef.current = activeAccountID
   const detectingRef = useRef(false)
   const checkedEventsRef = useRef(new Map<string, string>())
-  const enabled = preferenceBoolean(preferences, CHAT_LANGUAGE_DETECTION_PREFERENCE) && preferenceString(preferences, 'ai.endpoint', '').trim() !== ''
+  const enabled = preferenceBoolean(preferences, CHAT_LANGUAGE_DETECTION_PREFERENCE) && localAIEndpointConfigured(preferences)
 
   function detectionActive() {
     const current = preferencesRef.current
-    return preferenceBoolean(current, CHAT_LANGUAGE_DETECTION_PREFERENCE) && preferenceString(current, 'ai.endpoint', '').trim() !== ''
+    return preferenceBoolean(current, CHAT_LANGUAGE_DETECTION_PREFERENCE) && localAIEndpointConfigured(current)
   }
 
   function isArchived(room: Room) {

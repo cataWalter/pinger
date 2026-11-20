@@ -10,6 +10,7 @@ import { useAuthFormState } from './useAuthFormState'
 import { useTimelineHistory } from './useTimelineHistory'
 import { useInboxState } from './useInboxState'
 import { useTimelineScroll } from './useTimelineScroll'
+import { useSidebarWidth } from './sidebarWidth'
 import { useMediaGalleryState } from './useMediaGalleryState'
 import { useMessageSearch } from './useMessageSearch'
 import { useLocalAIChats } from './useLocalAIChats'
@@ -67,6 +68,8 @@ function AppBody() {
     document.documentElement.dataset.lowSpec = String(lowSpecMode)
   }, [lowSpecMode])
 
+  const [sidebarWidth, setSidebarWidth] = useSidebarWidth()
+
   if (!snapshot) return <BootScreen error={error} />
 
 
@@ -123,11 +126,17 @@ function AppBody() {
       style={{
         '--own-bubble': safeBubbleColor,
         '--app-zoom': `${appZoom}%`,
+        '--sidebar-width': sidebarWidth === null ? undefined : `${sidebarWidth}px`,
         ...accentCssVariables(accentPalette),
         ...themeCssVariables(themeChoice, accentPalette, safeBubbleColor),
       } as React.CSSProperties}
     >
-      <AppSidebar app={appState} />
+      <AppSidebar
+        app={appState}
+        sidebarWidth={sidebarWidth}
+        sidebarZoom={appZoom / 100}
+        onSidebarWidthChange={setSidebarWidth}
+      />
       <section className="conversation" aria-label="Conversation">
         <ConversationHeader app={appState} />
         <ConversationWorkspace app={appState} />

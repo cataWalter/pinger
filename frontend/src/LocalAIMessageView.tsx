@@ -33,7 +33,7 @@ export default memo(function LocalAIMessageView({ message, idle, imagePrompt, ed
   return (
     <article className={`local-ai-message is-${message.role}`}>
       <span className="local-ai-message-label">
-        {isUser ? 'You' : 'Local AI'}
+        {isUser ? 'You' : 'AI'}
         {message.status === 'stopped' && ' · Stopped'}
       </span>
       {attachments.length > 0 && (

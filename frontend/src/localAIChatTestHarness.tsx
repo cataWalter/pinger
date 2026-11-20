@@ -19,8 +19,8 @@ export function renderChat(overrides: Partial<LocalAIChatProps> = {}) {
 }
 
 export async function sendDraft(text: string) {
-  const composer = screen.getByRole('textbox', { name: 'Message local AI' }) as HTMLTextAreaElement
+  const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
   await waitFor(() => expect(composer.disabled).toBe(false))
   fireEvent.change(composer, { target: { value: text } })
-  fireEvent.click(screen.getByRole('button', { name: 'Send to local AI' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Send to AI' }))
 }

@@ -43,10 +43,10 @@ function ChatGoalEditor({ savedGoal, aiEnabled, onInfer, onSave }: {
   return (
     <section className="room-agent-settings room-goal-settings" aria-label="Chat goal">
       <div className="room-members-heading"><h3>Chat goal</h3><span>{draft.length}/{MAX_CHAT_GOAL_LENGTH}</span></div>
-      <p className="room-agent-note">The long-term purpose of this chat. AI draft replies and suggestions use it. Inferring reads recent messages and sends them to the configured endpoint, which may be remote.</p>
+      <p className="room-agent-note">The long-term purpose of this chat. AI draft replies and suggestions use it. Inferring reads recent messages and sends them to the AI provider set in Settings &gt; AI, which may be an online service.</p>
       <label className="room-agent-field"><span>Goal</span><textarea maxLength={MAX_CHAT_GOAL_LENGTH} rows={3} spellCheck={false} value={draft} onChange={(event) => setDraft(event.target.value)} /></label>
       <div className="room-agent-editor-actions">
-        <button className="settings-command" type="button" disabled={!aiEnabled || busy !== ''} title={aiEnabled ? undefined : 'Set an AI endpoint in Settings > AI first.'} onClick={() => void infer()}><Sparkles size={14} />{busy === 'inferring' ? 'Reading chat…' : 'Infer from chat'}</button>
+        <button className="settings-command" type="button" disabled={!aiEnabled || busy !== ''} title={aiEnabled ? undefined : 'Set up AI in Settings > AI first.'} onClick={() => void infer()}><Sparkles size={14} />{busy === 'inferring' ? 'Reading chat…' : 'Infer from chat'}</button>
         <button className="settings-command" type="button" disabled={!dirty || busy !== ''} onClick={() => void save(draft)}>{busy === 'saving' ? 'Saving…' : 'Save goal'}</button>
         {savedGoal && <button className="settings-command is-danger" type="button" disabled={busy !== ''} onClick={() => void save('')}>Clear goal</button>}
       </div>
@@ -108,7 +108,7 @@ export function RoomInfoDialog({ room, chatGoal, aiEnabled, onInferChatGoal, onS
           </section>
           <section className="room-agent-settings" aria-label="Chat agents">
             <div className="room-members-heading"><h3>Chat agents</h3><span>{agents.agents.length}/{MAX_CHAT_AGENTS}</span></div>
-            <p className="room-agent-note">Profiles are saved to this account for this room. Profile instructions and included chat text are sent to the configured endpoint, which may be remote.</p>
+            <p className="room-agent-note">Profiles are saved to this account for this room. Profile instructions and included chat text are sent to the AI provider set in Settings &gt; AI, which may be an online service.</p>
             <label className="room-agent-field"><span>Default agent</span><select aria-label="Default chat agent" value={agents.defaultAgentId} onChange={(event) => onDefaultAgentChange(event.target.value)}>
               <option value="">No default</option>
               {agents.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}

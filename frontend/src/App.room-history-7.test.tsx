@@ -133,7 +133,7 @@ describe('room history updates', () => {
     expect(await screen.findByText('selected message')).toBeTruthy()
 
     openMessageMenu(container)
-    await user.click(await screen.findByRole('menuitem', { name: 'Explain message with local AI' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Explain message with AI' }))
     await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalledTimes(1))
     const requestID = harness.service.AIComplete.mock.calls[0][1]
     expect(requestID).toEqual(expect.any(String))
@@ -164,7 +164,7 @@ describe('room history updates', () => {
     expect(await screen.findByText('selected message')).toBeTruthy()
 
     openMessageMenu(container)
-    await user.click(await screen.findByRole('menuitem', { name: 'Explain message with local AI' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Explain message with AI' }))
     await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalledTimes(1))
     const requestID = harness.service.AIComplete.mock.calls[0][1]
     const dialog = await screen.findByRole('dialog', { name: 'Explain message' })
@@ -189,7 +189,7 @@ describe('room history updates', () => {
     expect(await screen.findByText('selected message')).toBeTruthy()
 
     openMessageMenu(container)
-    await user.click(await screen.findByRole('menuitem', { name: 'Explain message with local AI' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Explain message with AI' }))
     const dialog = await screen.findByRole('dialog', { name: 'Explain message' })
     await within(dialog).findByText('This is an explanation.')
 

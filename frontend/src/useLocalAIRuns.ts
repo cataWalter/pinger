@@ -54,12 +54,12 @@ export function useLocalAIRuns({
     setRunView({ ...run })
     try {
       const reply = await AppService.LocalAIChat({ messages: buildLocalAIModelMessages(history), requestId: run.requestId, agentInstructions })
-      if (!reply.trim()) throw new Error('The local model returned an empty reply.')
+      if (!reply.trim()) throw new Error('The model returned an empty reply.')
       await saveAssistantTurn(runChatID, reply, 'complete')
       generateTitle(runChatID)
     } catch (runError) {
       if (!run.stopping) {
-        setFailure({ chatId: runChatID, message: localAIErrorMessage(runError, 'The local model could not complete this message.'), history, agentId: runAgentID })
+        setFailure({ chatId: runChatID, message: localAIErrorMessage(runError, 'The model could not complete this message.'), history, agentId: runAgentID })
       } else if (run.text.trim()) {
         await saveAssistantTurn(runChatID, run.text, 'stopped').catch((saveError: unknown) => {
           setFailure({ chatId: runChatID, message: localAIErrorMessage(saveError, 'The partial reply could not be saved.'), history, agentId: runAgentID })

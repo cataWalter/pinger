@@ -1,13 +1,14 @@
-import { useEffect, useMemo, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, type FormEvent } from 'react'
 import { AppService, LanguageTutorService } from '../bindings/mychat/desktop'
 import { type AIMessage, type Message } from '../bindings/mychat/desktop/models.js'
 import { type PromptMessage, endsWithAssistantTurn } from './aiPrompts'
 import { resolveAIFeatureTuning, resolveChatLearningLanguage, resolveChatTutorLanguage, type AIFeatureID } from './aiSettings'
 import { type AIAcceptAction, type AIStreamHandler, type LanguageTutorState, describeError } from './appShared'
+import { clearParkedChatTranslations, parkChatTranslation, takeParkedChatTranslation } from './chatTranslationStash'
 import type { useMessageReactions } from './useMessageReactions'
 
 export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
-  const { activeAIRequestRef, activeAccountID, aiEnabled, aiPanel, aiStreamHandlersRef, busy, chatTranslationAIRequestRef, chatTranslationRequestRef, composeText, composeTextRef, editTarget, generatedImageReview, imageSendRun, languageTutorRequestRef, messages, preferences, preferencesRef, roomDrafts, scrollTimelineToBottom, selectedRoomID, selectedRoomRef, setAIPanel, setBusy, setChatTranslation, setComposeText, setError, setGeneratedImageReview, setHistoryRevision, setImageSendRun, setLanguageTutorState, setMentionBindings, setMentionStart, stageAttachmentFiles, stageDroppedFilesRef, stickToBottomRef, stoppedAIRequestRef, workspaceGenerationRef } = app
+  const { activeAIRequestRef, activeAccountID, aiEnabled, aiPanel, aiStreamHandlersRef, busy, chatTranslation, chatTranslationAIRequestRef, chatTranslationRequestRef, composeText, composeTextRef, editTarget, generatedImageReview, imageSendRun, languageTutorRequestRef, messages, preferences, preferencesRef, roomDrafts, scrollTimelineToBottom, selectedRoomID, selectedRoomRef, setAIPanel, setBusy, setChatTranslation, setComposeText, setError, setGeneratedImageReview, setHistoryRevision, setImageSendRun, setLanguageTutorState, setMentionBindings, setMentionStart, stageAttachmentFiles, stageDroppedFilesRef, stickToBottomRef, stoppedAIRequestRef, workspaceGenerationRef } = app
   stageDroppedFilesRef.current = stageAttachmentFiles
   function promptMessages(source: Message[]): PromptMessage[] {
     return source.map((message) => ({
@@ -40,11 +41,24 @@ export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
     void Promise.resolve(AppService.AICancel(requestID)).catch(() => false)
   }
 
+  // Finished translations are parked in RAM when their chat is left and taken back when it is reopened.
+  // In-flight translation work still stops on a chat switch.
+  const chatTranslationRef = useRef(chatTranslation)
+  chatTranslationRef.current = chatTranslation
+  const translationOwnerRef = useRef({ accountID: activeAccountID, roomID: selectedRoomID })
   useEffect(() => {
     chatTranslationRequestRef.current++
     cancelAIRequest(chatTranslationAIRequestRef.current)
     chatTranslationAIRequestRef.current = ''
-    setChatTranslation(null)
+    const previous = translationOwnerRef.current
+    translationOwnerRef.current = { accountID: activeAccountID, roomID: selectedRoomID }
+    if (previous.accountID !== activeAccountID) {
+      clearParkedChatTranslations()
+      setChatTranslation(null)
+      return
+    }
+    parkChatTranslation(activeAccountID, chatTranslationRef.current)
+    setChatTranslation(takeParkedChatTranslation(activeAccountID, selectedRoomID))
   }, [selectedRoomID, activeAccountID, chatTranslationAIRequestRef, chatTranslationRequestRef, setChatTranslation])
 
   // aiInstructions returns the tunable prompt for a feature. Built-in defaults are returned when no override is saved.
@@ -167,7 +181,7 @@ export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
       return
     }
     if (!aiEnabled) {
-      setError('Set a local AI endpoint in Settings > AI to use Language Tutor.')
+      setError('Set up AI in Settings > AI to use Language Tutor.')
       return
     }
     const learningLanguage = resolveChatLearningLanguage(preferences, selectedRoomID)

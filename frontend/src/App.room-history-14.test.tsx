@@ -178,7 +178,7 @@ describe('room history updates', () => {
     const filters = await screen.findByRole('group', { name: 'Filter rooms' })
     for (const [groupName, names] of [
       ['Room categories', ['Needs reply', 'Unanswered rooms', 'Favorite rooms']],
-      ['Room visibility', ['Archived rooms', 'Local AI chats', 'All']],
+      ['Room visibility', ['Archived rooms', 'AI chats', 'All']],
     ] as const) {
       const filterGroup = within(filters).getByRole('group', { name: groupName })
       for (const name of names) {
@@ -198,25 +198,25 @@ describe('room history updates', () => {
     const user = userEvent.setup()
     render(<App />)
     await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
     expect(screen.getByText('No private model chats yet')).toBeTruthy()
     await user.click(await screen.findByRole('button', { name: 'New private chat' }))
 
-    expect(await screen.findByRole('heading', { name: 'Local AI' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'AI chat' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Message timeline' })).toBeNull()
     let savedSeq = 0
     harness.service.CreateLocalAIChat.mockResolvedValue({ id: 'chat-1', title: '', agentId: '', updatedAt: 1 })
     harness.service.AppendLocalAIChatMessage.mockImplementation(async (_chatID: string, message: object) => ({ ...message, seq: ++savedSeq, createdAt: 1 }))
-    await user.type(await screen.findByRole('textbox', { name: 'Message local AI' }), 'Only local')
-    await user.click(await screen.findByRole('button', { name: 'Send to local AI' }))
+    await user.type(await screen.findByRole('textbox', { name: 'Message AI' }), 'Only local')
+    await user.click(await screen.findByRole('button', { name: 'Send to AI' }))
 
     expect(await screen.findByText('Hello from the local model.')).toBeTruthy()
     expect(harness.service.CreateLocalAIChat).toHaveBeenCalledWith('', 'chat')
     expect(harness.service.LocalAIChat).toHaveBeenCalledWith({ messages: [{ role: 'user', content: 'Only local' }], requestId: expect.any(String), agentInstructions: '' })
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
 
-    await user.type(await screen.findByRole('textbox', { name: 'Message local AI' }), 'Follow-up')
-    await user.click(await screen.findByRole('button', { name: 'Send to local AI' }))
+    await user.type(await screen.findByRole('textbox', { name: 'Message AI' }), 'Follow-up')
+    await user.click(await screen.findByRole('button', { name: 'Send to AI' }))
     await waitFor(() => expect(harness.service.LocalAIChat).toHaveBeenLastCalledWith({
       messages: [
         { role: 'user', content: 'Only local' },
@@ -238,7 +238,7 @@ describe('room history updates', () => {
     ])
     render(<App />)
     await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
 
     expect((await screen.findByRole('button', { name: /Trip plan/ })).querySelector('svg.lucide-message-square')).not.toBeNull()
     expect(screen.getByRole('button', { name: /Long article/ }).querySelector('svg.lucide-file-text')).not.toBeNull()
@@ -250,7 +250,7 @@ describe('room history updates', () => {
 
     fireEvent.keyDown(container.querySelector('.app-shell')!, { key: 'm', ctrlKey: true, shiftKey: true })
 
-    expect(await screen.findByRole('heading', { name: 'Local AI' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'AI chat' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Message timeline' })).toBeNull()
   })
 
@@ -260,7 +260,7 @@ describe('room history updates', () => {
     render(<App />)
     await screen.findByText('latest message')
     expect(screen.queryByRole('button', { name: /Trip plan/ })).toBeNull()
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
 
     const row = await screen.findByRole('button', { name: /Trip plan/ })
     expect(within(row).getByText('Here is a draft')).toBeTruthy()

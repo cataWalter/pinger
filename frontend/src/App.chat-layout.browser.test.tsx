@@ -26,7 +26,7 @@ async function openTutorDraft(width: number, height: number, preferences: Record
   await page.viewport(width, height)
   const snapshot = await service.Snapshot()
   service.Snapshot.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], name: 'Nora Bennett' }], preferences: { ...snapshot.preferences, 'ai.endpoint': 'http://localhost:11434', ...preferences } })
-  vi.mocked(LanguageTutorService.Analyze).mockResolvedValueOnce({ detected_language: 'it', corrected_text: 'Merhaba, nasılsın?', translation: '', grammar_notes: null, vocabulary: null, text_to_insert: '' })
+  vi.mocked(LanguageTutorService.Analyze).mockResolvedValueOnce({ detected_language: 'it', corrected_text: 'Merhaba, nasılsın?', translation: '', grammar_notes: [], vocabulary: [], text_to_insert: '' })
   renderApp()
   const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
   await user.click(await within(roomList).findByRole('button', { name: /Nora Bennett/ }))
@@ -132,7 +132,7 @@ describe('browser smoke: chat layout', () => {
     [390, 844, 100, 'Light'],
     [760, 600, 125, 'Dark'],
     [1100, 780, 100, 'Light'],
-  ] as const)('keeps exclusive room filters labeled and aligned at %i x %i and %i percent zoom in %s', async (width, height, zoom, theme) => {
+  ] as const)('keeps exclusive room filters aligned with labels shown only on the active control at %i x %i and %i percent zoom in %s', async (width, height, zoom, theme) => {
     const user = userEvent.setup()
     await page.viewport(width, height)
     const snapshot = await service.Snapshot()
@@ -145,13 +145,15 @@ describe('browser smoke: chat layout', () => {
     const scope = screen.getByRole('group', { name: 'Room visibility' })
     const categories = screen.getByRole('group', { name: 'Room categories' })
     const bounds = categories.getBoundingClientRect()
+    const filtersBounds = filters.getBoundingClientRect()
     const buttons = within(categories).getAllByRole('button')
     const initialBounds = buttons.map((button) => button.getBoundingClientRect())
     const scopeBounds = scope.getBoundingClientRect()
-    expect(bounds.left).toBeGreaterThanOrEqual(0)
+    expect(bounds.left).toBeGreaterThanOrEqual(filtersBounds.left - 1)
     expect(bounds.right).toBeLessThanOrEqual(width + 1)
-    expect(Math.abs(bounds.top - scopeBounds.top)).toBeLessThanOrEqual(1)
-    expect(bounds.left).toBeGreaterThanOrEqual(scopeBounds.right - 1)
+    const wrapsBelowScope = bounds.top >= scopeBounds.bottom - 1
+    const sitsBesideScope = bounds.left >= scopeBounds.right - 1
+    expect(wrapsBelowScope || sitsBesideScope).toBe(true)
     expect(categories.scrollWidth).toBeLessThanOrEqual(categories.clientWidth + 1)
     expect(buttons).toHaveLength(3)
     expect(categories.querySelector('.filter-count')?.textContent).toBe('1')
@@ -159,30 +161,30 @@ describe('browser smoke: chat layout', () => {
       const buttonBounds = button.getBoundingClientRect()
       const label = button.querySelector<HTMLElement>('.filter-label')!
       const symbol = button.querySelector<HTMLElement>('.filter-symbol')!
-      expect(getComputedStyle(label).display).toBe('none')
+      const active = button.getAttribute('aria-pressed') === 'true'
+      // Hidden labels are 1px (about 1.25px under 125 percent zoom); active labels show their text.
+      expect(label.getBoundingClientRect().width > 4).toBe(active)
+      if (active) expect(label.scrollWidth).toBeLessThanOrEqual(label.clientWidth + 1)
       expect(button.getAttribute('aria-label')).toBeTruthy()
       expect(button.getAttribute('title')).toBeTruthy()
-      expect(buttonBounds.height).toBeGreaterThanOrEqual(34)
-      expect(Math.abs(buttonBounds.width - initialBounds[0].width)).toBeLessThanOrEqual(1)
-      expect(Math.abs(buttonBounds.top - initialBounds[0].top)).toBeLessThanOrEqual(1)
+      expect(buttonBounds.height).toBeGreaterThanOrEqual(28)
       expect(buttonBounds.left).toBeGreaterThanOrEqual(bounds.left - 1)
       expect(buttonBounds.right).toBeLessThanOrEqual(bounds.right + 1)
       expect(symbol.getBoundingClientRect().bottom).toBeLessThanOrEqual(buttonBounds.bottom)
-      const badge = symbol.querySelector('.filter-count')
+      const badge = button.querySelector('.filter-count')
       if (badge) {
         const badgeBounds = badge.getBoundingClientRect()
-        expect(badgeBounds.left).toBeGreaterThanOrEqual(buttonBounds.left - 1)
-        expect(badgeBounds.right).toBeLessThanOrEqual(buttonBounds.right + 1)
-        expect(badgeBounds.top).toBeGreaterThanOrEqual(buttonBounds.top - 1)
+        expect(Math.abs(badgeBounds.right - buttonBounds.right)).toBeLessThanOrEqual(6)
+        expect(Math.abs(badgeBounds.top - buttonBounds.top)).toBeLessThanOrEqual(6)
       }
     }
-    for (const name of ['Unanswered rooms', 'Needs reply', 'Favorite rooms', 'Archived rooms', 'Local AI chats', 'All']) {
+    for (const name of ['Unanswered rooms', 'Needs reply', 'Favorite rooms', 'Archived rooms', 'AI chats', 'All']) {
       const button = within(filters).getByRole('button', { name })
       await user.click(button)
       expect(button.getAttribute('aria-pressed')).toBe('true')
       expect(button.parentElement!.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(1)
+      expect(categories.getBoundingClientRect().right).toBeLessThanOrEqual(width + 1)
       buttons.forEach((category, index) => {
-        expect(Math.abs(category.getBoundingClientRect().width - initialBounds[index].width)).toBeLessThanOrEqual(1)
         expect(Math.abs(category.getBoundingClientRect().height - initialBounds[index].height)).toBeLessThanOrEqual(1)
       })
     }

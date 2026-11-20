@@ -17,7 +17,7 @@ export function ConversationHeader({ app }: { app: AppState }) {
       {localAIChatOpen ? (
         <>
           <div className="conversation-title">
-            {localAIRenameDraft === null ? <h2>{localAIActiveChat?.title || 'Local AI'}</h2> : <input className="local-ai-title-input" aria-label="Chat title" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={localAIRenameDraft} maxLength={LOCAL_AI_TITLE_CHARACTERS} autoFocus onChange={(event) => setLocalAIRenameDraft(event.currentTarget.value)} onBlur={() => setLocalAIRenameDraft(null)} onKeyDown={(event) => {
+            {localAIRenameDraft === null ? <h2>{localAIActiveChat?.title || 'AI chat'}</h2> : <input className="local-ai-title-input" aria-label="Chat title" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={localAIRenameDraft} maxLength={LOCAL_AI_TITLE_CHARACTERS} autoFocus onChange={(event) => setLocalAIRenameDraft(event.currentTarget.value)} onBlur={() => setLocalAIRenameDraft(null)} onKeyDown={(event) => {
               if (event.key === 'Escape') {
                 event.preventDefault()
                 setLocalAIRenameDraft(null)

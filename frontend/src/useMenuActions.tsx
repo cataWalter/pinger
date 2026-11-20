@@ -103,7 +103,7 @@ export function useMenuActions(app: ReturnType<typeof useWorkspaceEffects>) {
       loadingOlderRef.current = true
       setLoadingOlder(true)
     }
-    setSummaryStatus(pagingHistory ? 'Loading older messages…' : 'Preparing Local AI chat…')
+    setSummaryStatus(pagingHistory ? 'Loading older messages…' : 'Preparing AI chat…')
 
     try {
       while (moreHistory) {

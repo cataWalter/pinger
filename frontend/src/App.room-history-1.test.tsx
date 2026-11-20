@@ -132,20 +132,23 @@ describe('room history updates', () => {
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms, slidingSyncListCounts: { main: 40 } })
     render(<App />)
 
+    // 600px viewport / 52px row pitch + 8 overscan reaches all 20 loaded rooms, so the prefetch
+    // to the 40-room list count fires on the first render. After scrolling to 1000px the first
+    // index is floor(1000 / 52) - 8 = 11.
     const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
-    await waitFor(() => expect(harness.service.UpdateVisibleRange).toHaveBeenCalledWith('main', 0, 18))
+    await waitFor(() => expect(harness.service.UpdateVisibleRange).toHaveBeenCalledWith('main', 0, 40))
 
     act(() => {
       Object.defineProperty(roomList, 'scrollTop', { configurable: true, value: 1000 })
       fireEvent.scroll(roomList)
     })
-    await waitFor(() => expect(harness.service.UpdateVisibleRange).toHaveBeenLastCalledWith('main', 8, 40))
+    await waitFor(() => expect(harness.service.UpdateVisibleRange).toHaveBeenLastCalledWith('main', 11, 40))
   })
 
   it('keeps AI actions disabled until an AI endpoint is set', async () => {
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
-    expect((menuCommand('Summarize with Local AI') as HTMLButtonElement).disabled).toBe(true)
+    expect((menuCommand('Summarize with AI') as HTMLButtonElement).disabled).toBe(true)
     expect(screen.queryByRole('button', { name: 'Analyze chat topics' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Analyze conversation' })).toBeNull()
   })
@@ -154,7 +157,7 @@ describe('room history updates', () => {
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
-    expect(menuCommand('Summarize with Local AI')).toBeTruthy()
+    expect(menuCommand('Summarize with AI')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Analyze chat topics' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Analyze conversation' })).toBeNull()
   })

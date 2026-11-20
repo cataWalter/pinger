@@ -47,7 +47,7 @@ export function AIResultDialogs({
             <button className="icon-button" type="button" aria-label="Close AI result" title="Close AI result" onClick={onCloseAIResult}><X size={16} /></button>
           </header>
           <div className="ai-result-content" aria-live="polite" aria-busy={aiPanel.busy}>
-            {aiPanel.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />{aiPanel.status || 'Waiting for the local model…'}</p>}
+            {aiPanel.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />{aiPanel.status || 'Waiting for the model…'}</p>}
             {aiPanel.error && <p className="settings-error" role="alert">{aiPanel.error}</p>}
             {aiPanel.result && <div className="ai-result-text">{aiPanel.result}</div>}
             {aiPanel.stopped && !aiPanel.busy && <p className="settings-note ai-result-stopped" role="status">Generation stopped. The text above may be incomplete.</p>}
@@ -58,7 +58,7 @@ export function AIResultDialogs({
           </form>}
           <aside className="ai-result-disclaimer">
             <ShieldCheck size={16} aria-hidden="true" />
-            <p>No Matrix message is sent automatically. The selected text, included chat context, and, for custom agents, profile instructions are sent to the configured endpoint, which may be remote.</p>
+            <p>No Matrix message is sent automatically. The selected text, included chat context, and, for custom agents, profile instructions are sent to the AI provider set in Settings &gt; AI, which may be an online service.</p>
           </aside>
           <footer className="room-info-footer ai-result-footer">
             {aiPanel.acceptAction.kind !== 'none' && <button className="settings-command ai-result-primary" type="button" title={aiPanel.acceptAction.kind === 'reply' ? 'Use the result as a reply draft' : aiPanel.acceptAction.kind === 'rewrite' ? 'Replace the composer draft with this result' : 'Use the result as a draft'} disabled={!aiPanel.result || aiPanel.busy || hasEditTarget} onClick={onAcceptAIResult}>
@@ -133,12 +133,12 @@ function LanguageTutorDialog({ state, hasEditTarget, languages, onClose, onCheck
             </section>
             <div className="ai-result-content language-tutor-content" aria-live="polite" aria-busy={state.busy}>
               {state.error && <p className="settings-error" role="alert">{state.error}</p>}
-              <LanguageTutorDraftCorrection analysis={state.analysis} busy={state.busy} preview={state.preview} originalText={state.originalText} learningCode={state.learningLanguage} languages={languages} />
+              <LanguageTutorDraftCorrection analysis={state.analysis} busy={state.busy} preview={state.preview} originalText={state.originalText} learningCode={state.learningLanguage} explanationCode={state.explanationLanguage} languages={languages} />
             </div>
           </div>
           : <div className="ai-result-content language-tutor-content" aria-live="polite" aria-busy={state.busy}>
             <p className="language-tutor-explained-in">Explained in {languageName(state.explanationLanguage, languages)}</p>
-            {state.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with the local model…</p>}
+            {state.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />Analyzing with AI…</p>}
             {state.busy && state.preview !== '' && <pre className="language-tutor-preview">{state.preview}</pre>}
             {state.error && <p className="settings-error" role="alert">{state.error}</p>}
             {state.analysis && <LanguageTutorAnalysisDetails analysis={state.analysis} originalText={state.originalText} learningCode={state.learningLanguage} explanationCode={state.explanationLanguage} languages={languages} />}

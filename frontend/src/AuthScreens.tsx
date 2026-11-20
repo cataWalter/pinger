@@ -16,8 +16,13 @@ function AuthSide() {
 export function BootScreen({ error }: { error: string }) {
   return (
     <main className="boot-screen">
-      <div className="boot-mark"><MessageCircleMore size={20} /></div>
-      <span>Pinger</span>
+      <div className={error ? 'boot-loader is-failed' : 'boot-loader'} role="status" aria-label={error ? 'Pinger could not start' : 'Loading Pinger'}>
+        <span className="boot-ping" aria-hidden="true" />
+        <span className="boot-ping boot-ping-late" aria-hidden="true" />
+        <span className="boot-orbit" aria-hidden="true" />
+        <span className="boot-mark" aria-hidden="true"><MessageCircleMore size={26} /></span>
+      </div>
+      <span className="boot-wordmark">Pinger</span>
       {error && <p role="alert">{error}</p>}
     </main>
   )

@@ -156,7 +156,7 @@ describe('room history updates', () => {
     harness.service.ListLocalAIChats.mockResolvedValue([{ id: 'chat-1', title: 'Trip plan', agentId: '', updatedAt: 1_700_000_000_000, preview: '' }])
     render(<App />)
     await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
 
     fireEvent.contextMenu(await screen.findByRole('button', { name: /Trip plan/ }), { clientX: 48, clientY: 48 })
     await user.click(await screen.findByRole('menuitem', { name: 'Add to All rooms' }))
@@ -171,7 +171,7 @@ describe('room history updates', () => {
     harness.service.ListLocalAIChats.mockResolvedValue([{ id: 'chat-1', title: 'Trip plan', agentId: '', updatedAt: 1_700_000_000_000, preview: '' }])
     const { container } = render(<App />)
     await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
     await user.click(await screen.findByRole('button', { name: /Trip plan/ }))
 
     fireEvent.keyDown(container.querySelector('.app-shell')!, { key: 'g', ctrlKey: true, shiftKey: true })
@@ -187,7 +187,7 @@ describe('room history updates', () => {
     harness.service.RenameLocalAIChat.mockResolvedValue(undefined)
     render(<App />)
     await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
 
     fireEvent.contextMenu(await screen.findByRole('button', { name: /Trip plan/ }), { clientX: 48, clientY: 48 })
     await user.click(await screen.findByRole('menuitem', { name: 'Rename chat' }))
@@ -211,7 +211,7 @@ describe('room history updates', () => {
     harness.service.ListLocalAIChats.mockResolvedValue([{ id: 'chat-1', title: '', agentId: '', updatedAt: 1_700_000_000_000, preview: '' }])
     render(<App />)
     await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
 
     fireEvent.contextMenu(await screen.findByRole('button', { name: /Untitled chat/ }), { clientX: 48, clientY: 48 })
     await user.click(await screen.findByRole('menuitem', { name: 'Rename chat' }))
@@ -228,7 +228,7 @@ describe('room history updates', () => {
     harness.service.DeleteLocalAIChat.mockResolvedValue(undefined)
     render(<App />)
     await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
 
     fireEvent.contextMenu(await screen.findByRole('button', { name: /Trip plan/ }), { clientX: 48, clientY: 48 })
     await user.click(await screen.findByRole('menuitem', { name: 'Add to Favorites' }))
@@ -260,7 +260,7 @@ describe('room history updates', () => {
     })
     render(<App />)
     await screen.findByText('latest message')
-    await user.click(await screen.findByRole('button', { name: 'Local AI chats' }))
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
 
     await user.click(await screen.findByRole('button', { name: 'New folder' }))
     await user.type(await screen.findByRole('textbox', { name: 'New folder name' }), 'Work{Enter}')
