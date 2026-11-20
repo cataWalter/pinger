@@ -222,6 +222,11 @@ func aiProviderCompletion(ctx context.Context, client *http.Client, provider AIP
 		return "", fmt.Errorf("contact AI endpoint: %w", err)
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound && provider == AIProviderOllama {
+		// llama.cpp and other OpenAI-compatible servers can share the Ollama port but do not serve /api/chat.
+		response.Body.Close()
+		return aiProviderCompletion(ctx, client, AIProviderOpenAICompatible, endpoint, model, messages, options, onChunk)
+	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		return "", aiStatusError(response)
 	}

@@ -124,7 +124,12 @@ function LanguageTutorDialog({ state, hasEditTarget, languages, onClose, onCheck
             <section className="language-tutor-editor">
               <span className="eyebrow">YOUR TEXT · {learningName.toUpperCase()}</span>
               <textarea data-initial-focus aria-label="Your text" lang={state.learningLanguage} spellCheck={false} autoCorrect="off" autoCapitalize="off" value={draft} onChange={(event) => setDraft(event.target.value)} />
-              {stale && <p className="language-tutor-stale">Changed since the last check. Press Check to update.</p>}
+              <div className="language-tutor-editor-actions">
+                {stale && <p className="language-tutor-stale">Changed since the last check. Press Check to update.</p>}
+                <button className="settings-command" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" title={`Check draft (${primaryModifierLabel()} + Enter)`} disabled={!draftText} onClick={() => onCheck(draft)}>
+                  Check <kbd aria-hidden="true">{primaryModifierLabel()} Enter</kbd>
+                </button>
+              </div>
             </section>
             <div className="ai-result-content language-tutor-content" aria-live="polite" aria-busy={state.busy}>
               {state.error && <p className="settings-error" role="alert">{state.error}</p>}
@@ -138,12 +143,9 @@ function LanguageTutorDialog({ state, hasEditTarget, languages, onClose, onCheck
             {state.error && <p className="settings-error" role="alert">{state.error}</p>}
             {state.analysis && <LanguageTutorAnalysisDetails analysis={state.analysis} originalText={state.originalText} learningCode={state.learningLanguage} explanationCode={state.explanationLanguage} languages={languages} />}
           </div>}
-        <footer className="room-info-footer ai-result-footer">
+        <footer className={isDraft ? 'room-info-footer ai-result-footer language-tutor-footer' : 'room-info-footer ai-result-footer'}>
           {isDraft
             ? <>
-              <button className="settings-command" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" title={`Check draft (${primaryModifierLabel()} + Enter)`} disabled={!draftText} onClick={() => onCheck(draft)}>
-                Check <kbd aria-hidden="true">{primaryModifierLabel()} Enter</kbd>
-              </button>
               <button className="settings-command" type="button" aria-keyshortcuts="Control+1 Meta+1" title={`Put your edited text in the composer (${primaryModifierLabel()} + 1)`} disabled={keepDisabled} onClick={() => onUseDraft(draft)}>
                 Keep my draft <kbd aria-hidden="true">{primaryModifierLabel()} 1</kbd>
               </button>

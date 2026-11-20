@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"mychat/matrix"
 )
 
 func (handler mediaAssetHandler) uploadAttachment(w http.ResponseWriter, r *http.Request, escapedRoomID string) {
@@ -111,7 +113,7 @@ func validMediaAssetSegment(value string) bool {
 
 func mediaAssetContentType(file *os.File, declared string) (string, error) {
 	if parsed, _, err := mime.ParseMediaType(declared); err == nil && parsed != "application/octet-stream" && parsed != "image/unknown" {
-		return declared, nil
+		return matrix.NormalizeMediaType(declared), nil
 	}
 	buffer := make([]byte, 512)
 	read, err := file.Read(buffer)

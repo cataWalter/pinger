@@ -1,14 +1,66 @@
-import type { FormEvent } from 'react'
-import { LogOut, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
+import { LogOut, Pencil, Plus, Sparkles, Trash2, X } from 'lucide-react'
 import type { Member, Room } from '../bindings/mychat/desktop/models.js'
 import { DialogSurface } from './DialogSurface'
-import { MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, type ChatAgentCollection, type ChatAgentProfile } from './aiPrompts'
+import { MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, MAX_CHAT_GOAL_LENGTH, type ChatAgentCollection, type ChatAgentProfile } from './aiPrompts'
 import type { LanguageEntry } from './aiSettings'
-import { initials } from './appShared'
+import { describeError, initials } from './appShared'
 import { InvitePeopleForm } from './RoomMembership'
 
-export function RoomInfoDialog({ room, agents, agentEditor, agentSettingsError, members, membersLoading, membersError, onClose, onAgentEditorChange, onDefaultAgentChange, onEditAgent, onDeleteAgent, onSaveAgent, onCreateAgent, onInvite, onLeave, learningLanguage, explanationLanguage, languageOptions, defaultLearningLanguageName, defaultExplanationLanguageName, onLearningLanguageChange, onExplanationLanguageChange }: {
+// ChatGoalEditor keeps an unsaved draft. Inference fills the draft only, and nothing is saved until the user presses Save.
+function ChatGoalEditor({ savedGoal, aiEnabled, onInfer, onSave }: {
+  savedGoal: string
+  aiEnabled: boolean
+  onInfer: () => Promise<string>
+  onSave: (goal: string) => Promise<boolean>
+}) {
+  const [draft, setDraft] = useState(savedGoal)
+  const [busy, setBusy] = useState<'' | 'inferring' | 'saving'>('')
+  const [error, setError] = useState('')
+  const dirty = draft.trim() !== savedGoal.trim()
+
+  async function infer() {
+    setBusy('inferring')
+    setError('')
+    try {
+      setDraft((await onInfer()).trim())
+    } catch (inferError) {
+      setError(describeError(inferError))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function save(goal: string) {
+    setBusy('saving')
+    setError('')
+    const saved = await onSave(goal.trim())
+    setBusy('')
+    if (!saved) setError('Could not save the chat goal.')
+    else setDraft(goal.trim())
+  }
+
+  return (
+    <section className="room-agent-settings room-goal-settings" aria-label="Chat goal">
+      <div className="room-members-heading"><h3>Chat goal</h3><span>{draft.length}/{MAX_CHAT_GOAL_LENGTH}</span></div>
+      <p className="room-agent-note">The long-term purpose of this chat. AI draft replies and suggestions use it. Inferring reads recent messages and sends them to the configured endpoint, which may be remote.</p>
+      <label className="room-agent-field"><span>Goal</span><textarea maxLength={MAX_CHAT_GOAL_LENGTH} rows={3} spellCheck={false} value={draft} onChange={(event) => setDraft(event.target.value)} /></label>
+      <div className="room-agent-editor-actions">
+        <button className="settings-command" type="button" disabled={!aiEnabled || busy !== ''} title={aiEnabled ? undefined : 'Set an AI endpoint in Settings > AI first.'} onClick={() => void infer()}><Sparkles size={14} />{busy === 'inferring' ? 'Reading chat…' : 'Infer from chat'}</button>
+        <button className="settings-command" type="button" disabled={!dirty || busy !== ''} onClick={() => void save(draft)}>{busy === 'saving' ? 'Saving…' : 'Save goal'}</button>
+        {savedGoal && <button className="settings-command is-danger" type="button" disabled={busy !== ''} onClick={() => void save('')}>Clear goal</button>}
+      </div>
+      {error && <p className="settings-error" role="alert">{error}</p>}
+    </section>
+  )
+}
+
+export function RoomInfoDialog({ room, chatGoal, aiEnabled, onInferChatGoal, onSaveChatGoal, agents, agentEditor, agentSettingsError, members, membersLoading, membersError, onClose, onAgentEditorChange, onDefaultAgentChange, onEditAgent, onDeleteAgent, onSaveAgent, onCreateAgent, onInvite, onLeave, learningLanguage, explanationLanguage, languageOptions, defaultLearningLanguageName, defaultExplanationLanguageName, onLearningLanguageChange, onExplanationLanguageChange }: {
   room: Room
+  chatGoal: string
+  aiEnabled: boolean
+  onInferChatGoal: () => Promise<string>
+  onSaveChatGoal: (goal: string) => Promise<boolean>
   agents: ChatAgentCollection
   agentEditor: ChatAgentProfile | null
   agentSettingsError: string
@@ -42,6 +94,7 @@ export function RoomInfoDialog({ room, agents, agentEditor, agentSettingsError, 
         <div className="room-info-content">
           <div className="room-info-fact"><span>Room ID</span><strong>{room.id}</strong></div>
           {room.topic && <div className="room-info-fact"><span>Topic</span><strong>{room.topic}</strong></div>}
+          <ChatGoalEditor key={`${room.id}:${chatGoal}`} savedGoal={chatGoal} aiEnabled={aiEnabled} onInfer={onInferChatGoal} onSave={onSaveChatGoal} />
           <section className="room-agent-settings room-tutor-settings" aria-label="Chat languages">
             <div className="room-members-heading"><h3>Languages</h3></div>
             <label className="room-agent-field"><span>Language to learn</span><select aria-label="Language to learn" value={learningLanguage} onChange={(event) => onLearningLanguageChange(event.target.value)}>

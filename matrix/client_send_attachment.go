@@ -31,6 +31,15 @@ func (c *Client) SendVoiceNote(ctx context.Context, roomID, filename string, dat
 	return c.sendAttachment(ctx, roomID, filename, data, durationMilliseconds, 0)
 }
 
+// NormalizeMediaType maps the WAV aliases that Go's content sniffer reports (audio/wave) to audio/wav,
+// the type that Matrix clients and webviews recognize for voice notes.
+func NormalizeMediaType(mimeType string) string {
+	if base, _, err := mime.ParseMediaType(mimeType); err == nil && (base == "audio/wave" || base == "audio/x-wav") {
+		return "audio/wav"
+	}
+	return mimeType
+}
+
 func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, data []byte, voiceDurationMilliseconds, videoDurationMilliseconds int64) error {
 	if len(data) == 0 {
 		return errors.New("attachment is empty")
@@ -43,7 +52,7 @@ func (c *Client) sendAttachment(ctx context.Context, roomID, filename string, da
 	if filename == "." || filename == "" {
 		return errors.New("attachment filename is empty")
 	}
-	mimeType := http.DetectContentType(data)
+	mimeType := NormalizeMediaType(http.DetectContentType(data))
 	if detected, _, err := mime.ParseMediaType(mimeType); err == nil {
 		mimeType = detected
 	}

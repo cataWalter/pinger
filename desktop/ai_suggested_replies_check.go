@@ -55,7 +55,7 @@ func checkSuggestedReplies(payload SuggestedReplies, explanation string) (Sugges
 		seenTexts[key] = true
 		cleaned = append(cleaned, SuggestedReply{Tone: tone, Text: text, Translation: translation})
 	}
-	return SuggestedReplies{Language: language, Suggestions: cleaned}, nil
+	return SuggestedReplies{InferredGoal: truncateChatGoal(payload.InferredGoal), Language: language, Suggestions: cleaned}, nil
 }
 
 // suggestedReplyLanguageBase returns the language part of a code such as pt-br, which is pt.

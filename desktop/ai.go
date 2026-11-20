@@ -16,6 +16,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"mychat/matrix"
 )
 
 const (
@@ -168,7 +170,7 @@ func aiAudioTranscription(ctx context.Context, client *http.Client, endpoint, mo
 		filename = "audio"
 	}
 	if parsedType, _, err := mime.ParseMediaType(contentType); err == nil && parsedType != "" {
-		contentType = parsedType
+		contentType = matrix.NormalizeMediaType(parsedType)
 	} else {
 		contentType = "application/octet-stream"
 	}

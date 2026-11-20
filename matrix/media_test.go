@@ -8,6 +8,19 @@ import (
 	"maunium.net/go/mautrix/event"
 )
 
+func TestNormalizeMediaTypeMapsWAVAliasesToAudioWAV(t *testing.T) {
+	for input, want := range map[string]string{
+		"audio/wave":                  "audio/wav",
+		"audio/x-wav; charset=binary": "audio/wav",
+		"audio/wav":                   "audio/wav",
+		"audio/ogg":                   "audio/ogg",
+	} {
+		if got := NormalizeMediaType(input); got != want {
+			t.Errorf("NormalizeMediaType(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestVideoMessageExposesThumbnail(t *testing.T) {
 	evt := &database.Event{
 		Type:    event.EventMessage.Type,

@@ -160,6 +160,36 @@
   cursor: default;
 }
 
+.local-ai-new-chat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 9px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.local-ai-new-chat:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.room-section-label {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.room-section-label>span:first-child {
+  white-space: nowrap;
+}
+
 .local-ai-chat .local-ai-agent-create {
   margin: 8px clamp(16px, 5vw, 64px) 0;
   padding: 12px;

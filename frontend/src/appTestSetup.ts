@@ -55,6 +55,7 @@ export const harness = {
     AIGenerateReplyDraft: vi.fn(),
     AIDetectChatLanguage: vi.fn(),
     AISuggestReplies: vi.fn(),
+    AIInferChatGoal: vi.fn(),
     GenerateRoomImage: vi.fn(),
     SendRoomImage: vi.fn(),
     AIFeatureDefaults: vi.fn(),
@@ -184,11 +185,16 @@ export function menuCommand(label: string) {
 }
 
 export const suggestedReplyFixture = [
-  { tone: 'Direct', text: 'Sounds good!', translation: 'Sounds good!' },
+  { tone: 'Brief', text: 'Sounds good!', translation: 'Sounds good!' },
   { tone: 'Playful', text: 'Maybe later?', translation: 'Maybe later?' },
-  { tone: 'Formal', text: 'Let me check and tell you.', translation: 'Let me check and tell you.' },
+  { tone: 'Witty', text: 'Let me check and tell you.', translation: 'Let me check and tell you.' },
+  { tone: 'Warm', text: 'Thanks, that means a lot.', translation: 'Thanks, that means a lot.' },
   { tone: 'Curious', text: 'What time works for you?', translation: 'What time works for you?' },
   { tone: 'Empathetic', text: 'That sounds tough. Want to talk?', translation: 'That sounds tough. Want to talk?' },
+  { tone: 'Diplomatic', text: 'Let us see what works for everyone.', translation: 'Let us see what works for everyone.' },
+  { tone: 'Assertive', text: 'Let us lock in a time today.', translation: 'Let us lock in a time today.' },
+  { tone: 'Intriguing', text: 'I have an idea I want your take on.', translation: 'I have an idea I want your take on.' },
+  { tone: 'Practical', text: 'Thursday at 6 works. Should I book it?', translation: 'Thursday at 6 works. Should I book it?' },
 ]
 
 export const snapshot: Snapshot = {

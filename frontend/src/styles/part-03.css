@@ -131,6 +131,18 @@
   gap: 9px;
 }
 
+.room-section-notice {
+  min-width: 0;
+  overflow: hidden;
+  color: #81998c;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
 .room-archive-all {
   display: grid;
   place-items: center;
@@ -150,6 +162,39 @@
 .room-archive-all:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.draft-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 9px 10px;
+  color: var(--sidebar-muted, #81998c);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.draft-progress-track {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+}
+
+.draft-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--sidebar-accent, #7fd1a6);
+  border-radius: inherit;
+  transition: width 200ms ease;
+}
+
+.draft-progress-text {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .room-list {

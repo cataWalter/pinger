@@ -270,10 +270,25 @@
   white-space: nowrap;
 }
 
-/* The footer is the container and includes the Send button, so 640px here leaves the toolbar about 580px. Below that, icons only; each keeps its title. */
+/* Below about 1080px the footer cannot fit every caption on one line, so the non-AI tools drop theirs (titles and labels stay) and the AI tools keep theirs. */
+@container (max-width: 1079px) {
+  .composer-tool-cluster:not(.composer-tool-cluster--ai) .composer-tool-caption {
+    display: none;
+  }
+
+  .composer-tool-cluster:not(.composer-tool-cluster--ai) .composer-tool-button {
+    min-width: 34px;
+  }
+}
+
+/* The footer is the container and includes the Send button, so 640px here leaves the toolbar about 580px. Below that, icons only, except the AI tools, which keep their captions so each icon says what it does. Every icon keeps its title. */
 @container (max-width: 639px) {
   .composer-tool-caption {
     display: none;
+  }
+
+  .composer-tool-cluster--ai .composer-tool-caption {
+    display: inline;
   }
 
   .composer-tool-button {

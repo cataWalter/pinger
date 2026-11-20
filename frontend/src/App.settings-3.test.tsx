@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type Message } from '../bindings/mychat/desktop/models.js'
 import App from './App'
 import { SNIPPETS_STORAGE_KEY } from './snippets'
+import { searchSettings } from './settings'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
 import { appendedTimelineMessageIDs, preferredScrollBehavior, TimelineMessageList, type TimelineMessageActions } from './appShared'
 import { harness, room, message, snapshot } from './appTestSetup'
@@ -173,6 +174,55 @@ describe('settings storage, integrations, help, and about', () => {
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Settings search results' })).toBeNull())
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeTruthy()
+  })
+
+  it('focuses settings search with the slash key and opens the best match with enter', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.click(await screen.findByRole('tab', { name: 'Help' }))
+
+    await user.keyboard('/')
+    const search = await screen.findByLabelText('Search settings')
+    await waitFor(() => expect(document.activeElement).toBe(search))
+
+    await user.type(search, 'unread{Enter}')
+    const best = searchSettings('unread')[0]
+    await waitFor(() => expect(screen.getByRole('tab', { name: best.tab }).getAttribute('aria-selected')).toBe('true'))
+    expect(screen.queryByRole('region', { name: 'Settings search results' })).toBeNull()
+  })
+
+  it('moves between settings search results with the arrow keys', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    const search = await screen.findByLabelText('Search settings')
+    await user.type(search, 'unread')
+
+    const results = await screen.findByRole('region', { name: 'Settings search results' })
+    const buttons = within(results).getAllByRole('button')
+    const bestButton = results.querySelector<HTMLButtonElement>('.settings-search-result.is-best-match')
+    expect(bestButton).toBeTruthy()
+    const bestIndex = buttons.indexOf(bestButton as HTMLButtonElement)
+    expect(buttons.length).toBeGreaterThan(bestIndex + 1)
+
+    await user.keyboard('{ArrowDown}')
+    await waitFor(() => expect(document.activeElement).toBe(bestButton))
+    await user.keyboard('{ArrowDown}')
+    expect(document.activeElement).toBe(buttons[bestIndex + 1])
+
+    for (let step = 0; step <= bestIndex + 1; step++) await user.keyboard('{ArrowUp}')
+    expect(document.activeElement).toBe(search)
+  })
+
+  it('highlights the matched words in settings search results', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.type(await screen.findByLabelText('Search settings'), 'unread')
+
+    const results = await screen.findByRole('region', { name: 'Settings search results' })
+    expect(within(results).getByRole('button', { name: /Show unread counts/ }).querySelector('mark')?.textContent).toBe('unread')
   })
 
   it('formats a preserved text selection from the composer formatting tools', async () => {

@@ -62,7 +62,7 @@ var aiBackendFeatureDefaults = []AIFeatureDefault{
 	{
 		ID:          aiFeatureSuggestedReplies,
 		Label:       "Suggested replies",
-		Description: "Five reply options in different styles, written in the chat's language, based on the latest messages in the open room. Picking one fills the composer draft.",
+		Description: "Ten reply options in different styles, written in the chat's language, based on the latest messages in the open room. Picking one fills the composer draft.",
 		Prompt:      suggestedRepliesSystemPrompt,
 		Temperature: suggestedRepliesTemperature,
 		MaxTokens:   suggestedRepliesMaxTokens,

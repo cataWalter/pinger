@@ -15,6 +15,8 @@ export function AppSidebar({ app }: { app: AppState }) {
     : aiReplyDraftBatch.failures.length > 0
       ? aiReplyDraftBatch.failures.join('\n')
       : 'Generate a reply draft for each chat that needs a reply'
+  const draftProgressText = `Drafting ${aiReplyDraftBatch.completed} of ${aiReplyDraftBatch.total}${aiReplyDraftBatch.failures.length > 0 ? ` · ${aiReplyDraftBatch.failures.length} failed` : ''}`
+  const draftProgressPercent = aiReplyDraftBatch.total > 0 ? Math.round((aiReplyDraftBatch.completed / aiReplyDraftBatch.total) * 100) : 0
   const aiDraftPreview = (room: Room) => {
     if (!isNeedsReplyRoom(room)) return undefined
     return getVolatileAIDraft(volatileAIDrafts, activeAccountID, room.id)?.text.replace(/\s+/g, ' ').trim() || undefined
@@ -83,7 +85,16 @@ export function AppSidebar({ app }: { app: AppState }) {
           }} />}
         </div>}
         {menuFilter === 'all' && <InviteList invites={snapshot.invites ?? []} busyRoomID={inviteBusyRoomID} onAccept={(invite) => void acceptInvite(invite)} onDecline={(invite) => void declineInvite(invite)} />}
-        <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : roomScope === 'local-ai' ? 'AI CHATS' : 'ROOMS'}</span><span className="room-section-actions">{roomScope === 'all' && (roomRefinements.unanswered || roomRefinements.needsReply) && <button className="room-archive-all" type="button" aria-label={aiReplyDraftBatch.status === 'running' ? `Generating AI reply drafts, ${aiReplyDraftBatch.completed} of ${aiReplyDraftBatch.total} complete` : 'Generate AI reply drafts'} title={draftBatchTitle} disabled={!aiEnabled || busy || Boolean(editTarget) || aiReplyDraftBatch.status === 'running'} onClick={() => void generateNeedsReplyDrafts()}><Sparkles size={13} /></button>}{roomScope === 'all' && aiReplyDraftBatch.status === 'running' && <button className="room-archive-all" type="button" aria-label="Cancel AI reply draft generation" title="Cancel AI reply draft generation" onClick={cancelAIDraftBatch}><X size={13} /></button>}{roomScope === 'local-ai' && <button className="room-archive-all" type="button" aria-label="New private chat" title="New private chat (Ctrl / ⌘ + Shift + M)" onClick={() => startLocalAIChat()}><Plus size={13} /></button>}<span className="room-section-count">{filteredRooms.length.toString().padStart(2, '0')}</span></span></div>
+        <div className="room-section-label"><span>{roomScope === 'archived' ? 'ARCHIVED' : roomScope === 'local-ai' ? 'AI CHATS' : 'ROOMS'}</span><span className="room-section-actions">{aiReplyDraftBatch.notice && <span className="room-section-notice" role="status">{aiReplyDraftBatch.notice}</span>}{roomScope === 'all' && roomRefinements.needsReply && <button className="room-archive-all" type="button" aria-label={aiReplyDraftBatch.status === 'running' ? `Generating AI reply drafts, ${aiReplyDraftBatch.completed} of ${aiReplyDraftBatch.total} complete` : 'Generate AI reply drafts'} title={draftBatchTitle} disabled={!aiEnabled || busy || Boolean(editTarget) || aiReplyDraftBatch.status === 'running'} onClick={() => void generateNeedsReplyDrafts()}><Sparkles size={13} /></button>}{roomScope === 'local-ai' && <button className="local-ai-new-chat" type="button" title="New private chat (Ctrl / ⌘ + Shift + M)" onClick={() => startLocalAIChat()}><Plus size={13} /><span>New private chat</span></button>}<span className="room-section-count">{filteredRooms.length.toString().padStart(2, '0')}</span></span></div>
+        {aiReplyDraftBatch.status === 'running' && (
+          <div className="draft-progress">
+            <div className="draft-progress-track" role="progressbar" aria-label="AI reply drafts" aria-valuemin={0} aria-valuemax={aiReplyDraftBatch.total} aria-valuenow={aiReplyDraftBatch.completed} aria-valuetext={draftProgressText}>
+              <span className="draft-progress-fill" style={{ width: `${draftProgressPercent}%` }} />
+            </div>
+            <span className="draft-progress-text">{draftProgressText}</span>
+            <button className="room-archive-all" type="button" aria-label="Cancel AI reply draft generation" title="Cancel AI reply draft generation" onClick={cancelAIDraftBatch}><X size={13} /></button>
+          </div>
+        )}
         <VirtualRoomList
           listRef={roomListRef}
           rooms={filteredRooms}

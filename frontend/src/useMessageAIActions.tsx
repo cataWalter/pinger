@@ -1,4 +1,4 @@
-import { type FormEvent } from 'react'
+import { useRef, type FormEvent } from 'react'
 import { ArrowUpRight, BellRing, Clock3, CircleDot, Copy, MessagesSquare, Pencil, Reply, RotateCcw, Languages, Smile, Sparkles, Star, Trash2, ListChecks } from 'lucide-react'
 import { AppService, LanguageTutorService } from '../bindings/mychat/desktop'
 import { type Message, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
@@ -10,7 +10,7 @@ import { deleteVolatileAIDraft, getVolatileAIDraft } from './volatileAIDrafts'
 import type { useMenuActions } from './useMenuActions'
 
 export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
-  const { agentEditor, aiEnabled, aiInstructions, analyzeWithLanguageTutor, cancelAIRequest, chatTranslationAIRequestRef, chatTranslationRequestRef, copyMessage, hasAIConversationContext, hasOlder, loadingOlderRef, markRoomUnread, messages, newAIRequestID, olderCursor, openMessageForward, openReminder, openThreadPanel, preferences, preferencesRef, promptMessages, retryMessage, roomAgents, roomAgentsPreferenceKey, rooms, runAIRequest, selectedRoomID, selectedRoomRef, setAgentEditor, setAgentSettingsError, setChatTranslation, setComposeText, setEditTarget, setHasOlder, setLoadingOlder, setMentionBindings, setMentionStart, setMessages, setOlderCursor, setPreference, setRedactTarget, setReplyTarget, snapshot, startReaction, suggestRepliesForRoom, timelineHeightBeforePrepend, timelineRef, workspaceGenerationRef } = app
+  const { agentEditor, aiEnabled, aiInstructions, analyzeWithLanguageTutor, cancelAIRequest, chatTranslationAIRequestRef, chatTranslationRequestRef, copyMessage, hasAIConversationContext, hasOlder, loadingOlderRef, markRoomUnread, messages, newAIRequestID, olderCursor, openMessageForward, openReminder, openThreadPanel, preferences, preferencesRef, promptMessages, retryMessage, roomAgents, roomAgentsPreferenceKey, roomChatGoal, roomChatGoalKey, rooms, runAIRequest, selectedRoomID, selectedRoomRef, setAgentEditor, setAgentSettingsError, setChatTranslation, setComposeText, setEditTarget, setHasOlder, setLoadingOlder, setMentionBindings, setMentionStart, setMessages, setOlderCursor, setPreference, setRedactTarget, setReplyTarget, snapshot, startReaction, suggestRepliesForRoom, timelineHeightBeforePrepend, timelineRef, workspaceGenerationRef } = app
   const { activeAccountID, setVolatileAIDrafts, volatileAIDrafts } = app
 
   async function translateRecentMessages() {
@@ -123,7 +123,7 @@ export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
     if (targetIndex < 0 && message.id) targetIndex = messages.findIndex((candidate) => candidate.id === message.id)
     if (targetIndex < 0 && message.transactionId) targetIndex = messages.findIndex((candidate) => candidate.transactionId === message.transactionId)
     const context = targetIndex < 0 ? [] : messages.slice(Math.max(0, targetIndex - 8), targetIndex)
-    void runAIRequest('Draft reply', buildReplyPrompt(promptMessages([message])[0], promptMessages(context), aiInstructions('draft_reply')), 'draft_reply', { kind: 'reply', target: message })
+    void runAIRequest('Draft reply', buildReplyPrompt(promptMessages([message])[0], promptMessages(context), aiInstructions('draft_reply'), roomChatGoal), 'draft_reply', { kind: 'reply', target: message })
   }
 
   function explainMessage(message: Message) {
@@ -168,7 +168,7 @@ export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
       { key: 'remind', label: 'Set reminder', ariaLabel: 'Set reminder for message', icon: <BellRing size={14} />, disabled: !manageable, separatorBefore: true, run: () => openReminder(message) },
       { key: 'language-tutor', label: 'Analyze with Language Tutor', ariaLabel: 'Analyze message with Language Tutor', primaryShiftKey: AI_ACTION_SHORTCUTS.analyzeMessage.key, icon: <Languages size={14} />, disabled: !aiEnabled || !body || Boolean(message.redacted), separatorBefore: true, run: () => void analyzeWithLanguageTutor(body, 'message') },
       { key: 'ai-reply', label: 'Draft reply with AI', ariaLabel: 'Draft reply with local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.draftReply.key, icon: <Reply size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => draftAIReply(message) },
-      { key: 'ai-suggest-replies', label: 'Suggest replies with AI', ariaLabel: 'Suggest five replies with local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.suggestReplies.key, icon: <ListChecks size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => void suggestRepliesForRoom(selectedRoomID) },
+      { key: 'ai-suggest-replies', label: 'Suggest replies with AI', ariaLabel: 'Suggest ten replies with local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.suggestReplies.key, icon: <ListChecks size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => void suggestRepliesForRoom(selectedRoomID) },
       { key: 'ai-explain', label: 'Explain message', ariaLabel: 'Explain message with local AI', primaryShiftKey: AI_ACTION_SHORTCUTS.explainMessage.key, icon: <Sparkles size={14} />, disabled: !aiEnabled || !manageable || !message.body, run: () => explainMessage(message) },
     ]
     if (message.own && manageable) {
@@ -224,10 +224,31 @@ export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
     await persistRoomAgents({ agents, defaultAgentId: roomAgents.defaultAgentId === profile.id ? '' : roomAgents.defaultAgentId })
   }
 
+  const chatGoalRequestRef = useRef('')
+
+  // inferChatGoal asks Local AI to describe the chat's long-term goal from its latest messages. The caller shows the result for review before saving it.
+  async function inferChatGoal() {
+    if (!selectedRoomID) throw new Error('Choose a chat first.')
+    cancelAIRequest(chatGoalRequestRef.current)
+    const requestID = newAIRequestID()
+    chatGoalRequestRef.current = requestID
+    try {
+      return await AppService.AIInferChatGoal(selectedRoomID, requestID)
+    } finally {
+      if (chatGoalRequestRef.current === requestID) chatGoalRequestRef.current = ''
+    }
+  }
+
+  // saveChatGoal stores the goal for the selected chat. An empty goal clears it.
+  async function saveChatGoal(goal: string) {
+    if (!roomChatGoalKey) return false
+    return setPreference(roomChatGoalKey, goal.trim())
+  }
+
   function createAgentProfile() {
     const id = globalThis.crypto?.randomUUID?.() ?? `agent-${Date.now()}`
     setAgentSettingsError('')
     setAgentEditor({ id, name: '', instructions: '' })
   }
-  return { ...app, messageContextMenuItems, translateRecentMessages, clearChatTranslation, draftAIReply, explainMessage, persistRoomAgents, saveAgentProfile, deleteAgentProfile, createAgentProfile }
+  return { ...app, messageContextMenuItems, translateRecentMessages, clearChatTranslation, draftAIReply, explainMessage, persistRoomAgents, saveAgentProfile, deleteAgentProfile, createAgentProfile, inferChatGoal, saveChatGoal }
 }

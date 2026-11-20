@@ -21,6 +21,8 @@ export type ChatAgentCollection = {
 export const MAX_CHAT_AGENTS = 8
 export const MAX_AGENT_NAME_LENGTH = 48
 export const MAX_AGENT_INSTRUCTIONS_LENGTH = 2000
+// Matches the backend limit, which counts runes. A UTF-16 length cap of the same value never allows more runes.
+export const MAX_CHAT_GOAL_LENGTH = 600
 export const MAX_AGENT_COLLECTION_LENGTH = 32_768
 export const PROMPT_CONTEXT_LIMIT = 50
 export const REPLY_CONTEXT_LIMIT = 8
@@ -145,10 +147,12 @@ export function endsWithAssistantTurn(conversation: AIMessage[]) {
   return conversation[conversation.length - 1]?.role === 'assistant'
 }
 
-export function buildReplyPrompt(target: PromptMessage, context: PromptMessage[], instructions?: string): AIMessage[] {
+export function buildReplyPrompt(target: PromptMessage, context: PromptMessage[], instructions?: string, chatGoal = ''): AIMessage[] {
+  const goal = chatGoal.trim()
+  const goalBlock = goal ? `Long-term goal of this chat, saved by the user. Use it only to shape replies that help reach this goal:\n${wrapChatData('chat_goal', escapeChatText(goal))}\n\n` : ''
   return [
     { role: 'system', content: withFeatureInstructions(untrustedDataInstructions('Write a concise, natural draft reply to the selected message. Use nearby context only when relevant. Return only the draft text.'), instructions) },
-    { role: 'user', content: `Nearby conversation (oldest first):\n${transcriptBlock(context, REPLY_CONTEXT_LIMIT)}\n\nSelected message from ${escapeChatText(target.senderName || target.sender)}:\n${wrapChatData('selected_message', escapeChatText(target.body))}` },
+    { role: 'user', content: `${goalBlock}Nearby conversation (oldest first):\n${transcriptBlock(context, REPLY_CONTEXT_LIMIT)}\n\nSelected message from ${escapeChatText(target.senderName || target.sender)}:\n${wrapChatData('selected_message', escapeChatText(target.body))}` },
   ]
 }
 

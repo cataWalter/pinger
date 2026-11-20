@@ -114,6 +114,26 @@ func TestMediaAssetHandlerServesRangesAndEventMIME(t *testing.T) {
 	}
 }
 
+func TestMediaAssetHandlerServesVoiceNotesAsAudioWAV(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "media")
+	if err := os.WriteFile(path, []byte("RIFF\x24\x00\x00\x00WAVEfmt "), 0o600); err != nil {
+		t.Fatalf("write media: %v", err)
+	}
+	source := &testMediaAssetSource{path: path, mimeType: "audio/wave"}
+	handler := mediaAssetHandler{currentClient: func() mediaAssetSource { return source }}
+	request := httptest.NewRequest(http.MethodGet, "/media/matrix/%21room%3Aexample.org/%24voice", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	if got := response.Header().Get("Content-Type"); got != "audio/wav" {
+		t.Fatalf("Content-Type = %q, want audio/wav", got)
+	}
+}
+
 func TestMediaAssetHandlerServesPreviewSizeFromPreviewSource(t *testing.T) {
 	dir := t.TempDir()
 	fullPath := filepath.Join(dir, "full")

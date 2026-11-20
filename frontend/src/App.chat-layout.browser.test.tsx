@@ -3,8 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { page } from 'vitest/browser'
 import { describe, expect, it, vi } from 'vitest'
 import { LanguageTutorService } from '../bindings/mychat/desktop'
+import { contrastRatio } from './accent'
 import { service } from './appBrowserMocks'
-import { captureScreenshot, installAppBrowserCleanup, renderApp, settleSurfaces } from './appBrowserHarness'
+import { captureScreenshot, installAppBrowserCleanup, renderApp, rgbHex, settleSurfaces } from './appBrowserHarness'
 
 vi.mock('@wailsio/runtime', () => ({
   Call: { ByName: vi.fn(() => Promise.resolve()) },
@@ -18,6 +19,25 @@ vi.mock('../bindings/mychat/desktop', async () => ({
 }))
 
 installAppBrowserCleanup()
+
+// openTutorDraft types a draft, opens Language Tutor on it, and waits for the correction to render.
+async function openTutorDraft(width: number, height: number, preferences: Record<string, string> = {}) {
+  const user = userEvent.setup()
+  await page.viewport(width, height)
+  const snapshot = await service.Snapshot()
+  service.Snapshot.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], name: 'Nora Bennett' }], preferences: { ...snapshot.preferences, 'ai.endpoint': 'http://localhost:11434', ...preferences } })
+  vi.mocked(LanguageTutorService.Analyze).mockResolvedValueOnce({ detected_language: 'it', corrected_text: 'Merhaba, nasılsın?', translation: '', grammar_notes: null, vocabulary: null, text_to_insert: '' })
+  renderApp()
+  const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
+  await user.click(await within(roomList).findByRole('button', { name: /Nora Bennett/ }))
+  await user.type(await screen.findByRole('textbox', { name: 'Message' }), 'Ciao, come stai? Spero che tu stia bene oggi.')
+  await user.click(within(screen.getByRole('group', { name: 'AI tools' })).getByRole('button', { name: 'Analyze draft with Language Tutor' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
+  await waitFor(() => expect(within(dialog).getByText('Merhaba, nasılsın?')).toBeTruthy())
+  await document.fonts.ready
+  await settleSurfaces()
+  return dialog
+}
 
 describe('browser smoke: chat layout', () => {
   it.each([
@@ -70,6 +90,7 @@ describe('browser smoke: chat layout', () => {
       expect(composerBounds.bottom).toBeLessThanOrEqual(height + 1)
       expect(composer.scrollWidth).toBeLessThanOrEqual(composer.clientWidth)
       const aiButtons = within(screen.getByRole('group', { name: 'AI tools' })).getAllByRole('button')
+      for (const button of aiButtons) expect(button.querySelector<HTMLElement>('.composer-tool-caption')!.getBoundingClientRect().width).toBeGreaterThan(0)
       const controls = [...['Attach file', 'Emoji picker', 'Record voice note', 'Record video message', 'Send message'].map((name) => screen.getByRole('button', { name })), ...aiButtons]
       for (const control of controls) {
         const bounds = control.getBoundingClientRect()
@@ -218,20 +239,7 @@ describe('browser smoke: chat layout', () => {
     [1100, 780],
     [390, 844],
   ] as const)('keeps the Language Tutor draft editor and correction inside the viewport at %i x %i', async (width, height) => {
-    const user = userEvent.setup()
-    await page.viewport(width, height)
-    const snapshot = await service.Snapshot()
-    service.Snapshot.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], name: 'Nora Bennett' }], preferences: { ...snapshot.preferences, 'ai.endpoint': 'http://localhost:11434' } })
-    vi.mocked(LanguageTutorService.Analyze).mockResolvedValueOnce({ detected_language: 'it', corrected_text: 'Merhaba, nasılsın?', translation: '', grammar_notes: null, vocabulary: null, text_to_insert: '' })
-    renderApp()
-    const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
-    await user.click(await within(roomList).findByRole('button', { name: /Nora Bennett/ }))
-    await user.type(await screen.findByRole('textbox', { name: 'Message' }), 'Ciao, come stai? Spero che tu stia bene oggi.')
-    await user.click(within(screen.getByRole('group', { name: 'AI tools' })).getByRole('button', { name: 'Analyze draft with Language Tutor' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Tutor this draft' })
-    await waitFor(() => expect(within(dialog).getByText('Merhaba, nasılsın?')).toBeTruthy())
-    await document.fonts.ready
-    await settleSurfaces()
+    const dialog = await openTutorDraft(width, height)
     const dialogBounds = dialog.getBoundingClientRect()
     const editor = dialog.querySelector<HTMLElement>('.language-tutor-editor')!
     const editorBounds = editor.getBoundingClientRect()
@@ -244,6 +252,42 @@ describe('browser smoke: chat layout', () => {
       expect(dialogBounds.width).toBeLessThanOrEqual(481)
     }
     expect(contentBounds.top).toBeGreaterThanOrEqual(editorBounds.bottom - 1)
+  })
+
+  it.each([
+    [1100, 780],
+    [390, 844],
+  ] as const)('keeps Check in the Language Tutor editor and the footer actions readable at %i x %i', async (width, height) => {
+    const dialog = await openTutorDraft(width, height)
+    const dialogBounds = dialog.getBoundingClientRect()
+    const editor = dialog.querySelector<HTMLElement>('.language-tutor-editor')!
+    const footer = dialog.querySelector<HTMLElement>('.language-tutor-footer')!
+    expect(within(editor).getByRole('button', { name: 'Check' })).toBeTruthy()
+    expect(within(footer).queryByRole('button', { name: 'Check' })).toBeNull()
+    const keep = within(footer).getByRole('button', { name: 'Keep my draft' }).getBoundingClientRect()
+    const replace = within(footer).getByRole('button', { name: 'Replace draft with Turkish' }).getBoundingClientRect()
+    for (const bounds of [keep, replace]) {
+      expect(bounds.left).toBeGreaterThanOrEqual(dialogBounds.left)
+      expect(bounds.right).toBeLessThanOrEqual(dialogBounds.right + 1)
+      expect(bounds.height).toBeLessThanOrEqual(41)
+    }
+    if (width > 480) {
+      expect(Math.abs(keep.top - replace.top)).toBeLessThanOrEqual(1)
+      expect(keep.right).toBeLessThanOrEqual(replace.left)
+    } else {
+      expect(keep.bottom).toBeLessThanOrEqual(replace.top)
+    }
+    await captureScreenshot({ path: `../.vitest/ui/language-tutor-footer-${width}.png` })
+  })
+
+  it('fills the Language Tutor primary action with the accent in dark theme', async () => {
+    const dialog = await openTutorDraft(1100, 780, { 'appearance.theme': 'Dark' })
+    const footer = dialog.querySelector<HTMLElement>('.language-tutor-footer')!
+    const keep = getComputedStyle(within(footer).getByRole('button', { name: 'Keep my draft' }))
+    const replace = getComputedStyle(within(footer).getByRole('button', { name: 'Replace draft with Turkish' }))
+    expect(replace.backgroundColor).not.toBe(keep.backgroundColor)
+    expect(contrastRatio(rgbHex(replace.color), rgbHex(replace.backgroundColor))).toBeGreaterThanOrEqual(4.5)
+    await captureScreenshot({ path: '../.vitest/ui/language-tutor-footer-dark.png' })
   })
 
 })

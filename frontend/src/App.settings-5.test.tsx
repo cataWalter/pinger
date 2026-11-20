@@ -116,36 +116,25 @@ describe('settings storage, integrations, help, and about', () => {
       if (String(input).includes('/media/ipc/attachment/')) return { ok: true, status: 204, text: async () => '' } as Response
       return originalFetch(input, init)
     })
-    const audioBuffer = {
-      duration: 0.25,
-      length: 2,
-      numberOfChannels: 1,
-      sampleRate: 8000,
-      getChannelData: () => Float32Array.of(0.25, -0.25),
-    } as unknown as AudioBuffer
     class FakeAudioContext {
-      decodeAudioData = vi.fn(async () => audioBuffer)
+      sampleRate = 8000
+      destination = {}
+      resume = vi.fn(async () => undefined)
       close = vi.fn(async () => undefined)
-    }
-    class FakeMediaRecorder {
-      state: 'inactive' | 'recording' = 'inactive'
-      mimeType = 'audio/webm'
-      ondataavailable: ((event: { data: Blob }) => void) | null = null
-      onstop: (() => void) | null = null
-      constructor() { }
-      start() {
-        this.state = 'recording'
-      }
-      stop() {
-        this.state = 'inactive'
-        this.ondataavailable?.({ data: new Blob(['audio bytes'], { type: this.mimeType }) })
-        this.onstop?.()
-      }
+      createMediaStreamSource = vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() }))
+      // The processor delivers one 250 ms block once it is connected to the destination.
+      createScriptProcessor = vi.fn(() => {
+        const processor = {
+          onaudioprocess: null as ((event: unknown) => void) | null,
+          connect: () => processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => new Float32Array(2000).fill(0.25) } }),
+          disconnect: vi.fn(),
+        }
+        return processor
+      })
     }
     vi.stubGlobal('navigator', {
       mediaDevices: { getUserMedia, enumerateDevices: vi.fn().mockResolvedValue([]) },
     })
-    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
     vi.stubGlobal('AudioContext', FakeAudioContext)
     vi.stubGlobal('fetch', uploadFetch)
     harness.service.History.mockResolvedValue({ messages: [message('$latest', 'latest message', 300)], before: 0, hasMore: false })

@@ -139,7 +139,7 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
     const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
     fireEvent.change(composer, { target: { value: 'My note' } })
-    await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
     await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
 
     await waitFor(() => expect(harness.service.AIGenerateReplyDraft).toHaveBeenCalledTimes(2))
@@ -170,7 +170,7 @@ describe('room history updates', () => {
     render(<App />)
 
     expect(await screen.findByText('latest message')).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
     await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
     await waitFor(() => expect(harness.service.AIGenerateReplyDraft).toHaveBeenCalledTimes(1))
     await user.click(screen.getByRole('button', { name: 'Cancel AI reply draft generation' }))
@@ -183,7 +183,7 @@ describe('room history updates', () => {
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
-  it('shows the AI reply draft control only with the Unanswered or Needs reply filter', async () => {
+  it('shows the AI reply draft control only with the Needs reply filter', async () => {
     const user = userEvent.setup()
     harness.service.Snapshot.mockResolvedValue({
       ...snapshot,
@@ -195,11 +195,99 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Generate AI reply drafts' })).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
-    expect(screen.getByRole('button', { name: 'Generate AI reply drafts' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Generate AI reply drafts' })).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Needs reply' }))
     expect(screen.getByRole('button', { name: 'Generate AI reply drafts' })).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Needs reply' }))
     expect(screen.queryByRole('button', { name: 'Generate AI reply drafts' })).toBeNull()
+  })
+
+  it('explains why the reply draft batch did nothing', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [{ ...room, unanswered: true, needsReply: false }],
+      preferences: { 'ai.endpoint': 'http://localhost:8080' },
+    })
+    render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
+    await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
+
+    expect(await screen.findByText('No chats need a reply')).toBeTruthy()
+    expect(harness.service.AIGenerateReplyDraft).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
+    expect(screen.queryByText('No chats need a reply')).toBeNull()
+  })
+
+  it('explains when every chat that needs a reply already has a draft', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [{ ...room, unanswered: true, needsReply: true }],
+      preferences: { 'ai.endpoint': 'http://localhost:8080' },
+    })
+    harness.service.AIGenerateReplyDraft.mockResolvedValue('AI reply')
+    render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
+    await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
+
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Generate AI reply drafts' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(harness.service.AIGenerateReplyDraft).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
+    expect(await screen.findByText('All chats have drafts')).toBeTruthy()
+    expect(harness.service.AIGenerateReplyDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports how many reply drafts failed', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [{ ...room, unanswered: true, needsReply: true }],
+      preferences: { 'ai.endpoint': 'http://localhost:8080' },
+    })
+    harness.service.AIGenerateReplyDraft.mockRejectedValue(new Error('no incoming text message to reply to'))
+    render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
+    await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
+
+    expect(await screen.findByText('1 of 1 drafts failed')).toBeTruthy()
+  })
+
+  it('shows how far a reply draft batch has progressed', async () => {
+    const user = userEvent.setup()
+    harness.service.Snapshot.mockResolvedValue({
+      ...snapshot,
+      rooms: [{ ...room, unanswered: true, needsReply: true }, { ...secondRoom, unanswered: true, needsReply: true }],
+      preferences: { 'ai.endpoint': 'http://localhost:8080' },
+    })
+    const pending: Array<{ resolve: (reply: string) => void; reject: (error: Error) => void }> = []
+    harness.service.AIGenerateReplyDraft.mockImplementation(() => new Promise<string>((resolve, reject) => { pending.push({ resolve, reject }) }))
+    render(<App />)
+
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
+    await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
+
+    const progressBar = () => screen.getByRole('progressbar', { name: 'AI reply drafts' })
+    expect(progressBar().getAttribute('aria-valuemax')).toBe('2')
+    expect(progressBar().getAttribute('aria-valuenow')).toBe('0')
+    expect(screen.getByText('Drafting 0 of 2')).toBeTruthy()
+
+    await waitFor(() => expect(pending).toHaveLength(2))
+    pending[0].reject(new Error('no incoming text message to reply to'))
+    await waitFor(() => expect(progressBar().getAttribute('aria-valuenow')).toBe('1'))
+    expect(screen.getByText('Drafting 1 of 2 · 1 failed')).toBeTruthy()
+
+    pending[1].resolve('Second reply')
+    await waitFor(() => expect(screen.queryByRole('progressbar', { name: 'AI reply drafts' })).toBeNull())
+    expect(screen.getByText('1 of 2 drafts failed')).toBeTruthy()
   })
 
   it('keeps a generated reply after a failed send and clears it after a successful send', async () => {
@@ -214,7 +302,7 @@ describe('room history updates', () => {
 
     expect(await screen.findByText('latest message')).toBeTruthy()
     const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
-    await user.click(screen.getByRole('button', { name: 'Unanswered rooms' }))
+    await user.click(screen.getByRole('button', { name: 'Needs reply' }))
     await user.click(screen.getByRole('button', { name: 'Generate AI reply drafts' }))
     await waitFor(() => expect(composer.value).toBe('AI reply'))
 
@@ -260,14 +348,37 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     openMessageMenu(container)
-    await user.click(await screen.findByRole('menuitem', { name: 'Suggest five replies with local AI' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Suggest ten replies with local AI' }))
 
     const picker = await screen.findByRole('group', { name: 'Suggested replies' })
     expect(within(picker).getByRole('button', { name: /Maybe later\?/ })).toBeTruthy()
     expect(harness.service.AISuggestReplies).toHaveBeenCalledTimes(1)
   })
 
-  it('shows a tone label and number key hint for each suggested reply', async () => {
+  it('shows the saved chat goal in suggested replies and regenerates after an edit', async () => {
+    const user = userEvent.setup()
+    harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080', [`room.chat_goal.${room.id}`]: 'Plan the Lisbon trip' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(menuCommand('Suggest replies'))
+    const picker = await screen.findByRole('group', { name: 'Suggested replies' })
+    expect(within(picker).getByText('Plan the Lisbon trip')).toBeTruthy()
+
+    await user.click(within(picker).getByRole('button', { name: 'Edit goal' }))
+    const goalField = within(picker).getByRole('textbox', { name: 'Chat goal' }) as HTMLTextAreaElement
+    expect(goalField.value).toBe('Plan the Lisbon trip')
+    fireEvent.change(goalField, { target: { value: 'Book flights for May' } })
+    await user.click(within(picker).getByRole('button', { name: 'Save goal' }))
+
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith(`room.chat_goal.${room.id}`, 'Book flights for May'))
+    await waitFor(() => expect(harness.service.AISuggestReplies).toHaveBeenCalledTimes(2))
+    expect(await within(picker).findByText('Book flights for May')).toBeTruthy()
+    expect(within(picker).queryByRole('textbox', { name: 'Chat goal' })).toBeNull()
+  })
+
+  it('closes the chat goal editor on Escape and keeps suggested replies open', async () => {
     const user = userEvent.setup()
     harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture })
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
@@ -276,16 +387,100 @@ describe('room history updates', () => {
 
     await user.click(menuCommand('Suggest replies'))
     const picker = await screen.findByRole('group', { name: 'Suggested replies' })
-    expect(within(picker).getByText('Direct')).toBeTruthy()
-    expect(within(picker).getByText('Playful')).toBeTruthy()
-    expect(within(picker).getByText('Formal')).toBeTruthy()
-    expect(within(picker).getByText('Empathetic')).toBeTruthy()
-    expect(within(picker).getByText('3')).toBeTruthy()
-    expect(within(picker).getByText('5')).toBeTruthy()
-    expect(within(picker).getAllByRole('button').filter((button) => button.classList.contains('suggested-reply-option'))).toHaveLength(5)
+    await user.click(within(picker).getByRole('button', { name: 'Set goal' }))
+    expect(within(picker).getByRole('textbox', { name: 'Chat goal' })).toBeTruthy()
+
+    await user.keyboard('{Escape}')
+    expect(within(picker).queryByRole('textbox', { name: 'Chat goal' })).toBeNull()
+    expect(screen.getByRole('group', { name: 'Suggested replies' })).toBeTruthy()
+    expect(harness.service.SetStringPreference).not.toHaveBeenCalled()
   })
 
-  it('chooses the fifth suggested reply with the 5 key', async () => {
+  it('does not choose a suggested reply with Cmd+Option while the chat goal is being edited', async () => {
+    const user = userEvent.setup()
+    harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+
+    await user.click(menuCommand('Suggest replies'))
+    const picker = await screen.findByRole('group', { name: 'Suggested replies' })
+    await user.click(within(picker).getByRole('button', { name: 'Set goal' }))
+    await user.click(within(picker).getByRole('textbox', { name: 'Chat goal' }))
+    await user.keyboard('{Meta>}{Alt>}[Digit2]{/Alt}{/Meta}')
+
+    expect(composer.value).toBe('')
+    expect(within(picker).getByRole('textbox', { name: 'Chat goal' })).toBeTruthy()
+  })
+
+  it('shows an inferred chat goal and suggests setting one when no goal is saved', async () => {
+    const user = userEvent.setup()
+    harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture, inferredGoal: 'Agree on the meeting time' })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(menuCommand('Suggest replies'))
+    const picker = await screen.findByRole('group', { name: 'Suggested replies' })
+    expect(await within(picker).findByText('Agree on the meeting time')).toBeTruthy()
+    expect(within(picker).getByText('Inferred goal')).toBeTruthy()
+    expect(within(picker).getByText('For the best replies, set the goal of this chat.')).toBeTruthy()
+    expect(harness.service.SetStringPreference).not.toHaveBeenCalled()
+  })
+
+  it('prefills the chat goal editor with the inferred goal', async () => {
+    const user = userEvent.setup()
+    harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture, inferredGoal: 'Agree on the meeting time' })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(menuCommand('Suggest replies'))
+    const picker = await screen.findByRole('group', { name: 'Suggested replies' })
+    await within(picker).findByText('Agree on the meeting time')
+    await user.click(within(picker).getByRole('button', { name: 'Set goal' }))
+
+    const goalField = within(picker).getByRole('textbox', { name: 'Chat goal' }) as HTMLTextAreaElement
+    expect(goalField.value).toBe('Agree on the meeting time')
+    await user.click(within(picker).getByRole('button', { name: 'Save goal' }))
+    await waitFor(() => expect(harness.service.SetStringPreference).toHaveBeenCalledWith(`room.chat_goal.${room.id}`, 'Agree on the meeting time'))
+  })
+
+  it('shows the saved chat goal instead of an inferred one and hides the hint', async () => {
+    const user = userEvent.setup()
+    harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture, inferredGoal: 'Agree on the meeting time' })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080', [`room.chat_goal.${room.id}`]: 'Plan the Lisbon trip' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(menuCommand('Suggest replies'))
+    const picker = await screen.findByRole('group', { name: 'Suggested replies' })
+    expect(await within(picker).findByText('Plan the Lisbon trip')).toBeTruthy()
+    expect(within(picker).queryByText('Agree on the meeting time')).toBeNull()
+    expect(within(picker).queryByText('For the best replies, set the goal of this chat.')).toBeNull()
+  })
+
+  it('shows a tone label and shortcut hint for each of the ten suggested replies', async () => {
+    const user = userEvent.setup()
+    harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await user.click(menuCommand('Suggest replies'))
+    const picker = await screen.findByRole('group', { name: 'Suggested replies' })
+    expect(within(picker).getByText('Brief')).toBeTruthy()
+    expect(within(picker).getByText('Witty')).toBeTruthy()
+    expect(within(picker).getByText('Empathetic')).toBeTruthy()
+    expect(within(picker).getByText('Practical')).toBeTruthy()
+    const options = within(picker).getAllByRole('button').filter((button) => button.classList.contains('suggested-reply-option'))
+    expect(options).toHaveLength(10)
+    expect(options[2].getAttribute('aria-keyshortcuts')).toMatch(/\+Alt\+3$/)
+    expect(options[9].getAttribute('aria-keyshortcuts')).toMatch(/\+Alt\+0$/)
+  })
+
+  it('chooses the tenth suggested reply with the 0 key', async () => {
     const user = userEvent.setup()
     harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture })
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
@@ -295,11 +490,48 @@ describe('room history updates', () => {
 
     await user.click(menuCommand('Suggest replies'))
     await screen.findByRole('group', { name: 'Suggested replies' })
-    await user.keyboard('5')
+    await user.keyboard('0')
 
-    expect(composer.value).toBe('That sounds tough. Want to talk?')
+    expect(composer.value).toBe('Thursday at 6 works. Should I book it?')
     expect(screen.queryByRole('group', { name: 'Suggested replies' })).toBeNull()
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['Meta and Option with the digit', '{Meta>}{Alt>}[Digit3]{/Alt}{/Meta}', 'Let me check and tell you.'],
+    ['Control and Alt with 0 for the tenth reply', '{Control>}{Alt>}[Digit0]{/Alt}{/Control}', 'Thursday at 6 works. Should I book it?'],
+  ])('chooses a suggested reply with %s while the composer has focus', async (_label, keys, expected) => {
+    const user = userEvent.setup()
+    harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+
+    await user.click(menuCommand('Suggest replies'))
+    await screen.findByRole('group', { name: 'Suggested replies' })
+    await user.click(composer)
+    await user.keyboard(keys)
+
+    expect(composer.value).toBe(expected)
+    expect(screen.queryByRole('group', { name: 'Suggested replies' })).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('ignores Control and Alt digits that AltGr produces on Windows layouts', async () => {
+    const user = userEvent.setup()
+    harness.service.AISuggestReplies.mockResolvedValue({ suggestions: suggestedReplyFixture })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+
+    await user.click(menuCommand('Suggest replies'))
+    const picker = await screen.findByRole('group', { name: 'Suggested replies' })
+    fireEvent.keyDown(composer, { key: '@', code: 'Digit2', ctrlKey: true, altKey: true, modifierAltGraph: true })
+
+    expect(composer.value).toBe('')
+    expect(within(picker).getByRole('button', { name: /Maybe later\?/ })).toBeTruthy()
   })
 
   it('chooses a suggested reply with its number key without sending', async () => {
@@ -358,7 +590,7 @@ describe('room history updates', () => {
     expect(staleOption.disabled).toBe(true)
     expect(within(picker).getByRole('status').textContent).toContain('Reading the latest messages')
 
-    resolveRegenerate({ suggestions: [{ tone: 'Warm', text: 'New warm reply' }, { tone: 'Brief', text: 'New brief reply' }, { tone: 'Direct', text: 'New direct reply' }] })
+    resolveRegenerate({ suggestions: [{ tone: 'Warm', text: 'New warm reply' }, { tone: 'Brief', text: 'New brief reply' }, { tone: 'Witty', text: 'New witty reply' }] })
     expect(await within(picker).findByRole('button', { name: /New brief reply/ })).toBeTruthy()
     expect(within(picker).queryByRole('button', { name: /Maybe later\?/ })).toBeNull()
   })

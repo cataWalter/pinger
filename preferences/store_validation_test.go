@@ -3,6 +3,7 @@ package preferences
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -25,6 +26,30 @@ func TestValidateLocalAIAgents(t *testing.T) {
 		if err := Validate(key, value); err == nil {
 			t.Errorf("%s: Validate(%s) unexpectedly succeeded", name, key)
 		}
+	}
+}
+
+func TestValidateRoomChatGoal(t *testing.T) {
+	key := "room.chat_goal.!room:example.org"
+	for name, value := range map[string]any{
+		"clear":      "",
+		"short goal": "Plan the Lisbon trip with Ana.",
+		"max runes":  strings.Repeat("é", MaxChatGoalRunes),
+	} {
+		if err := Validate(key, value); err != nil {
+			t.Errorf("%s: Validate(%s) error = %v", name, key, err)
+		}
+	}
+	for name, value := range map[string]any{
+		"wrong type": true,
+		"too long":   strings.Repeat("é", MaxChatGoalRunes+1),
+	} {
+		if err := Validate(key, value); err == nil {
+			t.Errorf("%s: Validate(%s) unexpectedly succeeded", name, key)
+		}
+	}
+	if err := Validate("room.chat_goal.", "goal"); err == nil {
+		t.Error("Validate(missing room ID) unexpectedly succeeded")
 	}
 }
 

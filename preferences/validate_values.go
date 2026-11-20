@@ -23,6 +23,19 @@ func validatePreference(key string, value any, languages LanguageLookup) error {
 		}
 		return validateAIAgentCollection(serialized)
 	}
+	if strings.HasPrefix(key, roomChatGoalPrefix) {
+		if strings.TrimPrefix(key, roomChatGoalPrefix) == "" {
+			return errors.New("room chat goal preference requires a room ID")
+		}
+		goal, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("preference %q must be a string", key)
+		}
+		if utf8.RuneCountInString(goal) > MaxChatGoalRunes {
+			return fmt.Errorf("chat goal must be at most %d characters", MaxChatGoalRunes)
+		}
+		return nil
+	}
 	for _, prefix := range []string{roomTutorLanguagePrefix, roomLearningLanguagePrefix, roomDetectedLanguagePrefix} {
 		if !strings.HasPrefix(key, prefix) {
 			continue
@@ -264,3 +277,9 @@ const roomLearningLanguagePrefix = "room.learning_language."
 // roomDetectedLanguagePrefix prefixes the language last detected automatically for a chat, room.detected_language.<roomID>.
 // It lets the app tell an automatic learning language from one the user chose.
 const roomDetectedLanguagePrefix = "room.detected_language."
+
+// roomChatGoalPrefix prefixes the long-term goal of a chat, room.chat_goal.<roomID>. An empty value clears it.
+const roomChatGoalPrefix = "room.chat_goal."
+
+// MaxChatGoalRunes is the longest chat goal that can be saved.
+const MaxChatGoalRunes = 600

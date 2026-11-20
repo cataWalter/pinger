@@ -66,7 +66,7 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 - AI action shortcuts appear under the composer AI buttons and in Settings → Keyboard.
 
 - Configure an OpenAI-compatible endpoint in Settings → Integrations (endpoint URL, optional model name, connection test) — including a llama-server you run yourself. Each chat's tutor language is set in its room details and defaults to the default language chosen in Settings → AI.
-- Actions: **Ask AI** (answer a question using room context), draft a reply, explain or translate a selected message, rewrite or shorten composer text, summarize a room, identify chat topics and themes, analyze a two-person conversation, and run a per-room chat agent. **Translate chat** into the chat's tutor language batches the room history so a whole conversation can be translated at once, and audio messages can be transcribed (optional transcription model in Settings → Integrations). Results can be inserted into the composer as a draft or reply.
+- Actions: **Ask AI** (answer a question using room context), draft a reply, explain or translate a selected message, rewrite or shorten composer text, summarize a room, identify chat topics and themes, analyze a two-person conversation, and run a per-room chat agent. Keep a per-room **chat goal** (inferred from recent messages, or written by you in Room details or the suggested replies panel) that steers draft replies and suggestions. Without a saved goal, suggested replies show the goal they infer from the chat and suggest saving one for better replies. **Translate chat** into the chat's tutor language batches the room history so a whole conversation can be translated at once, and audio messages can be transcribed (optional transcription model in Settings → Integrations). Results can be inserted into the composer as a draft or reply.
 - Create up to eight named instruction profiles per room, with an optional default. Profiles are managed in the room **Details** panel, stored in local preferences, and are not synced through Matrix.
 - AI actions return suggestions only. Nothing is sent as a Matrix message unless you review and send it yourself. The selected text, included chat context, and custom profile instructions are sent to the configured endpoint, which may be remote.
 - **Tone Guard** checks drafts over 10 words, drafts sent from 10 PM to 6 AM, drafts after tense incoming messages, or every draft in rooms where it is enabled. It uses only a local loopback model; a remote endpoint, timeout, or model error fails open. Medium- or high-severity drafts can be replaced with a calmer alternative or sent unchanged.
@@ -94,20 +94,16 @@ Desktop client for [gomuks](https://github.com/gomuks) — a Matrix client with 
 
 **Settings** (`Ctrl+,` / `⌘,`)
 
-A searchable dialog with twelve tabs:
+A searchable dialog with eight tabs. Press `/` (outside a text field) to jump to the search field. Enter opens the best match, ArrowDown moves into the results, and Escape clears the search. Matching words are highlighted, and each tab shows how many settings match.
 
 - **General** — launch at login, tray behavior (minimize to tray, start minimized, quit on close, menu bar icon), download folder and "ask where to save", double-click action, quick-reaction options, navigation after read/archive, inactive-room age and Archive inactive rooms, voice-note microphone and autoplay, schedule defaults and suggestions.
-- **Account** — profile details, typing indicators, content blur (read receipts are still sent when you open a room), log out.
+- **Account** — profile details, typing indicators, content blur (read receipts are still sent when you open a room), log out. An advanced section lists active devices with last-seen details (revoke them, or start an emoji comparison with another verified session), device verification status, room-key export/import protected with a passphrase, and detected chat networks (WhatsApp, Telegram, Instagram, Signal, iMessage, Discord, Slack, SMS).
 - **Appearance** — theme, accent, wallpaper, font size, app zoom, message and sidebar layout, link previews, timestamps.
 - **Notifications** — permission, enable/focus, sound and volume, content privacy, per-category alerts and tones, batching, repeat reminder, one-time-code handling, sound effects, and a button that opens the OS notification settings for Pinger.
 - **Keyboard** — Ctrl+Enter send, undo send window, spellcheck, emoji suggestions, emoticon replacement, copy timestamps, Up-arrow focus, single-key shortcuts (R, J, K, and the answered key), mark-answered key, full shortcut list.
-- **History** — messages loaded when a room opens (25–1000).
-- **Devices** — list active devices with last-seen details, revoke them, and start an emoji comparison with another verified session.
-- **Storage** — database, WAL, and media-cache sizes; clear media cache; optimize the database (VACUUM); storage per chat; cleanup filtered by media type and age.
-- **Security** — device verification status; export/import room keys protected with a passphrase.
-- **Help** — shortcuts, storage, local AI, bridged networks, encryption FAQ, and a report-an-issue link.
-- **About** — version and build info, check for updates with release notes, repository, feedback, and license links.
-- **Integrations** — OpenAI-compatible AI (endpoint, model, transcription model, translation language, test) and detected chat networks (WhatsApp, Telegram, Instagram, Signal, iMessage, Discord, Slack, SMS).
+- **Storage** — database, WAL, and media-cache sizes; clear media cache; optimize the database (VACUUM); storage per chat; cleanup filtered by media type and age. History — messages loaded when a room opens (25–1000).
+- **AI** — OpenAI-compatible AI (endpoint, model, transcription model, translation language, test).
+- **Help** — shortcuts, storage, local AI, bridged networks, encryption FAQ, and a report-an-issue link. About shows version and build info, update checks with release notes, and repository, feedback, and license links.
 
 ## Keyboard shortcuts
 
@@ -134,6 +130,7 @@ Press `?` in the app (or open Settings → Keyboard) for the authoritative list.
 | `Ctrl`/`⌘` + `1` | In the Language Tutor, keep your edited draft in the composer |
 | `Ctrl`/`⌘` + `2` | In the Language Tutor, replace the draft with the correction |
 | `Ctrl`/`⌘` + `Shift+B` | Suggest replies |
+| `Ctrl`/`⌘` + `Alt` + `1`–`9` / `0` | While suggested replies are open, choose reply 1–10 (`0` is the tenth). Works while typing in the composer and does not send. |
 | `Ctrl`/`⌘` + `Shift+J` | Generate an image from the draft for approval |
 | `Ctrl`/`⌘` + `Shift+O` | Prepare a Local AI summary chat |
 | `Ctrl`/`⌘` + `Shift+Y` | Translate messages received since your last message |

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, X } from 'lucide-react'
 import { type Room, type Snapshot } from '../bindings/mychat/desktop/models.js'
 import { type PreferenceValues } from './appShared'
+import { isTextEntryTarget } from './dom'
 import { type Snippet } from './snippets'
 import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
 import { SettingsAdvanced, SettingsAdvancedRevealContext } from './SettingsControls'
@@ -40,6 +41,19 @@ function findSettingTarget(panel: HTMLElement, entry: SettingsEntry) {
     }
   }
   return null
+}
+
+function escapeRegExp(text: string) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function highlightMatches(text: string, query: string) {
+  const terms = Array.from(new Set(query.trim().toLowerCase().split(/\s+/).filter(Boolean)))
+    .sort((left, right) => right.length - left.length)
+  if (terms.length === 0) return text
+  // With a capture group, split() puts the matched terms at odd indexes.
+  const pattern = new RegExp(`(${terms.map(escapeRegExp).join('|')})`, 'gi')
+  return text.split(pattern).map((part, index) => (index % 2 === 1 ? <mark key={index}>{part}</mark> : part))
 }
 
 export function SettingsDialog({
@@ -85,12 +99,26 @@ export function SettingsDialog({
   const searchResults = useMemo(() => searchSettings(searchQuery), [searchQuery])
   const searchResultsByTab = useMemo(() => groupSettingsByTab(searchResults), [searchResults])
   const searchActive = searchQuery.trim().length > 0
+  const bestMatch = searchResults[0]
 
   function revealSetting(entry: SettingsEntry) {
     searchNonceRef.current += 1
     setSearchQuery('')
     setSearchTarget({ entry, nonce: searchNonceRef.current })
     onTabChange(entry.tab)
+  }
+
+  function moveBetweenSearchResults(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    event.preventDefault()
+    const buttons = Array.from(settingsPanelRef.current?.querySelectorAll<HTMLButtonElement>('.settings-search-result') ?? [])
+    const index = buttons.indexOf(event.currentTarget)
+    if (event.key === 'ArrowUp' && index <= 0) {
+      searchInputRef.current?.focus()
+      return
+    }
+    const next = Math.min(index + (event.key === 'ArrowDown' ? 1 : -1), buttons.length - 1)
+    buttons[next]?.focus()
   }
 
   function closeSnippetManager() {
@@ -114,7 +142,17 @@ export function SettingsDialog({
 
   return (
     <>
-      <div className="settings-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <div
+        className="settings-scrim"
+        onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}
+        onKeyDown={(event) => {
+          // The global "/" shortcut is disabled while a dialog is open, so the dialog handles it here.
+          if (event.key !== '/' || event.altKey || event.metaKey || event.ctrlKey || isTextEntryTarget(event.target)) return
+          event.preventDefault()
+          searchInputRef.current?.focus()
+          searchInputRef.current?.select()
+        }}
+      >
         <DialogSurface className="settings-dialog" labelledBy="settings-title" onClose={onClose}>
           <header className="settings-header">
             <div><span className="eyebrow">PINGER</span><h2 id="settings-title">{t('settings.title')}</h2></div>
@@ -133,14 +171,23 @@ export function SettingsDialog({
               autoCapitalize="off"
               onChange={(event) => setSearchQuery(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key !== 'Escape') return
-                event.preventDefault()
-                event.stopPropagation()
-                setSearchQuery('')
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setSearchQuery('')
+                } else if (event.key === 'Enter' && bestMatch) {
+                  event.preventDefault()
+                  revealSetting(bestMatch)
+                } else if (event.key === 'ArrowDown' && searchActive) {
+                  event.preventDefault()
+                  settingsPanelRef.current?.querySelector<HTMLButtonElement>('.settings-search-result.is-best-match')?.focus()
+                }
               }}
             />
-            {searchQuery && (
+            {searchQuery ? (
               <button type="button" className="icon-button" aria-label="Clear settings search" title="Clear search" onClick={() => { setSearchQuery(''); searchInputRef.current?.focus() }}><X size={14} /></button>
+            ) : (
+              <kbd className="settings-search-key" aria-hidden="true" title="Press / to search settings">/</kbd>
             )}
           </div>
           <nav className="settings-tabs" role="tablist" aria-label="Settings sections">
@@ -195,9 +242,15 @@ export function SettingsDialog({
                     <h3>{group}</h3>
                     <div className="settings-search-list">
                       {entries.map((entry) => (
-                        <button key={entry.id} type="button" className="settings-search-result" onClick={() => revealSetting(entry)}>
-                          <strong>{entry.title}</strong>
-                          <small>{entry.description}</small>
+                        <button
+                          key={entry.id}
+                          type="button"
+                          className={`settings-search-result ${entry.id === bestMatch?.id ? 'is-best-match' : ''}`}
+                          onClick={() => revealSetting(entry)}
+                          onKeyDown={moveBetweenSearchResults}
+                        >
+                          <strong>{highlightMatches(entry.title, searchQuery)}</strong>
+                          <small>{highlightMatches(entry.description, searchQuery)}</small>
                         </button>
                       ))}
                     </div>

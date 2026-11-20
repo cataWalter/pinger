@@ -1,12 +1,12 @@
 import { type FormEvent } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { parseCustomEmoticonReplacements, replaceEmoticons } from './composerText'
-import { describeError, preferenceBoolean, preferenceString, type CaptureKind, type StagedAttachment, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, encodeVoiceNoteWav } from './appShared'
+import { describeError, preferenceBoolean, preferenceString, type CaptureKind, type StagedAttachment, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, encodePcmWav, startPcmVoiceCapture, type PcmVoiceCapture } from './appShared'
 import { deleteVolatileAIDraft, getVolatileAIDraft } from './volatileAIDrafts'
 import type { useMessageDispatch } from './useMessageDispatch'
 
 export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
-  const { activeAccountID, busy, composeText, dispatchMessage, editTarget, mentionBindings, preferences, refreshRoomSnapshotAfterSend, replyTarget, roomDrafts, scrollTimelineToBottom, selectedAudioInputDeviceId, selectedRoomID, selectedRoomRef, sendAttachmentFiles, sendableStagedAttachments, setAudioInputDevices, setBusy, setCaptureKind, setComposeText, setEditTarget, setError, setHistoryRevision, setMediaApproval, setMentionBindings, setMentionStart, setReplyTarget, setStagedAttachments, setVoiceCaptureStatus, setVolatileAIDrafts, stickToBottomRef, uploadAttachmentFile, volatileAIDrafts, voiceCaptureStatus, voiceChunksRef, voiceRecorderRef, voiceRoomIDRef, voiceStreamRef, voiceTimeoutRef } = app
+  const { activeAccountID, busy, composeText, dispatchMessage, editTarget, mentionBindings, preferences, refreshRoomSnapshotAfterSend, replyTarget, roomDrafts, scrollTimelineToBottom, selectedAudioInputDeviceId, selectedRoomID, selectedRoomRef, sendAttachmentFiles, sendableStagedAttachments, setAudioInputDevices, setBusy, setCaptureKind, setComposeText, setEditTarget, setError, setHistoryRevision, setMediaApproval, setMentionBindings, setMentionStart, setReplyTarget, setStagedAttachments, setVoiceCaptureStatus, setVolatileAIDrafts, stickToBottomRef, uploadAttachmentFile, volatileAIDrafts, voiceCaptureStatus, voiceChunksRef, voicePcmRef, voiceRecorderRef, voiceRoomIDRef, voiceStreamRef, voiceTimeoutRef } = app
 
   function stageAttachmentFiles(files: File[]) {
     const roomID = selectedRoomID
@@ -96,7 +96,36 @@ export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
     if (file) stageAttachmentFiles([file])
   }
 
+  function finishVoiceNote(capture: PcmVoiceCapture) {
+    const roomID = voiceRoomIDRef.current
+    voicePcmRef.current = null
+    if (voiceTimeoutRef.current !== null) window.clearTimeout(voiceTimeoutRef.current)
+    voiceTimeoutRef.current = null
+    setVoiceCaptureStatus('processing')
+    try {
+      const { samples, sampleRate } = capture.stop()
+      voiceStreamRef.current?.getTracks().forEach((track) => track.stop())
+      voiceStreamRef.current = null
+      if (samples.length === 0) throw new Error('No microphone audio was captured.')
+      const durationMilliseconds = Math.max(1, Math.round((samples.length / sampleRate) * 1000))
+      const file = new File([encodePcmWav(samples, sampleRate)], `voice-note-${Date.now()}.wav`, { type: 'audio/wav' })
+      setMediaApproval({
+        items: [mediaApprovalItemFromFile(file.name, file, '')],
+        onApprove: () => void sendAttachmentFiles([file], roomID, { kind: 'voice', durationMilliseconds }).finally(() => setVoiceCaptureStatus(null)),
+        onCancel: () => setVoiceCaptureStatus(null),
+      })
+    } catch (recordError) {
+      setError(describeError(recordError))
+      setVoiceCaptureStatus(null)
+    }
+  }
+
   function stopRecording() {
+    const capture = voicePcmRef.current
+    if (capture) {
+      finishVoiceNote(capture)
+      return
+    }
     const recorder = voiceRecorderRef.current
     if (!recorder || recorder.state === 'inactive') return
     if (voiceTimeoutRef.current !== null) window.clearTimeout(voiceTimeoutRef.current)
@@ -106,12 +135,14 @@ export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
 
   async function startRecording(kind: CaptureKind) {
     if (!selectedRoomID || busy || voiceCaptureStatus) return
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    if (!navigator.mediaDevices?.getUserMedia || (kind === 'video' ? typeof MediaRecorder === 'undefined' : typeof AudioContext === 'undefined')) {
       setError(`${kind === 'video' ? 'Video' : 'Voice'} recording is not supported in this environment.`)
       return
     }
     let stream: MediaStream | null = null
+    let audioContext: AudioContext | null = null
     try {
+      audioContext = kind === 'voice' ? new AudioContext() : null
       const audioConstraints: MediaStreamConstraints['audio'] = selectedAudioInputDeviceId
         ? { deviceId: { exact: selectedAudioInputDeviceId } }
         : true
@@ -122,71 +153,51 @@ export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
       void navigator.mediaDevices.enumerateDevices?.().then((devices) => {
         setAudioInputDevices(devices.filter((device) => device.kind === 'audioinput'))
       }).catch(() => { })
-      const startedAt = Date.now()
-      const mimeType = kind === 'video' ? preferredVideoMimeType() : ''
-      const recorder = kind === 'video'
-        ? new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 1_000_000 })
-        : new MediaRecorder(stream)
-      voiceChunksRef.current = []
       voiceRoomIDRef.current = selectedRoomID
       voiceStreamRef.current = stream
-      voiceRecorderRef.current = recorder
-      recorder.ondataavailable = (event) => { if (event.data.size > 0) voiceChunksRef.current.push(event.data) }
-      recorder.onstop = () => {
-        const roomID = voiceRoomIDRef.current
-        const chunks = voiceChunksRef.current
+      if (audioContext) {
+        voicePcmRef.current = startPcmVoiceCapture(audioContext, stream)
+      } else {
+        const startedAt = Date.now()
+        const mimeType = preferredVideoMimeType()
+        const recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 1_000_000 })
         voiceChunksRef.current = []
-        voiceRecorderRef.current = null
-        voiceStreamRef.current?.getTracks().forEach((track) => track.stop())
-        voiceStreamRef.current = null
-        if (voiceTimeoutRef.current !== null) window.clearTimeout(voiceTimeoutRef.current)
-        voiceTimeoutRef.current = null
-        if (chunks.length === 0) {
-          setVoiceCaptureStatus(null)
-          return
-        }
-        setVoiceCaptureStatus('processing')
-        if (kind === 'video') {
+        voiceRecorderRef.current = recorder
+        recorder.ondataavailable = (event) => { if (event.data.size > 0) voiceChunksRef.current.push(event.data) }
+        recorder.onstop = () => {
+          const roomID = voiceRoomIDRef.current
+          const chunks = voiceChunksRef.current
+          voiceChunksRef.current = []
+          voiceRecorderRef.current = null
+          voiceStreamRef.current?.getTracks().forEach((track) => track.stop())
+          voiceStreamRef.current = null
+          if (voiceTimeoutRef.current !== null) window.clearTimeout(voiceTimeoutRef.current)
+          voiceTimeoutRef.current = null
+          if (chunks.length === 0) {
+            setVoiceCaptureStatus(null)
+            return
+          }
+          setVoiceCaptureStatus('processing')
           const durationMilliseconds = Math.max(1, Math.min(Date.now() - startedAt, maxVideoMessageMilliseconds))
           const extension = recorder.mimeType.includes('mp4') ? 'mp4' : 'webm'
           const file = new File(chunks, `video-message-${Date.now()}.${extension}`, { type: recorder.mimeType || `video/${extension}` })
           setMediaApproval({
             items: [mediaApprovalItemFromFile(file.name, file, '')],
-            onApprove: () => void sendAttachmentFiles([file], roomID, { kind, durationMilliseconds }).finally(() => setVoiceCaptureStatus(null)),
+            onApprove: () => void sendAttachmentFiles([file], roomID, { kind: 'video', durationMilliseconds }).finally(() => setVoiceCaptureStatus(null)),
             onCancel: () => setVoiceCaptureStatus(null),
           })
-          return
         }
-        void (async () => {
-          const audioContext = new AudioContext()
-          try {
-            const decoded = await audioContext.decodeAudioData(await new Blob(chunks).arrayBuffer())
-            const wav = encodeVoiceNoteWav(decoded)
-            const durationMilliseconds = Math.round(decoded.duration * 1000)
-            const file = new File([wav], `voice-note-${Date.now()}.wav`, { type: 'audio/wav' })
-            setMediaApproval({
-              items: [mediaApprovalItemFromFile(file.name, file, '')],
-              onApprove: () => void sendAttachmentFiles([file], roomID, { kind, durationMilliseconds }).finally(() => setVoiceCaptureStatus(null)),
-              onCancel: () => setVoiceCaptureStatus(null),
-            })
-          } catch (recordError) {
-            setError(describeError(recordError))
-            setVoiceCaptureStatus(null)
-          } finally {
-            await audioContext.close().catch(() => { })
-          }
-        })()
+        recorder.onerror = () => {
+          voiceStreamRef.current?.getTracks().forEach((track) => track.stop())
+          voiceStreamRef.current = null
+          voiceRecorderRef.current = null
+          if (voiceTimeoutRef.current !== null) window.clearTimeout(voiceTimeoutRef.current)
+          voiceTimeoutRef.current = null
+          setVoiceCaptureStatus(null)
+          setError('Camera recording failed.')
+        }
+        recorder.start(250)
       }
-      recorder.onerror = () => {
-        voiceStreamRef.current?.getTracks().forEach((track) => track.stop())
-        voiceStreamRef.current = null
-        voiceRecorderRef.current = null
-        if (voiceTimeoutRef.current !== null) window.clearTimeout(voiceTimeoutRef.current)
-        voiceTimeoutRef.current = null
-        setVoiceCaptureStatus(null)
-        setError(kind === 'video' ? 'Camera recording failed.' : 'Microphone recording failed.')
-      }
-      recorder.start(250)
       setError('')
       setCaptureKind(kind)
       setVoiceCaptureStatus('recording')
@@ -195,6 +206,7 @@ export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
       stream?.getTracks().forEach((track) => track.stop())
       voiceStreamRef.current = null
       voiceRecorderRef.current = null
+      void audioContext?.close().catch(() => { })
       setError(describeError(recordError))
     }
   }

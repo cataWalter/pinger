@@ -12,30 +12,36 @@ import type { useAIRequests } from './useAIRequests'
 const AI_DRAFT_REQUEST_TIMEOUT_MS = 11 * 60 * 1000
 
 export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
-  const { archivedPreferenceKey, composeTextRef, preferences, roomDrafts, rooms, setVolatileAIDrafts, volatileAIDrafts } = app
+  const { archivedPreferenceKey, composeTextRef, preferences, roomDrafts, roomRefinements, roomScope, rooms, setVolatileAIDrafts, volatileAIDrafts } = app
   const { activeAIRequestRef, activeAccountID, aiEnabled, busy, cancelAIRequest, chatTranslationAIRequestRef, chatTranslationRequestRef, clearRoomSelection, closeLanguageTutor, editTarget, filteredRooms, handleRoomKeyDown, historyRoomIDRef, imageSendRun, languageTutorRequestRef, lastReadEventByRoom, loadingOlderRef, newAIRequestID, openRoomContextMenu, pendingHistoryRefreshRoomIDRef, pendingSearchJumpRef, refreshScheduledJobs, roomButtonActionsRef, roomSelectionAnchorRef, selectLocalAIChat, selectedRoomID, selectedRoomRef, setAIPanel, setChatTranslation, setComposeText, setEditTarget, setForwardingMessage, setGeneratedImageReview, setImageSendRun, setLanguageTutorState, setLeaveConfirmOpen, setLoadingOlder, setLocalAIChatOpen, setMediaApproval, setMentionBindings, setMessageContextMenu, setMessages, setMobilePane, setRedactTarget, setReplyTarget, setRoomContextMenu, setRoomInfoOpen, setRoomMembers, setScheduledDraft, setScheduledJobs, setScheduledJobsOpen, setScheduledTimes, setSearchNextBatch, setSearchOpen, setSearchResults, setSelectedRoomID, setSelectedRoomIDs, setSnapshot, setSuggestedReplies, setSummaryStatus, setTypingUsers, setUndoRoomID, showRoom, suggestedRepliesRequestRef, summaryLoadingRef, undoToastTimerRef, workspaceGenerationRef } = app
   const [aiReplyDraftBatch, setAIReplyDraftBatch] = useState({
     status: 'idle' as 'idle' | 'running' | 'complete' | 'cancelled',
     completed: 0,
     total: 0,
     failures: [] as string[],
+    notice: '',
   })
   const replyDraftBatchRef = useRef<{ accountID: string; requestIDs: Set<string>; cancelled: boolean } | null>(null)
 
-  // suggestRepliesForRoom asks Local AI for five reply options, each in a different style, based on the latest messages in roomID.
+  // A notice describes the chats in the view that produced it, so it clears when the filter changes.
+  useEffect(() => {
+    setAIReplyDraftBatch((current) => current.notice && current.status !== 'running' ? { ...current, notice: '' } : current)
+  }, [roomScope, roomRefinements.unanswered, roomRefinements.needsReply])
+
+  // suggestRepliesForRoom asks Local AI for ten reply options, each in a different style, based on the latest messages in roomID.
   async function suggestRepliesForRoom(roomID: string) {
     if (!roomID || !aiEnabled || editTarget) return
     cancelAIRequest(suggestedRepliesRequestRef.current)
     const requestID = newAIRequestID()
     suggestedRepliesRequestRef.current = requestID
-    setSuggestedReplies((previous) => ({ roomId: roomID, requestId: requestID, status: 'loading', language: previous?.roomId === roomID ? previous.language : '', suggestions: previous?.roomId === roomID ? previous.suggestions : [], error: '' }))
+    setSuggestedReplies((previous) => ({ roomId: roomID, requestId: requestID, status: 'loading', language: previous?.roomId === roomID ? previous.language : '', inferredGoal: previous?.roomId === roomID ? previous.inferredGoal : '', suggestions: previous?.roomId === roomID ? previous.suggestions : [], error: '' }))
     try {
       const result = await AppService.AISuggestReplies(roomID, requestID)
       if (suggestedRepliesRequestRef.current !== requestID) return
-      setSuggestedReplies({ roomId: roomID, requestId: requestID, status: 'ready', language: result.language ?? '', suggestions: result.suggestions ?? [], error: '' })
+      setSuggestedReplies({ roomId: roomID, requestId: requestID, status: 'ready', language: result.language ?? '', inferredGoal: result.inferredGoal ?? '', suggestions: result.suggestions ?? [], error: '' })
     } catch (suggestError) {
       if (suggestedRepliesRequestRef.current !== requestID) return
-      setSuggestedReplies({ roomId: roomID, requestId: requestID, status: 'error', language: '', suggestions: [], error: describeError(suggestError) })
+      setSuggestedReplies({ roomId: roomID, requestId: requestID, status: 'error', language: '', inferredGoal: '', suggestions: [], error: describeError(suggestError) })
     } finally {
       if (suggestedRepliesRequestRef.current === requestID) suggestedRepliesRequestRef.current = ''
     }
@@ -84,13 +90,15 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
       && !getVolatileAIDraft(volatileAIDrafts, activeAccountID, room.id))
       .sort((left, right) => roomActivityAt(left) - roomActivityAt(right))
     if (candidates.length === 0) {
-      setAIReplyDraftBatch({ status: 'complete', completed: 0, total: 0, failures: [] })
+      // With no candidates, either every chat that needs a reply already has a draft or none needs one.
+      const alreadyDrafted = rooms.some((room) => isNeedsReplyRoom(room) && !isArchivedRoom(room.accountId, room.id))
+      setAIReplyDraftBatch({ status: 'complete', completed: 0, total: 0, failures: [], notice: alreadyDrafted ? 'All chats have drafts' : 'No chats need a reply' })
       return
     }
 
     const run = { accountID: activeAccountID, requestIDs: new Set<string>(), cancelled: false }
     replyDraftBatchRef.current = run
-    setAIReplyDraftBatch({ status: 'running', completed: 0, total: candidates.length, failures: [] })
+    setAIReplyDraftBatch({ status: 'running', completed: 0, total: candidates.length, failures: [], notice: '' })
     let nextIndex = 0
     let completed = 0
     const failures: string[] = []
@@ -119,7 +127,7 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
           run.requestIDs.delete(requestID)
           if (!run.cancelled && replyDraftBatchRef.current === run) {
             completed++
-            setAIReplyDraftBatch({ status: 'running', completed, total: candidates.length, failures: [...failures] })
+            setAIReplyDraftBatch({ status: 'running', completed, total: candidates.length, failures: [...failures], notice: '' })
           }
         }
       }
@@ -128,7 +136,7 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
     await Promise.all(Array.from({ length: Math.min(2, candidates.length) }, () => worker()))
     if (replyDraftBatchRef.current === run) {
       replyDraftBatchRef.current = null
-      setAIReplyDraftBatch({ status: 'complete', completed, total: candidates.length, failures })
+      setAIReplyDraftBatch({ status: 'complete', completed, total: candidates.length, failures, notice: failures.length > 0 ? `${failures.length} of ${candidates.length} drafts failed` : '' })
     }
   }
 

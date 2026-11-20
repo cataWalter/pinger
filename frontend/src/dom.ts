@@ -2,8 +2,12 @@ export function isTextEntryTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || Boolean(target.closest('input, textarea, select, [contenteditable="true"]')))
 }
 
+export function isApplePlatform() {
+  return /Mac|iPhone|iPad/.test(navigator.platform)
+}
+
 export function primaryModifierLabel() {
-  return /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
+  return isApplePlatform() ? '⌘' : 'Ctrl'
 }
 
 export function lowSpecModeEnabled(): boolean {

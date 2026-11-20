@@ -35,7 +35,7 @@ func TestParseSuggestedRepliesRejectsInvalidOptions(t *testing.T) {
 	}{
 		"too few suggestions": {"en", func(options []SuggestedReply) []SuggestedReply { return options[:suggestedRepliesCount-1] }},
 		"too many suggestions": {"en", func(options []SuggestedReply) []SuggestedReply {
-			return append(options, SuggestedReply{Tone: "Direct", Text: "extra", Translation: "extra"})
+			return append(options, SuggestedReply{Tone: "Brief", Text: "extra", Translation: "extra"})
 		}},
 		"unknown tone": {"en", func(options []SuggestedReply) []SuggestedReply {
 			options[0].Tone = "Angry"

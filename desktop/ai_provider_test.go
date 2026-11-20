@@ -93,6 +93,31 @@ func TestAILocalCompletionRejectsRedirects(t *testing.T) {
 	}
 }
 
+func TestAILocalCompletionFallsBackToOpenAIRouteWhenOllamaRouteMissing(t *testing.T) {
+	var openAIRequests atomic.Int32
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/chat":
+			http.NotFound(w, r)
+		case "/v1/chat/completions":
+			openAIRequests.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":" hi "}}]}`))
+		default:
+			t.Errorf("unexpected request path %q", r.URL.Path)
+		}
+	}))
+	defer local.Close()
+	messages := []AIMessage{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "hey"}, {Role: "user", Content: "again"}}
+	completion, err := aiProviderCompletion(context.Background(), aiLocalHTTPClient, AIProviderOllama, local.URL, "", messages, aiCompletionOptions{Chat: true}, nil)
+	if err != nil || completion != "hi" {
+		t.Fatalf("local completion = %q, %v; want hi from the OpenAI-compatible route", completion, err)
+	}
+	if got := openAIRequests.Load(); got != 1 {
+		t.Fatalf("OpenAI-compatible route requests = %d, want 1", got)
+	}
+}
+
 func TestAILocalCompletionAcceptsLoopbackResponse(t *testing.T) {
 	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
