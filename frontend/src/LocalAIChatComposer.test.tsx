@@ -13,6 +13,30 @@ describe('LocalAIChat composer', () => {
 
   beforeEach(() => resetLocalAIChatMocks())
 
+  it('drafts the next user message into the composer without saving it', async () => {
+    service.LoadLocalAIChatMessages.mockResolvedValueOnce([
+      { seq: 1, role: 'user', content: 'Tell me about the trip.', status: 'complete', attachments: [], createdAt: 1 },
+      { seq: 2, role: 'assistant', content: 'Sure, where did you go?', status: 'complete', attachments: [], createdAt: 2 },
+    ])
+    service.LocalAIChat.mockResolvedValueOnce('Mostly Lisbon, and we ate a lot.')
+    renderChat({ chatId: 'chat-1' })
+    const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
+    await screen.findByText('Sure, where did you go?')
+    await waitFor(() => expect(composer.disabled).toBe(false))
+    fireEvent.keyDown(composer, { key: 'C', code: 'KeyC', ctrlKey: true, shiftKey: true })
+
+    await waitFor(() => expect(composer.value).toBe('Mostly Lisbon, and we ate a lot.'))
+    expect(service.LocalAIChat).toHaveBeenCalledWith(expect.objectContaining({
+      messages: [
+        expect.objectContaining({ role: 'user', content: 'Tell me about the trip.' }),
+        expect.objectContaining({ role: 'assistant', content: 'Sure, where did you go?' }),
+        expect.objectContaining({ role: 'user', content: expect.stringContaining('next message') }),
+      ],
+      agentInstructions: '',
+    }))
+    expect(service.AppendLocalAIChatMessage).not.toHaveBeenCalled()
+  })
+
   it('attaches a pasted screenshot and sends it with the message', async () => {
     service.LocalAIChat.mockResolvedValueOnce('The screenshot shows a chart.')
     renderChat({ chatId: 'chat-1' })

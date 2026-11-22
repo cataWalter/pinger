@@ -88,17 +88,14 @@ func (s *AppService) AISuggestReplies(roomID, requestID string) (SuggestedReplie
 	}
 	explanation, languages := suggestedReplyLanguages(preferences, roomID)
 	tuning := aiFeatureTuningFor(preferences, aiFeatureSuggestedReplies)
-	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
+	ctx, release := s.beginAIRoomRun(requestID)
 	defer release()
 
-	page, err := s.currentClient().HistoryPageWithLimit(ctx, roomID, 0, suggestedRepliesHistoryLimit)
+	messages, err := s.readAIRoomHistory(ctx, roomID, suggestedRepliesHistoryLimit)
 	if err != nil {
-		if ctx.Err() == context.Canceled {
-			return SuggestedReplies{}, errAIRunStopped
-		}
-		return SuggestedReplies{}, fmt.Errorf("read room history: %w", err)
+		return SuggestedReplies{}, err
 	}
-	input, err := suggestedRepliesTranscript(latestAIDraftMessages(page.Messages))
+	input, err := suggestedRepliesTranscript(latestAIDraftMessages(messages))
 	if err != nil {
 		return SuggestedReplies{}, err
 	}
@@ -119,20 +116,14 @@ func (s *AppService) AIGenerateReplyDraft(roomID, requestID string) (string, err
 		return "", err
 	}
 	tuning := aiFeatureTuningFor(preferences, aiFeatureSuggestedReplies)
-	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
+	ctx, release := s.beginAIRoomRun(requestID)
 	defer release()
-	// Bound the whole draft, including the history read, so a stuck call always returns.
-	ctx, cancelDraft := context.WithTimeout(ctx, aiMaxCompletionTimeout)
-	defer cancelDraft()
 
-	page, err := s.currentClient().HistoryPageWithLimit(ctx, roomID, 0, aiReplyDraftHistoryLimit)
+	messages, err := s.readAIRoomHistory(ctx, roomID, aiReplyDraftHistoryLimit)
 	if err != nil {
-		if ctx.Err() == context.Canceled {
-			return "", errAIRunStopped
-		}
-		return "", fmt.Errorf("read room history: %w", err)
+		return "", err
 	}
-	input, err := suggestedRepliesTranscript(page.Messages)
+	input, err := suggestedRepliesTranscript(messages)
 	if err != nil {
 		return "", err
 	}

@@ -220,7 +220,7 @@ describe('browser smoke: chat layout', () => {
     expect(bounds.top).toBeGreaterThanOrEqual(0)
     expect(bounds.bottom).toBeLessThanOrEqual(height + 1)
     const aiButtons = within(aiTools).getAllByRole('button')
-    expect(aiButtons).toHaveLength(5)
+    expect(aiButtons).toHaveLength(7)
     for (const button of aiButtons) {
       const buttonBounds = button.getBoundingClientRect()
       expect(buttonBounds.left).toBeGreaterThanOrEqual(bounds.left)

@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { decodeOggOpusToWavURL } from './audioFallback'
 import { WAVEFORM_BARS } from './audioWaveform'
 import { VoiceMessagePlayer } from './VoiceMessagePlayer'
+
+vi.mock('./audioFallback', () => ({ decodeOggOpusToWavURL: vi.fn() }))
 
 type Props = Parameters<typeof VoiceMessagePlayer>[0]
 
@@ -144,5 +147,29 @@ describe('VoiceMessagePlayer', () => {
 
     fireEvent.error(audioElement(container))
     expect(screen.getByRole('status').textContent).toBe('This audio file could not be played.')
+  })
+
+  it('plays a decoded copy when the browser cannot play the original', async () => {
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play')
+      .mockRejectedValueOnce(new DOMException('The operation is not supported.', 'NotSupportedError'))
+      .mockResolvedValueOnce(undefined)
+    vi.mocked(decodeOggOpusToWavURL).mockResolvedValue('blob:decoded-voice')
+    const { container } = renderPlayer({ source: 'https://example.test/voice.ogg' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play audio' }))
+
+    await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(2))
+    expect(decodeOggOpusToWavURL).toHaveBeenCalledWith('https://example.test/voice.ogg')
+    expect(audioElement(container).getAttribute('src')).toBe('blob:decoded-voice')
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('shows an error when the browser cannot play the original and decoding fails', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockRejectedValue(new DOMException('The operation is not supported.', 'NotSupportedError'))
+    vi.mocked(decodeOggOpusToWavURL).mockRejectedValue(new Error('Audio contains no decodable samples.'))
+    renderPlayer({ source: 'https://example.test/voice.ogg' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play audio' }))
+    expect((await screen.findByRole('status')).textContent).toBe('This audio file could not be played.')
   })
 })

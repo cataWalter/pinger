@@ -148,7 +148,7 @@ func aiToneGuardCompletion(ctx context.Context, client *http.Client, endpoint, m
 	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiToneGuardTimeout, aiToneGuardMaxTokens)
 }
 
-func aiAudioTranscription(ctx context.Context, client *http.Client, endpoint, model, filename, contentType string, audio []byte) (string, error) {
+func aiAudioTranscription(ctx context.Context, client *http.Client, endpoint, model, prompt, filename, contentType string, audio []byte) (string, error) {
 	if err := validateAIEndpoint(endpoint); err != nil {
 		return "", err
 	}
@@ -180,6 +180,11 @@ func aiAudioTranscription(ctx context.Context, client *http.Client, endpoint, mo
 	if model != "" {
 		if err := writer.WriteField("model", model); err != nil {
 			return "", fmt.Errorf("encode transcription model: %w", err)
+		}
+	}
+	if prompt != "" {
+		if err := writer.WriteField("prompt", prompt); err != nil {
+			return "", fmt.Errorf("encode transcription prompt: %w", err)
 		}
 	}
 	if err := writer.WriteField("response_format", "json"); err != nil {
@@ -265,6 +270,32 @@ func (s *AppService) aiContext() context.Context {
 		return s.ctx
 	}
 	return context.Background()
+}
+
+// beginAIRoomRun registers requestID so it can be stopped, and bounds the whole run, history read included, by aiMaxCompletionTimeout.
+func (s *AppService) beginAIRoomRun(requestID string) (context.Context, func()) {
+	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
+	ctx, cancel := context.WithTimeout(ctx, aiMaxCompletionTimeout)
+	return ctx, func() {
+		cancel()
+		release()
+	}
+}
+
+// readAIRoomHistory returns the latest limit messages of roomID for an AI run, or errAIRunStopped when the run was stopped.
+func (s *AppService) readAIRoomHistory(ctx context.Context, roomID string, limit int) ([]matrix.Message, error) {
+	client, err := s.requireClient()
+	if err != nil {
+		return nil, err
+	}
+	page, err := client.HistoryPageWithLimit(ctx, roomID, 0, limit)
+	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return nil, errAIRunStopped
+		}
+		return nil, fmt.Errorf("read room history: %w", err)
+	}
+	return page.Messages, nil
 }
 
 // aiIsWAV reports whether audio starts with a RIFF/WAVE header.

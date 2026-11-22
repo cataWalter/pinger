@@ -6,7 +6,6 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 	"sync"
 	"time"
@@ -48,7 +47,7 @@ type Client struct {
 	invites                map[string]Invite
 	urlPreviews            urlPreviewCache
 	local                  map[string]map[string]Message
-	mediaEncrypted         map[string]*event.EncryptedFileInfo
+	mediaEncrypted         map[string]*EncryptedMediaFile
 	typing                 map[string][]string
 	pendingNotifications   []Notification
 	pendingIncomingMessage bool

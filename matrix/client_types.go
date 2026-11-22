@@ -5,7 +5,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"maunium.net/go/mautrix"
-	"maunium.net/go/mautrix/event"
 	"time"
 )
 
@@ -79,7 +78,7 @@ type Message struct {
 	MediaSize       int
 	MediaWidth      int
 	MediaHeight     int
-	MediaEncrypted  *event.EncryptedFileInfo
+	MediaEncrypted  *EncryptedMediaFile
 	MediaDurationMs int
 	Encrypted       bool
 	DecryptionError string
@@ -89,7 +88,7 @@ type Message struct {
 
 	MediaType               string
 	MediaThumbnailURI       string
-	MediaThumbnailEncrypted *event.EncryptedFileInfo
+	MediaThumbnailEncrypted *EncryptedMediaFile
 
 	// MediaName is the filename of the inline media when the event provides one.
 	MediaName string

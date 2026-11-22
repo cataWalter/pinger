@@ -4,7 +4,9 @@ import {
   buildAskAIPrompt,
   buildAgentPrompt,
   buildConversationAnalysisPrompt,
+  buildContinuePrompt,
   buildExplainPrompt,
+  buildLocalContinueMessages,
   buildReplyPrompt,
   buildRewritePrompt,
   buildSummaryChatDraft,
@@ -21,6 +23,31 @@ const messages = [
 ]
 
 describe('local AI prompts', () => {
+  it('builds a continue request that labels the user and asks for only the next message', () => {
+    const [system, user] = buildContinuePrompt([
+      { senderName: 'You', sender: '@me:example.org', body: 'Want lunch?' },
+      { senderName: 'Alice', sender: '@alice:example.org', body: 'Sure <noon>' },
+    ], 'Use short replies.', 'Plan a team lunch')
+    expect(system).toMatchObject({ role: 'system' })
+    expect(system.content).toContain('Use short replies.')
+    expect(system.content).toContain('Return only the message text')
+    expect(user.content).toContain('Plan a team lunch')
+    expect(user.content).toContain('You: Want lunch?')
+    expect(user.content).toContain('Alice: Sure &lt;noon&gt;')
+  })
+
+  it('appends the continue request as the final user turn for local chat', () => {
+    const messages = buildLocalContinueMessages([
+      { role: 'user', content: 'Hi' },
+      { role: 'assistant', content: 'Hello' },
+    ], 'Keep it short.')
+    expect(messages).toHaveLength(3)
+    expect(messages.slice(0, 2)).toEqual([{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }])
+    expect(messages[2]).toMatchObject({ role: 'user' })
+    expect(messages[2].content).toContain('next message')
+    expect(messages[2].content).toContain('Keep it short.')
+  })
+
   it('builds an editable summary request with the full chronological transcript', () => {
     const manyMessages = Array.from({ length: 55 }, (_, index) => ({
       senderName: 'Alice',

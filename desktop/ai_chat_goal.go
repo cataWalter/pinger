@@ -50,20 +50,14 @@ func (s *AppService) AIInferChatGoal(roomID, requestID string) (string, error) {
 	}
 	explanation, languages := suggestedReplyLanguages(preferences, roomID)
 	tuning := aiFeatureTuningFor(preferences, aiFeatureSuggestedReplies)
-	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
+	ctx, release := s.beginAIRoomRun(requestID)
 	defer release()
-	// Bound the whole inference, including the history read, so a stuck call always returns.
-	ctx, cancelGoal := context.WithTimeout(ctx, aiMaxCompletionTimeout)
-	defer cancelGoal()
 
-	page, err := s.currentClient().HistoryPageWithLimit(ctx, roomID, 0, suggestedRepliesHistoryLimit)
+	messages, err := s.readAIRoomHistory(ctx, roomID, suggestedRepliesHistoryLimit)
 	if err != nil {
-		if ctx.Err() == context.Canceled {
-			return "", errAIRunStopped
-		}
-		return "", fmt.Errorf("read room history: %w", err)
+		return "", err
 	}
-	input, err := suggestedRepliesTranscript(page.Messages)
+	input, err := suggestedRepliesTranscript(messages)
 	if err != nil {
 		return "", errors.New("no text messages to infer a chat goal from")
 	}

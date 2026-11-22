@@ -26,6 +26,7 @@ export default defineConfig({
             { name: "react-vendor", test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 20 },
             { name: "emoji", test: /[\\/]node_modules[\\/]emoji-picker-react[\\/]/, priority: 25 },
             { name: "franc", test: /[\\/]node_modules[\\/]franc-min[\\/]/, priority: 25 },
+            { name: "ogg-opus", test: /[\\/]node_modules[\\/](ogg-opus-decoder|opus-decoder|@wasm-audio-decoders)[\\/]/, priority: 25 },
             { name: "vendor", test: /[\\/]node_modules[\\/]/, priority: 1 },
           ],
         },

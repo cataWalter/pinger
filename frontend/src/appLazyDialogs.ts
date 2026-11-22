@@ -10,3 +10,4 @@ export const LeaveRoomDialog = lazy(() => import('./ConfirmDialogs').then((modul
 export const RedactDialog = lazy(() => import('./ConfirmDialogs').then((module) => ({ default: module.RedactDialog })))
 export const ForwardMessageDialog = lazy(() => import('./RoomDialogs').then((module) => ({ default: module.ForwardMessageDialog })))
 export const MediaGalleryDialog = lazy(() => import('./RoomDialogs').then((module) => ({ default: module.MediaGalleryDialog })))
+export const ImproveDraftDialog = lazy(() => import('./ImproveDraftDialog').then((module) => ({ default: module.ImproveDraftDialog })))

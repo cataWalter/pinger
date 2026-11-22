@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { Loader2, Pause, Play } from 'lucide-react'
 import { WAVEFORM_BARS, decodeWaveformPeaks, placeholderWaveform } from './audioWaveform'
+import { decodeOggOpusToWavURL } from './audioFallback'
 
 const PLAYBACK_RATES = [1, 1.5, 2]
 const SEEK_STEP_SECONDS = 5
 const WAVEFORM_DECODE_MAX_BYTES = 50 * 1024 * 1024
+const MEDIA_ERR_SRC_NOT_SUPPORTED = 4
 const waveformCache = new Map<string, number[]>()
 
 export function formatAudioTime(seconds: number) {
@@ -16,11 +18,25 @@ export function formatAudioTime(seconds: number) {
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
 }
 
-async function startPlayback(player: HTMLAudioElement, onFailure: (message: string) => void) {
+function isUnsupportedSourceError(error: unknown) {
+  return error instanceof DOMException && error.name === 'NotSupportedError'
+}
+
+async function startPlayback(player: HTMLAudioElement, decodedSource: () => Promise<string>, onFailure: (message: string) => void) {
   try {
     await player.play()
+    return
   } catch (playError) {
-    onFailure(playError instanceof Error ? playError.message : 'Audio playback failed.')
+    if (!isUnsupportedSourceError(playError)) {
+      onFailure(playError instanceof Error ? playError.message : 'Audio playback failed.')
+      return
+    }
+  }
+  try {
+    player.src = await decodedSource()
+    await player.play()
+  } catch {
+    onFailure('This audio file could not be played.')
   }
 }
 
@@ -46,6 +62,7 @@ export function VoiceMessagePlayer({ label, waveformKey, durationMs, sizeBytes, 
   const autoPlayAttemptedRef = useRef(false)
   const requestAndPlayRef = useRef<() => void>(() => { })
   const scrubbingRef = useRef(false)
+  const decodedSourceRef = useRef<{ source: string; url: Promise<string> } | null>(null)
   const placeholder = useMemo(() => placeholderWaveform(waveformKey || label, WAVEFORM_BARS), [waveformKey, label])
   const bars = peaks ?? placeholder
   const canSeek = source !== '' && duration > 0
@@ -97,6 +114,21 @@ export function VoiceMessagePlayer({ label, waveformKey, durationMs, sizeBytes, 
     requestAndPlayRef.current()
   }, [autoPlay])
 
+  useEffect(() => () => {
+    void decodedSourceRef.current?.url.then((url) => URL.revokeObjectURL(url), () => undefined)
+  }, [])
+
+  function decodedSourceFor(source: string) {
+    const cached = decodedSourceRef.current
+    if (cached?.source === source) return cached.url
+    const url = decodeOggOpusToWavURL(source)
+    decodedSourceRef.current = { source, url }
+    url.catch(() => {
+      if (decodedSourceRef.current?.url === url) decodedSourceRef.current = null
+    })
+    return url
+  }
+
   async function requestAndPlay() {
     if (pendingPlayRef.current) return
     pendingPlayRef.current = true
@@ -106,7 +138,7 @@ export function VoiceMessagePlayer({ label, waveformKey, durationMs, sizeBytes, 
       const url = source || await onRequestSource()
       if (!url || !audioRef.current) return
       if (audioRef.current.getAttribute('src') !== url) audioRef.current.src = url
-      await startPlayback(audioRef.current, setPlayerError)
+      await startPlayback(audioRef.current, () => decodedSourceFor(url), setPlayerError)
     } catch (playError) {
       setPlayerError(playError instanceof Error ? playError.message : 'Audio playback failed.')
     } finally {
@@ -131,7 +163,7 @@ export function VoiceMessagePlayer({ label, waveformKey, durationMs, sizeBytes, 
     }
     if (player.ended) player.currentTime = 0
     setPlayerError('')
-    await startPlayback(player, setPlayerError)
+    await startPlayback(player, () => decodedSourceFor(source), setPlayerError)
   }
 
   function seekTo(seconds: number) {
@@ -228,7 +260,10 @@ export function VoiceMessagePlayer({ label, waveformKey, durationMs, sizeBytes, 
           setCurrentTime(0)
           onEnded?.()
         }}
-        onError={() => setPlayerError('This audio file could not be played.')}
+        onError={(event) => {
+          // Unsupported sources are retried as a decoded copy when playback starts.
+          if (event.currentTarget.error?.code !== MEDIA_ERR_SRC_NOT_SUPPORTED) setPlayerError('This audio file could not be played.')
+        }}
       />
       {playerError && <span className="media-error" role="status">{playerError}</span>}
     </div>

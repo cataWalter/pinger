@@ -151,6 +151,16 @@ export function detectedChatLanguageKey(roomID: string): string {
   return `room.detected_language.${roomID}`
 }
 
+// roomDetectedChatLanguage returns the detected language of one chat, for the audio transcription hint. A chat in the default language
+// stores an empty value, which means the default language. A chat that has not been detected yet returns an empty string.
+export function roomDetectedChatLanguage(preferences: Readonly<Record<string, unknown>>, roomID: string): string {
+  const roles = resolveLanguageRoles(preferences)
+  const stored = roomID ? preferences[detectedChatLanguageKey(roomID)] : undefined
+  if (typeof stored !== 'string') return ''
+  if (stored === '') return roles.defaultLanguage
+  return supportedLanguageCode(stored, roles.languages)
+}
+
 // chatLanguageChange decides whether an automatic detection should replace a chat's learning language. It returns null when
 // nothing should change. A learning language the user chose, which differs from the last automatic value, is never replaced.
 // A chat written in the default language has no learning language, so the automatic value is cleared.

@@ -1,5 +1,0 @@
-
-.app-shell[data-content-blur='true'] .thread-message:not(:hover):not(:focus-within) .thread-message-body> :not(.thread-message-meta),
-.app-shell[data-content-blur='true'] .thread-message:not(:hover):not(:focus-within) .thread-message-avatar {
-  filter: blur(8px);
-}

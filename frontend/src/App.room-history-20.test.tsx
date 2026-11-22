@@ -229,7 +229,7 @@ describe('room history updates', () => {
     }
 
     expect(await screen.findByText('Please meet at noon.')).toBeTruthy()
-    expect(harness.service.AITranscribeMedia).toHaveBeenCalledWith(audioMessage.mediaUri, audioMessage.body, audioMessage.mediaMime)
+    expect(harness.service.AITranscribeMedia).toHaveBeenCalledWith(audioMessage.mediaUri, audioMessage.body, audioMessage.mediaMime, '')
     expect(harness.service.AITranscribeMedia).toHaveBeenCalledTimes(1)
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
 

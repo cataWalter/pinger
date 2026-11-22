@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	sharedpreferences "mychat/preferences"
 )
 
 // aiIsMP3 reports whether audio starts with an ID3 tag or an MPEG Layer III frame sync.
@@ -141,7 +143,8 @@ func (s *AppService) CheckMessageTone(messages []AIMessage) (string, error) {
 }
 
 // AITranscribeMedia transcribes cached Matrix audio with the local loopback AI endpoint. Audio never goes to an online provider.
-func (s *AppService) AITranscribeMedia(mxcURI, filename, contentType string) (string, error) {
+// language is the chat's ISO 639-1 code. An empty or unknown code leaves the language to the model.
+func (s *AppService) AITranscribeMedia(mxcURI, filename, contentType, language string) (string, error) {
 	preferences := s.preferenceValues()
 	route, err := aiLocalRoute(preferences)
 	if err != nil {
@@ -151,7 +154,11 @@ func (s *AppService) AITranscribeMedia(mxcURI, filename, contentType string) (st
 	if transcriptionModel == "" {
 		transcriptionModel = route.model
 	}
-	audio, err := s.currentClient().CachedMediaBytes(s.aiContext(), mxcURI)
+	client, err := s.requireClient()
+	if err != nil {
+		return "", err
+	}
+	audio, err := client.CachedMediaBytes(s.aiContext(), mxcURI)
 	if err != nil {
 		return "", fmt.Errorf("load audio from Matrix: %w", err)
 	}
@@ -159,7 +166,26 @@ func (s *AppService) AITranscribeMedia(mxcURI, filename, contentType string) (st
 	if err != nil {
 		return "", err
 	}
-	return aiAudioTranscription(s.aiContext(), route.client, route.endpoint, transcriptionModel, filename, contentType, audio)
+	prompt := aiTranscriptionPrompt(aiTranscriptionLanguageName(preferences, language))
+	return aiAudioTranscription(s.aiContext(), route.client, route.endpoint, transcriptionModel, prompt, filename, contentType, audio)
+}
+
+// aiTranscriptionLanguageName returns the name of a chat language from the built-in or custom catalog, or an empty string.
+func aiTranscriptionLanguageName(preferences map[string]any, code string) string {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return ""
+	}
+	return sharedpreferences.LanguageLookupFromPreferences(preferences)[code]
+}
+
+// aiTranscriptionPrompt asks for a word-for-word transcript in the named language. The local endpoint ignores a language form
+// field, and a loose hint makes the model summarize the audio, so the instruction is strict. An empty name keeps the default request.
+func aiTranscriptionPrompt(languageName string) string {
+	if languageName == "" {
+		return ""
+	}
+	return "Transcribe this audio word for word. The speech is in " + languageName + ". Output only the transcript."
 }
 
 // TestAIEndpoint checks the configured AI provider. Local checks that the server is up and the model is loaded.

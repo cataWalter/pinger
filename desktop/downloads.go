@@ -49,7 +49,11 @@ type MediaCleanupResult struct {
 const maxDownloadAttempts = 1000
 
 func (s *AppService) StorageUsage() (StorageUsage, error) {
-	databaseBytes, walBytes, err := s.currentClient().StorageUsage()
+	client, err := s.requireClient()
+	if err != nil {
+		return StorageUsage{}, err
+	}
+	databaseBytes, walBytes, err := client.StorageUsage()
 	if err != nil {
 		return StorageUsage{}, err
 	}
@@ -57,7 +61,11 @@ func (s *AppService) StorageUsage() (StorageUsage, error) {
 }
 
 func (s *AppService) MediaCacheUsage() (MediaCacheUsage, error) {
-	bytes, files, err := s.currentClient().MediaCacheUsage()
+	client, err := s.requireClient()
+	if err != nil {
+		return MediaCacheUsage{}, err
+	}
+	bytes, files, err := client.MediaCacheUsage()
 	if err != nil {
 		return MediaCacheUsage{}, err
 	}
@@ -65,12 +73,20 @@ func (s *AppService) MediaCacheUsage() (MediaCacheUsage, error) {
 }
 
 func (s *AppService) ClearMediaCache() error {
-	return s.currentClient().ClearMediaCache()
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.ClearMediaCache()
 }
 
 // RoomStorageUsage reports cached media and approximate message storage per chat.
 func (s *AppService) RoomStorageUsage() ([]RoomStorage, error) {
-	usage, err := s.currentClient().RoomStorageUsage(s.ctx)
+	client, err := s.requireClient()
+	if err != nil {
+		return nil, err
+	}
+	usage, err := client.RoomStorageUsage(s.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +110,11 @@ func (s *AppService) ClearCachedMedia(request MediaCleanupRequest) (MediaCleanup
 	if err != nil {
 		return MediaCleanupResult{}, err
 	}
-	result, err := s.currentClient().ClearCachedMedia(s.ctx, filter)
+	client, err := s.requireClient()
+	if err != nil {
+		return MediaCleanupResult{}, err
+	}
+	result, err := client.ClearCachedMedia(s.ctx, filter)
 	if err != nil {
 		return MediaCleanupResult{}, err
 	}

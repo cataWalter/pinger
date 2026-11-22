@@ -1,6 +1,7 @@
 import { ArrowUpRight, RotateCcw, X } from 'lucide-react'
 import type { Message, Room } from '../bindings/mychat/desktop/models.js'
 import { DialogSurface } from './DialogSurface'
+import { roomDetectedChatLanguage } from './aiLanguages'
 import {
   MEDIA_GALLERY_FILTERS,
   MessageMedia,
@@ -89,7 +90,7 @@ export function MediaGalleryDialog({ roomID, roomName, items, filter, loading, s
                     <span title={message.senderName || message.sender}>{message.senderName || message.sender || 'Unknown sender'}</span>
                     {message.timestamp > 0 && <time dateTime={new Date(message.timestamp).toISOString()}>{formatMediaGalleryDateTime(message.timestamp, preferences)}</time>}
                   </div>
-                  <MessageMedia roomID={roomID} message={message} aiEnabled={Boolean(preferenceString(preferences, 'ai.endpoint', '').trim())} canUseDraft={false} onUseDraft={() => { }} />
+                  <MessageMedia roomID={roomID} message={message} aiEnabled={Boolean(preferenceString(preferences, 'ai.endpoint', '').trim())} chatLanguage={roomDetectedChatLanguage(preferences, roomID)} canUseDraft={false} onUseDraft={() => { }} />
                 </article>
               ))}
             </div>}

@@ -10,7 +10,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
-	"maunium.net/go/mautrix/event"
 	"os"
 	"path/filepath"
 )
@@ -61,7 +60,7 @@ func NewWithLogOutput(databasePath string, logOutput io.Writer) (*Client, error)
 		rooms:                make(map[string]Room),
 		invites:              make(map[string]Invite),
 		local:                make(map[string]map[string]Message),
-		mediaEncrypted:       make(map[string]*event.EncryptedFileInfo),
+		mediaEncrypted:       make(map[string]*EncryptedMediaFile),
 		typing:               make(map[string][]string),
 		notifiedEvents:       make(map[string]struct{}),
 		pendingTimelineRooms: make(map[string]struct{}),

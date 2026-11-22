@@ -183,7 +183,7 @@ Pinger connects directly to Beeper's Matrix homeserver at `https://matrix.beeper
 
 ### Prerequisites
 
-- [Go 1.26.10](https://go.dev/dl/); scripts and tasks explicitly select this toolchain
+- [Go 1.26.11](https://go.dev/dl/); scripts and tasks explicitly select this toolchain
 - [Node.js 22+](https://nodejs.org/) with npm
 - Wails CLI **v3.0.0-beta.30** (must match `go.mod`):
   `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.30`

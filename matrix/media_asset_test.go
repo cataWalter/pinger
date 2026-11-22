@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -94,6 +97,11 @@ func TestOpenMediaPreviewForEventPrefersThumbnailAndFallsBack(t *testing.T) {
 	}
 	defer client.Close()
 	client.SetMediaCacheDir(t.TempDir())
+	homeserver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"errcode":"M_UNKNOWN","error":"thumbnail failed"}`, http.StatusBadRequest)
+	}))
+	t.Cleanup(homeserver.Close)
+	client.engine.Client.HomeserverURL, _ = url.Parse(homeserver.URL)
 
 	const roomID = "!room:example.org"
 	if err = client.engine.DB.Room.CreateRow(context.Background(), id.RoomID(roomID)); err != nil {
@@ -120,9 +128,11 @@ func TestOpenMediaPreviewForEventPrefersThumbnailAndFallsBack(t *testing.T) {
 	}
 	insertImage("$with-thumbnail", map[string]any{"mimetype": "image/png", "thumbnail_url": "mxc://example.org/thumb-small"}, "mxc://example.org/full-large")
 	insertImage("$without-thumbnail", map[string]any{"mimetype": "image/png"}, "mxc://example.org/full-only")
+	insertImage("$unavailable-thumbnail", map[string]any{"mimetype": "image/png", "thumbnail_url": "mxc://example.org/thumb-missing"}, "mxc://example.org/full-unavailable-thumb")
 	writeCacheFile(t, client, "mxc://example.org/full-large", false, "full-large")
 	writeCacheFile(t, client, "mxc://example.org/thumb-small", false, "thumb-small")
 	writeCacheFile(t, client, "mxc://example.org/full-only", false, "full-only")
+	writeCacheFile(t, client, "mxc://example.org/full-unavailable-thumb", false, "full-unavailable-thumb")
 
 	readOpened := func(file *os.File, openErr error) string {
 		t.Helper()
@@ -143,6 +153,10 @@ func TestOpenMediaPreviewForEventPrefersThumbnailAndFallsBack(t *testing.T) {
 	fallback, _, fallbackErr := client.OpenMediaPreviewForEvent(context.Background(), roomID, "$without-thumbnail")
 	if got := readOpened(fallback, fallbackErr); got != "full-only" {
 		t.Fatalf("preview without thumbnail = %q, want original bytes", got)
+	}
+	unavailable, _, unavailableErr := client.OpenMediaPreviewForEvent(context.Background(), roomID, "$unavailable-thumbnail")
+	if got := readOpened(unavailable, unavailableErr); got != "full-unavailable-thumb" {
+		t.Fatalf("preview with unavailable thumbnail = %q, want original bytes", got)
 	}
 	original, _, originalErr := client.OpenMediaFileForEvent(context.Background(), roomID, "$with-thumbnail")
 	if got := readOpened(original, originalErr); got != "full-large" {

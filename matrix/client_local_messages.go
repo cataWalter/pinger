@@ -5,7 +5,6 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"maunium.net/go/mautrix/event"
 	"strings"
 )
 
@@ -17,7 +16,7 @@ func (c *Client) storeLocalMessage(roomID string, message Message) {
 	c.mu.Lock()
 	if message.MediaURI != "" && message.MediaEncrypted != nil {
 		if c.mediaEncrypted == nil {
-			c.mediaEncrypted = make(map[string]*event.EncryptedFileInfo)
+			c.mediaEncrypted = make(map[string]*EncryptedMediaFile)
 		}
 		c.mediaEncrypted[message.MediaURI] = message.MediaEncrypted
 	}

@@ -43,7 +43,7 @@ func TestAIAudioTranscriptionSendsAudioAndReturnsTranscript(t *testing.T) {
 	}))
 	defer server.Close()
 
-	transcript, err := aiAudioTranscription(context.Background(), server.Client(), server.URL+"/", "whisper-small", "voice-note.webm", "audio/webm; codecs=opus", []byte("audio bytes"))
+	transcript, err := aiAudioTranscription(context.Background(), server.Client(), server.URL+"/", "whisper-small", "", "voice-note.webm", "audio/webm; codecs=opus", []byte("audio bytes"))
 	if err != nil {
 		t.Fatalf("aiAudioTranscription() error = %v", err)
 	}
@@ -53,8 +53,56 @@ func TestAIAudioTranscriptionSendsAudioAndReturnsTranscript(t *testing.T) {
 }
 
 func TestAIAudioTranscriptionRejectsEmptyAudio(t *testing.T) {
-	if _, err := aiAudioTranscription(context.Background(), http.DefaultClient, "http://localhost:8080", "", "audio.ogg", "audio/ogg", nil); err == nil {
+	if _, err := aiAudioTranscription(context.Background(), http.DefaultClient, "http://localhost:8080", "", "", "audio.ogg", "audio/ogg", nil); err == nil {
 		t.Fatal("aiAudioTranscription() accepted empty audio")
+	}
+}
+
+func TestAIAudioTranscriptionSendsPromptOnlyWhenSet(t *testing.T) {
+	var prompts []string
+	var hasPrompt []bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("parse multipart form: %v", err)
+			return
+		}
+		_, ok := r.MultipartForm.Value["prompt"]
+		hasPrompt = append(hasPrompt, ok)
+		prompts = append(prompts, r.FormValue("prompt"))
+		_, _ = io.WriteString(w, `{"text":"ok"}`)
+	}))
+	defer server.Close()
+
+	const prompt = "Transcribe this audio word for word. The speech is in Italian. Output only the transcript."
+	for _, value := range []string{"", prompt} {
+		if _, err := aiAudioTranscription(context.Background(), server.Client(), server.URL, "", value, "audio.ogg", "audio/ogg", []byte("audio")); err != nil {
+			t.Fatalf("aiAudioTranscription() error = %v", err)
+		}
+	}
+	if hasPrompt[0] {
+		t.Fatal("empty prompt was sent")
+	}
+	if !hasPrompt[1] || prompts[1] != prompt {
+		t.Fatalf("prompt = %q, want %q", prompts[1], prompt)
+	}
+}
+
+func TestAITranscriptionLanguageAndPrompt(t *testing.T) {
+	preferences := map[string]any{"ai.custom_languages": `[{"code":"pt-BR","name":"Brazilian Portuguese"}]`}
+	if got := aiTranscriptionLanguageName(preferences, "it"); got != "Italian" {
+		t.Fatalf("built-in name = %q, want Italian", got)
+	}
+	if got := aiTranscriptionLanguageName(preferences, "pt-BR"); got != "Brazilian Portuguese" {
+		t.Fatalf("custom name = %q, want Brazilian Portuguese", got)
+	}
+	if got := aiTranscriptionLanguageName(preferences, "zz-unknown"); got != "" {
+		t.Fatalf("unknown name = %q, want empty", got)
+	}
+	if got := aiTranscriptionPrompt(""); got != "" {
+		t.Fatalf("prompt without language = %q, want empty", got)
+	}
+	if got := aiTranscriptionPrompt("Italian"); !strings.Contains(got, "The speech is in Italian.") {
+		t.Fatalf("prompt = %q, want the language name", got)
 	}
 }
 

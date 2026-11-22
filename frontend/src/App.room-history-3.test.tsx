@@ -370,7 +370,8 @@ describe('room history updates', () => {
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
   })
 
-  it.each(['ctrlKey', 'metaKey'])('analyzes the focused message with %s+Shift+C', async (modifier) => {
+  it.each(['ctrlKey', 'metaKey'])('drafts the next message into an empty composer with %s+Shift+C', async (modifier) => {
+    harness.service.AIComplete.mockResolvedValue('Sounds good, see you then.')
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:11434' } })
     render(<App />)
     const body = await screen.findByText('latest message')
@@ -378,8 +379,47 @@ describe('room history updates', () => {
     row.focus()
     fireEvent.keyDown(row, { key: 'C', code: 'KeyC', [modifier]: true, shiftKey: true })
 
-    await waitFor(() => expect(harness.tutorService.Analyze).toHaveBeenCalledWith('latest message', 'message', 'tr', 'en', expect.any(String)))
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    await waitFor(() => expect(composer.value).toBe('Sounds good, see you then.'))
+    expect(harness.service.AIComplete).toHaveBeenCalledTimes(1)
     expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('shows the continue draft panel with its waiting state and refine prompt', async () => {
+    let finishReply: (reply: string) => void = () => {}
+    harness.service.AIComplete.mockReturnValue(new Promise<string>((resolve) => { finishReply = resolve }))
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:11434' } })
+    render(<App />)
+    const body = await screen.findByText('latest message')
+    const row = body.closest<HTMLElement>('[data-event-id]')!
+    row.focus()
+    fireEvent.keyDown(row, { key: 'C', code: 'KeyC', ctrlKey: true, shiftKey: true })
+
+    const dialog = await screen.findByRole('dialog', { name: 'Continue conversation' })
+    expect(within(dialog).getByRole('status').textContent).toContain('Drafting the next message')
+    expect(dialog.querySelector('.ai-result-skeleton')).not.toBeNull()
+
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'typed meanwhile' } })
+    finishReply('Sounds good, see you then.')
+
+    expect(await within(dialog).findByText('Draft for your next message')).toBeTruthy()
+    expect(within(dialog).getByText('Sounds good, see you then.')).toBeTruthy()
+    expect(within(dialog).getByPlaceholderText('Refine this draft, for example: make it shorter')).toBeTruthy()
+    expect(dialog.querySelector('.ai-result-skeleton')).toBeNull()
+    expect(composer.value).toBe('typed meanwhile')
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('does not continue over an existing composer draft', async () => {
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:11434' } })
+    render(<App />)
+    await screen.findByText('latest message')
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'My draft' } })
+    fireEvent.keyDown(composer, { key: 'C', code: 'KeyC', ctrlKey: true, shiftKey: true })
+    expect(harness.service.AIComplete).not.toHaveBeenCalled()
+    expect(composer.value).toBe('My draft')
   })
 
   it('does not run unavailable AI shortcuts', async () => {
@@ -387,14 +427,88 @@ describe('room history updates', () => {
     await screen.findByText('latest message')
     const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
     fireEvent.change(composer, { target: { value: 'My draft' } })
-    for (const key of ['T', 'B', 'J', 'O', 'Y']) {
+    for (const key of ['T', 'B', 'J', 'O', 'Y', 'L']) {
       fireEvent.keyDown(composer, { key, code: `Key${key}`, ctrlKey: true, shiftKey: true })
     }
     expect(harness.tutorService.Analyze).not.toHaveBeenCalled()
     expect(harness.service.AISuggestReplies).not.toHaveBeenCalled()
+    expect(harness.service.AIInferDraftGoal).not.toHaveBeenCalled()
     expect(harness.service.GenerateRoomImage).not.toHaveBeenCalled()
     expect(harness.service.AIComplete).not.toHaveBeenCalled()
     expect(composer.value).toBe('My draft')
+  })
+
+  it('improves the draft with Ctrl+Shift+L, fills the chosen version, and restores the original', async () => {
+    const user = userEvent.setup()
+    harness.service.AIInferDraftGoal.mockResolvedValue('Confirm lunch on Friday')
+    harness.service.AIImproveDraft.mockResolvedValue({
+      variants: [
+        { text: 'Ciao! Pranzo domani?', rationale: 'Shorter and friendlier.' },
+        { text: 'Ciao, ci vediamo a pranzo domani?', rationale: 'Names the meal explicitly.' },
+      ],
+      openQuestions: ['Which restaurant?'],
+    })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:11434' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'ciao pranzo domani?' } })
+    fireEvent.keyDown(composer, { key: 'L', code: 'KeyL', ctrlKey: true, shiftKey: true })
+
+    const dialog = await screen.findByRole('dialog', { name: 'Improve draft' })
+    expect(harness.service.AIInferDraftGoal).toHaveBeenCalledWith(room.id, 'ciao pranzo domani?', expect.any(String))
+    const goal = await within(dialog).findByRole('textbox', { name: 'Draft goal' }) as HTMLTextAreaElement
+    await waitFor(() => expect(goal.value).toBe('Confirm lunch on Friday'))
+    expect(goal.disabled).toBe(false)
+
+    expect(harness.service.AIImproveDraft).toHaveBeenCalledWith(room.id, 'ciao pranzo domani?', 'Confirm lunch on Friday', expect.any(String))
+    expect(await within(dialog).findByText('Ciao! Pranzo domani?')).toBeTruthy()
+    expect(within(dialog).getByText('Names the meal explicitly.')).toBeTruthy()
+    expect(within(dialog).getByText('Which restaurant?')).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Improve again' })).toBeTruthy()
+
+    await user.click(within(dialog).getAllByRole('button', { name: 'Use this version' })[1])
+
+    expect(composer.value).toBe('Ciao, ci vediamo a pranzo domani?')
+    expect(screen.queryByRole('dialog', { name: 'Improve draft' })).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Restore original draft' }))
+    expect(composer.value).toBe('ciao pranzo domani?')
+    expect(screen.queryByRole('button', { name: 'Restore original draft' })).toBeNull()
+    expect(harness.service.SendMessage).not.toHaveBeenCalled()
+  })
+
+  it('shows a goal inference error and still improves the draft with an empty goal', async () => {
+    const user = userEvent.setup()
+    harness.service.AIInferDraftGoal.mockRejectedValue(new Error('model offline'))
+    harness.service.AIImproveDraft.mockResolvedValue({ variants: [{ text: 'Ciao!', rationale: 'Shorter.' }], openQuestions: null })
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:11434' } })
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'ciao' } })
+    fireEvent.keyDown(composer, { key: 'L', code: 'KeyL', ctrlKey: true, shiftKey: true })
+
+    const dialog = await screen.findByRole('dialog', { name: 'Improve draft' })
+    expect((await within(dialog).findByRole('alert')).textContent).toContain('model offline')
+    expect((within(dialog).getByRole('textbox', { name: 'Draft goal' }) as HTMLTextAreaElement).disabled).toBe(false)
+
+    await user.click(within(dialog).getByRole('button', { name: 'Improve draft' }))
+    expect(harness.service.AIImproveDraft).toHaveBeenCalledWith(room.id, 'ciao', '', expect.any(String))
+    expect(await within(dialog).findByText('Ciao!')).toBeTruthy()
+    expect(composer.value).toBe('ciao')
+  })
+
+  it('does not open Improve draft over an empty composer', async () => {
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:11434' } })
+    render(<App />)
+    await screen.findByText('latest message')
+    const composer = await screen.findByRole('textbox', { name: 'Message' })
+    fireEvent.keyDown(composer, { key: 'L', code: 'KeyL', ctrlKey: true, shiftKey: true })
+
+    expect(harness.service.AIInferDraftGoal).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Improve draft' })).toBeNull()
   })
 
   it('ignores AI shortcuts during key repeat, IME composition, and other modifier combinations', async () => {

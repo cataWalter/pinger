@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"maunium.net/go/mautrix"
-	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 	"os"
 	"path/filepath"
@@ -37,7 +36,7 @@ func (c *Client) CachedMediaBytes(ctx context.Context, mxc string) ([]byte, erro
 	return c.DownloadMedia(ctx, mxc, c.mediaEncryptionFor(mxc))
 }
 
-func (c *Client) mediaEncryptionFor(mxc string) *event.EncryptedFileInfo {
+func (c *Client) mediaEncryptionFor(mxc string) *EncryptedMediaFile {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.mediaEncrypted[mxc]
@@ -47,7 +46,7 @@ func (c *Client) rememberMediaEncryption(messages []Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.mediaEncrypted == nil {
-		c.mediaEncrypted = make(map[string]*event.EncryptedFileInfo)
+		c.mediaEncrypted = make(map[string]*EncryptedMediaFile)
 	}
 	for _, message := range messages {
 		if message.MediaURI != "" && message.MediaEncrypted != nil {
@@ -59,7 +58,7 @@ func (c *Client) rememberMediaEncryption(messages []Message) {
 	}
 }
 
-func (c *Client) DownloadMedia(ctx context.Context, mxc string, encrypted *event.EncryptedFileInfo) ([]byte, error) {
+func (c *Client) DownloadMedia(ctx context.Context, mxc string, encrypted *EncryptedMediaFile) ([]byte, error) {
 	if strings.TrimSpace(mxc) == "" {
 		return nil, errors.New("Matrix media URI is empty")
 	}
@@ -91,10 +90,12 @@ func (c *Client) DownloadMedia(ctx context.Context, mxc string, encrypted *event
 		return nil, fmt.Errorf("Matrix media exceeds %d MiB", maxMediaBytes>>20)
 	}
 	if encrypted != nil {
-		if err = encrypted.DecryptInPlace(data); err != nil {
+		plaintext, decryptErr := encrypted.decrypt(data)
+		if decryptErr != nil {
 			clear(data)
-			return nil, fmt.Errorf("decrypt Matrix media: %w", err)
+			return nil, fmt.Errorf("decrypt Matrix media: %w", decryptErr)
 		}
+		data = plaintext
 	}
 	c.writeCachedMedia(mxc, data, encrypted != nil)
 	return data, nil

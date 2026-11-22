@@ -66,7 +66,7 @@ export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
     return resolveAIFeatureTuning(preferencesRef.current, featureID).prompt
   }
 
-  async function runAIRequest(title: string, request: AIMessage[], featureID: AIFeatureID, acceptAction: AIAcceptAction = { kind: 'none' }) {
+  async function runAIRequest(title: string, request: AIMessage[], featureID: AIFeatureID, acceptAction: AIAcceptAction = { kind: 'none' }): Promise<string> {
     const requestID = newAIRequestID()
     const tuning = resolveAIFeatureTuning(preferencesRef.current, featureID)
     activeAIRequestRef.current = requestID
@@ -78,19 +78,21 @@ export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
     })
     try {
       const reply = await AppService.AIComplete(request, requestID, tuning.temperature, tuning.maxTokens)
-      if (activeAIRequestRef.current !== requestID) return
+      if (activeAIRequestRef.current !== requestID) return ''
       // The resolved reply is authoritative. Stream events can arrive after this resolves.
       setAIPanel((current) => current?.requestID === requestID
         ? { ...current, busy: false, result: reply, conversation: [...request, { role: 'assistant', content: reply }], stopped: stoppedAIRequestRef.current === requestID }
         : current)
+      return stoppedAIRequestRef.current === requestID ? '' : reply
     } catch (aiError) {
-      if (activeAIRequestRef.current !== requestID) return
+      if (activeAIRequestRef.current !== requestID) return ''
       const stopped = stoppedAIRequestRef.current === requestID
       setAIPanel((current) => current?.requestID === requestID
         ? stopped
           ? { ...current, busy: false, stopped: true }
           : { ...current, busy: false, error: describeError(aiError) }
         : current)
+      return ''
     } finally {
       unregister()
       if (activeAIRequestRef.current === requestID) activeAIRequestRef.current = ''

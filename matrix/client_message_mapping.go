@@ -11,6 +11,37 @@ import (
 	"strings"
 )
 
+// mediaContentInfo is the info block of a media message. Unlike event.FileInfo,
+// it keeps the FLOE fields of an encrypted thumbnail.
+type mediaContentInfo struct {
+	event.FileInfo
+	ThumbnailFile *EncryptedMediaFile
+}
+
+func (info *mediaContentInfo) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, &info.FileInfo); err != nil {
+		return err
+	}
+	var thumbnail struct {
+		ThumbnailFile *EncryptedMediaFile `json:"thumbnail_file"`
+	}
+	if err := json.Unmarshal(data, &thumbnail); err != nil {
+		return err
+	}
+	info.ThumbnailFile = thumbnail.ThumbnailFile
+	return nil
+}
+
+// mediaContent is a media message body, such as one image in an album.
+type mediaContent struct {
+	MsgType  string              `json:"msgtype"`
+	Body     string              `json:"body"`
+	URL      string              `json:"url"`
+	File     *EncryptedMediaFile `json:"file"`
+	Info     *mediaContentInfo   `json:"info"`
+	FileName string              `json:"filename"`
+}
+
 func messageFromEvent(evt *database.Event) (Message, bool) {
 	if evt == nil {
 		return Message{}, false
@@ -53,13 +84,13 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 			Body     string `json:"body"`
 			MIMEType string `json:"mimetype"`
 		} `json:"m.text"`
-		FormattedBody        string                       `json:"formatted_body"`
-		URL                  string                       `json:"url"`
-		File                 *event.EncryptedFileInfo     `json:"file"`
-		Info                 *event.FileInfo              `json:"info"`
-		FileName             string                       `json:"filename"`
-		BeeperGalleryImages  []*event.MessageEventContent `json:"com.beeper.gallery.images"`
-		BeeperGalleryCaption string                       `json:"com.beeper.gallery.caption"`
+		FormattedBody        string              `json:"formatted_body"`
+		URL                  string              `json:"url"`
+		File                 *EncryptedMediaFile `json:"file"`
+		Info                 *mediaContentInfo   `json:"info"`
+		FileName             string              `json:"filename"`
+		BeeperGalleryImages  []*mediaContent     `json:"com.beeper.gallery.images"`
+		BeeperGalleryCaption string              `json:"com.beeper.gallery.caption"`
 		RelatesTo            struct {
 			EventID       string `json:"event_id"`
 			IsFallingBack bool   `json:"is_falling_back"`
@@ -103,7 +134,7 @@ func messageFromEvent(evt *database.Event) (Message, bool) {
 			if galleryName == "" {
 				galleryName = galleryImage.Body
 			}
-			inlineCandidate := galleryImage.MsgType == event.MsgImage || strings.HasPrefix(galleryMIME, "image/")
+			inlineCandidate := galleryImage.MsgType == string(event.MsgImage) || strings.HasPrefix(galleryMIME, "image/")
 			if inlineSet || !inlineCandidate {
 				galleryMedia = append(galleryMedia, MediaAttachment{
 					URI:       galleryURI,

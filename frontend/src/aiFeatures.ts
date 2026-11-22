@@ -5,6 +5,7 @@ export type AIFeatureID =
   | 'ask_ai'
   | 'summarize'
   | 'draft_reply'
+  | 'continue_conversation'
   | 'rewrite'
   | 'shorten'
   | 'explain'
@@ -45,11 +46,12 @@ export const AI_MAX_TOKENS_LIMIT = 8192
 export const AI_ACTION_SHORTCUTS = {
   analyzeDraft: { key: 'T', description: 'Analyze draft with Language Tutor' },
   suggestReplies: { key: 'B', description: 'Suggest replies' },
+  improveDraft: { key: 'L', description: 'Improve draft with AI' },
   generateImage: { key: 'J', description: 'Generate image from draft' },
   summarize: { key: 'O', description: 'Summarize with AI' },
   translate: { key: 'Y', description: 'Translate recent messages' },
   clearTranslations: { key: 'X', description: 'Clear message translations' },
-  analyzeMessage: { key: 'C', description: 'Analyze focused message with Language Tutor' },
+  continueConversation: { key: 'C', description: 'Continue conversation with AI' },
   draftReply: { key: 'D', description: 'Draft reply to focused message with AI' },
   explainMessage: { key: 'E', description: 'Explain focused message with AI' },
   transcribeAudio: { key: 'V', description: 'Transcribe focused audio message with AI' },
@@ -85,6 +87,16 @@ export const AI_FEATURE_SPECS: readonly AIFeatureSpec[] = [
     placeholders: [],
     prompt: 'Write a natural, concise draft reply to the selected message, in the language the conversation uses. Respond to what was actually said, use nearby messages only for context, and avoid filler openings. Do not promise, agree to, or decide anything the user has not already indicated.',
     fixedRules: `Return only the draft text. Do not mention details, times, or places unless they appear in the messages. ${UNTRUSTED_CHAT_RULE}`,
+    temperature: 1,
+    maxTokens: 0,
+  },
+  {
+    id: 'continue_conversation',
+    label: 'Continue conversation',
+    description: 'Drafts the next message you could send in the open chat. The draft fills an empty composer for review.',
+    placeholders: [],
+    prompt: 'Write the next message the user would naturally send to keep this conversation going. Respond to the latest point, match the language, tone, and length of the user’s earlier messages, and stay concise. Do not promise, agree to, or decide anything the user has not already indicated.',
+    fixedRules: `Return only the message text, with no label, quotes, or preface. ${UNTRUSTED_CHAT_RULE}`,
     temperature: 1,
     maxTokens: 0,
   },

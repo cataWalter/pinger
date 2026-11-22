@@ -24,6 +24,7 @@ export function ConversationWorkspace({ app }: { app: AppState }) {
         }}
         onChatsChanged={localAIChatList.reload}
         newChatKind={localAINewChatKind}
+        continueInstructions={app.aiInstructions('continue_conversation')}
       />
       {localAIChatOpen ? null : <>
         <div className="conversation-thread">

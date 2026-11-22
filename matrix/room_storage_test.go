@@ -102,7 +102,7 @@ func TestRemoveCachedMediaDeletesOnlyMatchingFiles(t *testing.T) {
 	messages := []Message{
 		{MediaURI: "mxc://example.org/old-image", MediaType: string(event.MsgImage), Timestamp: cutoff.Add(-time.Hour)},
 		{MediaURI: "mxc://example.org/new-image", MediaType: string(event.MsgImage), Timestamp: cutoff.Add(time.Hour)},
-		{MediaURI: "mxc://example.org/old-video", MediaEncrypted: &event.EncryptedFileInfo{}, MediaType: string(event.MsgVideo), Timestamp: cutoff.Add(-time.Hour)},
+		{MediaURI: "mxc://example.org/old-video", MediaEncrypted: &EncryptedMediaFile{}, MediaType: string(event.MsgVideo), Timestamp: cutoff.Add(-time.Hour)},
 	}
 
 	result, err := client.removeCachedMedia(messages, MediaCleanupFilter{OlderThan: cutoff, MediaType: MediaCategoryImage}, map[string]struct{}{})

@@ -245,6 +245,12 @@ func TestValidateAIFeaturePreferences(t *testing.T) {
 	if err := Validate("ai.feature.agent.temperature", 0.5); err == nil {
 		t.Fatal("Validate() accepted a non-string AI temperature")
 	}
+	if err := Validate("ai.feature.improve_draft.temperature", "0.6"); err != nil {
+		t.Fatalf("Validate(improve_draft.temperature, 0.6) error = %v", err)
+	}
+	if err := Validate("ai.feature.improve_draft.max_tokens", "9000"); err == nil {
+		t.Fatal("Validate() accepted an improve draft token limit above 8192")
+	}
 }
 
 func TestValidateEmoticonReplacements(t *testing.T) {

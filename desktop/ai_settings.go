@@ -12,6 +12,7 @@ const (
 	aiFeatureLocalChat        = "local_chat"
 	aiFeatureLanguageTutor    = "language_tutor"
 	aiFeatureSuggestedReplies = "suggested_replies"
+	aiFeatureImproveDraft     = "improve_draft"
 )
 
 const (
@@ -66,6 +67,14 @@ var aiBackendFeatureDefaults = []AIFeatureDefault{
 		Prompt:      suggestedRepliesSystemPrompt,
 		Temperature: suggestedRepliesTemperature,
 		MaxTokens:   suggestedRepliesMaxTokens,
+	},
+	{
+		ID:          aiFeatureImproveDraft,
+		Label:       "Improve draft",
+		Description: "Three improved versions of the composer draft, each with a short rationale, plus questions the draft leaves open. Picking one fills the composer draft. This prompt sets the review task; the draft goal is inferred separately.",
+		Prompt:      improveDraftSystemPrompt,
+		Temperature: aiSamplingTemperature,
+		MaxTokens:   improveDraftMaxTokens,
 	},
 }
 

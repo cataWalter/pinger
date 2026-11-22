@@ -22,7 +22,7 @@ const formattingTools: { action: ComposerFormat; label: string; caption: string;
 ]
 
 export function ConversationComposer({ app }: { app: AppState }) {
-  const { applyEmojiSuggestion, applyFormatting, applyMention, attachmentInputRef, busy, cancelSuggestedReplies, captureNoun, chatTutorLanguage, composeText, composeTextRef, composerAIItems, composerContextMessage, composerEmojiControlRef, composerInputRef, editTarget, emojiActiveIndex, emojiOptions, emojiPickerOpen, focusTimelineMessage, handleAttachmentInput, handleComposerKeyDown, handleComposerPaste, imageRunHere, imageRunStatus, insertPickedEmoji, mentionActiveIndex, mentionOptions, openScheduleMessage, preferencesRef, removeStagedAttachment, replyTarget, roomChatGoal, roomDrafts, saveChatGoal, selectedRoom, selectedRoomID, sendableStagedAttachments, setComposeDraft, setComposeText, setEditTarget, setEmojiActiveIndex, setMentionActiveIndex, setMentionBindings, setMentionStart, setReplyTarget, snippetExpander, snippetMatch, snippetMenuVisible, snippetOptions, stagedRoomAttachments, startRecording, stopImageGeneration, stopRecording, submitMessage, suggestRepliesForRoom, suggestedReplies, summaryStatus, systemPrefersDark, themePreference, toggleComposerEmojiPicker, updateEmojiQuery, updateMentionQuery, useSuggestedReply, videoPreviewRef, videoRecordingActive, voiceCaptureStatus, voiceRecordingActive } = app
+  const { applyEmojiSuggestion, applyFormatting, applyMention, attachmentInputRef, busy, cancelSuggestedReplies, captureNoun, chatTutorLanguage, composeText, composeTextRef, composerAIItems, composerContextMessage, composerEmojiControlRef, composerInputRef, editTarget, emojiActiveIndex, emojiOptions, emojiPickerOpen, focusTimelineMessage, handleAttachmentInput, handleComposerKeyDown, handleComposerPaste, imageRunHere, imageRunStatus, improveRestore, insertPickedEmoji, mentionActiveIndex, mentionOptions, openScheduleMessage, preferencesRef, removeStagedAttachment, replyTarget, restoreImprovedDraft, roomChatGoal, roomDrafts, saveChatGoal, selectedRoom, selectedRoomID, sendableStagedAttachments, setComposeDraft, setComposeText, setEditTarget, setEmojiActiveIndex, setMentionActiveIndex, setMentionBindings, setMentionStart, setReplyTarget, snippetExpander, snippetMatch, snippetMenuVisible, snippetOptions, stagedRoomAttachments, startRecording, stopImageGeneration, stopRecording, submitMessage, suggestRepliesForRoom, suggestedReplies, summaryStatus, systemPrefersDark, themePreference, toggleComposerEmojiPicker, updateEmojiQuery, updateMentionQuery, useSuggestedReply, videoPreviewRef, videoRecordingActive, voiceCaptureStatus, voiceRecordingActive } = app
   return (
     <form className="composer" onSubmit={submitMessage}>
       <input ref={attachmentInputRef} className="visually-hidden" type="file" aria-hidden="true" tabIndex={-1} onChange={handleAttachmentInput} />
@@ -152,6 +152,12 @@ export function ConversationComposer({ app }: { app: AppState }) {
             </div>
           </div>
         </div>
+        {improveRestore && improveRestore.roomId === selectedRoomID && composeText === improveRestore.applied && (
+          <div className="composer-restore-draft" role="status">
+            <span>Draft improved.</span>
+            <button type="button" className="composer-assist-button" onClick={restoreImprovedDraft}>Restore original draft</button>
+          </div>
+        )}
         {suggestedReplies && suggestedReplies.roomId === selectedRoomID && (
           <SuggestedRepliesPicker state={suggestedReplies} hasDraft={composeText.trim() !== ''} explanationLanguage={chatTutorLanguage} chatGoal={roomChatGoal} onSaveChatGoal={saveChatGoal} onUse={useSuggestedReply} onRegenerate={() => void suggestRepliesForRoom(suggestedReplies.roomId)} onClose={cancelSuggestedReplies} />
         )}

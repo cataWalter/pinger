@@ -56,6 +56,8 @@ export const harness = {
     AIDetectChatLanguage: vi.fn(),
     AISuggestReplies: vi.fn(),
     AIInferChatGoal: vi.fn(),
+    AIInferDraftGoal: vi.fn(),
+    AIImproveDraft: vi.fn(),
     GenerateRoomImage: vi.fn(),
     SendRoomImage: vi.fn(),
     AIFeatureDefaults: vi.fn(),

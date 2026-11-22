@@ -87,4 +87,5 @@ export type LocalAIChatProps = {
   onChatCreated: (chat: LocalAIChatSummary) => void
   onChatsChanged: () => void
   newChatKind?: LocalAIChatKind
+  continueInstructions?: string
 }

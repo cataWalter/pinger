@@ -12,6 +12,7 @@ import { isSameDay, formatDayLabel, formatTime, createTimelineTimeFormatter } fr
 import { preferenceBoolean, preferenceString, preferenceNumber, linkPreviewsEnabled } from './preferences'
 import { preferredScrollBehavior } from './dom'
 import { MessageMedia } from './messageMedia'
+import { roomDetectedChatLanguage } from './aiLanguages'
 import { MessageReactionPicker } from './MessageReactionPicker'
 import { type ThemeMode } from './themes'
 
@@ -227,6 +228,7 @@ export const TimelineMessageList = memo(function TimelineMessageList({
                 message={message}
                 autoPlayNext={autoPlayNextMessageId === message.id}
                 aiEnabled={Boolean(preferenceString(preferences, 'ai.endpoint', '').trim())}
+                chatLanguage={roomDetectedChatLanguage(preferences, selectedRoomID)}
                 canUseDraft={canUseTranscriptAsDraft}
                 onUseDraft={(text) => actionsRef.current.onUseTranscript(text)}
                 onAudioEnded={() => actionsRef.current.onAudioEnded(message.id)}

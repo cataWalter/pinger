@@ -13,7 +13,11 @@ import (
 
 // SaveMedia writes a cached attachment to the download folder, or to a path chosen in a save dialog when ask-each-time is enabled. An empty path with no error means the user cancelled.
 func (s *AppService) SaveMedia(mxc, filename string) (string, error) {
-	data, err := s.currentClient().CachedMediaBytes(s.ctx, mxc)
+	client, err := s.requireClient()
+	if err != nil {
+		return "", err
+	}
+	data, err := client.CachedMediaBytes(s.ctx, mxc)
 	if err != nil {
 		return "", err
 	}
@@ -77,11 +81,19 @@ func (s *AppService) RevealFile(path string) error {
 }
 
 func (s *AppService) OptimizeDatabase() error {
-	return s.currentClient().OptimizeDatabase(s.ctx)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.OptimizeDatabase(s.ctx)
 }
 
 func (s *AppService) SetRoomUnanswered(roomID string, unanswered bool) error {
-	return s.currentClient().SetRoomUnanswered(s.ctx, roomID, unanswered)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.SetRoomUnanswered(s.ctx, roomID, unanswered)
 }
 
 func (s *AppService) SetBooleanPreference(key string, value bool) error {
@@ -157,7 +169,10 @@ func (s *AppService) UnsubscribeFromRoom(roomID string) error {
 
 func (s *AppService) markAllRead() error {
 	var combinedErr error
-	client := s.currentClient()
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
 	for _, room := range client.Rooms() {
 		page, err := client.HistoryPage(s.ctx, room.ID, 0)
 		if err != nil {

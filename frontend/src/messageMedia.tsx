@@ -12,12 +12,14 @@ import { describeError } from './messages'
 import { formatBytes } from './format'
 import { primaryShiftShortcutLabel } from './actionMenu'
 
-export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, canUseDraft, onUseDraft }: {
+export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, chatLanguage = '', canUseDraft, onUseDraft }: {
   roomID: string
   message: Message
   onAudioEnded?: () => void
   autoPlayNext?: boolean
   aiEnabled: boolean
+  // chatLanguage is the chat's ISO 639-1 code, used as a transcription hint. An empty value leaves the language to the model.
+  chatLanguage?: string
   canUseDraft: boolean
   onUseDraft: (text: string) => void
 }) {
@@ -163,7 +165,7 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
     setTranscription('')
     setTranscriptCopyFeedback('')
     try {
-      const result = (await AppService.AITranscribeMedia(message.mediaUri, filename, mimeType)).trim()
+      const result = (await AppService.AITranscribeMedia(message.mediaUri, filename, mimeType, chatLanguage)).trim()
       if (!result) throw new Error('The AI endpoint returned an empty transcription.')
       if (mountedRef.current) setTranscription(result)
     } catch (transcriptionError) {

@@ -138,9 +138,9 @@ describe('room history updates', () => {
       takeRecords() { return [] }
     })
     return (target: Element, isIntersecting: boolean) => act(() => {
-      const observer = observers[observers.length - 1]
-      expect(observer.targets).toContain(target)
-      observer.callback([{ target, isIntersecting } as unknown as IntersectionObserverEntry], observer as unknown as IntersectionObserver)
+      const observer = [...observers].reverse().find((candidate) => candidate.targets.includes(target))
+      expect(observer, 'an IntersectionObserver watches the target').toBeDefined()
+      observer?.callback([{ target, isIntersecting } as unknown as IntersectionObserverEntry], observer as unknown as IntersectionObserver)
     })
   }
 

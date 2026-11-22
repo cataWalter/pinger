@@ -18,7 +18,7 @@ func TestCachedMediaBytesUsesIncomingEncryptionMetadata(t *testing.T) {
 	client := &Client{mediaCacheDir: t.TempDir()}
 	client.rememberMediaEncryption([]Message{{
 		MediaURI:       uri,
-		MediaEncrypted: &event.EncryptedFileInfo{},
+		MediaEncrypted: &EncryptedMediaFile{},
 	}})
 
 	plainPath, err := client.mediaCachePathFor(uri, false)
@@ -91,6 +91,53 @@ func roomForBridgeTest(name *string, dmUser string) *database.Room {
 
 func stringPointer(value string) *string {
 	return &value
+}
+
+func TestMessageFromEventKeepsFLOEMediaAndThumbnail(t *testing.T) {
+	evt := &database.Event{
+		ID:     id.EventID("$floe-image:example.org"),
+		Sender: id.UserID("@them:example.org"),
+		Type:   event.EventMessage.Type,
+		Content: json.RawMessage(`{
+			"msgtype": "m.image",
+			"body": "photo.jpg",
+			"file": {
+				"url": "mxc://example.org/media",
+				"key": {"kty": "oct", "key_ops": ["encrypt", "decrypt"], "alg": "A256CTR", "k": "AAAA", "ext": true},
+				"iv": "AAAA",
+				"hashes": {"sha256": "AAAA"},
+				"v": "com.beeper.floe.v1",
+				"floe_key": "main-floe-key",
+				"floe_header": "main-floe-header"
+			},
+			"info": {
+				"mimetype": "image/jpeg",
+				"thumbnail_file": {
+					"url": "mxc://example.org/thumb",
+					"key": {"kty": "oct", "key_ops": ["encrypt", "decrypt"], "alg": "A256CTR", "k": "AAAA", "ext": true},
+					"iv": "AAAA",
+					"hashes": {"sha256": "AAAA"},
+					"v": "com.beeper.floe.v1",
+					"floe_key": "thumb-floe-key",
+					"floe_header": "thumb-floe-header"
+				}
+			}
+		}`),
+	}
+	message, ok := messageFromEvent(evt)
+	if !ok {
+		t.Fatal("expected FLOE image to be represented")
+	}
+	if message.MediaEncrypted == nil || message.MediaEncrypted.FLOEKey != "main-floe-key" || message.MediaEncrypted.FLOEHeader != "main-floe-header" {
+		t.Fatalf("MediaEncrypted = %+v, want FLOE key and header", message.MediaEncrypted)
+	}
+	thumb := message.MediaThumbnailEncrypted
+	if thumb == nil || thumb.FLOEKey != "thumb-floe-key" || thumb.FLOEHeader != "thumb-floe-header" {
+		t.Fatalf("MediaThumbnailEncrypted = %+v, want thumbnail FLOE key and header", thumb)
+	}
+	if message.MediaThumbnailURI != "mxc://example.org/thumb" {
+		t.Fatalf("MediaThumbnailURI = %q, want the encrypted thumbnail URL", message.MediaThumbnailURI)
+	}
 }
 
 func TestMessageFromEventTreatsNotSentAsPendingNotError(t *testing.T) {

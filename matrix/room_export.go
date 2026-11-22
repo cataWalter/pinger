@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
 
@@ -14,7 +13,7 @@ type MediaAttachment struct {
 	URI       string
 	MIME      string
 	Name      string
-	Encrypted *event.EncryptedFileInfo
+	Encrypted *EncryptedMediaFile
 }
 
 // MediaAttachments returns every downloadable file in a message: the inline

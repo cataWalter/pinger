@@ -9,7 +9,10 @@ import (
 )
 
 func (s *AppService) Snapshot() (Snapshot, error) {
-	client := s.currentClient()
+	client, err := s.requireClient()
+	if err != nil {
+		return Snapshot{}, err
+	}
 	if err := client.WaitForCache(s.ctx); err != nil {
 		return Snapshot{}, err
 	}
@@ -100,7 +103,10 @@ func (s *AppService) startPreferencePump(emit func(Snapshot)) {
 }
 
 func (s *AppService) Login(homeserver, username, password string) error {
-	client := s.currentClient()
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
 	if err := client.Login(s.ctx, homeserver, username, password); err != nil {
 		return err
 	}
@@ -115,7 +121,10 @@ func (s *AppService) Login(homeserver, username, password string) error {
 }
 
 func (s *AppService) Verify(recoveryKey string) error {
-	client := s.currentClient()
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
 	if err := client.Verify(s.ctx, recoveryKey); err != nil {
 		return err
 	}
@@ -168,7 +177,11 @@ func (s *AppService) History(roomID string, before int64) (HistoryPage, error) {
 			}
 		}
 	}
-	page, err := s.currentClient().HistoryPageWithLimit(s.ctx, roomID, before, initialLimit)
+	client, err := s.requireClient()
+	if err != nil {
+		return HistoryPage{}, err
+	}
+	page, err := client.HistoryPageWithLimit(s.ctx, roomID, before, initialLimit)
 	if err != nil {
 		return HistoryPage{}, err
 	}
@@ -180,15 +193,27 @@ func (s *AppService) History(roomID string, before int64) (HistoryPage, error) {
 }
 
 func (s *AppService) SendMessage(roomID, text string) error {
-	return s.currentClient().SendMessage(s.ctx, roomID, text)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.SendMessage(s.ctx, roomID, text)
 }
 
 func (s *AppService) SendMessageWithMentions(roomID, text string, userIDs []string) error {
-	return s.currentClient().SendMessageWithMentions(s.ctx, roomID, text, userIDs)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.SendMessageWithMentions(s.ctx, roomID, text, userIDs)
 }
 
 func (s *AppService) SendReply(roomID, text, replyTo string) error {
-	return s.currentClient().SendReply(s.ctx, roomID, text, replyTo)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.SendReply(s.ctx, roomID, text, replyTo)
 }
 
 // ThreadMessages returns a thread's root and replies, oldest first.
@@ -213,35 +238,67 @@ func (s *AppService) SendThreadReply(roomID, text, rootID string) error {
 }
 
 func (s *AppService) EditMessage(roomID, text, eventID string) error {
-	return s.currentClient().EditMessage(s.ctx, roomID, text, eventID)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.EditMessage(s.ctx, roomID, text, eventID)
 }
 
 func (s *AppService) React(roomID, eventID, emoji string) error {
-	return s.currentClient().React(s.ctx, roomID, eventID, emoji)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.React(s.ctx, roomID, eventID, emoji)
 }
 
 func (s *AppService) RemoveReaction(roomID, eventID, emoji string) error {
-	return s.currentClient().RemoveReaction(s.ctx, roomID, eventID, emoji)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.RemoveReaction(s.ctx, roomID, eventID, emoji)
 }
 
 func (s *AppService) RedactMessage(roomID, eventID string) error {
-	return s.currentClient().RedactMessage(s.ctx, roomID, eventID)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.RedactMessage(s.ctx, roomID, eventID)
 }
 
 func (s *AppService) RetryMessage(transactionID string) error {
-	return s.currentClient().RetryMessage(s.ctx, transactionID)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.RetryMessage(s.ctx, transactionID)
 }
 
 func (s *AppService) MarkRead(roomID, eventID string) error {
-	return s.currentClient().MarkRead(s.ctx, roomID, eventID)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.MarkRead(s.ctx, roomID, eventID)
 }
 
 func (s *AppService) MarkUnread(roomID string) error {
-	return s.currentClient().MarkUnread(s.ctx, roomID)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.MarkUnread(s.ctx, roomID)
 }
 
 func (s *AppService) SetTyping(roomID string, timeoutMilliseconds int64) error {
-	return s.currentClient().SetTyping(s.ctx, roomID, time.Duration(timeoutMilliseconds)*time.Millisecond)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.SetTyping(s.ctx, roomID, time.Duration(timeoutMilliseconds)*time.Millisecond)
 }
 
 type MessageSearchRequest struct {

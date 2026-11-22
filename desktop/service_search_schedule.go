@@ -9,7 +9,11 @@ import (
 )
 
 func (s *AppService) SearchMessages(request MessageSearchRequest) (MessageSearchPage, error) {
-	page, err := s.currentClient().SearchMessages(s.ctx, matrix.SearchRequest{
+	client, err := s.requireClient()
+	if err != nil {
+		return MessageSearchPage{}, err
+	}
+	page, err := client.SearchMessages(s.ctx, matrix.SearchRequest{
 		Query:        request.Query,
 		RoomID:       request.RoomID,
 		Sender:       request.Sender,
@@ -94,7 +98,11 @@ func (s *AppService) validateScheduledRoom(roomID string) error {
 	if roomID == "" {
 		return errors.New("select a room first")
 	}
-	for _, room := range s.currentClient().Rooms() {
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	for _, room := range client.Rooms() {
 		if room.ID == roomID {
 			return nil
 		}
@@ -103,7 +111,11 @@ func (s *AppService) validateScheduledRoom(roomID string) error {
 }
 
 func (s *AppService) RoomMembers(roomID string) ([]Member, error) {
-	members, err := s.currentClient().RoomMembers(s.ctx, roomID)
+	client, err := s.requireClient()
+	if err != nil {
+		return nil, err
+	}
+	members, err := client.RoomMembers(s.ctx, roomID)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +127,11 @@ func (s *AppService) RoomMembers(roomID string) ([]Member, error) {
 }
 
 func (s *AppService) LeaveRoom(roomID string) error {
-	return s.currentClient().LeaveRoom(s.ctx, roomID)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.LeaveRoom(s.ctx, roomID)
 }
 
 func (s *AppService) StartDirectChat(userID string) (string, error) {
@@ -174,7 +190,11 @@ func (s *AppService) URLPreview(link string) (*LinkPreview, error) {
 }
 
 func (s *AppService) Devices() ([]Device, error) {
-	devices, err := s.currentClient().Devices(s.ctx)
+	client, err := s.requireClient()
+	if err != nil {
+		return nil, err
+	}
+	devices, err := client.Devices(s.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +216,11 @@ func (s *AppService) Devices() ([]Device, error) {
 }
 
 func (s *AppService) RevokeDevice(deviceID, password string) error {
-	return s.currentClient().RevokeDevice(s.ctx, deviceID, password)
+	client, err := s.requireClient()
+	if err != nil {
+		return err
+	}
+	return client.RevokeDevice(s.ctx, deviceID, password)
 }
 
 func (s *AppService) sendAttachment(ctx context.Context, roomID, filename string, data []byte, voiceNote, videoMessage bool, durationMilliseconds int64) error {

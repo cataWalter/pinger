@@ -38,6 +38,7 @@ export function AIResultDialogs({
   onCheckLanguageTutorDraft,
   onUseLanguageTutorDraft,
 }: AIResultDialogsProps) {
+  const continuing = aiPanel?.featureID === 'continue_conversation'
   return (
     <>
       {aiPanel && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCloseAIResult() }}>
@@ -47,13 +48,16 @@ export function AIResultDialogs({
             <button className="icon-button" type="button" aria-label="Close AI result" title="Close AI result" onClick={onCloseAIResult}><X size={16} /></button>
           </header>
           <div className="ai-result-content" aria-live="polite" aria-busy={aiPanel.busy}>
-            {aiPanel.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />{aiPanel.status || 'Waiting for the model…'}</p>}
+            {aiPanel.busy && <p className="ai-result-loading" role="status"><span className="loading-mark" />{aiPanel.status || (continuing ? 'Drafting the next message…' : 'Waiting for the model…')}</p>}
+            {continuing && aiPanel.busy && !aiPanel.result && <div className="ai-result-skeleton" aria-hidden="true"><span /><span /><span /></div>}
             {aiPanel.error && <p className="settings-error" role="alert">{aiPanel.error}</p>}
-            {aiPanel.result && <div className="ai-result-text">{aiPanel.result}</div>}
+            {aiPanel.result && (continuing
+              ? <div className="ai-result-draft"><span className="ai-result-draft-label">Draft for your next message</span><div className="ai-result-text">{aiPanel.result}</div></div>
+              : <div className="ai-result-text">{aiPanel.result}</div>)}
             {aiPanel.stopped && !aiPanel.busy && <p className="settings-note ai-result-stopped" role="status">Generation stopped. The text above may be incomplete.</p>}
           </div>
           {!aiPanel.busy && endsWithAssistantTurn(aiPanel.conversation) && <form className="ai-result-followup" onSubmit={onSendFollowUp}>
-            <textarea aria-label="Follow-up question" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={aiPanel.followUp} maxLength={2000} rows={2} placeholder="Ask a follow-up about this result" onChange={(event) => onFollowUpChange(event.target.value)} />
+            <textarea aria-label="Follow-up question" spellCheck={false} autoCorrect="off" autoCapitalize="off" value={aiPanel.followUp} maxLength={2000} rows={2} placeholder={continuing ? 'Refine this draft, for example: make it shorter' : 'Ask a follow-up about this result'} onChange={(event) => onFollowUpChange(event.target.value)} />
             <button className="settings-command" type="submit" disabled={!aiPanel.followUp.trim()}>Send follow-up</button>
           </form>}
           <aside className="ai-result-disclaimer">

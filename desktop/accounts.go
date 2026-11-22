@@ -231,6 +231,15 @@ func (s *AppService) currentClient() *matrix.Client {
 	return s.client
 }
 
+// requireClient returns the active client, or errNoActiveAccount when none is set.
+func (s *AppService) requireClient() (*matrix.Client, error) {
+	client := s.currentClient()
+	if client == nil {
+		return nil, errNoActiveAccount
+	}
+	return client, nil
+}
+
 func (s *AppService) currentAccountID() string {
 	s.accountMu.RLock()
 	id := s.activeAccountID

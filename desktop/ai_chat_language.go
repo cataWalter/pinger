@@ -43,20 +43,14 @@ func (s *AppService) AIDetectChatLanguage(roomID, requestID string) (string, err
 		return "", err
 	}
 	languages := tutorLanguagesFromPreferences(preferences)
-	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
+	ctx, release := s.beginAIRoomRun(requestID)
 	defer release()
-	// Bound the whole detection, including the history read, so a stuck call always returns.
-	ctx, cancelDetection := context.WithTimeout(ctx, aiMaxCompletionTimeout)
-	defer cancelDetection()
 
-	page, err := s.currentClient().HistoryPageWithLimit(ctx, roomID, 0, chatLanguageHistoryLimit)
+	messages, err := s.readAIRoomHistory(ctx, roomID, chatLanguageHistoryLimit)
 	if err != nil {
-		if ctx.Err() == context.Canceled {
-			return "", errAIRunStopped
-		}
-		return "", fmt.Errorf("read room history: %w", err)
+		return "", err
 	}
-	input, err := suggestedRepliesTranscript(page.Messages)
+	input, err := suggestedRepliesTranscript(messages)
 	if err != nil {
 		// A chat with no text messages has no language to detect.
 		return "", nil

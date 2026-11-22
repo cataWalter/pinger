@@ -156,6 +156,23 @@ export function buildReplyPrompt(target: PromptMessage, context: PromptMessage[]
   ]
 }
 
+export function buildContinuePrompt(context: PromptMessage[], instructions?: string, chatGoal = ''): AIMessage[] {
+  const goal = chatGoal.trim()
+  const goalBlock = goal ? `Long-term goal of this chat, saved by the user. Use it only to shape the next message:\n${wrapChatData('chat_goal', escapeChatText(goal))}\n\n` : ''
+  return [
+    { role: 'system', content: withFeatureInstructions(untrustedDataInstructions('Write the next message for the user, whose messages are labeled You in the transcript. Continue naturally from the latest message, matching the language, tone, and length of the user’s earlier messages. Return only the message text, with no label or quotes.'), instructions) },
+    { role: 'user', content: `${goalBlock}Recent conversation (oldest first):\n${transcriptBlock(context)}` },
+  ]
+}
+
+// Local chat has no separate system turn for drafts, so the drafting request is the final user turn.
+export function buildLocalContinueMessages(history: AIMessage[], instructions?: string): AIMessage[] {
+  return [
+    ...history,
+    { role: 'user', content: withFeatureInstructions('Write the next message the user would send in this chat, in their voice. Match the language, tone, and length of their earlier messages, and respond to the latest point. Return only the message text, with no label or quotes.', instructions) },
+  ]
+}
+
 export function buildRewritePrompt(text: string, mode: 'rewrite' | 'shorten', instructions?: string): AIMessage[] {
   const task = mode === 'shorten'
     ? 'Shorten the draft while preserving its meaning and important details.'

@@ -4,32 +4,8 @@ import { SettingsProvider } from './SettingsContext'
 import { accentCssVariables } from './accent'
 import { SYSTEM_THEME_NAME, themeCssVariables, themeModeForPreference } from './themes'
 import { preferenceBoolean, preferenceString } from './appShared'
-import { useShellState } from './useShellState'
-import { useVolatileAIDraftState } from './volatileAIDrafts'
-import { useAuthFormState } from './useAuthFormState'
-import { useTimelineHistory } from './useTimelineHistory'
-import { useInboxState } from './useInboxState'
-import { useTimelineScroll } from './useTimelineScroll'
 import { useSidebarWidth } from './sidebarWidth'
-import { useMediaGalleryState } from './useMediaGalleryState'
-import { useMessageSearch } from './useMessageSearch'
-import { useLocalAIChats } from './useLocalAIChats'
-import { useRoomActions } from './useRoomActions'
-import { useSessionActions } from './useSessionActions'
-import { useMessageDispatch } from './useMessageDispatch'
-import { useComposerActions } from './useComposerActions'
-import { useMessageReactions } from './useMessageReactions'
-import { useAIRequests } from './useAIRequests'
-import { useAccountWorkspace } from './useAccountWorkspace'
-import { useNotificationDelivery } from './useNotificationDelivery'
-import { useWorkspaceEffects } from './useWorkspaceEffects'
-import { useChatLanguageDetection } from './useChatLanguageDetection'
-import { useMenuActions } from './useMenuActions'
-import { useMessageAIActions } from './useMessageAIActions'
-import { useComposerSnippets } from './useComposerSnippets'
-import { useRoomChatExport } from './useRoomChatExport'
-import { useApplicationKeys } from './useApplicationKeys'
-import { useComposerKeys } from './useComposerKeys'
+import { useAppStateChain } from './appStateChain'
 import type { AppState } from './appState'
 import { AppSidebar } from './AppSidebar'
 import { ConversationHeader } from './ConversationHeader'
@@ -37,31 +13,8 @@ import { ConversationWorkspace } from './ConversationWorkspace'
 import { AppDialogs } from './AppDialogs'
 
 function AppBody() {
-  const part00 = useVolatileAIDraftState(useShellState())
-  const part01 = useAuthFormState(part00)
-  const part02 = useTimelineHistory(part01)
-  const part03 = useInboxState(part02)
-  const part04 = useTimelineScroll(part03)
-  const part05 = useMediaGalleryState(part04)
-  const part06 = useMessageSearch(part05)
-  const part07 = useLocalAIChats(part06)
-  const part08 = useRoomActions(part07)
-  const part09 = useSessionActions(part08)
-  const part10 = useMessageDispatch(part09)
-  const part11 = useComposerActions(part10)
-  const part12 = useMessageReactions(part11)
-  const part13 = useAIRequests(part12)
-  const part14 = useAccountWorkspace(part13)
-  const part15 = useNotificationDelivery(part14)
-  const part16 = useWorkspaceEffects(part15)
-  const part16a = useChatLanguageDetection(part16)
-  const part17 = useMenuActions(part16a)
-  const part18 = useMessageAIActions(part17)
-  const part19 = useComposerSnippets(part18)
-  const part20 = useRoomChatExport(part19)
-  const part21 = useApplicationKeys(part20)
-  const part22 = useComposerKeys(part21)
-  const { accentPalette, appZoom, busy, error, handleApplicationKeyDown, homeserver, mobilePane, password, preferences, recoveryKey, safeBubbleColor, setError, setHomeserver, setPassword, setRecoveryKey, setUsername, snapshot, submitLogin, submitVerification, systemPrefersDark, themeChoice, username } = part22
+  const appChain = useAppStateChain()
+  const { accentPalette, appZoom, busy, error, handleApplicationKeyDown, homeserver, mobilePane, password, preferences, recoveryKey, safeBubbleColor, setError, setHomeserver, setPassword, setRecoveryKey, setUsername, snapshot, submitLogin, submitVerification, systemPrefersDark, themeChoice, username } = appChain
 
   const lowSpecMode = preferenceBoolean(snapshot?.preferences ?? {}, 'appearance.low_spec_mode')
   useEffect(() => {
@@ -102,7 +55,7 @@ function AppBody() {
     )
   }
 
-  const appState: AppState = { ...part22, snapshot }
+  const appState: AppState = { ...appChain, snapshot }
 
   return (
     <main

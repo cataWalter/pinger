@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
 	"unicode"
 
-	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
 
@@ -95,9 +95,7 @@ func (c *Client) openMediaFileForEvent(ctx context.Context, roomID, eventID stri
 		if err == nil {
 			return file, "", nil
 		}
-		if !errors.Is(err, ErrMediaNotFound) {
-			return nil, "", err
-		}
+		log.Printf("Matrix thumbnail for event %q unavailable, using original: %v", eventID, err)
 	}
 	file, err := c.openCachedMediaFile(ctx, message.MediaURI, message.MediaEncrypted)
 	if err != nil {
@@ -120,7 +118,7 @@ func (c *Client) OpenMediaFileForURI(ctx context.Context, mxc string) (*os.File,
 	return file, nil
 }
 
-func (c *Client) openCachedMediaFile(ctx context.Context, mxc string, encrypted *event.EncryptedFileInfo) (*os.File, error) {
+func (c *Client) openCachedMediaFile(ctx context.Context, mxc string, encrypted *EncryptedMediaFile) (*os.File, error) {
 	if strings.TrimSpace(mxc) == "" {
 		return nil, ErrInvalidMediaRequest
 	}

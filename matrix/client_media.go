@@ -8,7 +8,6 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"maunium.net/go/mautrix/event"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,14 +122,14 @@ func (c *Client) ClearMediaCache() error {
 	return nil
 }
 
-func mediaMIME(info *event.FileInfo) string {
+func mediaMIME(info *mediaContentInfo) string {
 	if info == nil {
 		return ""
 	}
 	return info.MimeType
 }
 
-func mediaThumbnailURI(info *event.FileInfo) string {
+func mediaThumbnailURI(info *mediaContentInfo) string {
 	if info == nil {
 		return ""
 	}
@@ -143,35 +142,35 @@ func mediaThumbnailURI(info *event.FileInfo) string {
 	return ""
 }
 
-func mediaThumbnailEncrypted(info *event.FileInfo) *event.EncryptedFileInfo {
+func mediaThumbnailEncrypted(info *mediaContentInfo) *EncryptedMediaFile {
 	if info == nil {
 		return nil
 	}
 	return info.ThumbnailFile
 }
 
-func mediaSize(info *event.FileInfo) int {
+func mediaSize(info *mediaContentInfo) int {
 	if info == nil {
 		return 0
 	}
 	return info.Size
 }
 
-func mediaWidth(info *event.FileInfo) int {
+func mediaWidth(info *mediaContentInfo) int {
 	if info == nil {
 		return 0
 	}
 	return info.Width
 }
 
-func mediaHeight(info *event.FileInfo) int {
+func mediaHeight(info *mediaContentInfo) int {
 	if info == nil {
 		return 0
 	}
 	return info.Height
 }
 
-func mediaDuration(info *event.FileInfo) int {
+func mediaDuration(info *mediaContentInfo) int {
 	if info == nil || info.Duration <= 0 {
 		return 0
 	}

@@ -1,9 +1,13 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { ArrowDown } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
+import { buildLocalContinueMessages } from './aiPrompts'
+import { AI_ACTION_SHORTCUTS } from './aiSettings'
+import { primaryShiftShortcutKey } from './appShared'
 import {
   LOCAL_AI_HISTORY_TURN_LIMIT,
   LOCAL_AI_MESSAGE_CHARACTERS,
+  buildLocalAIModelMessages,
   exportLocalAIChat,
   localAIErrorMessage,
   localAIMessageLength,
@@ -25,14 +29,16 @@ import LocalAIToolbar from './LocalAIToolbar'
 
 export type { LocalAIChatProps } from './localAIChatTypes'
 
-export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden, initialDraft = '', initialDraftVersion = 0, onAgentChange, onCreateAgent, onChatCreated, onChatsChanged, newChatKind = 'chat' }: LocalAIChatProps) {
+export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden, initialDraft = '', initialDraftVersion = 0, onAgentChange, onCreateAgent, onChatCreated, onChatsChanged, newChatKind = 'chat', continueInstructions = '' }: LocalAIChatProps) {
   const [submitting, setSubmitting] = useState(false)
   const [runView, setRunView] = useState<LocalAIRun | null>(null)
   const [failure, setFailure] = useState<LocalAIFailure | null>(null)
   const [edit, setEdit] = useState<LocalAIEdit | null>(null)
   const [imageRun, setImageRun] = useState<LocalAIImageRun | null>(null)
+  const [drafting, setDrafting] = useState(false)
   const runRef = useRef<LocalAIRun | null>(null)
   const imageRunRef = useRef<LocalAIImageRun | null>(null)
+  const draftRequestRef = useRef('')
   const shouldFollowRef = useRef(true)
   const messageActionsRef = useRef<LocalAIMessageActions>({
     startEdit: () => undefined,
@@ -62,7 +68,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     copyMessage,
   } = useLocalAIComposer({ chatId, initialDraft, initialDraftVersion })
   const { messages, setMessages, loading, chatIdRef, loadedChatIdRef } = useLocalAIChatLoader({ chatId, setEdit, setComposerError, shouldFollowRef })
-  const busy = submitting || loading || runView !== null || imageRun !== null
+  const busy = submitting || loading || runView !== null || imageRun !== null || drafting
   const runHere = runView !== null && runView.chatId === chatId
   const runElsewhere = runView !== null && !runHere
   const imageHere = imageRun !== null && imageRun.chatId === chatId
@@ -202,12 +208,51 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     }
   }
 
+  // Drafts the next user turn into an empty composer for review. Nothing is saved or sent.
+  async function draftNextMessage() {
+    const chatID = chatIdRef.current
+    if (busy || !chatID || messages.length === 0 || draft.trim() !== '' || attachments.length > 0) return
+    const requestID = createLocalAIRequestID()
+    const ticket = composerTicket()
+    draftRequestRef.current = requestID
+    setDrafting(true)
+    setComposerError('')
+    try {
+      const reply = await AppService.LocalAIChat({
+        messages: buildLocalContinueMessages(buildLocalAIModelMessages(messages), continueInstructions),
+        requestId: requestID,
+        agentInstructions: '',
+      })
+      if (draftRequestRef.current !== requestID) return
+      const text = reply.trim()
+      restoreUnsentComposer(ticket, text, [], text ? '' : 'The model returned no draft.')
+    } catch (draftError) {
+      if (draftRequestRef.current === requestID) restoreUnsentComposer(ticket, '', [], localAIErrorMessage(draftError, 'The next message could not be drafted.'))
+    } finally {
+      if (draftRequestRef.current === requestID) draftRequestRef.current = ''
+      setDrafting(false)
+    }
+  }
+
+  function stopDrafting() {
+    const requestID = draftRequestRef.current
+    if (!requestID) return
+    draftRequestRef.current = ''
+    void Promise.resolve(AppService.AICancel(requestID)).catch(() => false)
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     void sendMessage()
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (primaryShiftShortcutKey(event.nativeEvent) === AI_ACTION_SHORTCUTS.continueConversation.key) {
+      event.preventDefault()
+      event.stopPropagation()
+      void draftNextMessage()
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       void sendMessage()
@@ -276,12 +321,12 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
         onPaste={handleComposerPaste}
         onSubmit={handleSubmit}
         onGenerateImage={() => void generateImage()}
-        generating={runHere || imageHere}
+        generating={runHere || imageHere || drafting}
         stopping={runHere ? (runView?.stopping ?? false) : (imageRun?.stopping ?? false)}
-        onStop={runHere ? stopRun : stopImage}
+        onStop={runHere ? stopRun : imageHere ? stopImage : stopDrafting}
         canSend={canSend}
         busy={busy}
-        loading={loading}
+        loading={loading || drafting}
         composerError={composerError}
         runElsewhere={runElsewhere}
         imageElsewhere={imageElsewhere}
