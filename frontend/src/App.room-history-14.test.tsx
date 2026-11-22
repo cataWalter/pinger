@@ -194,6 +194,25 @@ describe('room history updates', () => {
     expect(within(roomList).getByRole('button', { name: /Unread direct/ })).toBeTruthy()
   })
 
+  it('lists rooms whose messages match the room search', async () => {
+    const user = userEvent.setup()
+    const planningRoom: Room = { ...room, id: '!planning:example.org', name: 'Planning', direct: false, preview: '' }
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, rooms: [room, planningRoom] })
+    harness.service.SearchMessages.mockImplementation(async (request: { query: string }) => ({
+      results: request.query === '"c++"*' ? [{ roomID: planningRoom.id, message: message('$cpp', 'we ship c++ today', 200) }] : [],
+      nextBatch: '',
+    }))
+    render(<App />)
+    await screen.findByText('latest message')
+    const roomList = await screen.findByRole('navigation', { name: 'Rooms' })
+
+    await user.type(await screen.findByRole('textbox', { name: 'Find a room' }), 'c++')
+
+    expect(await within(roomList).findByRole('button', { name: /Planning/ })).toBeTruthy()
+    expect(within(roomList).queryByRole('button', { name: /Test room/ })).toBeNull()
+    expect(harness.service.SearchMessages).toHaveBeenLastCalledWith(expect.objectContaining({ query: '"c++"*', roomID: '' }))
+  })
+
   it('opens a separate local AI chat and sends only its conversation', async () => {
     const user = userEvent.setup()
     render(<App />)

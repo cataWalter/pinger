@@ -1,11 +1,37 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Events } from '@wailsio/runtime'
+import { AppService } from '../bindings/mychat/desktop'
 import { type Room } from '../bindings/mychat/desktop/models.js'
 import { DEFAULT_ACCENT_NAME, accentPaletteFor } from './accent'
 import { SYSTEM_THEME_NAME, themeIdForPreference } from './themes'
 import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID } from './localAIChats'
 import { type ChatExportProgressEvent, preferenceBoolean, preferenceString, isUnansweredRoom, isNeedsReplyRoom, compareRoomActivity, rankQuickSwitcherRooms } from './appShared'
 import type { useTimelineHistory } from './useTimelineHistory'
+
+const CONTENT_SEARCH_DEBOUNCE_MS = 250
+const CONTENT_SEARCH_PAGE_SIZE = 100
+const CONTENT_SEARCH_MAX_PAGES = 20
+const NO_ROOM_IDS: ReadonlySet<string> = new Set()
+
+type ContentMatches = { accountID: string; query: string; roomIDs: ReadonlySet<string> }
+
+// Quoting keeps punctuation in the query from becoming FTS5 syntax.
+function messageSearchTerm(query: string) {
+  return query.split(/\s+/).filter(Boolean).map((word) => `"${word.replace(/"/g, '""')}"*`).join(' ')
+}
+
+async function roomIDsWithMessageMatches(query: string, isActive: () => boolean) {
+  const roomIDs = new Set<string>()
+  const term = messageSearchTerm(query)
+  let nextBatch = ''
+  for (let page = 0; page < CONTENT_SEARCH_MAX_PAGES && isActive(); page++) {
+    const found = await AppService.SearchMessages({ query: term, roomID: '', sender: '', minTimestamp: 0, maxTimestamp: 0, limit: CONTENT_SEARCH_PAGE_SIZE, nextBatch })
+    for (const result of found?.results ?? []) roomIDs.add(result.roomID)
+    nextBatch = found?.nextBatch ?? ''
+    if (!nextBatch) break
+  }
+  return roomIDs
+}
 
 export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
   const { activeAccountID, chatExport, editTarget, editTargetRef, imageSendRun, localAIChatId, localAIChatList, localAIChatOpen, localAIFolderFilter, mentionQuery, mentionStart, preferences, quickSwitcherQuery, replyTarget, roomContextMenu, roomMembers, roomRefinements, roomScope, roomSelectionAnchorRef, rooms, scheduledJobs, search, selectedRoom, selectedRoomID, selectedRoomIDs, setAudioInputDevices, setChatExport, setImageSendRun, setSelectedAudioInputDeviceId, setSelectedRoomIDs, setSystemPrefersDark, systemPrefersDark } = app
@@ -69,12 +95,31 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
   const localAIFolderIDByRoomID = useMemo(() => new Map(localAIChatList.chats.map((chat) => [localAIRoomID(chat.id), chat.folderId] as const)), [localAIChatList.chats])
   const localAIActiveFolder = localAIFolderFilter ? localAIChatList.folders.find((folder) => folder.id === localAIFolderFilter) ?? null : null
   const listRooms = useMemo(() => [...rooms, ...localAIRoomsForList], [rooms, localAIRoomsForList])
+  // Rooms with a message matching the query are listed even when their name does not match.
+  const contentQuery = search.trim()
+  const [contentMatches, setContentMatches] = useState<ContentMatches>({ accountID: '', query: '', roomIDs: NO_ROOM_IDS })
+  useEffect(() => {
+    if (!contentQuery) return
+    let active = true
+    const timer = window.setTimeout(() => {
+      void roomIDsWithMessageMatches(contentQuery, () => active)
+        .catch(() => NO_ROOM_IDS)
+        .then((roomIDs) => {
+          if (active) setContentMatches({ accountID: activeAccountID, query: contentQuery, roomIDs })
+        })
+    }, CONTENT_SEARCH_DEBOUNCE_MS)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [activeAccountID, contentQuery])
+  const contentRoomIDs = contentMatches.query === contentQuery && contentMatches.accountID === activeAccountID ? contentMatches.roomIDs : NO_ROOM_IDS
   const filteredRooms = useMemo(() => {
     const query = search.trim().toLowerCase()
     const today = Date.now()
     const pinFavorites = preferenceString(preferences, 'sidebar.pinned_style', 'Top of list') === 'Top of list'
     return listRooms.filter((room) => {
-      const matchesQuery = !query || `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query)
+      const matchesQuery = !query || `${room.name} ${room.id} ${room.preview}`.toLowerCase().includes(query) || contentRoomIDs.has(room.id)
       const localAI = isLocalAIRoomID(room.id)
       const archived = !localAI && preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))
       const matchesArchive = roomScope === 'local-ai' ? localAI : roomScope === 'archived' ? archived : !archived || Boolean(query)
@@ -89,7 +134,7 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
         : 0
       return favoriteOrder || compareRoomActivity(left, right, today)
     })
-  }, [listRooms, search, preferences, roomScope, roomRefinements, localAIFolderFilter, localAIFolderIDByRoomID, archivedPreferenceKey])
+  }, [listRooms, search, contentRoomIDs, preferences, roomScope, roomRefinements, localAIFolderFilter, localAIFolderIDByRoomID, archivedPreferenceKey])
   // The open private chat takes the highlight, because the Matrix selection is cleared while it is open.
   const activeListRoomID = localAIChatOpen ? (localAIChatId ? localAIRoomID(localAIChatId) : '') : selectedRoomID
   const quickSwitcherRooms = useMemo(() => rankQuickSwitcherRooms(rooms, quickSwitcherQuery), [rooms, quickSwitcherQuery])
