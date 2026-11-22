@@ -112,6 +112,8 @@ describe('browser smoke: history', () => {
     fireEvent.keyDown(timeline, { key: 'Home' })
     await waitFor(() => expect((document.activeElement as HTMLElement)?.dataset.eventId).toBe('$anchor-0'))
     await waitFor(() => expect(service.History).toHaveBeenCalledWith('!browser-smoke:example.org', -1000))
+    // Pin the reading position at the very top: Virtuoso skips its own prepend compensation at scrollTop 0.
+    timeline.scrollTop = 0
     const original = container.querySelector<HTMLElement>('[data-event-id="$anchor-0"]')!
     let previousTop = original.getBoundingClientRect().top
     let stableFrames = 0

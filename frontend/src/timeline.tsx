@@ -18,6 +18,17 @@ import { type ThemeMode } from './themes'
 
 export const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
 
+type TimelineTopRow = { scope: string; eventID: string; offset: number }
+
+// Virtuoso skips its prepend compensation when scrollTop is exactly 0, so the reading position is restored from the DOM.
+function captureTopRow(scrollParent: HTMLElement, scope: string): TimelineTopRow | null {
+  const parentTop = scrollParent.getBoundingClientRect().top
+  const row = Array.from(scrollParent.querySelectorAll<HTMLElement>('[data-event-id]'))
+    .find((candidate) => candidate.dataset.eventId && candidate.getBoundingClientRect().bottom > parentTop)
+  if (!row?.dataset.eventId) return null
+  return { scope, eventID: row.dataset.eventId, offset: row.getBoundingClientRect().top - parentTop }
+}
+
 export const virtualTimelineComponents = {
   Header: ({ context }: { context?: { header?: ReactNode; zoom?: number } }) => <div style={{ zoom: context?.zoom ?? 1, display: 'flex', flexDirection: 'column' }}>{context?.header}</div>,
 }
@@ -82,6 +93,8 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   const focusFrameRef = useRef<number | null>(null)
   const [anchor, setAnchor] = useState({ scope, source: messages, visible: visibleMessages, hideDeleted, firstIndex: 1000000 })
   const previousRef = useRef<{ scope: string; messages: Message[] } | null>(null)
+  const topRowRef = useRef<TimelineTopRow | null>(null)
+  const previousFirstIndexRef = useRef(anchor.firstIndex)
   const animateMessages = preferenceBoolean(preferences, 'appearance.message_animations', true)
   const formatTimestamp = createTimelineTimeFormatter(preferences)
 
@@ -98,6 +111,56 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   useEffect(() => {
     setScrollParent(scrollParentRef?.current ?? null)
   }, [scrollParentRef, selectedRoomID])
+
+  useEffect(() => {
+    if (!scrollParent) return
+    let frame: number | null = null
+    const capture = () => {
+      frame = null
+      topRowRef.current = captureTopRow(scrollParent, scope)
+    }
+    const onScroll = () => {
+      if (frame === null) frame = requestAnimationFrame(capture)
+    }
+    scrollParent.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      scrollParent.removeEventListener('scroll', onScroll)
+      if (frame !== null) cancelAnimationFrame(frame)
+    }
+  }, [scope, scrollParent])
+
+  useLayoutEffect(() => {
+    const previous = previousFirstIndexRef.current
+    previousFirstIndexRef.current = anchor.firstIndex
+    const snapshot = topRowRef.current
+    if (!virtualized || !scrollParent || anchor.firstIndex >= previous || !snapshot || snapshot.scope !== scope) return
+    let frames = 0
+    let settledFrames = 0
+    let scrolledToIndex = false
+    const settle = () => {
+      frames += 1
+      const row = Array.from(scrollParent.querySelectorAll<HTMLElement>('[data-event-id]'))
+        .find((candidate) => candidate.dataset.eventId === snapshot.eventID)
+      if (row) {
+        const delta = row.getBoundingClientRect().top - scrollParent.getBoundingClientRect().top - snapshot.offset
+        if (Math.abs(delta) > 0.5) {
+          scrollParent.scrollTop += delta
+          settledFrames = 0
+        } else {
+          settledFrames += 1
+        }
+      } else {
+        settledFrames = 0
+        const index = visibleMessagesRef.current.findIndex((message) => message.id === snapshot.eventID || message.transactionId === snapshot.eventID)
+        if (!scrolledToIndex && index >= 0 && virtualRef.current) {
+          scrolledToIndex = true
+          virtualRef.current.scrollToIndex({ index, align: 'start', behavior: 'auto' })
+        }
+      }
+      if (settledFrames < 2 && frames < 12) requestAnimationFrame(settle)
+    }
+    requestAnimationFrame(settle)
+  }, [anchor.firstIndex, scope, scrollParent, virtualized])
 
   useLayoutEffect(() => {
     if (!listHandleRef) return
