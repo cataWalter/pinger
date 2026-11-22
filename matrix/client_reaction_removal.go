@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"go.mau.fi/gomuks/pkg/hicli/database"
 	"maunium.net/go/mautrix/id"
 )
 
@@ -21,18 +22,9 @@ func (c *Client) ownReactionIDs(ctx context.Context, roomID string, eventID id.E
 		return nil, err
 	}
 	var ids []id.EventID
-	pending := false
+	var pending bool
 	if result := reactions[eventID]; result != nil {
-		for _, evt := range result.Events {
-			if evt == nil || evt.Sender != userID || evt.SendError != "" || removed[evt.ID] || reactionKey(evt.Content) != emoji {
-				continue
-			}
-			if strings.HasPrefix(string(evt.ID), "~") {
-				pending = true
-				continue
-			}
-			ids = append(ids, evt.ID)
-		}
+		ids, pending = selectOwnReactionIDs(result.Events, userID, emoji, removed)
 	}
 	if len(ids) > 0 {
 		return ids, nil
@@ -41,6 +33,22 @@ func (c *Client) ownReactionIDs(ctx context.Context, roomID string, eventID id.E
 		return nil, errors.New("reaction is still sending")
 	}
 	return findOwnReactionIDs(ctx, c.engine.Client, id.RoomID(roomID), eventID, userID, emoji)
+}
+
+// selectOwnReactionIDs returns the user's confirmed reactions with emoji and whether any are still sending.
+// Successful sends keep the transient "not sent" marker, so only real send errors are excluded.
+func selectOwnReactionIDs(events []*database.Event, userID id.UserID, emoji string, removed map[id.EventID]bool) (ids []id.EventID, pending bool) {
+	for _, evt := range events {
+		if evt == nil || evt.Sender != userID || mapSendError(evt.SendError) != "" || removed[evt.ID] || reactionKey(evt.Content) != emoji {
+			continue
+		}
+		if strings.HasPrefix(string(evt.ID), "~") {
+			pending = true
+			continue
+		}
+		ids = append(ids, evt.ID)
+	}
+	return ids, pending
 }
 
 // markReactionRemoved records a redacted reaction so it stays hidden until sync catches up.

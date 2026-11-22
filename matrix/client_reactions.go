@@ -34,7 +34,8 @@ func (c *Client) populateOwnReactions(ctx context.Context, roomID string, messag
 	return nil
 }
 
-// applyOwnReactions rebuilds reaction counts and the user's own reactions, skipping failed sends and removed reactions.
+// applyOwnReactions rebuilds reaction counts and the user's own reactions, skipping failed or unconfirmed sends and removed reactions.
+// Successful sends keep the transient "not sent" marker, so mapSendError decides whether a send failed.
 func applyOwnReactions(messages []Message, reactions map[id.EventID]*database.GetReactionsResult, userID id.UserID, removed map[id.EventID]bool) {
 	for index := range messages {
 		result := reactions[id.EventID(messages[index].ID)]
@@ -44,7 +45,7 @@ func applyOwnReactions(messages []Message, reactions map[id.EventID]*database.Ge
 		counts := make(map[string]int)
 		own := make(map[string]bool)
 		for _, evt := range result.Events {
-			if evt == nil || evt.SendError != "" || removed[evt.ID] {
+			if evt == nil || mapSendError(evt.SendError) != "" || strings.HasPrefix(string(evt.ID), "~") || removed[evt.ID] {
 				continue
 			}
 			key := reactionKey(evt.Content)
