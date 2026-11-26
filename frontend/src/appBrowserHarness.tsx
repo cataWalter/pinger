@@ -2,6 +2,7 @@ import { cleanup, render } from '@testing-library/react'
 import { Profiler, type ProfilerOnRenderCallback } from 'react'
 import { afterEach } from 'vitest'
 import { page } from 'vitest/browser'
+import type {} from '@vitest/browser-playwright'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
 import './style.css'
@@ -34,7 +35,8 @@ export async function settleSurfaces() {
 export async function captureScreenshot(options: { path: string }) {
   await settleSurfaces()
   const engine = navigator.userAgent.includes('Chrome/') ? 'chromium' : 'webkit'
-  await page.screenshot({ path: options.path.replace('/ui/', `/ui/${engine}/`) })
+  // Infinite CSS animations (shimmers, spinners, typing dots) can keep the captured body unstable on slower CI runners.
+  await page.screenshot({ path: options.path.replace('/ui/', `/ui/${engine}/`), animations: 'disabled' })
 }
 
 export function rgbHex(value: string) {
