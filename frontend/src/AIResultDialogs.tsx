@@ -3,7 +3,7 @@ import { ShieldCheck, X } from 'lucide-react'
 import { endsWithAssistantTurn } from './aiPrompts'
 import { languageName, type LanguageEntry, type LanguageRoles } from './aiSettings'
 import { primaryModifierLabel } from './dom'
-import { DialogSurface } from './DialogSurface'
+import { DialogScrim, DialogSurface } from './DialogSurface'
 import { LanguageTutorAnalysisDetails, LanguageTutorDraftCorrection, type AIPanel, type LanguageTutorState } from './appShared'
 
 export type AIResultDialogsProps = {
@@ -41,8 +41,8 @@ export function AIResultDialogs({
   const continuing = aiPanel?.featureID === 'continue_conversation'
   return (
     <>
-      {aiPanel && <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCloseAIResult() }}>
-        <DialogSurface className="room-info-dialog ai-result-dialog" labelledBy="ai-result-title" onClose={onCloseAIResult} onClick={(event) => event.stopPropagation()}>
+      {aiPanel && <DialogScrim variant="drawer" className="ai-result-scrim" onDismiss={onCloseAIResult}>
+        <DialogSurface className="room-info-dialog ai-result-dialog" labelledBy="ai-result-title" onClose={onCloseAIResult}>
           <header className="room-info-header ai-result-header">
             <div><span className="eyebrow">AI RESULT</span><h2 id="ai-result-title">{aiPanel.title}</h2></div>
             <button className="icon-button" type="button" aria-label="Close AI result" title="Close AI result" onClick={onCloseAIResult}><X size={16} /></button>
@@ -74,7 +74,7 @@ export function AIResultDialogs({
             <button className="settings-command" type="button" onClick={onCloseAIResult}>Close</button>
           </footer>
         </DialogSurface>
-      </div>}
+      </DialogScrim>}
       {languageTutorState && <LanguageTutorDialog state={languageTutorState} hasEditTarget={hasEditTarget} languages={languageRoles.languages} onClose={onCloseLanguageTutor} onCheck={onCheckLanguageTutorDraft} onUseDraft={onUseLanguageTutorDraft} />}
     </>
   )
@@ -117,8 +117,8 @@ function LanguageTutorDialog({ state, hasEditTarget, languages, onClose, onCheck
   }
 
   return (
-    <div className="ai-result-scrim language-tutor-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }} onKeyDown={handleKeyDown}>
-      <DialogSurface className="room-info-dialog ai-result-dialog language-tutor-dialog" labelledBy="language-tutor-title" onClose={onClose} onClick={(event) => event.stopPropagation()}>
+    <DialogScrim variant="drawer" className="ai-result-scrim language-tutor-scrim" onDismiss={onClose} onKeyDown={handleKeyDown}>
+      <DialogSurface className="room-info-dialog ai-result-dialog language-tutor-dialog" labelledBy="language-tutor-title" onClose={onClose}>
         <header className="room-info-header ai-result-header">
           <div><span className="eyebrow">LANGUAGE TUTOR</span><h2 id="language-tutor-title">{isDraft ? 'Tutor this draft' : 'Analyze message'}</h2></div>
           <button className="icon-button" type="button" aria-label="Close Language Tutor" title="Close Language Tutor" onClick={onClose}><X size={16} /></button>
@@ -160,6 +160,6 @@ function LanguageTutorDialog({ state, hasEditTarget, languages, onClose, onCheck
             : <button className="settings-command" type="button" onClick={onClose}>Close</button>}
         </footer>
       </DialogSurface>
-    </div>
+    </DialogScrim>
   )
 }

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"go.mau.fi/gomuks/pkg/hicli/database"
@@ -249,4 +251,75 @@ func (c *Client) ClearCachedMedia(ctx context.Context, filter MediaCleanupFilter
 		}
 	}
 	return total, nil
+}
+
+// EnforceMediaCachePolicy prunes cached media files older than maxAgeDays and trims oldest files to keep disk usage within maxBytes.
+func (c *Client) EnforceMediaCachePolicy(maxBytes int64, maxAgeDays int, now time.Time) (MediaCleanupResult, error) {
+	if maxBytes <= 0 && maxAgeDays <= 0 {
+		return MediaCleanupResult{}, nil
+	}
+	dir := c.MediaCacheDir()
+	if dir == "" {
+		return MediaCleanupResult{}, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return MediaCleanupResult{}, nil
+	}
+	if err != nil {
+		return MediaCleanupResult{}, fmt.Errorf("read media cache directory: %w", err)
+	}
+	type diskEntry struct {
+		path    string
+		size    int64
+		modTime time.Time
+	}
+	var kept []diskEntry
+	var totalBytes int64
+	var result MediaCleanupResult
+	cutoff := time.Time{}
+	if maxAgeDays > 0 {
+		cutoff = now.AddDate(0, 0, -maxAgeDays)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".media-") {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		size := info.Size()
+		if !cutoff.IsZero() && info.ModTime().Before(cutoff) {
+			if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				return result, fmt.Errorf("remove expired cached media %q: %w", path, removeErr)
+			}
+			result.Files++
+			result.Bytes += size
+			continue
+		}
+		totalBytes += size
+		kept = append(kept, diskEntry{path: path, size: size, modTime: info.ModTime()})
+	}
+	if maxBytes > 0 && totalBytes > maxBytes {
+		sort.SliceStable(kept, func(i, j int) bool {
+			if !kept[i].modTime.Equal(kept[j].modTime) {
+				return kept[i].modTime.Before(kept[j].modTime)
+			}
+			return kept[i].path < kept[j].path
+		})
+		for _, item := range kept {
+			if totalBytes <= maxBytes {
+				break
+			}
+			if removeErr := os.Remove(item.path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				return result, fmt.Errorf("trim cached media %q: %w", item.path, removeErr)
+			}
+			totalBytes -= item.size
+			result.Files++
+			result.Bytes += item.size
+		}
+	}
+	return result, nil
 }

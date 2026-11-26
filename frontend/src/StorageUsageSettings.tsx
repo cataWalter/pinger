@@ -1,17 +1,40 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { HardDrive } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type MediaCacheUsage, type MediaCleanupResult, type RoomStorage, type StorageUsage } from '../bindings/mychat/desktop/models.js'
-import { describeError, formatBytes } from './appShared'
-import { SettingsAdvanced, SettingsSection } from './SettingsControls'
+import { ConfirmDialog } from './ConfirmDialog'
+import { describeError, formatBytes, preferenceString } from './appShared'
+import { SettingRow, SettingsAdvanced, SettingsSection } from './SettingsControls'
 import { storageMediaOptions, storageAgeOptions, storageChatLimit } from './storageSettingsConstants'
 import { RecentMessagesExport } from './RecentMessagesExport'
 
-export function StorageSettingsTab() {
+export function StorageSettingsTab({ preferences = {}, onPreferenceChange }: {
+  preferences?: Record<string, unknown>
+  onPreferenceChange?: (key: string, value: string) => void
+} = {}) {
+  const maxCacheSize = preferenceString(preferences, 'storage.media_max_size_mb', '')
+  const maxCacheAge = preferenceString(preferences, 'storage.media_max_age_days', '')
   const [storage, setStorage] = useState<{ database: StorageUsage; media: MediaCacheUsage } | null>(null)
   const [storageLoading, setStorageLoading] = useState(false)
   const [storageError, setStorageError] = useState('')
   const [storageAction, setStorageAction] = useState('')
+  const [cleanupPending, setCleanupPending] = useState(false)
+  const [cleanupStatus, setCleanupStatus] = useState('')
+
+  useEffect(() => {
+    let active = true
+    async function readCleanupStatus() {
+      try {
+        const pending = await AppService.AccountCleanupPending()
+        if (active) setCleanupPending(pending)
+      } catch {
+        if (active) setCleanupStatus('Could not check previous account cleanup.')
+      }
+    }
+    void readCleanupStatus()
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -37,11 +60,16 @@ export function StorageSettingsTab() {
     }
   }
 
-  async function runStorageAction(action: 'clear' | 'optimize') {
+  async function runStorageAction(action: 'clear' | 'optimize' | 'account-cleanup') {
     setStorageAction(action)
     setStorageError('')
     try {
-      if (action === 'clear') await AppService.ClearMediaCache()
+      if (action === 'account-cleanup') {
+        setCleanupStatus('')
+        const pending = await AppService.RetryAccountCleanup()
+        setCleanupPending(pending)
+        setCleanupStatus(pending ? 'Cleanup is still pending. Try again after checking access to local storage.' : 'Previous account data was cleaned up.')
+      } else if (action === 'clear') await AppService.ClearMediaCache()
       else await AppService.OptimizeDatabase()
       await refreshStorage()
     } catch (actionError) {
@@ -53,6 +81,13 @@ export function StorageSettingsTab() {
 
   return (
     <SettingsSection title="Local storage">
+      {cleanupPending && <>
+        <p className="settings-note">Some local data from previous accounts could not be removed. Your active account is unaffected.</p>
+        <button className="settings-command" type="button" disabled={storageAction !== ''} onClick={() => void runStorageAction('account-cleanup')}>
+          <HardDrive size={15} />{storageAction === 'account-cleanup' ? 'Retrying cleanup...' : 'Retry previous account cleanup'}
+        </button>
+      </>}
+      {cleanupStatus && <p className="settings-note" role="status">{cleanupStatus}</p>}
       {storageLoading && <p className="settings-note">Reading storage usage…</p>}
       {storageError && <p className="settings-error" role="alert">{storageError}</p>}
       {storage && <div className="storage-summary">
@@ -63,6 +98,27 @@ export function StorageSettingsTab() {
       <button className="settings-command" type="button" disabled={storageLoading || storageAction !== ''} onClick={() => void runStorageAction('clear')}><HardDrive size={15} />{storageAction === 'clear' ? 'Clearing cache…' : 'Clear media cache'}</button>
       <button className="settings-command" type="button" disabled={storageLoading || storageAction !== ''} onClick={() => void runStorageAction('optimize')}><HardDrive size={15} />{storageAction === 'optimize' ? 'Optimizing database…' : 'Optimize database'}</button>
       <p className="settings-note">Clearing the media cache does not remove messages or encryption keys.</p>
+      {onPreferenceChange && <>
+        <SettingRow label="Media cache size limit" hint="Automatically trim oldest cached media files when total size exceeds this limit.">
+          <select aria-label="Media cache size limit" value={maxCacheSize} onChange={(event) => onPreferenceChange('storage.media_max_size_mb', event.currentTarget.value)}>
+            <option value="">Unlimited</option>
+            <option value="256">256 MB</option>
+            <option value="512">512 MB</option>
+            <option value="1024">1 GB</option>
+            <option value="2048">2 GB</option>
+            <option value="4096">4 GB</option>
+          </select>
+        </SettingRow>
+        <SettingRow label="Delete cached media older than" hint="Automatically remove cached media files older than this age.">
+          <select aria-label="Delete cached media older than" value={maxCacheAge} onChange={(event) => onPreferenceChange('storage.media_max_age_days', event.currentTarget.value)}>
+            <option value="">Never</option>
+            <option value="7">7 days</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="365">1 year</option>
+          </select>
+        </SettingRow>
+      </>}
       <SettingsAdvanced description="Per-chat storage cleanup and exporting recent messages.">
         <ChatStorageSettings />
         <RecentMessagesExport />
@@ -78,6 +134,7 @@ export function ChatStorageSettings() {
   const [chatID, setChatID] = useState('')
   const [age, setAge] = useState('')
   const [mediaType, setMediaType] = useState('')
+  const [pendingClear, setPendingClear] = useState<{ roomID: string; typeLabel: string; scope: string; ageLabel: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [cleanupResult, setCleanupResult] = useState<MediaCleanupResult | null>(null)
 
@@ -100,17 +157,19 @@ export function ChatStorageSettings() {
       setLoading(false)
     }
   }
-
-  async function clearMedia(target: { roomID: string; name: string }) {
+  function clearMedia(target: { roomID: string; name: string }) {
     const typeLabel = storageMediaOptions.find((option) => option.value === mediaType)?.label.toLowerCase() ?? 'all media'
     const ageLabel = storageAgeOptions.find((option) => option.value === age)?.label.toLowerCase() ?? 'any age'
     const scope = target.roomID ? target.name : 'all chats'
-    if (!window.confirm(`Remove cached media (${typeLabel}, ${scope}, ${ageLabel})? Messages stay. Media downloads again when opened.`)) return
+    setPendingClear({ roomID: target.roomID, typeLabel, scope, ageLabel })
+  }
+
+  async function executeClearMedia(roomID: string) {
     setBusy(true)
     setError('')
     setCleanupResult(null)
     try {
-      setCleanupResult(await AppService.ClearCachedMedia({ roomId: target.roomID, olderThanDays: Number(age) || 0, mediaType }))
+      setCleanupResult(await AppService.ClearCachedMedia({ roomId: roomID, olderThanDays: Number(age) || 0, mediaType }))
       await reloadRows()
     } catch (cleanupError) {
       setError(describeError(cleanupError))
@@ -165,6 +224,21 @@ export function ChatStorageSettings() {
         <button className="settings-command is-danger" type="submit" disabled={busy || loading}>{busy ? 'Clearing…' : 'Clear matching media'}</button>
       </form>
       {cleanupResult && <p className="settings-note" role="status">{`Removed ${cleanupResult.files.toLocaleString()} cached files (${formatBytes(cleanupResult.bytes)}).`}</p>}
+      {pendingClear && createPortal(
+        <ConfirmDialog
+          title="Remove cached media?"
+          message={`Remove cached media (${pendingClear.typeLabel}, ${pendingClear.scope}, ${pendingClear.ageLabel})? Messages stay. Media downloads again when opened.`}
+          confirmLabel="Remove media"
+          danger
+          onCancel={() => setPendingClear(null)}
+          onConfirm={() => {
+            const roomID = pendingClear.roomID
+            setPendingClear(null)
+            void executeClearMedia(roomID)
+          }}
+        />,
+        document.querySelector('.app-shell') ?? document.body,
+      )}
     </div>
   )
 }

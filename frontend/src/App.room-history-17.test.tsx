@@ -194,14 +194,6 @@ describe('room history updates', () => {
     expect(composer.getAttribute('autocapitalize')).toBe('off')
   })
 
-  it('keeps spelling off in the message composer even when a stored spellcheck preference is on', async () => {
-    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'composer.spellcheck': true } })
-    render(<App />)
-
-    expect(await screen.findByText('latest message')).toBeTruthy()
-    expect(screen.getByRole('textbox', { name: 'Message' }).getAttribute('spellcheck')).toBe('false')
-  })
-
   it('moves focus from the empty composer to the message list when configured', async () => {
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'composer.arrow_up_focus_timeline': true } })
     render(<App />)

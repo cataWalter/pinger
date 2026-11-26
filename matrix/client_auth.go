@@ -301,6 +301,8 @@ func (c *Client) Logout(ctx context.Context) error {
 	clear(c.rooms)
 	clear(c.local)
 	clear(c.mediaEncrypted)
+	c.mediaEncryptedOrder = nil
+	clear(c.mediaEncryptedByRoom)
 	c.mu.Unlock()
 	return nil
 }

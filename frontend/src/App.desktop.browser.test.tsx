@@ -63,13 +63,14 @@ describe('browser smoke: desktop', () => {
       shell.dataset.theme = themeID
       shell.dataset.themeMode = themeID
       for (const [key, value] of Object.entries(themeCssVariables(themeID, accentPaletteFor('Ocean'), '#236b52'))) shell.style.setProperty(key, value)
-      shell.style.setProperty('--app-zoom', '125%')
+      document.documentElement.style.fontSize = '125%'
       shell.dataset.fontSize = 'large'
       expect(attachments.scrollHeight).toBeGreaterThan(attachments.clientHeight)
       expect(attachments.getBoundingClientRect().right).toBeLessThanOrEqual(761)
       expect(screen.getByRole('button', { name: 'Send message' }).getBoundingClientRect().bottom).toBeLessThanOrEqual(601)
       await captureScreenshot({ path: `../.vitest/ui/staged-images-${themeID}-125-percent.png` })
     }
+    document.documentElement.style.fontSize = ''
     await user.click(within(attachments).getByRole('button', { name: 'Remove image.png' }))
     expect(within(attachments).getAllByRole('img', { name: 'Image attachment preview' })).toHaveLength(3)
     expect(within(attachments).getByText('notes.txt')).toBeTruthy()
@@ -125,7 +126,7 @@ describe('browser smoke: desktop', () => {
 
     await page.viewport(760, 600)
     shell.dataset.fontSize = 'large'
-    shell.style.setProperty('--app-zoom', '125%')
+    document.documentElement.style.fontSize = '125%'
     const send = screen.getByRole('button', { name: 'Send message' }).getBoundingClientRect()
     expect(send.right).toBeLessThanOrEqual(761)
     expect(send.bottom).toBeLessThanOrEqual(601)
@@ -140,13 +141,16 @@ describe('browser smoke: desktop', () => {
     await user.click(screen.getByRole('button', { name: 'Room actions' }))
     expect(screen.queryByRole('menu', { name: 'Room actions' })).toBeNull()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Room actions' }))
-    expect(screen.queryByRole('button', { name: 'Formatting' })).toBeNull()
-    const bold = within(screen.getByRole('group', { name: 'Formatting' })).getByRole('button', { name: 'Bold' })
+    expect(screen.queryByRole('toolbar', { name: 'Formatting' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Formatting' }))
+    const bold = within(await screen.findByRole('toolbar', { name: 'Formatting' })).getByRole('button', { name: 'Bold' })
     expect(bold.getBoundingClientRect().top).toBeGreaterThanOrEqual(0)
+    await user.click(screen.getByRole('button', { name: 'Formatting' }))
     const aiTools = screen.getByRole('group', { name: 'AI tools' })
     expect(aiTools.getBoundingClientRect().right).toBeLessThanOrEqual(761)
     expect(aiTools.getBoundingClientRect().top).toBeGreaterThanOrEqual(0)
     await captureScreenshot({ path: '../.vitest/ui/large-font-125-percent.png' })
+    document.documentElement.style.fontSize = ''
     await page.viewport(1100, 780)
   })
 

@@ -8,7 +8,6 @@ import (
 
 const (
 	batchUpdateEventName           = "matrix:batch_update"
-	roomsDeltaEventName            = "matrix:rooms_delta"
 	defaultEventBatchFlushInterval = 50 * time.Millisecond
 	defaultEventBatchMaximumSize   = 100
 )
@@ -25,6 +24,19 @@ type ReadReceiptItem struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+type RedactionItem struct {
+	RoomID     string `json:"roomId"`
+	EventID    string `json:"eventId"`
+	RedactedBy string `json:"redactedBy"`
+}
+
+type ReactionDeltaItem struct {
+	RoomID    string          `json:"roomId"`
+	EventID   string          `json:"eventId"`
+	Reactions map[string]int  `json:"reactions"`
+	Reacted   map[string]bool `json:"reacted"`
+}
+
 type TypingItem struct {
 	RoomID  string   `json:"roomId"`
 	UserIDs []string `json:"userIds"`
@@ -35,10 +47,13 @@ type RoomDeltaItem struct {
 }
 
 type BatchedPayload struct {
-	NewMessages     []MessageItem     `json:"new_messages"`
-	ReadReceipts    []ReadReceiptItem `json:"read_receipts"`
-	TypingUpdates   []TypingItem      `json:"typing_updates"`
-	RoomStateDeltas []RoomDeltaItem   `json:"room_deltas"`
+	NewMessages      []MessageItem       `json:"new_messages"`
+	EditedMessages   []MessageItem       `json:"edited_messages"`
+	RedactedEventIDs []RedactionItem     `json:"redacted_event_ids"`
+	ReactionDeltas   []ReactionDeltaItem `json:"reaction_deltas"`
+	ReadReceipts     []ReadReceiptItem   `json:"read_receipts"`
+	TypingUpdates    []TypingItem        `json:"typing_updates"`
+	RoomStateDeltas  []RoomDeltaItem     `json:"room_deltas"`
 }
 
 type BatchedEvent = BatchedPayload
@@ -52,6 +67,7 @@ type EventBatcher struct {
 	flushMu        sync.Mutex
 	buffer         BatchedPayload
 	receiptIndexes map[string]int
+	typingIndexes  map[string]int
 	pendingEvents  int
 	emit           func(string, BatchedPayload)
 	flushRequests  chan struct{}
@@ -71,12 +87,16 @@ func NewEventBatcher(wailsCtx context.Context, flushInterval time.Duration) *Eve
 		flushInterval: flushInterval,
 		maxBatchSize:  defaultEventBatchMaximumSize,
 		buffer: BatchedPayload{
-			NewMessages:     make([]MessageItem, 0, defaultEventBatchMaximumSize),
-			ReadReceipts:    make([]ReadReceiptItem, 0, defaultEventBatchMaximumSize),
-			TypingUpdates:   make([]TypingItem, 0, defaultEventBatchMaximumSize),
-			RoomStateDeltas: make([]RoomDeltaItem, 0, defaultEventBatchMaximumSize),
+			NewMessages:      make([]MessageItem, 0, defaultEventBatchMaximumSize),
+			EditedMessages:   make([]MessageItem, 0, defaultEventBatchMaximumSize),
+			RedactedEventIDs: make([]RedactionItem, 0, defaultEventBatchMaximumSize),
+			ReactionDeltas:   make([]ReactionDeltaItem, 0, defaultEventBatchMaximumSize),
+			ReadReceipts:     make([]ReadReceiptItem, 0, defaultEventBatchMaximumSize),
+			TypingUpdates:    make([]TypingItem, 0, defaultEventBatchMaximumSize),
+			RoomStateDeltas:  make([]RoomDeltaItem, 0, defaultEventBatchMaximumSize),
 		},
 		receiptIndexes: make(map[string]int, defaultEventBatchMaximumSize),
+		typingIndexes:  make(map[string]int, defaultEventBatchMaximumSize),
 		flushRequests:  make(chan struct{}, 1),
 	}
 }
@@ -106,6 +126,36 @@ func (b *EventBatcher) EnqueueMessage(message MessageItem) {
 	}
 }
 
+func (b *EventBatcher) EnqueueEditedMessage(message MessageItem) {
+	b.mu.Lock()
+	b.buffer.EditedMessages = append(b.buffer.EditedMessages, message)
+	flush := b.recordEventLocked()
+	b.mu.Unlock()
+	if flush {
+		b.requestFlush()
+	}
+}
+
+func (b *EventBatcher) EnqueueRedaction(redaction RedactionItem) {
+	b.mu.Lock()
+	b.buffer.RedactedEventIDs = append(b.buffer.RedactedEventIDs, redaction)
+	flush := b.recordEventLocked()
+	b.mu.Unlock()
+	if flush {
+		b.requestFlush()
+	}
+}
+
+func (b *EventBatcher) EnqueueReactionDelta(delta ReactionDeltaItem) {
+	b.mu.Lock()
+	b.buffer.ReactionDeltas = append(b.buffer.ReactionDeltas, delta)
+	flush := b.recordEventLocked()
+	b.mu.Unlock()
+	if flush {
+		b.requestFlush()
+	}
+}
+
 func (b *EventBatcher) EnqueueReceipt(receipt ReadReceiptItem) {
 	b.mu.Lock()
 	if index, exists := b.receiptIndexes[receipt.RoomID]; exists {
@@ -115,6 +165,22 @@ func (b *EventBatcher) EnqueueReceipt(receipt ReadReceiptItem) {
 	}
 	b.receiptIndexes[receipt.RoomID] = len(b.buffer.ReadReceipts)
 	b.buffer.ReadReceipts = append(b.buffer.ReadReceipts, receipt)
+	flush := b.recordEventLocked()
+	b.mu.Unlock()
+	if flush {
+		b.requestFlush()
+	}
+}
+
+func (b *EventBatcher) EnqueueTyping(typing TypingItem) {
+	b.mu.Lock()
+	if index, exists := b.typingIndexes[typing.RoomID]; exists {
+		b.buffer.TypingUpdates[index] = typing
+		b.mu.Unlock()
+		return
+	}
+	b.typingIndexes[typing.RoomID] = len(b.buffer.TypingUpdates)
+	b.buffer.TypingUpdates = append(b.buffer.TypingUpdates, typing)
 	flush := b.recordEventLocked()
 	b.mu.Unlock()
 	if flush {
@@ -176,25 +242,41 @@ func (b *EventBatcher) Flush() {
 	remaining := b.maxBatchSize
 	messageCount := min(len(b.buffer.NewMessages), remaining)
 	remaining -= messageCount
+	editedCount := min(len(b.buffer.EditedMessages), remaining)
+	remaining -= editedCount
+	redactionCount := min(len(b.buffer.RedactedEventIDs), remaining)
+	remaining -= redactionCount
+	reactionCount := min(len(b.buffer.ReactionDeltas), remaining)
+	remaining -= reactionCount
 	receiptCount := min(len(b.buffer.ReadReceipts), remaining)
 	remaining -= receiptCount
 	typingCount := min(len(b.buffer.TypingUpdates), remaining)
 	remaining -= typingCount
 	roomDeltaCount := min(len(b.buffer.RoomStateDeltas), remaining)
-	batchSize := messageCount + receiptCount + typingCount + roomDeltaCount
+	batchSize := messageCount + editedCount + redactionCount + reactionCount + receiptCount + typingCount + roomDeltaCount
 	if batchSize == 0 {
 		b.mu.Unlock()
 		return
 	}
 
+	clear(b.typingIndexes)
+	for index, typing := range b.buffer.TypingUpdates {
+		b.typingIndexes[typing.RoomID] = index
+	}
 	// Wails queues event data asynchronously, so emitted slices must not alias the reusable accumulator.
 	payload := BatchedPayload{
-		NewMessages:     cloneBatchPrefix(b.buffer.NewMessages, messageCount),
-		ReadReceipts:    cloneBatchPrefix(b.buffer.ReadReceipts, receiptCount),
-		TypingUpdates:   cloneBatchPrefix(b.buffer.TypingUpdates, typingCount),
-		RoomStateDeltas: cloneBatchPrefix(b.buffer.RoomStateDeltas, roomDeltaCount),
+		NewMessages:      cloneBatchPrefix(b.buffer.NewMessages, messageCount),
+		EditedMessages:   cloneBatchPrefix(b.buffer.EditedMessages, editedCount),
+		RedactedEventIDs: cloneBatchPrefix(b.buffer.RedactedEventIDs, redactionCount),
+		ReactionDeltas:   cloneBatchPrefix(b.buffer.ReactionDeltas, reactionCount),
+		ReadReceipts:     cloneBatchPrefix(b.buffer.ReadReceipts, receiptCount),
+		TypingUpdates:    cloneBatchPrefix(b.buffer.TypingUpdates, typingCount),
+		RoomStateDeltas:  cloneBatchPrefix(b.buffer.RoomStateDeltas, roomDeltaCount),
 	}
 	b.buffer.NewMessages = drainBatchPrefix(b.buffer.NewMessages, messageCount)
+	b.buffer.EditedMessages = drainBatchPrefix(b.buffer.EditedMessages, editedCount)
+	b.buffer.RedactedEventIDs = drainBatchPrefix(b.buffer.RedactedEventIDs, redactionCount)
+	b.buffer.ReactionDeltas = drainBatchPrefix(b.buffer.ReactionDeltas, reactionCount)
 	b.buffer.ReadReceipts = drainBatchPrefix(b.buffer.ReadReceipts, receiptCount)
 	b.buffer.TypingUpdates = drainBatchPrefix(b.buffer.TypingUpdates, typingCount)
 	b.buffer.RoomStateDeltas = drainBatchPrefix(b.buffer.RoomStateDeltas, roomDeltaCount)
@@ -208,9 +290,6 @@ func (b *EventBatcher) Flush() {
 	b.mu.Unlock()
 
 	emit(batchUpdateEventName, payload)
-	if len(payload.RoomStateDeltas) > 0 {
-		emit(roomsDeltaEventName, BatchedPayload{RoomStateDeltas: payload.RoomStateDeltas})
-	}
 	if flushAgain {
 		b.requestFlush()
 	}

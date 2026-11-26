@@ -213,7 +213,7 @@ func TestValidateTutorLanguagePreferences(t *testing.T) {
 func TestValidateAIFeaturePreferences(t *testing.T) {
 	for _, key := range []string{
 		"ai.feature.agent.prompt",
-		"ai.feature.tone_guard.temperature",
+		"ai.feature.draft_reply.temperature",
 		"ai.feature.chat_translation.max_tokens",
 		"ai.feature.language_tutor.prompt",
 	} {
@@ -221,10 +221,10 @@ func TestValidateAIFeaturePreferences(t *testing.T) {
 			t.Errorf("Validate(%q, blank) error = %v", key, err)
 		}
 	}
-	if err := Validate("ai.feature.tone_guard.temperature", "0.6"); err != nil {
-		t.Fatalf("Validate(tone_guard.temperature, 0.6) error = %v", err)
+	if err := Validate("ai.feature.draft_reply.temperature", "0.6"); err != nil {
+		t.Fatalf("Validate(draft_reply.temperature, 0.6) error = %v", err)
 	}
-	if err := Validate("ai.feature.tone_guard.temperature", "0.5"); err == nil {
+	if err := Validate("ai.feature.draft_reply.temperature", "0.5"); err == nil {
 		t.Fatal("Validate() accepted an AI temperature below 0.6")
 	}
 	if err := Validate("ai.feature.summarize.max_tokens", "512"); err != nil {
@@ -233,7 +233,7 @@ func TestValidateAIFeaturePreferences(t *testing.T) {
 	if err := Validate("ai.feature.agent.prompt", strings.Repeat("a", 8001)); err == nil {
 		t.Fatal("Validate() accepted an AI prompt longer than 8000 characters")
 	}
-	if err := Validate("ai.feature.tone_guard.temperature", "2.5"); err == nil {
+	if err := Validate("ai.feature.draft_reply.temperature", "2.5"); err == nil {
 		t.Fatal("Validate() accepted an out-of-range AI temperature")
 	}
 	if err := Validate("ai.feature.summarize.max_tokens", "9000"); err == nil {

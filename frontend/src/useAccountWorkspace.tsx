@@ -32,6 +32,8 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
   // suggestRepliesForRoom asks Local AI for ten reply options, each in a different style, based on the latest messages in roomID.
   async function suggestRepliesForRoom(roomID: string) {
     if (!roomID || !aiEnabled || editTarget) return
+    if (!(await app.confirmOnlineAIRequest('Suggest replies', 'recent messages, the saved chat goal, and reply instructions'))) return
+    if (selectedRoomRef.current !== roomID) return
     cancelAIRequest(suggestedRepliesRequestRef.current)
     const requestID = newAIRequestID()
     suggestedRepliesRequestRef.current = requestID
@@ -97,6 +99,7 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
       return
     }
 
+    if (!(await app.confirmOnlineAIRequest('Draft replies', `recent messages and reply instructions from ${candidates.length} ${candidates.length === 1 ? 'chat' : 'chats'}`))) return
     const run = { accountID: activeAccountID, requestIDs: new Set<string>(), cancelled: false }
     replyDraftBatchRef.current = run
     setAIReplyDraftBatch({ status: 'running', completed: 0, total: candidates.length, failures: [], notice: '' })
@@ -182,6 +185,7 @@ export function useAccountWorkspace(app: ReturnType<typeof useAIRequests>) {
 
   function resetAccountWorkspace(state: Snapshot) {
     workspaceGenerationRef.current++
+    app.resolveOnlineAIConfirmation(false)
     cancelSuggestedReplies()
     closeLanguageTutor()
     closeAIResult()

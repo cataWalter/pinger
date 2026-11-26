@@ -3,7 +3,7 @@ import { preferenceBoolean } from './appShared'
 import type { useApplicationKeys } from './useApplicationKeys'
 
 export function useComposerKeys(app: ReturnType<typeof useApplicationKeys>) {
-  const { applyEmojiSuggestion, applyMention, composeText, emojiActiveIndex, emojiOptions, mentionActiveIndex, mentionOptions, mentionStart, preferences, setEmojiActiveIndex, setEmojiMatch, setMentionActiveIndex, setMentionStart, snippetExpander, timelineRef } = app
+  const { applyEmojiSuggestion, applyMention, composeDraftStore, emojiActiveIndex, emojiOptions, mentionActiveIndex, mentionOptions, mentionStart, preferences, setEmojiActiveIndex, setEmojiMatch, setMentionActiveIndex, setMentionStart, snippetExpander, timelineRef } = app
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     const snippetHandled = snippetExpander.handleKeyDown(
@@ -11,7 +11,7 @@ export function useComposerKeys(app: ReturnType<typeof useApplicationKeys>) {
       !(mentionStart >= 0 && mentionOptions.length > 0) && emojiOptions.length === 0,
     )
     if (snippetHandled) return
-    if (event.key === 'ArrowUp' && !composeText && preferenceBoolean(preferences, 'composer.arrow_up_focus_timeline')) {
+    if (event.key === 'ArrowUp' && !composeDraftStore.getText() && preferenceBoolean(preferences, 'composer.arrow_up_focus_timeline')) {
       event.preventDefault()
       timelineRef.current?.focus()
       return

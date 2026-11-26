@@ -15,6 +15,8 @@ type AppService struct {
 	// Lock order: accountMu, then activeRoomMu. localAIChatMu and chatExportMu are leaves; never nest them.
 	client                 *matrix.Client
 	accountMu              sync.RWMutex
+	accountCleanupMu       sync.Mutex
+	accountCleanupPending  atomic.Bool
 	accountRegistry        *accountRegistry
 	dataDir                string
 	defaultDataDir         string
@@ -31,6 +33,7 @@ type AppService struct {
 	openURL                func(string) error
 	chooseDataFolder       func() (string, error)
 	restartRequested       atomic.Bool
+	loggingOut             atomic.Bool
 	setAutostart           func(bool) error
 	setMenuBarIcon         func(bool)
 	menuStateChanged       func(MenuState)
@@ -43,9 +46,12 @@ type AppService struct {
 	localAIChatMu          sync.Mutex
 	localAIChats           *localAIChatStore
 	aiRuns                 aiRunRegistry
+	aiHealth               aiHealthTracker
 	imageEngine            imageEngine
 	workers                sync.WaitGroup
 	scheduled              *scheduledJobStore
+	scheduledMessageBusy   atomic.Bool
+	smokeSnapshot          chan struct{}
 	chatExportMu           sync.Mutex
 	chatExportCancel       context.CancelFunc
 
@@ -56,6 +62,7 @@ type AppService struct {
 	emitChatExportProgress     func(ChatExportProgress)
 	emitBulkChatExportProgress func(BulkChatExportProgress)
 	emitAIStream               func(AIStreamEvent)
+	emitAIProviderStatus       func(AIProviderHealthStatus)
 }
 
 func (s *AppService) OpenExternalURL(rawURL string) error {
@@ -209,10 +216,17 @@ type Update struct {
 	AccountID               string              `json:"accountId"`
 	NotificationPreferences map[string]any      `json:"notificationPreferences"`
 	Rooms                   []Room              `json:"rooms"`
+	RoomsOmitted            bool                `json:"roomsOmitted,omitempty"`
 	Invites                 []Invite            `json:"invites"`
 	SlidingSyncListCounts   map[string]int      `json:"slidingSyncListCounts"`
 	ChangedRoomID           []string            `json:"changedRoomId"`
 	TimelineChangedRoomID   []string            `json:"timelineChangedRoomId"`
+	NewMessages             []MessageItem       `json:"newMessages,omitempty"`
+	EditedMessages          []MessageItem       `json:"editedMessages,omitempty"`
+	RedactedEventIDs        []RedactionItem     `json:"redactedEventIds,omitempty"`
+	ReactionDeltas          []ReactionDeltaItem `json:"reactionDeltas,omitempty"`
+	ReadReceipts            []ReadReceiptItem   `json:"readReceipts,omitempty"`
+	TypingUpdates           []TypingItem        `json:"typingUpdates,omitempty"`
 	TypingUsers             map[string][]string `json:"typingUsers"`
 	Notifications           []Notification      `json:"notifications"`
 	NewIncomingMessage      bool                `json:"newIncomingMessage,omitempty"`
@@ -221,6 +235,11 @@ type Update struct {
 	NeedsVerification       bool                `json:"needsVerification"`
 	Verification            *Verification       `json:"verification"`
 	ConnectionState         string              `json:"connectionState"`
+}
+
+type PreferenceDelta struct {
+	AccountID   string         `json:"accountId"`
+	Preferences map[string]any `json:"preferences"`
 }
 
 type SASEmoji struct {

@@ -142,6 +142,7 @@ func (s *AppService) GenerateLocalAIChatTitle(chatID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	route = s.trackAIRoute(route)
 	ctx, cancel := context.WithTimeout(s.aiContext(), localAIChatTitleTimeout)
 	defer cancel()
 	reply, err := route.complete(ctx, localAIChatTitleMessages(input), localAIChatTitleOptions(), nil)

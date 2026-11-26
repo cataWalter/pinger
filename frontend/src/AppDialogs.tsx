@@ -1,4 +1,4 @@
-import { Suspense } from 'react'
+import { memo, Suspense } from 'react'
 import { Upload } from 'lucide-react'
 import { QuickSwitcher } from './QuickSwitcher'
 import { ProfilePhotoViewer } from './ProfilePhotoViewer'
@@ -8,11 +8,17 @@ import { VerificationDialog } from './VerificationDialog'
 import { AppService } from '../bindings/mychat/desktop'
 import { languageName, roomLearningLanguageChoice, roomLearningLanguageKey, roomTutorLanguageChoice, roomTutorLanguageKey } from './aiSettings'
 import { DialogPresence } from './DialogPresence'
-import type { AppState } from './appState'
+import { ConfirmDialog } from './ConfirmDialog'
+import { useOverlays } from './AppDomainContexts'
+import { useSettings } from './SettingsContext'
+import { useQuickSwitcherOpen } from './uiOverlayStore'
 import { SettingsDialog, AIResultDialogs, ScheduledJobsDialog, ScheduledDraftDialog, MediaApprovalDialog, GeneratedImageDialog, LeaveRoomDialog, RedactDialog, ForwardMessageDialog, MediaGalleryDialog, ImproveDraftDialog } from './appLazyDialogs'
 
-export function AppDialogs({ app }: { app: AppState }) {
-  const { acceptAIResult, activeAccountID, activeThread, agentEditor, agentSettingsError, aiEnabled, aiPanel, analyzeWithLanguageTutor, applyImprovedDraft, approveGeneratedImage, archiveInactiveRooms, audioInputDevices, busy, closeAIResult, closeImproveDraft, closeLanguageTutor, closeMediaGallery, confirmMessageForward, createAgentProfile, deleteAgentProfile, editTarget, forwardBusy, forwardError, forwardTargetRoomID, forwardingMessage, generatedImageReview, historyRevision, inferChatGoal, improveDraft, inviteToSelectedRoom, languageRoles, languageTutorState, leaveConfirmOpen, leaveRoomError, leaveSelectedRoom, leavingRoom, manageScheduledJob, mediaApproval, mediaGalleryError, mediaGalleryFilter, mediaGalleryItems, mediaGalleryLoading, mediaGalleryOpen, mediaGalleryScanned, messages, openMediaGallery, persistRoomAgents, preferences, profilePhotoPreview, quickSwitcherIndex, quickSwitcherInputRef, quickSwitcherOpen, quickSwitcherQuery, quickSwitcherRooms, redactMessage, redactTarget, regenerateAIResult, resetAccountWorkspace, resolveMediaApproval, roomAgents, roomChatGoal, roomDrafts, roomInfoOpen, roomMembers, roomMembersError, roomMembersLoading, rooms, runImproveDraft, saveAgentProfile, saveChatGoal, scheduleTimeSuggestions, scheduledBusyID, scheduledDialogError, scheduledDraft, scheduledDueAt, scheduledJobs, scheduledJobsError, scheduledJobsOpen, scheduledLoading, scheduledSaving, scheduledTimes, selectedAudioInputDeviceId, selectedRoom, selectedRoomID, sendAIFollowUp, setAIFollowUp, setAgentEditor, setAgentSettingsError, setForwardTargetRoomID, setForwardingMessage, setGeneratedImageReview, setImproveDraftGoal, setLeaveConfirmOpen, setLeaveRoomError, setMediaGalleryFilter, setOpenThread, setPreference, setPreferenceWithTransition, setPreferences, setProfilePhotoPreview, setQuickSwitcherIndex, setQuickSwitcherOpen, setQuickSwitcherQuery, setRedactTarget, setRoomInfoOpen, setScheduledDraft, setScheduledDueAt, setScheduledJobsOpen, setScheduledTimes, setSettingsOpen, setSettingsTab, setStagedAttachments, settingsOpen, settingsTab, showRoom, snapshot, snippets, stopAIRequest, stopImproveReview, submitScheduledDraft, updateSnippets, useLanguageTutorDraft } = app
+export const AppDialogs = memo(function AppDialogs() {
+  const app = useOverlays()
+  const { settingsOpen, settingsTab } = useSettings()
+  const { acceptAIResult, activeAccountID, activeThread, agentEditor, agentSettingsError, aiEnabled, aiPanel, analyzeWithLanguageTutor, applyImprovedDraft, approveGeneratedImage, archiveInactiveRooms, audioInputDevices, busy, closeAIResult, closeImproveDraft, closeLanguageTutor, closeMediaGallery, confirmMessageForward, createAgentProfile, deleteAgentProfile, editTarget, forwardBusy, forwardError, forwardTargetRoomID, forwardingMessage, generatedImageReview, historyRevision, inferChatGoal, improveDraft, inviteToSelectedRoom, languageRoles, languageTutorState, leaveConfirmOpen, leaveRoomError, leaveSelectedRoom, leavingRoom, manageScheduledJob, mediaApproval, mediaGalleryError, mediaGalleryFilter, mediaGalleryItems, mediaGalleryLoading, mediaGalleryOpen, mediaGalleryScanned, messages, openMediaGallery, persistRoomAgents, preferences, profilePhotoPreview, quickSwitcherIndex, quickSwitcherInputRef, quickSwitcherQuery, quickSwitcherRooms, redactMessage, redactTarget, regenerateAIResult, resetAccountWorkspace, resolveMediaApproval, roomAgents, roomChatGoal, roomDrafts, roomInfoOpen, roomMembers, roomMembersError, roomMembersLoading, rooms, runImproveDraft, saveAgentProfile, saveChatGoal, scheduleTimeSuggestions, scheduledBusyID, scheduledDialogError, scheduledDraft, scheduledDueAt, scheduledJobs, scheduledJobsError, scheduledJobsOpen, scheduledLoading, scheduledSaving, scheduledTimes, selectedAudioInputDeviceId, selectedRoom, selectedRoomID, sendAIFollowUp, setAIFollowUp, setAgentEditor, setAgentSettingsError, setForwardTargetRoomID, setForwardingMessage, setGeneratedImageReview, setImproveDraftGoal, setLeaveConfirmOpen, setLeaveRoomError, setMediaGalleryFilter, setOpenThread, setPreference, setPreferenceWithTransition, setPreferences, setProfilePhotoPreview, setQuickSwitcherIndex, setQuickSwitcherOpen, setQuickSwitcherQuery, setRedactTarget, setRoomInfoOpen, setScheduledDraft, setScheduledDueAt, setScheduledJobsOpen, setScheduledTimes, setSettingsOpen, setSettingsTab, setStagedAttachments, showRoom, snapshot, snippets, stopAIRequest, stopImproveReview, submitScheduledDraft, uiOverlayStore, updateSnippets, useLanguageTutorDraft } = app
+  const quickSwitcherOpen = useQuickSwitcherOpen(uiOverlayStore)
   return (
     <>
     {forwardingMessage && <Suspense fallback={null}>
@@ -202,7 +208,17 @@ export function AppDialogs({ app }: { app: AppState }) {
     </DialogPresence>
     <DialogPresence open={!!profilePhotoPreview}>{profilePhotoPreview && <ProfilePhotoViewer source={profilePhotoPreview.source} label={profilePhotoPreview.label} onClose={() => setProfilePhotoPreview(null)} />}</DialogPresence>
     {snapshot.verification && <VerificationDialog key={snapshot.verification.transactionId} verification={snapshot.verification} />}
+    {app.onlineAIConfirmation && (
+      <ConfirmDialog
+        title={app.onlineAIConfirmation.title}
+        message={app.onlineAIConfirmation.message}
+        confirmLabel="Send"
+        rememberLabel="Remember for this session"
+        onCancel={() => app.resolveOnlineAIConfirmation(false)}
+        onConfirm={(remember) => app.resolveOnlineAIConfirmation(true, remember)}
+      />
+    )}
     <div className="drop-overlay" role="status"><div><Upload size={21} /><span>{selectedRoom ? `Add files to ${selectedRoom.name || selectedRoom.id}` : 'Select a room to upload files'}</span></div></div>
     </>
   )
-}
+})

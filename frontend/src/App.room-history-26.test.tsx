@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type Room } from '../bindings/mychat/desktop/models.js'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
-import { harness, room, secondRoom, message, snapshot } from './appTestSetup'
+import { emitMatrixUpdate, harness, room, secondRoom, message, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
   const { clipboardSetText, harness } = await import('./appTestSetup')
@@ -241,14 +241,12 @@ describe('room history updates', () => {
     await waitFor(() => expect(recoveryInput.value).toBe(''))
 
     act(() => {
-      harness.eventHandlers.get('matrix:update')?.({
-        data: {
-          rooms: [room],
-          timelineChangedRoomId: [],
-          initialSyncComplete: true,
-          needsVerification: false,
-          connectionState: 'connected',
-        },
+      emitMatrixUpdate({
+        rooms: [room],
+        timelineChangedRoomId: [],
+        initialSyncComplete: true,
+        needsVerification: false,
+        connectionState: 'connected',
       })
     })
 
@@ -256,14 +254,12 @@ describe('room history updates', () => {
     expect(screen.queryByRole('heading', { name: 'Verify this device' })).toBeNull()
 
     act(() => {
-      harness.eventHandlers.get('matrix:update')?.({
-        data: {
-          rooms: [room],
-          timelineChangedRoomId: [],
-          initialSyncComplete: true,
-          needsVerification: true,
-          connectionState: 'connected',
-        },
+      emitMatrixUpdate({
+        rooms: [room],
+        timelineChangedRoomId: [],
+        initialSyncComplete: true,
+        needsVerification: true,
+        connectionState: 'connected',
       })
     })
 

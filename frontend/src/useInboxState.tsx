@@ -6,6 +6,7 @@ import { DEFAULT_ACCENT_NAME, accentPaletteFor } from './accent'
 import { SYSTEM_THEME_NAME, themeIdForPreference } from './themes'
 import { isLocalAIRoomID, localAIChatIDFromRoomID, localAIChatToRoom, localAIFavoritePreference, localAIIncludeInAllPreference, localAIChatIcon, localAIRoomID } from './localAIChats'
 import { type ChatExportProgressEvent, preferenceBoolean, preferenceString, isUnansweredRoom, isNeedsReplyRoom, compareRoomActivity, rankQuickSwitcherRooms } from './appShared'
+import type { RoomContextMenuState } from './uiOverlayStore'
 import type { useTimelineHistory } from './useTimelineHistory'
 
 const CONTENT_SEARCH_DEBOUNCE_MS = 250
@@ -34,7 +35,7 @@ async function roomIDsWithMessageMatches(query: string, isActive: () => boolean)
 }
 
 export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
-  const { activeAccountID, chatExport, editTarget, editTargetRef, imageSendRun, localAIChatId, localAIChatList, localAIChatOpen, localAIFolderFilter, mentionQuery, mentionStart, preferences, quickSwitcherQuery, replyTarget, roomContextMenu, roomMembers, roomRefinements, roomScope, roomSelectionAnchorRef, rooms, scheduledJobs, search, selectedRoom, selectedRoomID, selectedRoomIDs, setAudioInputDevices, setChatExport, setImageSendRun, setSelectedAudioInputDeviceId, setSelectedRoomIDs, setSystemPrefersDark, systemPrefersDark } = app
+  const { activeAccountID, chatExport, editTarget, editTargetRef, imageSendRun, localAIChatId, localAIChatList, localAIChatOpen, localAIFolderFilter, mentionQuery, mentionStart, preferences, quickSwitcherQuery, replyTarget, roomMembers, roomRefinements, roomScope, roomSelectionAnchorRef, rooms, scheduledJobs, search, selectedRoom, selectedRoomID, selectedRoomIDs, setAudioInputDevices, setChatExport, setImageSendRun, setSelectedAudioInputDeviceId, setSelectedRoomIDs, setSystemPrefersDark, systemPrefersDark } = app
   // Progress is only listened to while an image from the composer is generating.
   const imageRunRequestID = imageSendRun?.requestID ?? ''
   useEffect(() => {
@@ -139,22 +140,25 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
   const activeListRoomID = localAIChatOpen ? (localAIChatId ? localAIRoomID(localAIChatId) : '') : selectedRoomID
   const quickSwitcherRooms = useMemo(() => rankQuickSwitcherRooms(rooms, quickSwitcherQuery), [rooms, quickSwitcherQuery])
   const needsReplyCount = useMemo(() => rooms.filter((room) => isNeedsReplyRoom(room) && !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId))).length, [rooms, preferences, archivedPreferenceKey])
-  const contextMenuRooms = roomContextMenu
-    ? (selectedRoomIDs.includes(roomContextMenu.roomID) ? selectedRoomIDs : [roomContextMenu.roomID])
-      .map((roomID) => rooms.find((room) => room.id === roomID))
-      .filter((room): room is Room => Boolean(room))
-    : []
-  const contextMenuNeedsReplyAddRooms = contextMenuRooms.filter((room) => isUnansweredRoom(room) && !isNeedsReplyRoom(room))
-  const contextMenuNeedsReplyAddCount = contextMenuNeedsReplyAddRooms.length
-  const contextMenuIsBulk = contextMenuRooms.length > 1
-  const contextMenuHasUnread = contextMenuRooms.some((room) => room.unread > 0 || room.markedUnread)
-  const contextMenuNeedsArchive = contextMenuRooms.some((room) => !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId)))
-  const contextMenuNeedsFavorite = contextMenuRooms.some((room) => !room.favorite)
-  const contextMenuNeedsMute = contextMenuRooms.some((room) => !room.muted)
-  const contextMenuChatID = roomContextMenu ? localAIChatIDFromRoomID(roomContextMenu.roomID) : null
-  const contextMenuLocalAIRoom = contextMenuChatID === null ? null : localAIRooms.find((room) => room.id === roomContextMenu?.roomID) ?? null
-  const contextMenuLocalAIInAll = contextMenuChatID !== null && preferenceBoolean(preferences, localAIIncludeInAllPreference(contextMenuChatID))
-  const contextMenuLocalAIFolderID = contextMenuChatID === null ? '' : localAIChatList.chats.find((chat) => chat.id === contextMenuChatID)?.folderId ?? ''
+  const getRoomContextMenuState = useCallback((roomContextMenu: RoomContextMenuState) => {
+    const contextMenuRooms = roomContextMenu
+      ? (selectedRoomIDs.includes(roomContextMenu.roomID) ? selectedRoomIDs : [roomContextMenu.roomID])
+        .map((roomID) => rooms.find((room) => room.id === roomID))
+        .filter((room): room is Room => Boolean(room))
+      : []
+    const contextMenuNeedsReplyAddRooms = contextMenuRooms.filter((room) => isUnansweredRoom(room) && !isNeedsReplyRoom(room))
+    const contextMenuNeedsReplyAddCount = contextMenuNeedsReplyAddRooms.length
+    const contextMenuIsBulk = contextMenuRooms.length > 1
+    const contextMenuHasUnread = contextMenuRooms.some((room) => room.unread > 0 || room.markedUnread)
+    const contextMenuNeedsArchive = contextMenuRooms.some((room) => !preferenceBoolean(preferences, archivedPreferenceKey(room.id, room.accountId)))
+    const contextMenuNeedsFavorite = contextMenuRooms.some((room) => !room.favorite)
+    const contextMenuNeedsMute = contextMenuRooms.some((room) => !room.muted)
+    const contextMenuChatID = roomContextMenu ? localAIChatIDFromRoomID(roomContextMenu.roomID) : null
+    const contextMenuLocalAIRoom = contextMenuChatID === null ? null : localAIRooms.find((room) => room.id === roomContextMenu?.roomID) ?? null
+    const contextMenuLocalAIInAll = contextMenuChatID !== null && preferenceBoolean(preferences, localAIIncludeInAllPreference(contextMenuChatID))
+    const contextMenuLocalAIFolderID = contextMenuChatID === null ? '' : localAIChatList.chats.find((chat) => chat.id === contextMenuChatID)?.folderId ?? ''
+    return { contextMenuRooms, contextMenuNeedsReplyAddRooms, contextMenuNeedsReplyAddCount, contextMenuIsBulk, contextMenuHasUnread, contextMenuNeedsArchive, contextMenuNeedsFavorite, contextMenuNeedsMute, contextMenuChatID, contextMenuLocalAIRoom, contextMenuLocalAIInAll, contextMenuLocalAIFolderID }
+  }, [archivedPreferenceKey, localAIChatList.chats, localAIRooms, preferences, rooms, selectedRoomIDs])
   const scheduledJobCount = scheduledJobs.length
 
   useEffect(() => {
@@ -185,5 +189,5 @@ export function useInboxState(app: ReturnType<typeof useTimelineHistory>) {
     const minutes = Number(preferenceString(preferences, key, String(fallback)))
     return Number.isInteger(minutes) && minutes >= 1 && minutes <= 10080 ? minutes : fallback
   }
-  return { ...app, imageRunRequestID, runningChatExportRoomID, chatExportForSelectedRoom, audioInputDevicePreference, archivedPreferenceKey, localAIRooms, localAIRoomsForList, localAIIconByRoomID, localAIFolderIDByRoomID, localAIActiveFolder, listRooms, filteredRooms, activeListRoomID, quickSwitcherRooms, needsReplyCount, contextMenuRooms, contextMenuNeedsReplyAddRooms, contextMenuNeedsReplyAddCount, contextMenuIsBulk, contextMenuHasUnread, contextMenuNeedsArchive, contextMenuNeedsFavorite, contextMenuNeedsMute, contextMenuChatID, contextMenuLocalAIRoom, contextMenuLocalAIInAll, contextMenuLocalAIFolderID, scheduledJobCount, mentionOptions, themePreference, themeChoice, accentPalette, bubbleColor, safeBubbleColor, composerContextMessage, defaultScheduleDelayMinutes }
+  return { ...app, imageRunRequestID, runningChatExportRoomID, chatExportForSelectedRoom, audioInputDevicePreference, archivedPreferenceKey, localAIRooms, localAIRoomsForList, localAIIconByRoomID, localAIFolderIDByRoomID, localAIActiveFolder, listRooms, filteredRooms, activeListRoomID, quickSwitcherRooms, needsReplyCount, getRoomContextMenuState, scheduledJobCount, mentionOptions, themePreference, themeChoice, accentPalette, bubbleColor, safeBubbleColor, composerContextMessage, defaultScheduleDelayMinutes }
 }

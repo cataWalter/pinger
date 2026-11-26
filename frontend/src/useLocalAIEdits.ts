@@ -17,6 +17,7 @@ type LocalAIEditsOptions = {
   setSubmitting: (submitting: boolean) => void
   onChatsChanged: () => void
   runModel: (runChatID: string, history: LocalAIChatMessage[], runAgentID: string) => Promise<void>
+  confirmRun: () => Promise<boolean>
 }
 
 // Edits a sent message and regenerates a reply. Both remove the messages after the target before the model runs again.
@@ -33,12 +34,14 @@ export function useLocalAIEdits({
   setSubmitting,
   onChatsChanged,
   runModel,
+  confirmRun,
 }: LocalAIEditsOptions) {
   async function regenerate(message: LocalAIChatMessage) {
     const currentChatID = chatIdRef.current
     const index = messages.findIndex((item) => item.seq === message.seq)
     const history = index > 0 ? messages.slice(0, index) : []
     if (busy || !currentChatID || history[history.length - 1]?.role !== 'user') return
+    if (!(await confirmRun())) return
     shouldFollowRef.current = true
     setComposerError('')
     setSubmitting(true)
@@ -66,6 +69,7 @@ export function useLocalAIEdits({
       return
     }
     const history = messages.slice(0, messages.indexOf(target))
+    if (!(await confirmRun())) return
     shouldFollowRef.current = true
     setEdit(null)
     setComposerError('')

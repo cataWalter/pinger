@@ -5,10 +5,11 @@ import { AppService } from '../bindings/mychat/desktop'
 import { AI_ACTION_SHORTCUTS } from './aiSettings'
 import { primaryShiftShortcutKey, type ActionMenuEntry } from './appShared'
 import { describeError, isTextEntryTarget, timelineMessageID } from './appShared'
+import type { useComposerSnippets } from './useComposerSnippets'
 import type { useImproveDraft } from './useImproveDraft'
 
-export function useRoomChatExport(app: ReturnType<typeof useImproveDraft>) {
-  const { aiEnabled, aiInstructions, analyzeWithLanguageTutor, busy, chatExport, chatTranslation, clearChatTranslation, composeText, composeTextRef, composerInputRef, editTarget, generateImageToRoom, generatedImageReview, hasAIConversationContext, hasOlder, imageButtonTooltip, imageEngineReady, imageRunHere, imageSendRun, improveComposerDraft, leavingRoom, loadingOlder, localAIChatOpen, messageContextMenu, messageContextMenuItems, messages, promptMessages, roomChatGoal, roomContextMenu, roomDrafts, rooms, runAIRequest, selectedRoom, selectedRoomID, selectedRoomRef, setAIPanel, setChatExport, setComposeDraft, setLeaveConfirmOpen, setLeaveRoomError, setLeavingRoom, setMessageContextMenu, setRoomInfoOpen, setSelectedRoomID, setSnapshot, suggestRepliesForRoom, summarizeRoom, summaryStatus, translateRecentLabel, translateRecentMessages } = app
+export function useRoomChatExport(app: ReturnType<typeof useComposerSnippets> & ReturnType<typeof useImproveDraft>) {
+  const { aiEnabled, aiInstructions, analyzeWithLanguageTutor, busy, chatExport, chatTranslation, clearChatTranslation, composeDraftStore, composeTextRef, composerInputRef, editTarget, generateImageToRoom, generatedImageReview, hasAIConversationContext, hasOlder, imageButtonTooltip, imageEngineReady, imageRunHere, imageSendRun, improveComposerDraft, leavingRoom, loadingOlder, localAIChatOpen, messageContextMenuItems, messages, promptMessages, roomChatGoal, roomDrafts, rooms, runAIRequest, selectedRoom, selectedRoomID, selectedRoomRef, setAIPanel, setChatExport, setComposeDraft, setLeaveConfirmOpen, setLeaveRoomError, setLeavingRoom, setMessageContextMenu, setRoomInfoOpen, setSelectedRoomID, setSnapshot, suggestRepliesForRoom, summarizeRoom, summaryStatus, translateRecentLabel, translateRecentMessages, uiOverlayStore } = app
 
   async function inviteToSelectedRoom(userIDs: string[]) {
     if (!selectedRoomID) return
@@ -81,20 +82,21 @@ export function useRoomChatExport(app: ReturnType<typeof useImproveDraft>) {
     if (!roomID || busy || !aiEnabled || editTarget || composeTextRef.current.trim() !== '') return
     const context = promptMessages(messages.map((message) => (message.own ? { ...message, senderName: 'You' } : message)))
     const request = buildContinuePrompt(context, aiInstructions('continue_conversation'), roomChatGoal)
-    const text = (await runAIRequest('Continue conversation', request, 'continue_conversation', { kind: 'draft' })).trim()
+    const scope = roomChatGoal ? 'recent chat history, the saved chat goal, and your instructions' : 'recent chat history and your instructions'
+    const text = (await runAIRequest('Continue conversation', request, 'continue_conversation', scope, { kind: 'draft' })).trim()
     if (!text || selectedRoomRef.current !== roomID || composeTextRef.current.trim() !== '') return
     setComposeDraft(text)
     setAIPanel(null)
     composerInputRef.current?.focus()
   }
 
-  function composerAIItems(): ActionMenuEntry[] {
+  function composerAIItems(draftText = composeDraftStore.getText()): ActionMenuEntry[] {
     return [
-      { label: 'Analyze draft with Language Tutor', caption: 'Tutor', primaryShiftKey: AI_ACTION_SHORTCUTS.analyzeDraft.key, icon: <GraduationCap size={15} />, onSelect: () => void analyzeWithLanguageTutor(composeText, 'draft'), disabled: !selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget) },
+      { label: 'Analyze draft with Language Tutor', caption: 'Tutor', primaryShiftKey: AI_ACTION_SHORTCUTS.analyzeDraft.key, icon: <GraduationCap size={15} />, onSelect: () => void analyzeWithLanguageTutor(draftText, 'draft'), disabled: !selectedRoom || !draftText.trim() || busy || !aiEnabled || Boolean(editTarget) },
       { label: 'Suggest replies', caption: 'Replies', primaryShiftKey: AI_ACTION_SHORTCUTS.suggestReplies.key, icon: <Reply size={15} />, onSelect: () => void suggestRepliesForRoom(selectedRoomID), disabled: !selectedRoom || busy || !aiEnabled || Boolean(editTarget) },
-      { label: 'Improve draft with AI', caption: 'Improve', primaryShiftKey: AI_ACTION_SHORTCUTS.improveDraft.key, icon: <WandSparkles size={15} />, onSelect: () => void improveComposerDraft(), disabled: !selectedRoom || !composeText.trim() || busy || !aiEnabled || Boolean(editTarget) },
-      { label: 'Continue conversation', caption: 'Continue', primaryShiftKey: AI_ACTION_SHORTCUTS.continueConversation.key, icon: <MessageSquarePlus size={15} />, onSelect: () => void continueRoomConversation(), disabled: !selectedRoom || busy || !aiEnabled || Boolean(editTarget) || !hasAIConversationContext || composeText.trim() !== '' },
-      { label: 'Generate image from draft', caption: 'Image', primaryShiftKey: AI_ACTION_SHORTCUTS.generateImage.key, icon: <ImagePlus size={15} />, onSelect: () => void generateImageToRoom(), title: imageButtonTooltip, disabled: Boolean(imageRunHere) || !selectedRoom || !imageEngineReady || !composeText.trim() || busy || Boolean(editTarget) || imageSendRun !== null || generatedImageReview !== null },
+      { label: 'Improve draft with AI', caption: 'Improve', primaryShiftKey: AI_ACTION_SHORTCUTS.improveDraft.key, icon: <WandSparkles size={15} />, onSelect: () => void improveComposerDraft(), disabled: !selectedRoom || !draftText.trim() || busy || !aiEnabled || Boolean(editTarget) },
+      { label: 'Continue conversation', caption: 'Continue', primaryShiftKey: AI_ACTION_SHORTCUTS.continueConversation.key, icon: <MessageSquarePlus size={15} />, onSelect: () => void continueRoomConversation(), disabled: !selectedRoom || busy || !aiEnabled || Boolean(editTarget) || !hasAIConversationContext || draftText.trim() !== '' },
+      { label: 'Generate image from draft', caption: 'Image', primaryShiftKey: AI_ACTION_SHORTCUTS.generateImage.key, icon: <ImagePlus size={15} />, onSelect: () => void generateImageToRoom(), title: imageButtonTooltip, disabled: Boolean(imageRunHere) || !selectedRoom || !imageEngineReady || !draftText.trim() || busy || Boolean(editTarget) || imageSendRun !== null || generatedImageReview !== null },
       { label: 'Summarize with AI', caption: 'Summarize', primaryShiftKey: AI_ACTION_SHORTCUTS.summarize.key, icon: <ScrollText size={15} />, onSelect: () => void summarizeRoom(), disabled: !selectedRoom || busy || loadingOlder || Boolean(summaryStatus) || !aiEnabled || (!hasAIConversationContext && !hasOlder) },
       { label: translateRecentLabel, caption: 'Translate', primaryShiftKey: AI_ACTION_SHORTCUTS.translate.key, icon: <Languages size={15} />, onSelect: () => void translateRecentMessages(), disabled: !selectedRoom || busy || loadingOlder || !aiEnabled || (!hasAIConversationContext && !hasOlder) },
       ...(chatTranslation?.roomID === selectedRoomID ? [{ label: 'Clear message translations', caption: 'Clear', primaryShiftKey: AI_ACTION_SHORTCUTS.clearTranslations.key, icon: <X size={15} />, onSelect: clearChatTranslation }] : []),
@@ -102,6 +104,7 @@ export function useRoomChatExport(app: ReturnType<typeof useImproveDraft>) {
   }
 
   function handleAIShortcut(event: KeyboardEvent<HTMLElement>) {
+    const { messageContextMenu, roomContextMenu } = uiOverlayStore.getSnapshot()
     if (localAIChatOpen || roomContextMenu || (isTextEntryTarget(event.target) && event.target !== composerInputRef.current)) return false
     const shortcutKey = primaryShiftShortcutKey(event.nativeEvent)
     if (!shortcutKey) return false

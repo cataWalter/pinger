@@ -1,17 +1,18 @@
 import { type FormEvent } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
+import { i18n } from './i18n'
 import { type MatrixNotification, type PreferenceValues, type OutgoingMessage, describeError, displayMessageBody, preferenceBoolean, preferenceString, preferenceNumber, playNotificationSound, notificationTone, type RecordedUpload, maxAttachmentBytes, requestLocalAsset } from './appShared'
 import type { useSessionActions } from './useSessionActions'
 
 export function useMessageDispatch(app: ReturnType<typeof useSessionActions>) {
-  const { activeAccountID, busy, composeTextRef, editTarget, forwardBusy, forwardTargetRoomID, forwardingMessage, mediaApproval, preferences, preferencesRef, refreshScheduledJobs, roomDrafts, rooms, roomsRef, scheduledBusyID, scheduledDraft, scheduledDueAt, scheduledSaving, scheduledTimes, selectedRoomID, selectedRoomRef, setAutoPlayNextMessageId, setBusy, setComposeText, setError, setForwardBusy, setForwardError, setForwardingMessage, setHistoryRevision, setMediaApproval, setMentionBindings, setMentionStart, setReplyTarget, setRoomArchived, setScheduledBusyID, setScheduledDialogError, setScheduledDraft, setScheduledJobsError, setScheduledSaving, setSnapshot, stagedAttachments, visibleMessages, workspaceGenerationRef } = app
+  const { activeAccountID, busy, composeTextRef, editTarget, forwardBusy, forwardTargetRoomID, forwardingMessage, mediaApproval, preferences, preferencesRef, refreshScheduledJobs, roomDrafts, rooms, roomsRef, scheduledBusyID, scheduledDraft, scheduledDueAt, scheduledSaving, scheduledTimes, selectedRoomID, selectedRoomRef, setAutoPlayNextMessageId, setBusy, setComposeText, setError, setForwardBusy, setForwardError, setForwardingMessage, setHistoryRevision, setMediaApproval, setMentionBindings, setMentionStart, setReplyTarget, setRoomArchived, setScheduledBusyID, setScheduledDialogError, setScheduledDraft, setScheduledJobsError, setScheduledSaving, setSnapshot, snapshot, stagedAttachments, visibleMessages, workspaceGenerationRef } = app
 
   async function submitScheduledDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!scheduledDraft || scheduledSaving) return
     const dueAt = new Date(scheduledDueAt).getTime()
     if (!Number.isFinite(dueAt) || dueAt <= Date.now()) {
-      setScheduledDialogError('Choose a time in the future.')
+      setScheduledDialogError(i18n.t('errors.chooseFutureTime'))
       return
     }
     setScheduledSaving(true)
@@ -54,7 +55,7 @@ export function useMessageDispatch(app: ReturnType<typeof useSessionActions>) {
     try {
       if (action === 'reschedule') {
         const dueAt = new Date(scheduledTimes[id] ?? '').getTime()
-        if (!Number.isFinite(dueAt) || dueAt <= Date.now()) throw new Error('Choose a time in the future.')
+        if (!Number.isFinite(dueAt) || dueAt <= Date.now()) throw new Error(i18n.t('errors.chooseFutureTime'))
         await AppService.UpdateScheduledJob(id, dueAt)
       } else if (action === 'cancel') {
         await AppService.CancelScheduledJob(id)
@@ -81,11 +82,21 @@ export function useMessageDispatch(app: ReturnType<typeof useSessionActions>) {
     }
   }
 
-  async function refreshRoomSnapshotAfterSend() {
-    try {
-      setSnapshot(await AppService.Snapshot())
-    } catch {
-    }
+  function markRoomSentLocally(roomID: string, previewText: string) {
+    const sender = snapshot?.profile.userId ?? ''
+    const now = Date.now()
+    setSnapshot((current) => current ? {
+      ...current,
+      rooms: (current.rooms ?? []).map((candidate) => candidate.id === roomID ? {
+        ...candidate,
+        preview: previewText || candidate.preview,
+        lastEventSender: sender || candidate.lastEventSender,
+        lastEventAt: Math.max(candidate.lastEventAt, now),
+        lastSeen: Math.max(candidate.lastSeen, now),
+        unanswered: false,
+        needsReply: false,
+      } : candidate),
+    } : current)
   }
 
   async function confirmMessageForward() {
@@ -96,10 +107,11 @@ export function useMessageDispatch(app: ReturnType<typeof useSessionActions>) {
     setForwardBusy(true)
     setForwardError('')
     try {
-      const sender = forwardingMessage.senderName || forwardingMessage.sender || 'Unknown sender'
-      await dispatchMessage({ roomID: destination.id, text: `Forwarded from ${sender}:\n\n${body}`, replyTo: null, mentionUserIDs: [] })
+      const sender = forwardingMessage.senderName || forwardingMessage.sender || i18n.t('errors.unknownSender')
+      const forwardedText = `Forwarded from ${sender}:\n\n${body}`
+      await dispatchMessage({ roomID: destination.id, text: forwardedText, replyTo: null, mentionUserIDs: [] })
       setForwardingMessage(null)
-      void refreshRoomSnapshotAfterSend()
+      markRoomSentLocally(destination.id, forwardedText)
     } catch (sendError) {
       setForwardError(describeError(sendError))
     } finally {
@@ -166,7 +178,7 @@ export function useMessageDispatch(app: ReturnType<typeof useSessionActions>) {
   async function sendAttachmentFiles(files: File[], roomID = selectedRoomID, recording?: RecordedUpload) {
     if (files.length === 0) return
     if (!roomID) {
-      setError('Select a room before uploading files.')
+      setError(i18n.t('errors.selectRoomBeforeUpload'))
       return
     }
     if (busy) return
@@ -176,7 +188,7 @@ export function useMessageDispatch(app: ReturnType<typeof useSessionActions>) {
       let uploadedAny = false
       for (const file of files) {
         if (file.size > maxAttachmentBytes) {
-          setError(`${file.name || 'Attachments'} cannot exceed 50 MiB.`)
+          setError(i18n.t('errors.attachmentTooLarge', { name: file.name || 'Attachments' }))
           continue
         }
         await uploadAttachmentFile(roomID, file, recording)
@@ -189,5 +201,5 @@ export function useMessageDispatch(app: ReturnType<typeof useSessionActions>) {
       setBusy(false)
     }
   }
-  return { ...app, confirmMessageForward, submitScheduledDraft, manageScheduledJob, dispatchMessage, refreshRoomSnapshotAfterSend, notificationRoomName, notificationKey, playNotificationAlert, handleTimelineAudioEnded, stagedRoomAttachments, sendableStagedAttachments, resolveMediaApproval, uploadAttachmentFile, sendAttachmentFiles }
+  return { ...app, confirmMessageForward, submitScheduledDraft, manageScheduledJob, dispatchMessage, markRoomSentLocally, notificationRoomName, notificationKey, playNotificationAlert, handleTimelineAudioEnded, stagedRoomAttachments, sendableStagedAttachments, resolveMediaApproval, uploadAttachmentFile, sendAttachmentFiles }
 }

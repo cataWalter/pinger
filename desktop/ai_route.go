@@ -5,14 +5,19 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
+
+	"mychat/logging"
 )
 
 // aiRoute is the provider, endpoint, and model one AI call uses.
 type aiRoute struct {
-	client   *http.Client
-	provider AIProvider
-	endpoint string
-	model    string
+	client     *http.Client
+	provider   AIProvider
+	endpoint   string
+	model      string
+	health     *aiHealthTracker
+	emitStatus func(AIProviderHealthStatus)
 }
 
 // aiLocalRoute targets the loopback endpoint in ai.endpoint. Voice transcription, image generation, and tone checks always use it.
@@ -76,5 +81,37 @@ func aiChatRoute(preferences map[string]any) (aiRoute, error) {
 
 // complete runs one request on the route.
 func (r aiRoute) complete(ctx context.Context, messages []AIMessage, options aiCompletionOptions, onChunk func(string)) (string, error) {
-	return aiProviderCompletion(ctx, r.client, r.provider, r.endpoint, r.model, messages, options, onChunk)
+	if r.health != nil {
+		if status, coolingDown := r.health.checkCooldown(r.provider, r.endpoint, time.Now()); coolingDown {
+			return "", formatCooldownError(status)
+		}
+	}
+	startedAt := time.Now()
+	result, err := aiProviderCompletion(ctx, r.client, r.provider, r.endpoint, r.model, messages, options, onChunk)
+	if r.health != nil {
+		var status AIProviderHealthStatus
+		var changed bool
+		if err == nil {
+			status, changed = r.health.recordSuccess(r.provider, r.endpoint)
+		} else {
+			status, changed = r.health.recordFailure(r.provider, r.endpoint, err, time.Now())
+		}
+		if changed && r.emitStatus != nil {
+			r.emitStatus(status)
+		}
+	}
+	outcome := "success"
+	if err != nil {
+		switch {
+		case errors.Is(ctx.Err(), context.Canceled):
+			outcome = "canceled"
+		case errors.Is(ctx.Err(), context.DeadlineExceeded):
+			outcome = "timeout"
+		default:
+			outcome = "failed"
+		}
+	}
+	logging.For("ai").Debug().Bool("online", r.provider == AIProviderOnline).
+		Str("outcome", outcome).Dur("duration_ms", time.Since(startedAt)).Msg("text completion finished")
+	return result, err
 }

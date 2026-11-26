@@ -68,6 +68,8 @@ export function useAuthFormState(app: ReturnType<typeof useShellState> & Volatil
   const timelineMessageActionsRef = useRef<TimelineMessageActions>({
     onDoubleClick: () => { },
     onOpenContextMenu: () => { },
+    onReply: () => { },
+    onReact: () => { },
     onFocusMessage: () => { },
     onAudioEnded: () => { },
     onUseTranscript: () => { },

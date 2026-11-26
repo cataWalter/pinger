@@ -88,4 +88,5 @@ export type LocalAIChatProps = {
   onChatsChanged: () => void
   newChatKind?: LocalAIChatKind
   continueInstructions?: string
+  onlineEndpoint?: string
 }

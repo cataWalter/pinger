@@ -22,12 +22,20 @@ const (
 )
 
 type Change struct {
-	Revision int64
+	Revision  int64
+	AccountID string
+	Changed   map[string]any
 }
 
 type Store struct {
 	db       *sql.DB
 	interval time.Duration
+
+	stmtAll            *sql.Stmt
+	stmtReadRaw        *sql.Stmt
+	stmtReadRevision   *sql.Stmt
+	stmtUpsert         *sql.Stmt
+	stmtUpdateRevision *sql.Stmt
 
 	mu           sync.RWMutex
 	lastRevision int64
@@ -64,13 +72,55 @@ func open(path string, interval time.Duration) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := store.prepareStatements(); err != nil {
+		_ = store.closeStatements()
+		_ = db.Close()
+		return nil, err
+	}
 	store.lastRevision, err = store.revision()
 	if err != nil {
+		_ = store.closeStatements()
 		_ = db.Close()
 		return nil, err
 	}
 	go store.watch()
 	return store, nil
+}
+
+func (s *Store) prepareStatements() error {
+	var err error
+	if s.stmtAll, err = s.db.Prepare("SELECT key, value_json FROM preferences WHERE scope = ? AND account_id = ?"); err != nil {
+		return fmt.Errorf("prepare preference list query: %w", err)
+	}
+	if s.stmtReadRaw, err = s.db.Prepare("SELECT value_json FROM preferences WHERE scope = ? AND account_id = ? AND key = ?"); err != nil {
+		return fmt.Errorf("prepare preference read query: %w", err)
+	}
+	if s.stmtReadRevision, err = s.db.Prepare("SELECT revision FROM preference_meta WHERE id = 1"); err != nil {
+		return fmt.Errorf("prepare preference revision query: %w", err)
+	}
+	if s.stmtUpsert, err = s.db.Prepare(`
+		INSERT INTO preferences (scope, account_id, key, value_json, updated_at, revision)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(scope, account_id, key) DO UPDATE SET
+			value_json = excluded.value_json,
+			updated_at = excluded.updated_at,
+			revision = excluded.revision`); err != nil {
+		return fmt.Errorf("prepare preference upsert statement: %w", err)
+	}
+	if s.stmtUpdateRevision, err = s.db.Prepare("UPDATE preference_meta SET revision = ? WHERE id = 1"); err != nil {
+		return fmt.Errorf("prepare preference revision update: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) closeStatements() error {
+	return errors.Join(
+		closeStmt(s.stmtAll),
+		closeStmt(s.stmtReadRaw),
+		closeStmt(s.stmtReadRevision),
+		closeStmt(s.stmtUpsert),
+		closeStmt(s.stmtUpdateRevision),
+	)
 }
 
 func (s *Store) initialize() error {
@@ -127,7 +177,7 @@ func (s *Store) all(scope Scope, accountID string) (map[string]any, error) {
 	if err := validateScope(scope, accountID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query("SELECT key, value_json FROM preferences WHERE scope = ? AND account_id = ?", scope, accountID)
+	rows, err := s.stmtAll.Query(scope, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("read preferences: %w", err)
 	}
@@ -231,13 +281,20 @@ func (s *Store) setAll(writes []write) error {
 		return err
 	}
 
+	readRawStmt := tx.Stmt(s.stmtReadRaw)
+	defer readRawStmt.Close()
 	changed := make([]int, 0, len(writes))
 	for i, w := range writes {
-		existing, found, err := readPreferenceRaw(tx, w.scope, w.accountID, w.key)
-		if err != nil {
-			return err
+		var existing []byte
+		err := readRawStmt.QueryRow(w.scope, w.accountID, w.key).Scan(&existing)
+		if errors.Is(err, sql.ErrNoRows) {
+			changed = append(changed, i)
+			continue
 		}
-		if !found || !bytes.Equal(existing, encoded[i]) {
+		if err != nil {
+			return fmt.Errorf("read preference %q: %w", w.key, err)
+		}
+		if !bytes.Equal(existing, encoded[i]) {
 			changed = append(changed, i)
 		}
 	}
@@ -245,31 +302,40 @@ func (s *Store) setAll(writes []write) error {
 		return nil
 	}
 
+	readRevStmt := tx.Stmt(s.stmtReadRevision)
+	defer readRevStmt.Close()
 	var revision int64
-	if err := tx.QueryRow("SELECT revision FROM preference_meta WHERE id = 1").Scan(&revision); err != nil {
+	if err := readRevStmt.QueryRow().Scan(&revision); err != nil {
 		return fmt.Errorf("read preference revision: %w", err)
 	}
 	revision++
 	now := time.Now().UnixMilli()
+	upsertStmt := tx.Stmt(s.stmtUpsert)
+	defer upsertStmt.Close()
 	for _, i := range changed {
 		w := writes[i]
-		if _, err := tx.Exec(`
-		INSERT INTO preferences (scope, account_id, key, value_json, updated_at, revision)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(scope, account_id, key) DO UPDATE SET
-			value_json = excluded.value_json,
-			updated_at = excluded.updated_at,
-			revision = excluded.revision`, w.scope, w.accountID, w.key, encoded[i], now, revision); err != nil {
+		if _, err := upsertStmt.Exec(w.scope, w.accountID, w.key, encoded[i], now, revision); err != nil {
 			return fmt.Errorf("write preference %q: %w", w.key, err)
 		}
 	}
-	if _, err := tx.Exec("UPDATE preference_meta SET revision = ? WHERE id = 1", revision); err != nil {
+	updateRevStmt := tx.Stmt(s.stmtUpdateRevision)
+	defer updateRevStmt.Close()
+	if _, err := updateRevStmt.Exec(revision); err != nil {
 		return fmt.Errorf("write preference revision: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit preference update: %w", err)
 	}
 	s.markRevision(revision)
-	s.publish(Change{Revision: revision})
+	changedValues := make(map[string]any, len(changed))
+	changedAccountID := ""
+	for _, i := range changed {
+		w := writes[i]
+		changedValues[w.key] = w.value
+		if w.scope == AccountScope && w.accountID != "" {
+			changedAccountID = w.accountID
+		}
+	}
+	s.publish(Change{Revision: revision, AccountID: changedAccountID, Changed: changedValues})
 	return nil
 }

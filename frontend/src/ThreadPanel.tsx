@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { MessagesSquare, Send, X } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
 import type { Message } from '../bindings/mychat/desktop/models.js'
-import { DialogSurface } from './DialogSurface'
+import { DialogScrim, DialogSurface } from './DialogSurface'
 import { Avatar, MarkdownMessage, describeError, displayMessageBody, formatTime, isOwnMessage, preferenceBoolean, type PreferenceValues } from './appShared'
 
 function ThreadMessage({ message, own, use24Hour }: { message: Message; own: boolean; use24Hour: boolean }) {
@@ -98,8 +98,8 @@ export function ThreadPanel({ roomID, rootID, rootMessage, revision, currentUser
   }
 
   return (
-    <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <DialogSurface className="room-info-dialog thread-panel" labelledBy="thread-title" onClose={onClose} onClick={(event) => event.stopPropagation()}>
+    <DialogScrim variant="drawer" className="room-info-scrim" onDismiss={onClose}>
+      <DialogSurface className="room-info-dialog thread-panel" labelledBy="thread-title" onClose={onClose}>
         <header className="room-info-header">
           <div><span className="eyebrow">THREAD</span><h2 id="thread-title">{t('thread.replyCount', { count: replyCount })}</h2></div>
           <button className="icon-button" type="button" aria-label="Close thread" title="Close thread" onClick={onClose}><X size={16} /></button>
@@ -119,6 +119,6 @@ export function ThreadPanel({ roomID, rootID, rootMessage, revision, currentUser
         </form>
         {sendError && <p className="message-error thread-panel-error" role="alert">Could not send reply: {sendError}</p>}
       </DialogSurface>
-    </div>
+    </DialogScrim>
   )
 }

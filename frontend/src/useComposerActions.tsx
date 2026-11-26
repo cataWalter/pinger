@@ -1,12 +1,12 @@
 import { type FormEvent } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { parseCustomEmoticonReplacements, replaceEmoticons } from './composerText'
-import { describeError, preferenceBoolean, preferenceString, type CaptureKind, type StagedAttachment, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, encodePcmWav, startPcmVoiceCapture, type PcmVoiceCapture } from './appShared'
+import { createOptimisticMessage, describeError, preferenceBoolean, preferenceString, type CaptureKind, type StagedAttachment, mediaApprovalItemFromFile, maxVideoMessageMilliseconds, maxAttachmentBytes, preferredVideoMimeType, encodePcmWav, startPcmVoiceCapture, type PcmVoiceCapture } from './appShared'
 import { deleteVolatileAIDraft, getVolatileAIDraft } from './volatileAIDrafts'
 import type { useMessageDispatch } from './useMessageDispatch'
 
 export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
-  const { activeAccountID, busy, composeText, dispatchMessage, editTarget, mentionBindings, preferences, refreshRoomSnapshotAfterSend, replyTarget, roomDrafts, scrollTimelineToBottom, selectedAudioInputDeviceId, selectedRoomID, selectedRoomRef, sendAttachmentFiles, sendableStagedAttachments, setAudioInputDevices, setBusy, setCaptureKind, setComposeText, setEditTarget, setError, setHistoryRevision, setMediaApproval, setMentionBindings, setMentionStart, setReplyTarget, setStagedAttachments, setVoiceCaptureStatus, setVolatileAIDrafts, stickToBottomRef, uploadAttachmentFile, volatileAIDrafts, voiceCaptureStatus, voiceChunksRef, voicePcmRef, voiceRecorderRef, voiceRoomIDRef, voiceStreamRef, voiceTimeoutRef } = app
+  const { activeAccountID, busy, composeDraftStore, dispatchMessage, editTarget, markRoomSentLocally, mentionBindings, preferences, replyTarget, roomDrafts, scrollTimelineToBottom, selectedAudioInputDeviceId, selectedRoomID, selectedRoomRef, sendAttachmentFiles, sendableStagedAttachments, setAudioInputDevices, setBusy, setCaptureKind, setComposeText, setEditTarget, setError, setHistoryRevision, setMediaApproval, setMentionBindings, setMentionStart, setMessages, setReplyTarget, setStagedAttachments, setVoiceCaptureStatus, setVolatileAIDrafts, snapshot, stickToBottomRef, uploadAttachmentFile, volatileAIDrafts, voiceCaptureStatus, voiceChunksRef, voicePcmRef, voiceRecorderRef, voiceRoomIDRef, voiceStreamRef, voiceTimeoutRef } = app
 
   function stageAttachmentFiles(files: File[]) {
     const roomID = selectedRoomID
@@ -41,6 +41,7 @@ export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
   async function sendComposerDraft(roomID: string, text: string, mentionUserIDs: string[], attachments: StagedAttachment[]) {
     setBusy(true)
     setError('')
+    let optimisticID = ''
     try {
       for (const item of attachments) {
         await uploadAttachmentFile(roomID, item.file)
@@ -54,9 +55,22 @@ export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
       }
       if (editTarget) {
         await AppService.EditMessage(roomID, text, editTarget.id)
+        setHistoryRevision((revision) => revision + 1)
       } else {
+        const optimistic = createOptimisticMessage({
+          sender: snapshot?.profile.userId ?? '',
+          senderName: snapshot?.profile.displayName ?? '',
+          body: text,
+          replyTo: replyTarget,
+        })
+        optimisticID = optimistic.transactionId
+        if (selectedRoomRef.current === roomID) {
+          setMessages((current) => [...current, optimistic])
+        }
+        stickToBottomRef.current = true
+        scrollTimelineToBottom()
         await dispatchMessage({ roomID, text, replyTo: replyTarget, mentionUserIDs })
-        await refreshRoomSnapshotAfterSend()
+        markRoomSentLocally(roomID, text)
       }
       const nextDraft = editTarget ? roomDrafts.get(roomID) ?? '' : ''
       if (!editTarget) {
@@ -72,9 +86,12 @@ export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
       setEditTarget(null)
       stickToBottomRef.current = true
       scrollTimelineToBottom()
-      setHistoryRevision((revision) => revision + 1)
     } catch (sendError) {
-      setError(describeError(sendError))
+      const errorText = describeError(sendError)
+      if (optimisticID) {
+        setMessages((current) => current.map((msg) => msg.transactionId === optimisticID ? { ...msg, sending: false, sendError: errorText } : msg))
+      }
+      setError(errorText)
     } finally {
       setBusy(false)
     }
@@ -83,8 +100,9 @@ export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const roomID = selectedRoomID
+    const draftText = composeDraftStore.getText()
     const customReplacements = parseCustomEmoticonReplacements(preferenceString(preferences, 'emoji.emoticon_replacements', ''))
-    const text = (preferenceBoolean(preferences, 'emoji.replace_emoticons', true) ? replaceEmoticons(composeText, customReplacements) : composeText).trim()
+    const text = (preferenceBoolean(preferences, 'emoji.replace_emoticons', true) ? replaceEmoticons(draftText, customReplacements) : draftText).trim()
     if (!roomID || (!text && sendableStagedAttachments.length === 0) || busy) return
     const mentionUserIDs = [...new Set(mentionBindings.filter(({ token }) => text.includes(token)).map(({ userID }) => userID))]
     await sendComposerDraft(roomID, text, mentionUserIDs, sendableStagedAttachments)
@@ -109,10 +127,20 @@ export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
       if (samples.length === 0) throw new Error('No microphone audio was captured.')
       const durationMilliseconds = Math.max(1, Math.round((samples.length / sampleRate) * 1000))
       const file = new File([encodePcmWav(samples, sampleRate)], `voice-note-${Date.now()}.wav`, { type: 'audio/wav' })
+      const previewURL = typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : ''
+      const revokePreview = () => {
+        if (previewURL && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(previewURL)
+      }
       setMediaApproval({
-        items: [mediaApprovalItemFromFile(file.name, file, '')],
-        onApprove: () => void sendAttachmentFiles([file], roomID, { kind: 'voice', durationMilliseconds }).finally(() => setVoiceCaptureStatus(null)),
-        onCancel: () => setVoiceCaptureStatus(null),
+        items: [mediaApprovalItemFromFile(file.name, file, previewURL)],
+        onApprove: () => {
+          revokePreview()
+          void sendAttachmentFiles([file], roomID, { kind: 'voice', durationMilliseconds }).finally(() => setVoiceCaptureStatus(null))
+        },
+        onCancel: () => {
+          revokePreview()
+          setVoiceCaptureStatus(null)
+        },
       })
     } catch (recordError) {
       setError(describeError(recordError))
@@ -181,10 +209,20 @@ export function useComposerActions(app: ReturnType<typeof useMessageDispatch>) {
           const durationMilliseconds = Math.max(1, Math.min(Date.now() - startedAt, maxVideoMessageMilliseconds))
           const extension = recorder.mimeType.includes('mp4') ? 'mp4' : 'webm'
           const file = new File(chunks, `video-message-${Date.now()}.${extension}`, { type: recorder.mimeType || `video/${extension}` })
+          const previewURL = typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : ''
+          const revokePreview = () => {
+            if (previewURL && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(previewURL)
+          }
           setMediaApproval({
-            items: [mediaApprovalItemFromFile(file.name, file, '')],
-            onApprove: () => void sendAttachmentFiles([file], roomID, { kind: 'video', durationMilliseconds }).finally(() => setVoiceCaptureStatus(null)),
-            onCancel: () => setVoiceCaptureStatus(null),
+            items: [mediaApprovalItemFromFile(file.name, file, previewURL)],
+            onApprove: () => {
+              revokePreview()
+              void sendAttachmentFiles([file], roomID, { kind: 'video', durationMilliseconds }).finally(() => setVoiceCaptureStatus(null))
+            },
+            onCancel: () => {
+              revokePreview()
+              setVoiceCaptureStatus(null)
+            },
           })
         }
         recorder.onerror = () => {

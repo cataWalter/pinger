@@ -49,13 +49,9 @@ afterEach(() => {
 })
 
 describe('settings storage, integrations, help, and about', () => {
-  let confirmSpy: { mockRestore: () => void; } | undefined
-
   let snippetDownloadClickSpy: { mockRestore: () => void; } | undefined
 
   afterEach(() => {
-    confirmSpy?.mockRestore()
-    confirmSpy = undefined
     snippetDownloadClickSpy?.mockRestore()
     snippetDownloadClickSpy = undefined
     cleanup()
@@ -158,7 +154,6 @@ describe('settings storage, integrations, help, and about', () => {
   })
 
   it('lists per-chat storage and clears matching cached media after confirmation', async () => {
-    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     harness.service.RoomStorageUsage
       .mockResolvedValueOnce([{ roomId: '!room:example.org', name: 'Test room', messages: 12, textBytes: 1024, mediaBytes: 4096, mediaFiles: 3 }])
       .mockResolvedValue([{ roomId: '!room:example.org', name: 'Test room', messages: 12, textBytes: 1024, mediaBytes: 0, mediaFiles: 0 }])
@@ -171,20 +166,22 @@ describe('settings storage, integrations, help, and about', () => {
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Cleanup age' }), '30')
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Cleanup media type' }), 'image')
     await user.click(within(table).getByRole('button', { name: 'Clear media in Test room' }))
+    const confirmDialog = await screen.findByRole('alertdialog', { name: 'Remove cached media?' })
+    await user.click(within(confirmDialog).getByRole('button', { name: 'Remove media' }))
 
     await waitFor(() => expect(harness.service.ClearCachedMedia).toHaveBeenCalledWith({ roomId: '!room:example.org', olderThanDays: 30, mediaType: 'image' }))
-    expect(confirmSpy).toHaveBeenCalled()
     expect(await screen.findByText(/Removed 3 cached files/)).toBeTruthy()
   })
 
   it('does not clear media when the cleanup confirmation is declined', async () => {
-    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     harness.service.RoomStorageUsage.mockResolvedValue([{ roomId: '!room:example.org', name: 'Test room', messages: 1, textBytes: 10, mediaBytes: 20, mediaFiles: 1 }])
     const user = await openSettingsTab('Storage')
     await user.click(await screen.findByText('Advanced'))
 
     await user.click(await screen.findByRole('button', { name: 'Clear matching media' }))
-    expect(confirmSpy).toHaveBeenCalled()
+    const confirmDialog = await screen.findByRole('alertdialog', { name: 'Remove cached media?' })
+    await user.click(within(confirmDialog).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('alertdialog', { name: 'Remove cached media?' })).toBeNull()
     expect(harness.service.ClearCachedMedia).not.toHaveBeenCalled()
   })
 

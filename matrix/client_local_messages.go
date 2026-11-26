@@ -15,10 +15,7 @@ func (c *Client) storeLocalMessage(roomID string, message Message) {
 	}
 	c.mu.Lock()
 	if message.MediaURI != "" && message.MediaEncrypted != nil {
-		if c.mediaEncrypted == nil {
-			c.mediaEncrypted = make(map[string]*EncryptedMediaFile)
-		}
-		c.mediaEncrypted[message.MediaURI] = message.MediaEncrypted
+		c.rememberMediaEncryptionEntryLocked(roomID, message.MediaURI, message.MediaEncrypted)
 	}
 	if c.local[roomID] == nil {
 		c.local[roomID] = make(map[string]Message)

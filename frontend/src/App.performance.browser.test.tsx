@@ -68,7 +68,8 @@ describe('browser smoke: performance', () => {
         if (fraction === 0) expect(firstIndex).toBe(retainedStart)
         if (fraction === 1) expect(lastIndex).toBe(historyMessages.length - 1)
         else expect(lastIndex).toBeLessThan(historyMessages.length - 1)
-        expect(Math.abs(visibleRows[0].getBoundingClientRect().height / visibleRows[0].offsetHeight - zoom / 100)).toBeLessThan(0.05)
+        expect(Math.abs(visibleRows[0].getBoundingClientRect().height / visibleRows[0].offsetHeight - 1)).toBeLessThan(0.05)
+        expect(parseFloat(getComputedStyle(visibleRows[0].querySelector('.message-body')!).fontSize)).toBeCloseTo((14 * zoom) / 100, 1)
         for (let index = 1; index < visibleRows.length; index++) {
           expect(visibleRows[index].getBoundingClientRect().top - visibleRows[index - 1].getBoundingClientRect().bottom).toBeLessThanOrEqual(20)
         }

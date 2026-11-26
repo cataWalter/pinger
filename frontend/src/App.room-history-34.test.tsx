@@ -149,8 +149,7 @@ describe('room history updates', () => {
     openMessageMenu(container)
     const menu = await screen.findByRole('menu', { name: 'Message actions' })
     const target = container.querySelector('[data-event-id="$latest"]')
-    expect(container.querySelector('.message-context-scrim')).not.toBeNull()
-    expect(container.querySelectorAll('.message-context-scrim-panel')).toHaveLength(4)
+    expect(container.querySelector('.message-context-scrim')).toBeNull()
     expect(target?.classList.contains('is-context-target')).toBe(true)
     expect(within(menu).getByRole('menuitem', { name: 'Reply to Alice' })).toBeTruthy()
     expect(within(menu).getByRole('menuitem', { name: 'Set reminder for message' })).toBeTruthy()
@@ -163,7 +162,6 @@ describe('room history updates', () => {
 
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('menu', { name: 'Message actions' })).toBeNull())
-    expect(container.querySelector('.message-context-scrim')).toBeNull()
     expect(target?.classList.contains('is-context-target')).toBe(false)
   })
 

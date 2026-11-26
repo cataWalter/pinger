@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
 import * as appShared from './appShared'
-import { harness, room, message, snapshot } from './appTestSetup'
+import { emitMatrixUpdate, harness, room, message, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
   const { clipboardSetText, harness } = await import('./appTestSetup')
@@ -165,18 +165,16 @@ describe('room history updates', () => {
 
       const emitUpdate = async (newIncomingMessage: boolean) => {
         await act(async () => {
-          harness.eventHandlers.get('matrix:update')?.({
-            data: {
-              rooms: [room],
-              notificationPreferences: { 'sounds.effects': 'Incoming and sent messages' },
-              timelineChangedRoomId: [],
-              notifications: [],
-              newIncomingMessage,
-              initialSyncComplete: true,
-              needsVerification: false,
-              connectionState: 'connected',
-              error: '',
-            },
+          emitMatrixUpdate({
+            rooms: [room],
+            notificationPreferences: { 'sounds.effects': 'Incoming and sent messages' },
+            timelineChangedRoomId: [],
+            notifications: [],
+            newIncomingMessage,
+            initialSyncComplete: true,
+            needsVerification: false,
+            connectionState: 'connected',
+            error: '',
           })
           await Promise.resolve()
         })
@@ -203,23 +201,36 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     await act(async () => {
-      harness.eventHandlers.get('matrix:update')?.({
-        data: {
-          rooms: [room],
-          changedRoomId: [],
-          timelineChangedRoomId: [],
-          typingUsers: { [room.id]: [] },
-          notifications: [],
-          error: 'request error: http2: server sent GOAWAY and closed the connection',
-          initialSyncComplete: true,
-          needsVerification: false,
-          connectionState: 'offline',
-        },
+      emitMatrixUpdate({
+        rooms: [room],
+        changedRoomId: [],
+        timelineChangedRoomId: [],
+        typingUsers: { [room.id]: [] },
+        notifications: [],
+        error: 'request error: http2: server sent GOAWAY and closed the connection',
+        initialSyncComplete: true,
+        needsVerification: false,
+        connectionState: 'offline',
       })
       await Promise.resolve()
     })
 
     expect(screen.queryByText(/GOAWAY/)).toBeNull()
+  })
+
+  it('shows initial sync while keeping cached messages available', async () => {
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, syncReady: false, connectionState: 'connecting' })
+    render(<App />)
+    expect(await screen.findByText('Syncing your Matrix chats...')).toBeTruthy()
+    expect(await screen.findByText('latest message')).toBeTruthy()
+
+    await act(async () => {
+      emitMatrixUpdate({
+        rooms: [room], changedRoomId: [], timelineChangedRoomId: [], typingUsers: {}, notifications: [],
+        error: '', initialSyncComplete: true, needsVerification: false, connectionState: 'connected',
+      })
+    })
+    expect(screen.queryByText('Syncing your Matrix chats...')).toBeNull()
   })
 
   it('shows an offline notice when the browser loses its network connection', async () => {
@@ -250,18 +261,16 @@ describe('room history updates', () => {
     const serverNotice = "Can't reach the Matrix server. Retrying…"
     const emitConnectionState = async (connectionState: string) => {
       await act(async () => {
-        harness.eventHandlers.get('matrix:update')?.({
-          data: {
-            rooms: [room],
-            changedRoomId: [],
-            timelineChangedRoomId: [],
-            typingUsers: { [room.id]: [] },
-            notifications: [],
-            error: '',
-            initialSyncComplete: true,
-            needsVerification: false,
-            connectionState,
-          },
+        emitMatrixUpdate({
+          rooms: [room],
+          changedRoomId: [],
+          timelineChangedRoomId: [],
+          typingUsers: { [room.id]: [] },
+          notifications: [],
+          error: '',
+          initialSyncComplete: true,
+          needsVerification: false,
+          connectionState,
         })
         await Promise.resolve()
       })

@@ -79,16 +79,6 @@ func TestPreferenceStoreAcceptsAdditionalThemes(t *testing.T) {
 	}
 }
 
-func TestPreferenceStoreAcceptsSpellcheckSetting(t *testing.T) {
-	store, err := NewPreferenceStore(filepath.Join(t.TempDir(), "preferences.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = store.Set("composer.spellcheck", false); err != nil {
-		t.Fatalf("Set(composer.spellcheck, false) error = %v", err)
-	}
-}
-
 func TestPreferenceStoreAcceptsCopyTimestampSetting(t *testing.T) {
 	store, err := NewPreferenceStore(filepath.Join(t.TempDir(), "preferences.json"))
 	if err != nil {

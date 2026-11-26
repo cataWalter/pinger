@@ -152,6 +152,18 @@ func isEventStreamResponse(response *http.Response) bool {
 }
 
 // aiStatusError reads a short error body from a non-2xx response and returns it with the status code.
+type aiHTTPStatusError struct {
+	statusCode int
+	message    string
+}
+
+func (e *aiHTTPStatusError) Error() string {
+	if e.message != "" {
+		return fmt.Sprintf("AI endpoint returned %d: %s", e.statusCode, e.message)
+	}
+	return fmt.Sprintf("AI endpoint returned %d", e.statusCode)
+}
+
 func aiStatusError(response *http.Response) error {
 	data, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
 	var parsed struct {
@@ -168,10 +180,10 @@ func aiStatusError(response *http.Response) error {
 			}
 		}
 		if message != "" {
-			return fmt.Errorf("AI endpoint returned %d: %s", response.StatusCode, message)
+			return &aiHTTPStatusError{statusCode: response.StatusCode, message: message}
 		}
 	}
-	return fmt.Errorf("AI endpoint returned %d", response.StatusCode)
+	return &aiHTTPStatusError{statusCode: response.StatusCode}
 }
 
 func decodeAICompletion(provider AIProvider, chat bool, data []byte) (string, error) {

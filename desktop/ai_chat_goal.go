@@ -48,6 +48,7 @@ func (s *AppService) AIInferChatGoal(roomID, requestID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	route = s.trackAIRoute(route)
 	explanation, languages := suggestedReplyLanguages(preferences, roomID)
 	tuning := aiFeatureTuningFor(preferences, aiFeatureSuggestedReplies)
 	ctx, release := s.beginAIRoomRun(requestID)

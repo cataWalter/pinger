@@ -21,8 +21,12 @@ export interface ImprovedDraftRestore {
   applied: string
 }
 
+type ImproveDraftInput = Pick<ReturnType<typeof useComposerSnippets>,
+  'aiEnabled' | 'busy' | 'cancelAIRequest' | 'composeTextRef' | 'composerInputRef' | 'confirmOnlineAIRequest' |
+  'editTarget' | 'newAIRequestID' | 'selectedRoomID' | 'selectedRoomRef' | 'setComposeDraft'>
+
 // useImproveDraft owns the draft review: it infers the draft goal, runs the review, and places a chosen version in the composer. Nothing is sent.
-export function useImproveDraft(app: ReturnType<typeof useComposerSnippets>) {
+export function useImproveDraft(app: ImproveDraftInput) {
   const { aiEnabled, busy, cancelAIRequest, composeTextRef, composerInputRef, editTarget, newAIRequestID, selectedRoomID, selectedRoomRef, setComposeDraft } = app
   const [session, setSession] = useState<ImproveDraftSession | null>(null)
   const [restore, setRestore] = useState<ImprovedDraftRestore | null>(null)
@@ -30,10 +34,12 @@ export function useImproveDraft(app: ReturnType<typeof useComposerSnippets>) {
   const reviewRequestRef = useRef('')
 
   // improveComposerDraft opens the review, infers the draft goal from the chat, and runs the review with it.
-  function improveComposerDraft() {
+  async function improveComposerDraft() {
     const roomID = selectedRoomID
     const original = composeTextRef.current
     if (!roomID || !aiEnabled || busy || editTarget || !original.trim()) return
+    if (!(await app.confirmOnlineAIRequest('Improve draft', 'your draft, recent messages, and the draft goal'))) return
+    if (selectedRoomRef.current !== roomID) return
     cancelAIRequest(goalRequestRef.current)
     cancelAIRequest(reviewRequestRef.current)
     reviewRequestRef.current = ''
@@ -87,9 +93,9 @@ export function useImproveDraft(app: ReturnType<typeof useComposerSnippets>) {
     }
   }
 
-  // runImproveDraft re-runs the review with the goal shown in the dialog, for example after the goal was edited.
-  function runImproveDraft() {
+  async function runImproveDraft() {
     if (!session || session.reviewing || session.goalLoading) return
+    if (!(await app.confirmOnlineAIRequest('Improve draft', 'your draft, recent messages, and the draft goal'))) return
     void runReview(session.roomId, session.original, session.goal.trim())
   }
 
@@ -126,5 +132,5 @@ export function useImproveDraft(app: ReturnType<typeof useComposerSnippets>) {
     composerInputRef.current?.focus()
   }
 
-  return { ...app, improveDraft: session, improveRestore: restore, improveComposerDraft, setImproveDraftGoal, runImproveDraft, stopImproveReview, applyImprovedDraft, closeImproveDraft, restoreImprovedDraft }
+  return { improveDraft: session, improveRestore: restore, improveComposerDraft, setImproveDraftGoal, runImproveDraft, stopImproveReview, applyImprovedDraft, closeImproveDraft, restoreImprovedDraft }
 }

@@ -193,17 +193,25 @@ func (s *scheduledJobStore) claimDueForAccount(kind string, now int64, accountID
 	defer s.mu.Unlock()
 	previous := append([]ScheduledJob(nil), s.jobs...)
 	claimed := make([]ScheduledJob, 0)
+	nextMessage := -1
 	for index := range s.jobs {
 		job := &s.jobs[index]
 		if job.Kind != kind || job.Status != scheduledPending || job.DueAt > now || accountID != "" && job.AccountID != accountID {
 			continue
 		}
 		if kind == scheduledMessageKind {
-			job.Status = scheduledSending
-		} else {
-			job.Status = scheduledFired
+			if nextMessage == -1 || job.DueAt < s.jobs[nextMessage].DueAt ||
+				job.DueAt == s.jobs[nextMessage].DueAt && job.ID < s.jobs[nextMessage].ID {
+				nextMessage = index
+			}
+			continue
 		}
+		job.Status = scheduledFired
 		claimed = append(claimed, *job)
+	}
+	if nextMessage >= 0 {
+		s.jobs[nextMessage].Status = scheduledSending
+		claimed = append(claimed, s.jobs[nextMessage])
 	}
 	if len(claimed) == 0 {
 		return nil, nil

@@ -1,10 +1,12 @@
+import { memo } from 'react'
 import LocalAIChat from './LocalAIChat'
-import type { AppState } from './appState'
+import { useSessionRooms } from './AppDomainContexts'
 import { ConversationMessages } from './ConversationMessages'
 import { ConversationComposer } from './ConversationComposer'
+import { onlineAIEndpointOf, textAIProviderOf } from './aiSettings'
 
-export function ConversationWorkspace({ app }: { app: AppState }) {
-  const { createLocalAIAgent, localAIActiveChat, localAIAgentId, localAIAgents, localAIChatId, localAIChatList, localAIChatOpen, localAIInitialDraft, localAINewChatKind, setLocalAIChatId, setLocalAINewChatAgentId } = app
+export const ConversationWorkspace = memo(function ConversationWorkspace() {
+  const { aiInstructions, createLocalAIAgent, localAIActiveChat, localAIAgentId, localAIAgents, localAIChatId, localAIChatList, localAIChatOpen, localAIInitialDraft, localAINewChatKind, preferences, setLocalAIChatId, setLocalAINewChatAgentId } = useSessionRooms()
   return (
     <div className="conversation-workspace">
       <LocalAIChat
@@ -24,14 +26,15 @@ export function ConversationWorkspace({ app }: { app: AppState }) {
         }}
         onChatsChanged={localAIChatList.reload}
         newChatKind={localAINewChatKind}
-        continueInstructions={app.aiInstructions('continue_conversation')}
+        continueInstructions={aiInstructions('continue_conversation')}
+        onlineEndpoint={textAIProviderOf(preferences) === 'online' ? onlineAIEndpointOf(preferences) : undefined}
       />
       {localAIChatOpen ? null : <>
         <div className="conversation-thread">
-          <ConversationMessages app={app} />
-          <ConversationComposer app={app} />
+          <ConversationMessages />
+          <ConversationComposer />
         </div>
       </>}
     </div>
   )
-}
+})

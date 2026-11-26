@@ -36,6 +36,8 @@ func (c *Client) CachedMediaBytes(ctx context.Context, mxc string) ([]byte, erro
 	return c.DownloadMedia(ctx, mxc, c.mediaEncryptionFor(mxc))
 }
 
+const maxMediaEncryptedEntries = 4096
+
 func (c *Client) mediaEncryptionFor(mxc string) *EncryptedMediaFile {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -43,18 +45,92 @@ func (c *Client) mediaEncryptionFor(mxc string) *EncryptedMediaFile {
 }
 
 func (c *Client) rememberMediaEncryption(messages []Message) {
+	c.rememberRoomMediaEncryption("", messages)
+}
+
+func (c *Client) rememberRoomMediaEncryption(roomID string, messages []Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	for _, message := range messages {
+		if message.MediaURI != "" && message.MediaEncrypted != nil {
+			c.rememberMediaEncryptionEntryLocked(roomID, message.MediaURI, message.MediaEncrypted)
+		}
+		if message.MediaThumbnailURI != "" && message.MediaThumbnailEncrypted != nil {
+			c.rememberMediaEncryptionEntryLocked(roomID, message.MediaThumbnailURI, message.MediaThumbnailEncrypted)
+		}
+	}
+}
+
+func (c *Client) rememberMediaEncryptionEntryLocked(roomID, mxc string, file *EncryptedMediaFile) {
 	if c.mediaEncrypted == nil {
 		c.mediaEncrypted = make(map[string]*EncryptedMediaFile)
 	}
-	for _, message := range messages {
-		if message.MediaURI != "" && message.MediaEncrypted != nil {
-			c.mediaEncrypted[message.MediaURI] = message.MediaEncrypted
+	if _, exists := c.mediaEncrypted[mxc]; exists {
+		c.mediaEncrypted[mxc] = file
+		c.touchMediaEncryptedOrderLocked(mxc)
+	} else {
+		c.mediaEncrypted[mxc] = file
+		c.mediaEncryptedOrder = append(c.mediaEncryptedOrder, mxc)
+		for len(c.mediaEncrypted) > maxMediaEncryptedEntries && len(c.mediaEncryptedOrder) > 0 {
+			oldest := c.mediaEncryptedOrder[0]
+			c.mediaEncryptedOrder = c.mediaEncryptedOrder[1:]
+			delete(c.mediaEncrypted, oldest)
+			for _, keys := range c.mediaEncryptedByRoom {
+				delete(keys, oldest)
+			}
 		}
-		if message.MediaThumbnailURI != "" && message.MediaThumbnailEncrypted != nil {
-			c.mediaEncrypted[message.MediaThumbnailURI] = message.MediaThumbnailEncrypted
+	}
+	if roomID != "" {
+		if c.mediaEncryptedByRoom == nil {
+			c.mediaEncryptedByRoom = make(map[string]map[string]struct{})
 		}
+		if c.mediaEncryptedByRoom[roomID] == nil {
+			c.mediaEncryptedByRoom[roomID] = make(map[string]struct{})
+		}
+		c.mediaEncryptedByRoom[roomID][mxc] = struct{}{}
+	}
+}
+
+func (c *Client) touchMediaEncryptedOrderLocked(mxc string) {
+	for i, key := range c.mediaEncryptedOrder {
+		if key == mxc {
+			copy(c.mediaEncryptedOrder[i:], c.mediaEncryptedOrder[i+1:])
+			c.mediaEncryptedOrder[len(c.mediaEncryptedOrder)-1] = mxc
+			return
+		}
+	}
+	c.mediaEncryptedOrder = append(c.mediaEncryptedOrder, mxc)
+}
+
+func (c *Client) forgetRoomMediaEncryptionLocked(roomID string) {
+	if roomID == "" || len(c.mediaEncryptedByRoom) == 0 {
+		return
+	}
+	roomKeys, exists := c.mediaEncryptedByRoom[roomID]
+	if !exists {
+		return
+	}
+	delete(c.mediaEncryptedByRoom, roomID)
+	for mxc := range roomKeys {
+		referencedElsewhere := false
+		for _, otherKeys := range c.mediaEncryptedByRoom {
+			if _, found := otherKeys[mxc]; found {
+				referencedElsewhere = true
+				break
+			}
+		}
+		if !referencedElsewhere {
+			delete(c.mediaEncrypted, mxc)
+		}
+	}
+	if len(c.mediaEncryptedOrder) > 0 {
+		kept := c.mediaEncryptedOrder[:0]
+		for _, mxc := range c.mediaEncryptedOrder {
+			if _, ok := c.mediaEncrypted[mxc]; ok {
+				kept = append(kept, mxc)
+			}
+		}
+		c.mediaEncryptedOrder = kept
 	}
 }
 

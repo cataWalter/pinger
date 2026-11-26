@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
-import { harness, room, secondRoom, message, snapshot } from './appTestSetup'
+import { emitMatrixUpdate, harness, room, secondRoom, message, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
   const { clipboardSetText, harness } = await import('./appTestSetup')
@@ -146,14 +146,12 @@ describe('room history updates', () => {
     expect(screen.queryByRole('button', { name: 'Load older messages' })).toBeNull()
 
     act(() => {
-      harness.eventHandlers.get('matrix:update')?.({
-        data: {
-          rooms: [room],
-          timelineChangedRoomId: [room.id],
-          initialSyncComplete: true,
-          needsVerification: false,
-          connectionState: 'connected',
-        },
+      emitMatrixUpdate({
+        rooms: [room],
+        timelineChangedRoomId: [room.id],
+        initialSyncComplete: true,
+        needsVerification: false,
+        connectionState: 'connected',
       })
     })
 
@@ -170,15 +168,13 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     act(() => {
-      harness.eventHandlers.get('matrix:update')?.({
-        data: {
-          rooms: [room],
-          timelineChangedRoomId: [],
-          typingUsers: { [room.id]: [typingUserID] },
-          initialSyncComplete: true,
-          needsVerification: false,
-          connectionState: 'connected',
-        },
+      emitMatrixUpdate({
+        rooms: [room],
+        timelineChangedRoomId: [],
+        typingUsers: { [room.id]: [typingUserID] },
+        initialSyncComplete: true,
+        needsVerification: false,
+        connectionState: 'connected',
       })
     })
 
@@ -195,15 +191,13 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
 
     act(() => {
-      harness.eventHandlers.get('matrix:update')?.({
-        data: {
-          rooms: [{ ...room, name: 'aldo rossi' }],
-          timelineChangedRoomId: [],
-          typingUsers: { [room.id]: [typingUserID] },
-          initialSyncComplete: true,
-          needsVerification: false,
-          connectionState: 'connected',
-        },
+      emitMatrixUpdate({
+        rooms: [{ ...room, name: 'aldo rossi' }],
+        timelineChangedRoomId: [],
+        typingUsers: { [room.id]: [typingUserID] },
+        initialSyncComplete: true,
+        needsVerification: false,
+        connectionState: 'connected',
       })
     })
 

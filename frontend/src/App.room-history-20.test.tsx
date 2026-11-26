@@ -201,6 +201,7 @@ describe('room history updates', () => {
       expect(videoCard).toBeTruthy()
       return videoCard
     })
+    expect(card?.querySelector('.media-video-poster-meta')?.textContent).toBe('0:02')
     await user.click(within(card as HTMLElement).getByRole('button', { name: /Load video/ }))
 
     const video = await waitFor(() => {

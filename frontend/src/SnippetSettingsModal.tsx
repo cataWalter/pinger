@@ -1,6 +1,6 @@
 import { useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Download, Pencil, Plus, Search, Trash2, Upload, X } from 'lucide-react'
-import { DialogSurface } from './DialogSurface'
+import { DialogScrim, DialogSurface } from './DialogSurface'
 import { createSnippetID, mergeImportedSnippets, parseSnippetImport, serializeSnippets, type Snippet, type SnippetDraft } from './snippets'
 
 interface SnippetSettingsModalProps {
@@ -154,8 +154,8 @@ export function SnippetSettingsModal({ open, snippets, onSnippetsChange, onClose
       .some((value) => value.toLocaleLowerCase().includes(normalizedSearch)))
     : snippets
 
-  return <div className="room-info-scrim snippet-manager-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close() }}>
-    <DialogSurface className="room-info-dialog snippet-manager-dialog" labelledBy="snippet-manager-title" onClose={close} onClick={(event) => event.stopPropagation()}>
+  return <DialogScrim variant="modal" className="snippet-manager-scrim" onDismiss={close}>
+    <DialogSurface className="dialog-modal-card snippet-manager-dialog" labelledBy="snippet-manager-title" onClose={close}>
       <header className="room-info-header">
         <div><span className="eyebrow">COMPOSER</span><h2 id="snippet-manager-title">Text snippets</h2></div>
         <button className="icon-button" type="button" aria-label="Close text snippets" title="Close text snippets" onClick={close}><X size={16} /></button>
@@ -210,5 +210,5 @@ export function SnippetSettingsModal({ open, snippets, onSnippetsChange, onClose
       </div>
       <footer className="room-info-footer"><button className="settings-command" type="button" onClick={close}>Close</button></footer>
     </DialogSurface>
-  </div>
+  </DialogScrim>
 }

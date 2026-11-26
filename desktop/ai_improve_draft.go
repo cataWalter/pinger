@@ -72,6 +72,7 @@ func (s *AppService) AIImproveDraft(roomID, draft, draftGoal, requestID string) 
 	if err != nil {
 		return ImprovedDraft{}, err
 	}
+	route = s.trackAIRoute(route)
 	explanation, languages := suggestedReplyLanguages(preferences, roomID)
 	tuning := aiFeatureTuningFor(preferences, aiFeatureImproveDraft)
 	ctx, release := s.beginAIRoomRun(requestID)
@@ -103,6 +104,7 @@ func (s *AppService) AIInferDraftGoal(roomID, draft, requestID string) (string, 
 	if err != nil {
 		return "", err
 	}
+	route = s.trackAIRoute(route)
 	explanation, languages := suggestedReplyLanguages(preferences, roomID)
 	tuning := aiFeatureTuningFor(preferences, aiFeatureImproveDraft)
 	ctx, release := s.beginAIRoomRun(requestID)

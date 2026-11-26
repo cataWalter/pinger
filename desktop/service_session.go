@@ -20,6 +20,12 @@ func (s *AppService) Snapshot() (Snapshot, error) {
 	preferences := s.preferenceValues()
 	rooms := mapRoomsWithPreferences(client.Rooms(), preferences)
 	tagRooms(rooms, s.currentAccountID())
+	if s.smokeSnapshot != nil {
+		select {
+		case s.smokeSnapshot <- struct{}{}:
+		default:
+		}
+	}
 	return Snapshot{
 		AccountID:             s.currentAccountID(),
 		LoggedIn:              client.IsLoggedIn(),
@@ -74,7 +80,7 @@ func (s *AppService) setPreference(key string, value any) error {
 	return s.preferences.Set(key, value)
 }
 
-func (s *AppService) startPreferencePump(emit func(Snapshot)) {
+func (s *AppService) startPreferencePump(emit func(Snapshot), emitDelta func(PreferenceDelta)) {
 	if s.sharedPreferences == nil || emit == nil {
 		return
 	}
@@ -87,9 +93,14 @@ func (s *AppService) startPreferencePump(emit func(Snapshot)) {
 			select {
 			case <-s.ctx.Done():
 				return
-			case _, ok := <-changes:
+			case change, ok := <-changes:
 				if !ok || s.ctx.Err() != nil {
 					return
+				}
+				accountID := s.currentAccountID()
+				if emitDelta != nil && len(change.Changed) > 0 && (change.AccountID == "" || change.AccountID == accountID) {
+					emitDelta(PreferenceDelta{AccountID: accountID, Preferences: change.Changed})
+					continue
 				}
 				state, err := s.Snapshot()
 				if err != nil {

@@ -137,7 +137,7 @@ describe('room history updates', () => {
     await user.click(await screen.findByRole('button', { name: 'Unanswered rooms' }))
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Unanswered rooms' }).getAttribute('aria-pressed')).toBe('true'))
-    expect(screen.getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('false')
     expect(within(roomList).queryByRole('button', { name: /Group project/ })).toBeNull()
     expect(within(roomList).getByRole('button', { name: /WhatsApp contact/ })).toBeTruthy()
     expect(within(roomList).getByRole('button', { name: /Nilay/ })).toBeTruthy()
@@ -147,8 +147,8 @@ describe('room history updates', () => {
 
     await user.click(await screen.findByRole('button', { name: 'All' }))
     expect(screen.getByRole('button', { name: 'All' }).getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByRole('button', { name: 'Unanswered rooms' }).getAttribute('aria-pressed')).toBe('true')
-    expect(within(roomList).getByRole('button', { name: /Nilay/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Unanswered rooms' }).getAttribute('aria-pressed')).toBe('false')
+    expect(within(roomList).getByRole('button', { name: /Group project/ })).toBeTruthy()
   })
 
   it('adds a private chat to All rooms from its context menu', async () => {
@@ -277,5 +277,39 @@ describe('room history updates', () => {
     await user.click(await screen.findByRole('button', { name: 'Work' }))
     expect(await screen.findByRole('button', { name: /Trip plan/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Essay notes/ })).toBeNull()
+  })
+
+  it('reorders local AI folders by drag-and-drop and keyboard shortcut', async () => {
+    const user = userEvent.setup()
+    let folders = [
+      { id: 'folder-1', name: 'Alpha' },
+      { id: 'folder-2', name: 'Beta' },
+      { id: 'folder-3', name: 'Gamma' },
+    ]
+    harness.service.ListLocalAIChats.mockImplementation(async () => [])
+    harness.service.ListLocalAIChatFolders.mockImplementation(async () => folders)
+    harness.service.ReorderLocalAIChatFolders.mockImplementation(async (ids: string[]) => {
+      folders = ids.map((id) => folders.find((f) => f.id === id)!).filter(Boolean)
+    })
+    render(<App />)
+    await screen.findByText('latest message')
+    await user.click(await screen.findByRole('button', { name: 'AI chats' }))
+
+    const alphaButton = await screen.findByRole('button', { name: 'Alpha' })
+    const gammaButton = await screen.findByRole('button', { name: 'Gamma' })
+
+    fireEvent.dragStart(alphaButton, { dataTransfer: { effectAllowed: 'move', setData: vi.fn(), getData: () => 'folder-1' } })
+    fireEvent.dragOver(gammaButton, { dataTransfer: { dropEffect: 'move' } })
+    fireEvent.drop(gammaButton, { dataTransfer: { getData: () => 'folder-1' } })
+
+    await waitFor(() => expect(harness.service.ReorderLocalAIChatFolders).toHaveBeenCalledWith(['folder-2', 'folder-3', 'folder-1']))
+    await waitFor(() => {
+      const folderButtons = screen.getByRole('group', { name: 'AI chat folders' }).querySelectorAll('button[draggable="true"]')
+      expect(Array.from(folderButtons).map((el) => el.textContent)).toEqual(['Beta', 'Gamma', 'Alpha'])
+    })
+
+    const betaButton = screen.getByRole('button', { name: 'Beta' })
+    fireEvent.keyDown(betaButton, { key: 'ArrowRight', altKey: true })
+    await waitFor(() => expect(harness.service.ReorderLocalAIChatFolders).toHaveBeenNthCalledWith(2, ['folder-3', 'folder-2', 'folder-1']))
   })
 })

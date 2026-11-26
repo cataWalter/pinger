@@ -175,6 +175,9 @@ func (c *Client) enrichOwnMessage(ctx context.Context, roomID string, message Me
 }
 
 func (c *Client) populateMessageProfiles(ctx context.Context, roomID string, messages []Message) {
+	if c.engine == nil || c.engine.DB == nil {
+		return
+	}
 	users := make(map[string]struct{})
 	for i := range messages {
 		if messages[i].Sender != "" {

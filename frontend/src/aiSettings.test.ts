@@ -31,8 +31,8 @@ import {
 
 describe('AI feature settings', () => {
   it('has one spec per tunable feature with placeholders present in the default prompt', () => {
-    expect(AI_FEATURE_SPECS).toHaveLength(11)
-    expect(new Set(AI_FEATURE_SPECS.map((spec) => spec.id)).size).toBe(11)
+    expect(AI_FEATURE_SPECS).toHaveLength(10)
+    expect(new Set(AI_FEATURE_SPECS.map((spec) => spec.id)).size).toBe(10)
     for (const spec of AI_FEATURE_SPECS) {
       expect(spec.prompt.trim()).not.toBe('')
       for (const placeholder of spec.placeholders) {
@@ -50,10 +50,10 @@ describe('AI feature settings', () => {
   })
 
   it('resolves built-in defaults when no overrides are saved', () => {
-    expect(resolveAIFeatureTuning({}, 'tone_guard')).toEqual({
-      prompt: aiFeatureSpec('tone_guard').prompt,
-      temperature: aiFeatureSpec('tone_guard').temperature,
-      maxTokens: 192,
+    expect(resolveAIFeatureTuning({}, 'draft_reply')).toEqual({
+      prompt: aiFeatureSpec('draft_reply').prompt,
+      temperature: aiFeatureSpec('draft_reply').temperature,
+      maxTokens: 0,
     })
     expect(resolveAIFeatureTuning({}, 'summarize').maxTokens).toBe(0)
   })

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
-import { harness, room, secondRoom, message, snapshot } from './appTestSetup'
+import { emitMatrixUpdate, harness, room, secondRoom, message, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
   const { clipboardSetText, harness } = await import('./appTestSetup')
@@ -178,14 +178,12 @@ describe('room history updates', () => {
     await user.click(await screen.findByRole('button', { name: 'Archived rooms' }))
     expect(container.querySelector('.room-list .room-button')).toBeTruthy()
     act(() => {
-      harness.eventHandlers.get('matrix:update')?.({
-        data: {
-          rooms: [{ ...archivedRoom, lastEventId: '$after-archive-update', lastEventAt: archivedRoom.lastEventAt + 1 }],
-          timelineChangedRoomId: [archivedRoom.id],
-          initialSyncComplete: true,
-          needsVerification: false,
-          connectionState: 'connected',
-        },
+      emitMatrixUpdate({
+        rooms: [{ ...archivedRoom, lastEventId: '$after-archive-update', lastEventAt: archivedRoom.lastEventAt + 1 }],
+        timelineChangedRoomId: [archivedRoom.id],
+        initialSyncComplete: true,
+        needsVerification: false,
+        connectionState: 'connected',
       })
     })
 

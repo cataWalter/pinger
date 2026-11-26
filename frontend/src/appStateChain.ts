@@ -63,7 +63,7 @@ export function useComposerCommandState(input: ReturnType<typeof useWorkspaceSta
   const messageAIState = useMessageAIActions(menuState)
   const snippetState = useComposerSnippets(messageAIState)
   const improveState = useImproveDraft(snippetState)
-  return useRoomChatExport(improveState)
+  return useRoomChatExport({ ...snippetState, ...improveState })
 }
 
 // Application-wide and composer keyboard shortcuts.

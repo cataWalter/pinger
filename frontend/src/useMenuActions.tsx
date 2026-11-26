@@ -8,10 +8,10 @@ import { describeError, isTextEntryTarget, preferenceBoolean, mergeTimelineMessa
 import type { useWorkspaceEffects } from './useWorkspaceEffects'
 
 export function useMenuActions(app: ReturnType<typeof useWorkspaceEffects>) {
-  const { aiEnabled, aiInstructions, analyzeWithLanguageTutor, applyBulkRoomAction, applyMenuFilter, composeText, hasOlder, jumpToLatest, loadingOlderRef, localAIChatId, localAIChatOpen, markRoomAnswered, menuActionRef, menuDraftReady, menuRoom, menuRoomArchived, menuRoomFavorite, menuRoomNeedsReply, menuRoomUnread, messages, olderCursor, preferences, promptMessages, roomSearchInputRef, roomsRef, selectRoomByOffset, selectedRoomID, selectedRoomRef, setError, setLoadingOlder, setPreference, setQuickSwitcherIndex, setQuickSwitcherOpen, setQuickSwitcherQuery, setSettingsOpen, setSettingsTab, setSummaryStatus, startLocalAIChat, summaryLoadingRef, undoAnswered, undoRoomID, workspaceGenerationRef } = app
+  const { aiEnabled, aiInstructions, analyzeWithLanguageTutor, applyBulkRoomAction, applyMenuFilter, busy, composeDraftStore, editTarget, hasOlder, jumpToLatest, loadingOlderRef, localAIChatId, localAIChatOpen, markRoomAnswered, menuActionRef, menuRoom, menuRoomArchived, menuRoomFavorite, menuRoomNeedsReply, menuRoomUnread, messages, olderCursor, preferences, promptMessages, roomSearchInputRef, roomsRef, selectRoomByOffset, selectedRoomID, selectedRoomRef, setError, setLoadingOlder, setPreference, setQuickSwitcherIndex, setQuickSwitcherOpen, setQuickSwitcherQuery, setSettingsOpen, setSettingsTab, setSummaryStatus, startLocalAIChat, summaryLoadingRef, undoAnswered, undoRoomID, workspaceGenerationRef } = app
 
   function runMenuAction(action: string) {
-    if (hasOpenDialog() && (action !== 'undo' || !isTextEntryTarget(document.activeElement))) return
+    if (hasOpenDialog()) return
     if (action.startsWith('settings:')) {
       const tab = SETTINGS_TABS.find((candidate) => candidate === action.slice('settings:'.length))
       if (tab) setSettingsTab(tab)
@@ -46,12 +46,15 @@ export function useMenuActions(app: ReturnType<typeof useWorkspaceEffects>) {
         }
         return
       }
-      case 'tutor-draft':
-        if (menuDraftReady) void analyzeWithLanguageTutor(composeText, 'draft')
+      case 'tutor-draft': {
+        const draft = composeDraftStore.getText()
+        if (Boolean(selectedRoomRef.current) && draft.trim() !== '' && !busy && aiEnabled && !editTarget) {
+          void analyzeWithLanguageTutor(draft, 'draft')
+        }
         return
+      }
       case 'undo':
-        if (isTextEntryTarget(document.activeElement)) document.execCommand('undo')
-        else if (undoRoomID) void undoAnswered()
+        if (!isTextEntryTarget(document.activeElement) && undoRoomID) void undoAnswered()
         return
       case 'room-next':
         selectRoomByOffset(1)

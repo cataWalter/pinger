@@ -214,6 +214,7 @@ func (c *Client) LeaveRoom(ctx context.Context, roomID string) error {
 	c.mu.Lock()
 	delete(c.rooms, roomID)
 	delete(c.local, roomID)
+	c.forgetRoomMediaEncryptionLocked(roomID)
 	c.mu.Unlock()
 	c.publishTimeline([]string{roomID}, "")
 	return nil

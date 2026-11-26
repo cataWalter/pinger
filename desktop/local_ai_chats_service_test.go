@@ -1,6 +1,8 @@
 package desktop
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -64,6 +66,24 @@ func TestLocalAIChatTitleDerivation(t *testing.T) {
 	}
 	if !strings.HasSuffix(title, "…") {
 		t.Fatalf("truncated title = %q, want ellipsis", title)
+	}
+}
+
+func TestLocalAIChatStoreClosesOnServiceShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	service := &AppService{ctx: ctx, cancel: cancel, dataDir: t.TempDir()}
+	store, err := service.localAIChatStoreForUse()
+	if err != nil {
+		t.Fatalf("open local AI store: %v", err)
+	}
+
+	service.close()
+	if err := store.db.Ping(); err == nil {
+		t.Fatal("local AI database is still open")
+	}
+	if reopened, err := service.localAIChatStoreForUse(); reopened != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("get local AI store after shutdown: store = %v, err = %v", reopened, err)
 	}
 }
 
@@ -172,6 +192,26 @@ func TestLocalAIChatServiceFolders(t *testing.T) {
 	folders, err = service.ListLocalAIChatFolders()
 	if err != nil || len(folders) != 0 {
 		t.Fatalf("folders after delete = %+v, err = %v", folders, err)
+	}
+
+	first, err := service.CreateLocalAIChatFolder("First")
+	if err != nil {
+		t.Fatalf("CreateLocalAIChatFolder(First) error = %v", err)
+	}
+	second, err := service.CreateLocalAIChatFolder("Second")
+	if err != nil {
+		t.Fatalf("CreateLocalAIChatFolder(Second) error = %v", err)
+	}
+	third, err := service.CreateLocalAIChatFolder("Third")
+	if err != nil {
+		t.Fatalf("CreateLocalAIChatFolder(Third) error = %v", err)
+	}
+	if err := service.ReorderLocalAIChatFolders([]string{third.ID, first.ID, second.ID}); err != nil {
+		t.Fatalf("ReorderLocalAIChatFolders() error = %v", err)
+	}
+	folders, err = service.ListLocalAIChatFolders()
+	if err != nil || len(folders) != 3 || folders[0].ID != third.ID || folders[1].ID != first.ID || folders[2].ID != second.ID {
+		t.Fatalf("reordered folders = %+v, err = %v", folders, err)
 	}
 }
 

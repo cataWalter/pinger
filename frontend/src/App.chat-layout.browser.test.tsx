@@ -79,9 +79,8 @@ describe('browser smoke: chat layout', () => {
       await user.type(draft, 'I will bring my camera.')
       const toolButtons = Array.from(container.querySelectorAll<HTMLElement>('.composer-tool-button'))
       if (oneLine) expect(new Set(toolButtons.map((button) => Math.round(button.getBoundingClientRect().top))).size).toBe(1)
-      const bold = within(screen.getByRole('group', { name: 'Formatting' })).getByRole('button', { name: 'Bold' })
-      expect(bold.querySelector('.composer-tool-caption')?.textContent).toBe('Bold')
-      expect(screen.queryByRole('button', { name: 'Formatting' })).toBeNull()
+      expect(screen.queryByRole('toolbar', { name: 'Formatting' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Formatting' })).toBeTruthy()
       expect(draft.value).toBe('I will bring my camera.')
       const composer = container.querySelector<HTMLElement>('.composer')!
       const composerBounds = composer.getBoundingClientRect()
@@ -117,7 +116,7 @@ describe('browser smoke: chat layout', () => {
       const bodies = Array.from(container.querySelectorAll<HTMLElement>('.timeline .message-body'))
       expect(bodies).toHaveLength(conversation.length)
       for (let index = 0; index < bodies.length; index++) {
-        expect(parseFloat(getComputedStyle(bodies[index]).fontSize)).toBe(zoom === 125 ? 16 : 14)
+        expect(parseFloat(getComputedStyle(bodies[index]).fontSize)).toBe(zoom === 125 ? 20 : 14)
         expect(bodies[index].scrollWidth).toBeLessThanOrEqual(bodies[index].clientWidth + 1)
         if (index > 0) expect(bodies[index].getBoundingClientRect().top).toBeGreaterThanOrEqual(bodies[index - 1].getBoundingClientRect().bottom + 3)
       }
@@ -146,7 +145,9 @@ describe('browser smoke: chat layout', () => {
     const categories = screen.getByRole('group', { name: 'Room categories' })
     const bounds = categories.getBoundingClientRect()
     const filtersBounds = filters.getBoundingClientRect()
-    const buttons = within(categories).getAllByRole('button')
+    const scopeButtons = within(scope).getAllByRole('button')
+    const categoryButtons = within(categories).getAllByRole('button')
+    const buttons = [...scopeButtons, ...categoryButtons]
     const initialBounds = buttons.map((button) => button.getBoundingClientRect())
     const scopeBounds = scope.getBoundingClientRect()
     expect(bounds.left).toBeGreaterThanOrEqual(filtersBounds.left - 1)
@@ -155,8 +156,9 @@ describe('browser smoke: chat layout', () => {
     const sitsBesideScope = bounds.left >= scopeBounds.right - 1
     expect(wrapsBelowScope || sitsBesideScope).toBe(true)
     expect(categories.scrollWidth).toBeLessThanOrEqual(categories.clientWidth + 1)
-    expect(buttons).toHaveLength(3)
-    expect(categories.querySelector('.filter-count')?.textContent).toBe('1')
+    expect(scopeButtons).toHaveLength(4)
+    expect(categoryButtons).toHaveLength(2)
+    expect(scope.querySelector('.filter-count')?.textContent).toBe('1')
     for (const button of buttons) {
       const buttonBounds = button.getBoundingClientRect()
       const label = button.querySelector<HTMLElement>('.filter-label')!
@@ -168,8 +170,8 @@ describe('browser smoke: chat layout', () => {
       expect(button.getAttribute('aria-label')).toBeTruthy()
       expect(button.getAttribute('title')).toBeTruthy()
       expect(buttonBounds.height).toBeGreaterThanOrEqual(28)
-      expect(buttonBounds.left).toBeGreaterThanOrEqual(bounds.left - 1)
-      expect(buttonBounds.right).toBeLessThanOrEqual(bounds.right + 1)
+      expect(buttonBounds.left).toBeGreaterThanOrEqual(filtersBounds.left - 1)
+      expect(buttonBounds.right).toBeLessThanOrEqual(filtersBounds.right + 1)
       expect(symbol.getBoundingClientRect().bottom).toBeLessThanOrEqual(buttonBounds.bottom)
       const badge = button.querySelector('.filter-count')
       if (badge) {
@@ -182,13 +184,13 @@ describe('browser smoke: chat layout', () => {
       const button = within(filters).getByRole('button', { name })
       await user.click(button)
       expect(button.getAttribute('aria-pressed')).toBe('true')
-      expect(button.parentElement!.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(1)
+      expect(filters.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(1)
       expect(categories.getBoundingClientRect().right).toBeLessThanOrEqual(width + 1)
       buttons.forEach((category, index) => {
         expect(Math.abs(category.getBoundingClientRect().height - initialBounds[index].height)).toBeLessThanOrEqual(1)
       })
     }
-    await user.click(within(categories).getByRole('button', { name: 'Needs reply' }))
+    await user.click(within(scope).getByRole('button', { name: 'Needs reply' }))
     await captureScreenshot({ path: `../.vitest/ui/room-filters-${width}.png` })
   })
 

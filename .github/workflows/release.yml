@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish release and update distribution repositories.
+        description: Publish the selected version tag and update distribution repositories.
         type: boolean
         default: false
 
@@ -20,11 +20,42 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Run 47 continues at v0.25 after the existing v0.24 release.
-  RELEASE_VERSION_OFFSET: "22"
   GOTOOLCHAIN: go1.26.11
 
 jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      build_date: ${{ steps.version.outputs.build_date }}
+    steps:
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          PUBLISH_REQUESTED: ${{ inputs.publish }}
+        run: |
+          tag=""
+          version="0.0.0"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))?$ ]]; then
+              echo '::error::Release tags must be vMAJOR.MINOR or vMAJOR.MINOR.PATCH.'
+              exit 1
+            fi
+            tag="$GITHUB_REF_NAME"
+            version="${tag#v}"
+          elif [[ "$PUBLISH_REQUESTED" == true ]]; then
+            echo '::error::Select an existing version tag to publish a release.'
+            exit 1
+          fi
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
   test:
     name: Test and vet
     uses: ./.github/workflows/ci.yml
@@ -33,8 +64,10 @@ jobs:
     name: Build macOS universal DMGs
     runs-on: macos-latest
     timeout-minutes: 30
-    needs: [test]
+    needs: [test, metadata]
     env:
+      VERSION: ${{ needs.metadata.outputs.version }}
+      BUILD_DATE: ${{ needs.metadata.outputs.build_date }}
       # Matches the deployment target in build/darwin/Taskfile.yml and the
       # "macOS 13 or newer" support statement in the README.
       MACOSX_DEPLOYMENT_TARGET: "13.0"
@@ -55,18 +88,6 @@ jobs:
           npm run icons
           npm run icons:check
           npm run build
-
-      - name: Prepare build metadata
-        shell: bash
-        run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            version="${GITHUB_REF_NAME}"
-          else
-            version="0.$((GITHUB_RUN_NUMBER - RELEASE_VERSION_OFFSET))"
-          fi
-          echo "VERSION=${version}" >> "$GITHUB_ENV"
-          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
-          mkdir -p dist
 
       - name: Build universal macOS app
         shell: bash
@@ -95,6 +116,41 @@ jobs:
           test -n "$(/usr/bin/plutil -extract NSCameraUsageDescription raw -o - "$plist")"
           codesign --force --deep --sign - "dist/Pinger.app"
           codesign --verify --deep --strict "dist/Pinger.app"
+
+      - name: Sign macOS app with Developer ID
+        if: needs.metadata.outputs.tag != '' && vars.PINGER_SIGN_MACOS == 'true'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          : "${MACOS_CERTIFICATE:?Missing macOS signing certificate}"
+          : "${MACOS_CERTIFICATE_PASSWORD:?Missing macOS signing password}"
+          : "${MACOS_SIGNING_IDENTITY:?Missing Developer ID Application identity}"
+          work="$(mktemp -d)"
+          keychain="$work/pinger.keychain-db"
+          cleanup() {
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -rf "$work"
+          }
+          trap cleanup EXIT
+          keychain_password="$(openssl rand -hex 32)"
+          printf '%s' "$MACOS_CERTIFICATE" | base64 -D > "$work/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$work/certificate.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          codesign --force --options runtime --timestamp --keychain "$keychain" --sign "$MACOS_SIGNING_IDENTITY" dist/Pinger.app
+          codesign --verify --deep --strict dist/Pinger.app
+
+      - name: Smoke-test packaged macOS startup
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          dist/Pinger.app/Contents/MacOS/pinger --smoke-test | tee "$RUNNER_TEMP/pinger-smoke.log"
+          grep -Fxq 'Pinger packaged startup smoke passed' "$RUNNER_TEMP/pinger-smoke.log"
 
       - name: Create macOS DMGs
         shell: bash
@@ -131,6 +187,26 @@ jobs:
           hdiutil detach "$mount_point" -quiet
           ls -lh dist/*.dmg
 
+      - name: Notarize and staple macOS DMG
+        if: needs.metadata.outputs.tag != '' && vars.PINGER_SIGN_MACOS == 'true'
+        shell: bash
+        env:
+          NOTARY_API_KEY: ${{ secrets.MACOS_NOTARY_API_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          set -euo pipefail
+          : "${NOTARY_API_KEY:?Missing notary API key}"
+          : "${NOTARY_KEY_ID:?Missing notary key ID}"
+          : "${NOTARY_ISSUER:?Missing notary issuer ID}"
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          printf '%s' "$NOTARY_API_KEY" | base64 -D > "$work/key.p8"
+          dmg="dist/Pinger-${VERSION}-macos-universal.dmg"
+          xcrun notarytool submit "$dmg" --key "$work/key.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait --timeout 15m
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+
       - name: Upload platform artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -143,7 +219,10 @@ jobs:
     name: Build Windows x64 ZIPs
     runs-on: windows-latest
     timeout-minutes: 25
-    needs: [test]
+    needs: [test, metadata]
+    env:
+      VERSION: ${{ needs.metadata.outputs.version }}
+      BUILD_DATE: ${{ needs.metadata.outputs.build_date }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -159,19 +238,6 @@ jobs:
           npm run icons
           npm run icons:check
           npm run build
-
-      - name: Prepare build metadata
-        shell: pwsh
-        run: |
-          $buildDate = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
-          if ($env:GITHUB_REF_TYPE -eq "tag") {
-            $version = $env:GITHUB_REF_NAME
-          } else {
-            $version = "0.$([int]$env:GITHUB_RUN_NUMBER - [int]$env:RELEASE_VERSION_OFFSET)"
-          }
-          "VERSION=$version" >> $env:GITHUB_ENV
-          "BUILD_DATE=$buildDate" >> $env:GITHUB_ENV
-          New-Item -ItemType Directory -Force dist | Out-Null
 
       - name: Generate Windows application resources
         shell: pwsh
@@ -190,10 +256,40 @@ jobs:
           GOOS: windows
           CC: gcc
         run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
           $ldflags = "-s -w -H windowsgui -X main.Version=$env:VERSION -X main.Commit=$env:GITHUB_SHA -X main.BuildDate=$env:BUILD_DATE"
           go build -tags "sqlite_fts5 goolm" -trimpath -buildvcs=false "-ldflags=$ldflags" -o dist/pinger.exe .
           if ($LASTEXITCODE -ne 0) { throw "Windows build failed" }
           Remove-Item rsrc_windows_amd64.syso
+
+      - name: Sign Windows executable
+        if: needs.metadata.outputs.tag != '' && vars.PINGER_SIGN_WINDOWS == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          if (!$env:WINDOWS_CERTIFICATE -or !$env:WINDOWS_CERTIFICATE_PASSWORD) { throw 'Missing Windows signing credentials' }
+          $certificateFile = Join-Path $env:RUNNER_TEMP 'pinger-sign.pfx'
+          $certificate = $null
+          try {
+            [IO.File]::WriteAllBytes($certificateFile, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+            $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $certificate = Import-PfxCertificate -FilePath $certificateFile -Password $password -CertStoreLocation Cert:\CurrentUser\My
+            $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+            if (!$certificate -or !$signTool) { throw 'Signing certificate or Windows SDK SignTool is unavailable' }
+            & $signTool.FullName sign /sha1 $certificate.Thumbprint /s My /fd SHA256 /tr https://timestamp.digicert.com /td SHA256 dist/pinger.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Authenticode signing failed' }
+            & $signTool.FullName verify /pa /all dist/pinger.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Authenticode verification failed' }
+          } finally {
+            if ($certificate) { Remove-Item "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -DeleteKey }
+            Remove-Item $certificateFile -ErrorAction SilentlyContinue
+          }
+
+      - name: Package Windows executable
+        shell: pwsh
+        run: |
           Compress-Archive -LiteralPath dist/pinger.exe -DestinationPath "dist/Pinger-$($env:VERSION)-windows-amd64.zip"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zip = [System.IO.Compression.ZipFile]::OpenRead((Get-ChildItem dist/*.zip).FullName)
@@ -211,6 +307,26 @@ jobs:
           if ($null -eq $icon) { throw "dist/pinger.exe has no embedded icon" }
           Write-Host "Embedded icon size: $($icon.Width)x$($icon.Height)"
 
+      - name: Smoke-test packaged Windows startup
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $package = (Get-ChildItem dist/*.zip).FullName
+          $smokeDir = Join-Path $env:RUNNER_TEMP 'pinger-smoke'
+          Expand-Archive -LiteralPath $package -DestinationPath $smokeDir
+          $stdout = Join-Path $smokeDir 'stdout.log'
+          $stderr = Join-Path $smokeDir 'stderr.log'
+          $process = Start-Process -FilePath (Join-Path $smokeDir 'pinger.exe') -ArgumentList '--smoke-test' `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          if (!$process.WaitForExit(45000)) {
+            $process.Kill($true)
+            throw 'Packaged Windows startup timed out'
+          }
+          Get-Content $stdout, $stderr
+          if ($process.ExitCode -ne 0 -or 'Pinger packaged startup smoke passed' -notin (Get-Content $stdout)) {
+            throw 'Packaged Windows startup handshake failed'
+          }
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -223,7 +339,10 @@ jobs:
     name: Build Linux x64 deb and AppImage
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    needs: [test]
+    needs: [test, metadata]
+    env:
+      VERSION: ${{ needs.metadata.outputs.version }}
+      BUILD_DATE: ${{ needs.metadata.outputs.build_date }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -234,7 +353,7 @@ jobs:
         run: |
           sudo -n apt-get update -y
           sudo -n apt-get install -y --no-install-recommends \
-            libgtk-4-dev libwebkitgtk-6.0-dev libsqlite3-dev imagemagick libfuse2
+            libgtk-4-dev libwebkitgtk-6.0-dev libsqlite3-dev imagemagick libfuse2 xvfb xauth
 
       - name: Set up build dependencies
         uses: ./.github/actions/setup-build
@@ -245,24 +364,6 @@ jobs:
           npm run icons
           npm run icons:check
           npm run build
-
-      - name: Prepare build metadata
-        shell: bash
-        run: |
-          # Debian versions must start with a digit.
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            version="${GITHUB_REF_NAME}"
-            deb_version="${GITHUB_REF_NAME#v}"
-          else
-            version="0.$((GITHUB_RUN_NUMBER - RELEASE_VERSION_OFFSET))"
-            deb_version="${version}"
-          fi
-          {
-            echo "VERSION=${version}"
-            echo "DEB_VERSION=${deb_version}"
-            echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } >> "$GITHUB_ENV"
-          mkdir -p dist
 
       - name: Render application icons
         shell: bash
@@ -298,7 +399,7 @@ jobs:
 
           cat > "$stage/DEBIAN/control" <<EOF
           Package: pinger
-          Version: ${DEB_VERSION}
+          Version: ${VERSION}
           Section: net
           Priority: optional
           Architecture: amd64
@@ -408,6 +509,20 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN=1 "dist/Pinger-${VERSION}-linux-amd64.AppImage" --appimage-version
           ls -lh dist/*.AppImage
 
+      - name: Smoke-test packaged Linux startup
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          smoke_dir="$(mktemp -d)"
+          trap 'rm -rf "$smoke_dir"' EXIT
+          dpkg-deb --extract "dist/Pinger-${VERSION}-linux-amd64.deb" "$smoke_dir/deb"
+          export XDG_CACHE_HOME="$smoke_dir/cache" XDG_CONFIG_HOME="$smoke_dir/config" XDG_DATA_HOME="$smoke_dir/data"
+          export GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 APPIMAGE_EXTRACT_AND_RUN=1
+          for executable in "$smoke_dir/deb/usr/bin/pinger" "dist/Pinger-${VERSION}-linux-amd64.AppImage"; do
+            xvfb-run -a dbus-run-session -- "$executable" --smoke-test | tee "$smoke_dir/startup.log"
+            grep -Fxq 'Pinger packaged startup smoke passed' "$smoke_dir/startup.log"
+          done
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -420,14 +535,16 @@ jobs:
 
   publish:
     name: Publish GitHub release
-    needs: [build, build-windows, build-linux]
-    if: github.event_name != 'workflow_dispatch' || inputs.publish
+    needs: [metadata, build, build-windows, build-linux]
+    if: needs.metadata.outputs.tag != '' && (github.event_name == 'push' || inputs.publish)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
+      tag: ${{ needs.metadata.outputs.tag }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -445,26 +562,20 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Resolve release tag
-        id: tag
-        shell: bash
-        run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            tag="$GITHUB_REF_NAME"
-          else
-            tag="v0.$((GITHUB_RUN_NUMBER - RELEASE_VERSION_OFFSET))"
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
       - name: Generate SHA-256 checksums
         run: |
           node scripts/release/release-assets.mjs checksums dist
           node scripts/release/release-assets.mjs verify dist
 
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: dist/*
+
       - name: Publish release assets
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
+          tag_name: ${{ needs.metadata.outputs.tag }}
           target_commitish: ${{ github.sha }}
           prerelease: false
           make_latest: true

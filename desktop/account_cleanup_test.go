@@ -126,3 +126,50 @@ func TestInitializeAccountsKeepsOnlyActiveAccount(t *testing.T) {
 	assertCleanupPathExists(t, filepath.Join(dataDir, "crypto.key"), false)
 	assertCleanupPathExists(t, filepath.Join(dataDir, "accounts", testSurvivorAccountID, "matrix.db"), true)
 }
+
+func TestAccountCleanupRetriesWithoutRemovingActiveAccount(t *testing.T) {
+	dataDir := t.TempDir()
+	mediaRoot := filepath.Join(dataDir, "media")
+	if err := os.WriteFile(mediaRoot, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shared, err := openSharedPreferences(dataDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shared.Close() })
+	scheduled, err := newScheduledJobStore(filepath.Join(dataDir, "scheduled-jobs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &AppService{sharedPreferences: shared, scheduled: scheduled}
+	if err = service.initializeAccounts(dataDir, mediaRoot); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(service.currentClient().Close)
+	if !service.AccountCleanupPending() || !service.RetryAccountCleanup() {
+		t.Fatal("cleanup should remain pending while the cache root is not a directory")
+	}
+	if err = os.Remove(mediaRoot); err != nil {
+		t.Fatal(err)
+	}
+	obsolete := filepath.Join(mediaRoot, testOtherAccountID)
+	if err = os.MkdirAll(obsolete, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	activeMedia := filepath.Join(mediaRoot, "active-media")
+	if err = os.WriteFile(activeMedia, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if service.RetryAccountCleanup() || service.AccountCleanupPending() {
+		t.Fatal("cleanup is still pending after the cache root was restored")
+	}
+	if _, err = os.Stat(obsolete); !os.IsNotExist(err) {
+		t.Fatalf("obsolete media directory still exists: %v", err)
+	}
+	for _, path := range []string{activeMedia, filepath.Join(dataDir, "matrix.db")} {
+		if _, err = os.Stat(path); err != nil {
+			t.Fatalf("active account data was not preserved: %v", err)
+		}
+	}
+}

@@ -176,19 +176,13 @@ describe('native application menu actions', () => {
     await waitFor(() => expect(harness.tutorService.Analyze).toHaveBeenCalledWith('Ben iyiyim.', 'draft', 'tr', 'en', expect.any(String)))
   })
 
-  it('sends undo to the focused text field from the native menu', async () => {
-    const execCommand = vi.fn(() => true)
-    Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true })
-    try {
-      render(<App />)
-      const composer = await screen.findByRole('textbox', { name: 'Message' })
-      composer.focus()
+  it('does not intercept undo via document.execCommand when a text field is focused', async () => {
+    render(<App />)
+    const composer = await screen.findByRole('textbox', { name: 'Message' })
+    composer.focus()
 
-      act(() => dispatchMenuAction('undo'))
+    act(() => dispatchMenuAction('undo'))
 
-      expect(execCommand).toHaveBeenCalledWith('undo')
-    } finally {
-      Reflect.deleteProperty(document, 'execCommand')
-    }
+    expect((composer as HTMLTextAreaElement).value).toBe('')
   })
 })

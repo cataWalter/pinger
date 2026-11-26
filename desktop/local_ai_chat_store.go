@@ -87,6 +87,9 @@ func (s *localAIChatStore) initialize() error {
 	if err := s.ensureColumn("local_ai_chats", "folder_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("local_ai_folders", "sort_order", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -213,7 +216,7 @@ func (s *localAIChatStore) delete(chatID string) error {
 }
 
 func (s *localAIChatStore) listFolders() ([]LocalAIChatFolder, error) {
-	rows, err := s.db.Query(`SELECT folder_id, name FROM local_ai_folders ORDER BY created_at, folder_id`)
+	rows, err := s.db.Query(`SELECT folder_id, name FROM local_ai_folders ORDER BY sort_order, created_at, folder_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list local AI folders: %w", err)
 	}
@@ -244,19 +247,47 @@ func (s *localAIChatStore) createFolder(name string, now int64) (LocalAIChatFold
 	}
 	defer func() { _ = tx.Rollback() }()
 	var count int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM local_ai_folders`).Scan(&count); err != nil {
+	var nextOrder int
+	if err := tx.QueryRow(`SELECT COUNT(*), COALESCE(MAX(sort_order), 0) + 1 FROM local_ai_folders`).Scan(&count, &nextOrder); err != nil {
 		return LocalAIChatFolder{}, fmt.Errorf("count local AI folders: %w", err)
 	}
 	if count >= localAIChatFolderLimit {
 		return LocalAIChatFolder{}, fmt.Errorf("local AI folders must be %d or fewer", localAIChatFolderLimit)
 	}
-	if _, err := tx.Exec(`INSERT INTO local_ai_folders (folder_id, name, created_at) VALUES (?, ?, ?)`, folderID, name, now); err != nil {
+	if _, err := tx.Exec(`INSERT INTO local_ai_folders (folder_id, name, created_at, sort_order) VALUES (?, ?, ?, ?)`, folderID, name, now, nextOrder); err != nil {
 		return LocalAIChatFolder{}, fmt.Errorf("create local AI folder: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return LocalAIChatFolder{}, fmt.Errorf("commit local AI folder: %w", err)
 	}
 	return LocalAIChatFolder{ID: folderID, Name: name}, nil
+}
+
+func (s *localAIChatStore) reorderFolders(folderIDs []string) error {
+	if len(folderIDs) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(folderIDs))
+	for _, folderID := range folderIDs {
+		if _, dup := seen[folderID]; dup {
+			return fmt.Errorf("duplicate folder ID %q", folderID)
+		}
+		seen[folderID] = struct{}{}
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin local AI folder reorder: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for idx, folderID := range folderIDs {
+		if _, err := tx.Exec(`UPDATE local_ai_folders SET sort_order = ? WHERE folder_id = ?`, idx+1, folderID); err != nil {
+			return fmt.Errorf("reorder local AI folder %q: %w", folderID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit local AI folder reorder: %w", err)
+	}
+	return nil
 }
 
 func (s *localAIChatStore) renameFolder(folderID, name string) error {

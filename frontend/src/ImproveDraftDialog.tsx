@@ -1,6 +1,6 @@
 import { ShieldCheck, X } from 'lucide-react'
 import { MAX_CHAT_GOAL_LENGTH } from './aiPrompts'
-import { DialogSurface } from './DialogSurface'
+import { DialogScrim, DialogSurface } from './DialogSurface'
 import type { ImproveDraftSession } from './useImproveDraft'
 
 export type ImproveDraftDialogProps = {
@@ -17,8 +17,8 @@ export function ImproveDraftDialog({ session, onGoalChange, onRun, onStop, onUse
   const busy = session.goalLoading || session.reviewing
   const hasVariants = session.variants.length > 0
   return (
-    <div className="ai-result-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <DialogSurface className="room-info-dialog ai-result-dialog improve-draft-dialog" labelledBy="improve-draft-title" onClose={onClose} onClick={(event) => event.stopPropagation()}>
+    <DialogScrim variant="modal" onDismiss={onClose}>
+      <DialogSurface className="dialog-modal-card improve-draft-dialog" labelledBy="improve-draft-title" onClose={onClose}>
         <header className="room-info-header ai-result-header">
           <div><span className="eyebrow">IMPROVE DRAFT</span><h2 id="improve-draft-title">Improve draft</h2></div>
           <button className="icon-button" type="button" aria-label="Close Improve draft" title="Close Improve draft" onClick={onClose}><X size={16} /></button>
@@ -65,6 +65,6 @@ export function ImproveDraftDialog({ session, onGoalChange, onRun, onStop, onUse
           <button className="settings-command" type="button" onClick={onClose}>Close</button>
         </footer>
       </DialogSurface>
-    </div>
+    </DialogScrim>
   )
 }

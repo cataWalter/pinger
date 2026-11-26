@@ -8,6 +8,7 @@ import type { LocalAIFailure, LocalAIImageRun, LocalAIRun } from './localAIChatT
 
 type LocalAIRunsOptions = {
   agents: ChatAgentProfile[]
+  allowModelTitle: boolean
   chatIdRef: RefObject<string | null>
   runRef: { current: LocalAIRun | null }
   imageRunRef: { current: LocalAIImageRun | null }
@@ -23,6 +24,7 @@ type LocalAIRunsOptions = {
 // Runs the model for one chat turn and handles stopping it. The run is saved only when it finishes or is stopped.
 export function useLocalAIRuns({
   agents,
+  allowModelTitle,
   chatIdRef,
   runRef,
   imageRunRef,
@@ -56,7 +58,7 @@ export function useLocalAIRuns({
       const reply = await AppService.LocalAIChat({ messages: buildLocalAIModelMessages(history), requestId: run.requestId, agentInstructions })
       if (!reply.trim()) throw new Error('The model returned an empty reply.')
       await saveAssistantTurn(runChatID, reply, 'complete')
-      generateTitle(runChatID)
+      if (allowModelTitle) generateTitle(runChatID)
     } catch (runError) {
       if (!run.stopping) {
         setFailure({ chatId: runChatID, message: localAIErrorMessage(runError, 'The model could not complete this message.'), history, agentId: runAgentID })

@@ -75,6 +75,7 @@ export const harness = {
     CreateLocalAIChatFolder: vi.fn(),
     RenameLocalAIChatFolder: vi.fn(),
     DeleteLocalAIChatFolder: vi.fn(),
+    ReorderLocalAIChatFolders: vi.fn(),
     SetLocalAIChatFolder: vi.fn(),
     ExportLocalAIChat: vi.fn(),
     ChooseDownloadFolder: vi.fn(),
@@ -87,6 +88,8 @@ export const harness = {
     OnlineAIKeyStored: vi.fn(() => Promise.resolve(false)),
     StorageUsage: vi.fn(),
     MediaCacheUsage: vi.fn(),
+    AccountCleanupPending: vi.fn().mockResolvedValue(false),
+    RetryAccountCleanup: vi.fn(),
     ClearMediaCache: vi.fn(),
     OptimizeDatabase: vi.fn(),
     RoomStorageUsage: vi.fn(),
@@ -221,4 +224,15 @@ export const snapshot: Snapshot = {
   invites: [],
   slidingSyncListCounts: { main: 1 },
   preferences: {},
+}
+
+export function emitMatrixUpdate(update: Record<string, unknown>) {
+  harness.eventHandlers.get('matrix:batch_update')?.({
+    data: {
+      new_messages: [],
+      read_receipts: [],
+      typing_updates: [],
+      room_deltas: [{ update }],
+    },
+  })
 }

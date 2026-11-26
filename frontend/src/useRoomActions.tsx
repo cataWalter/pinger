@@ -5,10 +5,10 @@ import { describeError, preferenceBoolean, preferenceString, isNeedsReplyRoom, r
 import type { useLocalAIChats } from './useLocalAIChats'
 
 export function useRoomActions(app: ReturnType<typeof useLocalAIChats>) {
-  const { archivedPreferenceKey, automaticArchiveEnabled, automaticArchiveInFlightRef, clearNeedsReply, clearRoomSelection, filteredRooms, markRoomAnsweredRef, nextRoomAfterArchive, nextRoomByBehavior, preferences, rooms, roomsRef, selectedRoomID, selectedRoomRef, setError, setForwardError, setForwardTargetRoomID, setForwardingMessage, setMessageContextMenu, setPreference, setRoomContextMenu, setSnapshot, showRoom, showUndoToast, triageBusyRef } = app
+  const { archivedPreferenceKey, automaticArchiveEnabled, automaticArchiveInFlightRef, clearNeedsReply, clearRoomSelection, filteredRooms, markRoomAnsweredRef, nextRoomAfterArchive, nextRoomByBehavior, preferences, rooms, roomsByID, roomsRef, selectedRoomID, selectedRoomRef, setError, setForwardError, setForwardTargetRoomID, setForwardingMessage, setMessageContextMenu, setPreference, setRoomContextMenu, setSnapshot, showRoom, showUndoToast, triageBusyRef } = app
 
   async function markRoomRead(roomID: string) {
-    const room = rooms.find((candidate) => candidate.id === roomID)
+    const room = roomsByID.get(roomID)
     if (!room || (room.unread === 0 && !room.markedUnread) || !room.lastEventId) return
     try {
       await AppService.MarkRead(room.id, room.lastEventId)
@@ -26,7 +26,7 @@ export function useRoomActions(app: ReturnType<typeof useLocalAIChats>) {
   }
 
   async function markRoomUnread(roomID: string) {
-    const room = rooms.find((candidate) => candidate.id === roomID)
+    const room = roomsByID.get(roomID)
     if (!room || room.unread > 0 || room.markedUnread) return
     try {
       await AppService.MarkUnread(room.id)
@@ -44,7 +44,7 @@ export function useRoomActions(app: ReturnType<typeof useLocalAIChats>) {
   }
 
   async function setRoomArchived(roomID: string, archived: boolean) {
-    const room = rooms.find((candidate) => candidate.id === roomID)
+    const room = roomsByID.get(roomID)
     if (!room) return
     if (archived && (room.unread > 0 || room.markedUnread) && room.lastEventId) {
       try {

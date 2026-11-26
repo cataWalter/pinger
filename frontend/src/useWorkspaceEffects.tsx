@@ -3,7 +3,7 @@ import { Events } from '@wailsio/runtime'
 import { sameInviteList } from './RoomMembership'
 import { AppService } from '../bindings/mychat/desktop'
 import { type ScheduledJob, type Snapshot } from '../bindings/mychat/desktop/models.js'
-import { type MatrixUpdate, newestPersistentMessage, describeError, preferenceBoolean, preferenceString, preferenceNumber, reconcileRoomSnapshots, playNotificationSound } from './appShared'
+import { type MatrixUpdate, type PreferenceDelta, newestPersistentMessage, describeError, preferenceBoolean, preferenceString, preferenceNumber, reconcileRoomSnapshots, playNotificationSound } from './appShared'
 import type { useNotificationDelivery } from './useNotificationDelivery'
 import { sameVerificationState, base64ToBytes } from './appHelpers'
 
@@ -12,7 +12,7 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
 
   useEffect(() => {
     let active = true
-    const applyMatrixUpdate = (update: MatrixUpdate) => {
+    const applyMatrixUpdate = (update: MatrixUpdate, options?: { skipHistoryFallback?: boolean; deliveredMessageIDs?: Set<string> }) => {
       if (!active) return
       const soundPreferences = update.notificationPreferences ?? preferencesRef.current
       if (document.hasFocus()
@@ -22,12 +22,16 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
       }
       matrixUpdateHandlersRef.current.deliverMatrixNotifications(update)
       const previousRooms = roomsRef.current
-      const nextTypingUsers = update.typingUsers?.[selectedRoomRef.current] ?? []
+      const incomingRooms = update.rooms ?? []
       setSnapshot((current) => {
         if (!current) return current
-        const rooms = reconcileRoomSnapshots(current.rooms, update.rooms ?? [])
+        const rooms = update.roomsOmitted || update.rooms === undefined || update.rooms === null
+          ? current.rooms
+          : reconcileRoomSnapshots(current.rooms, incomingRooms)
         const currentInvites = current.invites ?? []
-        const invites = update.invites === undefined || sameInviteList(currentInvites, update.invites ?? []) ? current.invites : update.invites ?? []
+        const invites = update.invites === undefined || update.invites === null || sameInviteList(currentInvites, update.invites)
+          ? current.invites
+          : update.invites
         const slidingSyncListCounts = update.slidingSyncListCounts ?? current.slidingSyncListCounts
         const currentListCounts = current.slidingSyncListCounts ?? {}
         const nextListCounts = slidingSyncListCounts ?? {}
@@ -54,11 +58,14 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
         ) return current
         return { ...current, rooms, invites, slidingSyncListCounts, syncReady, needsVerification, verification, profile, connectionState }
       })
-      setTypingUsers((current) => current.length === nextTypingUsers.length && current.every((user, index) => user === nextTypingUsers[index])
-        ? current
-        : nextTypingUsers)
+      if (update.typingUsers) {
+        const nextTypingUsers = update.typingUsers[selectedRoomRef.current] ?? []
+        setTypingUsers((current) => current.length === nextTypingUsers.length && current.every((user, index) => user === nextTypingUsers[index])
+          ? current
+          : nextTypingUsers)
+      }
       for (const roomID of update.timelineChangedRoomId ?? []) {
-        const updatedRoom = (update.rooms ?? []).find((room) => room.id === roomID)
+        const updatedRoom = incomingRooms.find((room) => room.id === roomID)
         const previousRoom = previousRooms.find((room) => room.id === roomID)
         if (!updatedRoom?.lastEventId || !previousRoom || updatedRoom.lastEventId === previousRoom.lastEventId) continue
         const key = matrixUpdateHandlersRef.current.archivedPreferenceKey(roomID, updatedRoom.accountId)
@@ -70,11 +77,15 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
       // history refresh so left room list and right message pane stay in sync.
       const selectedID = selectedRoomRef.current
       const timelineTouched = (update.timelineChangedRoomId ?? []).includes(selectedID)
-      if (timelineTouched) {
+      const selected = incomingRooms.find((room) => room.id === selectedID)
+      const newestLoaded = newestPersistentMessage(messagesRef.current)
+      const lastEventAlreadyHandled = Boolean(
+        selected?.lastEventId
+        && (options?.deliveredMessageIDs?.has(selected.lastEventId) || newestLoaded?.id === selected.lastEventId),
+      )
+      if (timelineTouched && (!options?.skipHistoryFallback || (selected?.lastEventId && !lastEventAlreadyHandled))) {
         setHistoryRevision((revision) => revision + 1)
-      } else if (selectedID) {
-        const selected = (update.rooms ?? []).find((room) => room.id === selectedID)
-        const newestLoaded = newestPersistentMessage(messagesRef.current)
+      } else if (selectedID && !options?.skipHistoryFallback && !update.roomsOmitted) {
         if (selected && newestLoaded && selected.lastEventId && selected.lastEventId !== newestLoaded.id) {
           const newestTimestamp = newestLoaded.timestamp ?? 0
           if (selected.lastSeen > newestTimestamp || (selected.lastSeen === newestTimestamp && selected.lastEventAt >= newestTimestamp)) {
@@ -84,9 +95,6 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
       }
     }
     matrixUpdateHandlerRef.current = applyMatrixUpdate
-    const unsubscribe = Events.On('matrix:update', (event: { data: unknown }) => {
-      applyMatrixUpdate(event.data as MatrixUpdate)
-    })
     const unsubscribePreferences = Events.On('preferences:update', (event: { data: unknown }) => {
       if (!active) return
       const state = event.data as Snapshot | undefined
@@ -95,6 +103,31 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
       setSelectedRoomID((current) => {
         if (current && (state.rooms ?? []).some((room) => room.id === current)) return current
         return (state.rooms ?? [])[0]?.id || ''
+      })
+    })
+    const unsubscribePreferenceDelta = Events.On('preferences:delta', (event: { data: unknown }) => {
+      if (!active) return
+      const delta = event.data as PreferenceDelta | undefined
+      if (!delta?.preferences) return
+      setSnapshot((current) => {
+        if (!current) return current
+        if (delta.accountId && current.accountId !== delta.accountId) return current
+        const nextPreferences = { ...(current.preferences ?? {}), ...delta.preferences }
+        let roomsChanged = false
+        const nextRooms = (current.rooms ?? []).map((room) => {
+          const favKey = `room.favorite.${room.id}`
+          const muteKey = `room.muted.${room.id}`
+          const favorite = favKey in delta.preferences ? Boolean(delta.preferences[favKey]) : room.favorite
+          const muted = muteKey in delta.preferences ? Boolean(delta.preferences[muteKey]) : room.muted
+          if (favorite === room.favorite && muted === room.muted) return room
+          roomsChanged = true
+          return { ...room, favorite, muted }
+        })
+        return {
+          ...current,
+          preferences: nextPreferences,
+          rooms: roomsChanged ? nextRooms : current.rooms,
+        }
       })
     })
     const unsubscribeHostError = Events.On('matrix:host-error', (event: { data: unknown }) => {
@@ -167,9 +200,9 @@ export function useWorkspaceEffects(app: ReturnType<typeof useNotificationDelive
     return () => {
       active = false
       matrixUpdateHandlerRef.current = null
-      unsubscribe()
       unsubscribePreferences()
       unsubscribeHostError()
+      unsubscribePreferenceDelta()
       unsubscribeMenuAbout()
       unsubscribeMenuSettings()
       unsubscribeMenuSearch()

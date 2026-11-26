@@ -2,11 +2,11 @@ package matrix
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"go.mau.fi/gomuks/pkg/hicli/database"
 	"go.mau.fi/gomuks/pkg/hicli/jsoncmd"
+	"go.mau.fi/util/dbutil"
 	"go.mau.fi/util/jsontime"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -60,21 +60,21 @@ func (c *Client) SearchMessages(ctx context.Context, request SearchRequest) (Sea
 	if err != nil {
 		return SearchPage{}, fmt.Errorf("search local Matrix history: %w", err)
 	}
+	keys := make([]searchEventKey, 0, len(response.Events))
+	for _, eventResult := range response.Events {
+		keys = append(keys, searchEventKey{roomID: eventResult.RoomID, eventRowID: eventResult.RowID})
+	}
+	cursors, err := searchTimelineCursors(ctx, c.engine.DB.Timeline.GetDB(), keys)
+	if err != nil {
+		return SearchPage{}, fmt.Errorf("find searched messages in room timelines: %w", err)
+	}
 	results := make([]SearchResult, 0, len(response.Events))
 	profileMessages := make(map[string][]Message)
 	profileResultIndexes := make(map[string][]int)
 	for _, eventResult := range response.Events {
 		if message, ok := messageFromEvent(eventResult); ok {
 			roomID := eventResult.RoomID.String()
-			var timelineCursor database.TimelineRowID
-			cursorErr := c.engine.DB.Timeline.GetDB().QueryRow(ctx,
-				"SELECT rowid FROM timeline WHERE room_id = ? AND event_rowid = ?",
-				eventResult.RoomID, eventResult.RowID,
-			).Scan(&timelineCursor)
-			if cursorErr != nil && !errors.Is(cursorErr, sql.ErrNoRows) {
-				return SearchPage{}, fmt.Errorf("find searched message in room timeline: %w", cursorErr)
-			}
-			message.TimelineCursor = int64(timelineCursor)
+			message.TimelineCursor = int64(cursors[searchEventKey{roomID: eventResult.RoomID, eventRowID: eventResult.RowID}])
 			profileMessages[roomID] = append(profileMessages[roomID], message)
 			profileResultIndexes[roomID] = append(profileResultIndexes[roomID], len(results))
 			results = append(results, SearchResult{RoomID: roomID, Message: message})
@@ -87,4 +87,37 @@ func (c *Client) SearchMessages(ctx context.Context, request SearchRequest) (Sea
 		}
 	}
 	return SearchPage{Results: results, NextBatch: response.NextBatch}, nil
+}
+
+type searchEventKey struct {
+	roomID     id.RoomID
+	eventRowID database.EventRowID
+}
+
+func searchTimelineCursors(ctx context.Context, db *dbutil.Database, keys []searchEventKey) (map[searchEventKey]database.TimelineRowID, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(keys)*2)
+	for _, key := range keys {
+		args = append(args, key.roomID, key.eventRowID)
+	}
+	values := strings.Repeat("(?, ?),", len(keys)-1) + "(?, ?)"
+	rows, err := db.Query(ctx, `WITH matches(room_id, event_rowid) AS (VALUES `+values+`)
+		SELECT timeline.room_id, timeline.event_rowid, timeline.rowid
+		FROM matches JOIN timeline USING (room_id, event_rowid)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cursors := make(map[searchEventKey]database.TimelineRowID, len(keys))
+	for rows.Next() {
+		var key searchEventKey
+		var cursor database.TimelineRowID
+		if err = rows.Scan(&key.roomID, &key.eventRowID, &cursor); err != nil {
+			return nil, err
+		}
+		cursors[key] = cursor
+	}
+	return cursors, rows.Err()
 }

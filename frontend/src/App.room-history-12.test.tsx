@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
-import { harness, room, secondRoom, message, openMessageMenu, snapshot } from './appTestSetup'
+import { emitMatrixUpdate, harness, room, secondRoom, message, openMessageMenu, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
   const { clipboardSetText, harness } = await import('./appTestSetup')
@@ -135,10 +135,8 @@ describe('room history updates', () => {
 
     expect(await screen.findByText('latest message')).toBeTruthy()
     act(() => {
-      harness.eventHandlers.get('matrix:update')?.({
-        data: {
-          notifications: [{ roomId: secondRoom.id, accountId: 'acct-1', room: secondRoom.name, sender: 'Alice', senderAvatar: 'mxc://example.org/alice', body: 'A native alert' }],
-        },
+      emitMatrixUpdate({
+        notifications: [{ roomId: secondRoom.id, accountId: 'acct-1', room: secondRoom.name, sender: 'Alice', senderAvatar: 'mxc://example.org/alice', body: 'A native alert' }],
       })
     })
 
@@ -167,10 +165,8 @@ describe('room history updates', () => {
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
     act(() => {
-      harness.eventHandlers.get('matrix:update')?.({
-        data: {
-          notifications: [{ roomId: secondRoom.id, room: secondRoom.name, sender: 'Bob', body: 'group chatter', category: 'group' }],
-        },
+      emitMatrixUpdate({
+        notifications: [{ roomId: secondRoom.id, room: secondRoom.name, sender: 'Bob', body: 'group chatter', category: 'group' }],
       })
     })
     expect(harness.service.SendNotification).not.toHaveBeenCalled()
@@ -187,10 +183,8 @@ describe('room history updates', () => {
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
     act(() => {
-      harness.eventHandlers.get('matrix:update')?.({
-        data: {
-          notifications: [{ roomId: secondRoom.id, room: secondRoom.name, sender: 'Bob', body: 'group chatter', category: 'group' }],
-        },
+      emitMatrixUpdate({
+        notifications: [{ roomId: secondRoom.id, room: secondRoom.name, sender: 'Bob', body: 'group chatter', category: 'group' }],
       })
     })
     await waitFor(() => expect(harness.service.SendNotification).toHaveBeenCalledWith(expect.objectContaining({ title: 'Bob', subtitle: 'Second room', body: 'group chatter', roomId: secondRoom.id })))
@@ -209,13 +203,11 @@ describe('room history updates', () => {
     vi.useFakeTimers()
     try {
       act(() => {
-        harness.eventHandlers.get('matrix:update')?.({
-          data: {
-            notifications: [
-              { roomId: secondRoom.id, room: secondRoom.name, sender: 'Alice', body: 'one', category: 'direct' },
-              { roomId: secondRoom.id, room: secondRoom.name, sender: 'Bob', body: 'two', category: 'direct' },
-            ],
-          },
+        emitMatrixUpdate({
+          notifications: [
+            { roomId: secondRoom.id, room: secondRoom.name, sender: 'Alice', body: 'one', category: 'direct' },
+            { roomId: secondRoom.id, room: secondRoom.name, sender: 'Bob', body: 'two', category: 'direct' },
+          ],
         })
       })
       expect(harness.service.SendNotification).not.toHaveBeenCalled()

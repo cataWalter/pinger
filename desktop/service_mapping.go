@@ -108,12 +108,70 @@ func mapUpdate(update matrix.Update, preferences map[string]any) Update {
 			Category:     notification.Category,
 		})
 	}
+	var rooms []Room
+	if !update.RoomsOmitted {
+		rooms = mapRoomsWithPreferences(update.Rooms, preferences)
+	}
+	newMessages := mapMessageItems(update.NewMessages)
+	editedMessages := mapMessageItems(update.EditedMessages)
+	var redactedEventIDs []RedactionItem
+	if len(update.RedactedEventIDs) > 0 {
+		redactedEventIDs = make([]RedactionItem, 0, len(update.RedactedEventIDs))
+		for _, item := range update.RedactedEventIDs {
+			redactedEventIDs = append(redactedEventIDs, RedactionItem{
+				RoomID:     item.RoomID,
+				EventID:    item.EventID,
+				RedactedBy: item.RedactedBy,
+			})
+		}
+	}
+	var reactionDeltas []ReactionDeltaItem
+	if len(update.ReactionDeltas) > 0 {
+		reactionDeltas = make([]ReactionDeltaItem, 0, len(update.ReactionDeltas))
+		for _, item := range update.ReactionDeltas {
+			reactionDeltas = append(reactionDeltas, ReactionDeltaItem{
+				RoomID:    item.RoomID,
+				EventID:   item.EventID,
+				Reactions: cloneReactionCounts(item.Reactions),
+				Reacted:   cloneReactionFlags(item.Reacted),
+			})
+		}
+	}
+	var readReceipts []ReadReceiptItem
+	if len(update.ReadReceipts) > 0 {
+		readReceipts = make([]ReadReceiptItem, 0, len(update.ReadReceipts))
+		for _, item := range update.ReadReceipts {
+			readReceipts = append(readReceipts, ReadReceiptItem{
+				RoomID:    item.RoomID,
+				EventID:   item.EventID,
+				UserID:    item.UserID,
+				Timestamp: item.Timestamp,
+			})
+		}
+	}
+	var typingUpdates []TypingItem
+	if len(update.TypingUpdates) > 0 {
+		typingUpdates = make([]TypingItem, 0, len(update.TypingUpdates))
+		for _, item := range update.TypingUpdates {
+			typingUpdates = append(typingUpdates, TypingItem{
+				RoomID:  item.RoomID,
+				UserIDs: append([]string(nil), item.UserIDs...),
+			})
+		}
+	}
 	return Update{
-		Rooms:                 mapRoomsWithPreferences(update.Rooms, preferences),
+		Rooms:                 rooms,
+		RoomsOmitted:          update.RoomsOmitted,
 		Invites:               mapInvites(update.Invites),
 		SlidingSyncListCounts: update.SlidingSyncListCounts,
 		ChangedRoomID:         update.ChangedRoomID,
 		TimelineChangedRoomID: update.TimelineChangedRoomID,
+		NewMessages:           newMessages,
+		EditedMessages:        editedMessages,
+		RedactedEventIDs:      redactedEventIDs,
+		ReactionDeltas:        reactionDeltas,
+		ReadReceipts:          readReceipts,
+		TypingUpdates:         typingUpdates,
 		TypingUsers:           update.TypingUsers,
 		Notifications:         notifications,
 		NewIncomingMessage:    update.NewIncomingMessage,

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Message } from '../bindings/mychat/desktop/models.js'
 import { preferredScrollBehavior } from './appShared'
@@ -6,14 +6,15 @@ import { localDateTimeInputValue, preferenceBoolean, timelineMessageID, isNeedsR
 import type { useInboxState } from './useInboxState'
 
 export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
-  const { activeThread, answeredShortcut, composeText, defaultScheduleDelayMinutes, editTarget, leaveConfirmOpen, markRoomAnsweredRef, messageContextMenu, messagesRef, pinnedScrollTopRef, preferencesRef, quickSwitcherOpen, reactingMessageID, redactTarget, replyTarget, roomContextMenu, roomInfoOpen, roomsRef, selectedRoomID, selectedRoomRef, setMessageContextMenu, setOpenThread, setPreferenceRef, setReactingMessageID, setRoomContextMenu, setScheduledDialogError, setScheduledDraft, setScheduledDueAt, settingsOpen, singleKeyShortcuts, stickToBottomRef, timelineListRef, timelineRef, visibleMessages } = app
+  const { activeThread, answeredShortcut, composeDraftStore, defaultScheduleDelayMinutes, editTarget, leaveConfirmOpen, markRoomAnsweredRef, messagesRef, pinnedScrollTopRef, preferencesRef, reactingMessageID, redactTarget, replyTarget, roomInfoOpen, roomsByID, selectedRoomID, selectedRoomRef, setMessageContextMenu, setOpenThread, setPreferenceRef, setReactingMessageID, setRoomContextMenu, setScheduledDialogError, setScheduledDraft, setScheduledDueAt, settingsStore, singleKeyShortcuts, stickToBottomRef, timelineListRef, timelineRef, uiOverlayStore, visibleMessages } = app
 
   function openScheduleMessage() {
-    if (!selectedRoomID || !composeText.trim() || editTarget) return
+    const draftText = composeDraftStore.getText().trim()
+    if (!selectedRoomID || !draftText || editTarget) return
     setScheduledDraft({
       kind: 'message',
       roomID: selectedRoomID,
-      text: composeText.trim(),
+      text: draftText,
       replyToEventID: replyTarget?.id,
       replyToSender: replyTarget?.senderName || replyTarget?.sender,
       replyToPreview: replyTarget?.body,
@@ -63,42 +64,62 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
       if (!singleKeyShortcuts || event.repeat || event.altKey || event.metaKey || event.ctrlKey || event.key.toUpperCase() !== answeredShortcut) return
       const target = event.target
       if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [contenteditable="true"]'))) return
+      const { settingsOpen } = settingsStore.getSnapshot()
+      const { quickSwitcherOpen, roomContextMenu } = uiOverlayStore.getSnapshot()
       if (settingsOpen || roomInfoOpen || activeThread || leaveConfirmOpen || redactTarget || quickSwitcherOpen) return
       const roomID = roomContextMenu?.roomID ?? selectedRoomID
-      const room = roomsRef.current.find((candidate) => candidate.id === roomID)
+      const room = roomsByID.get(roomID)
       if (!room || !isNeedsReplyRoom(room)) return
       event.preventDefault()
       void markRoomAnsweredRef.current(roomID)
     }
     window.addEventListener('keydown', handleGlobalAnsweredShortcut)
     return () => window.removeEventListener('keydown', handleGlobalAnsweredShortcut)
-  }, [activeThread, answeredShortcut, singleKeyShortcuts, leaveConfirmOpen, quickSwitcherOpen, roomContextMenu, roomInfoOpen, redactTarget, selectedRoomID, settingsOpen, markRoomAnsweredRef, roomsRef])
+  }, [activeThread, answeredShortcut, singleKeyShortcuts, leaveConfirmOpen, roomInfoOpen, redactTarget, selectedRoomID, markRoomAnsweredRef, roomsByID, settingsStore, uiOverlayStore])
 
   useEffect(() => {
-    if (!roomContextMenu && !messageContextMenu) return
-    const dismissOnOutsideClick = (event: globalThis.PointerEvent) => {
-      if (event.target instanceof Element) {
-        if (event.target.closest('.room-context-menu')) return
-        if (event.target.closest('.message-context-menu')) return
+    let activeCleanup: (() => void) | null = null
+    let lastRoomMenu = uiOverlayStore.getSnapshot().roomContextMenu
+    let lastMsgMenu = uiOverlayStore.getSnapshot().messageContextMenu
+
+    const syncListeners = () => {
+      const { roomContextMenu, messageContextMenu } = uiOverlayStore.getSnapshot()
+      if (roomContextMenu === lastRoomMenu && messageContextMenu === lastMsgMenu && activeCleanup) return
+      lastRoomMenu = roomContextMenu
+      lastMsgMenu = messageContextMenu
+      activeCleanup?.()
+      activeCleanup = null
+      if (!roomContextMenu && !messageContextMenu) return
+      const dismissOnOutsideClick = (event: globalThis.PointerEvent) => {
+        if (event.target instanceof Element) {
+          if (event.target.closest('.room-context-menu')) return
+          if (event.target.closest('.message-context-menu')) return
+        }
+        setRoomContextMenu(null)
+        setMessageContextMenu(null)
       }
-      setRoomContextMenu(null)
-      setMessageContextMenu(null)
+      const dismissOnEscape = (event: globalThis.KeyboardEvent) => {
+        if (event.key !== 'Escape') return
+        setRoomContextMenu(null)
+        setMessageContextMenu(null)
+      }
+      const frame = window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(roomContextMenu ? '.room-context-menu button' : '.message-context-menu button')?.focus())
+      document.addEventListener('pointerdown', dismissOnOutsideClick)
+      window.addEventListener('keydown', dismissOnEscape)
+      activeCleanup = () => {
+        window.cancelAnimationFrame(frame)
+        document.removeEventListener('pointerdown', dismissOnOutsideClick)
+        window.removeEventListener('keydown', dismissOnEscape)
+      }
     }
-    const dismissOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      setRoomContextMenu(null)
-      setMessageContextMenu(null)
-    }
-    // Only one menu is ever open: opening one clears the other.
-    const frame = window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(roomContextMenu ? '.room-context-menu button' : '.message-context-menu button')?.focus())
-    document.addEventListener('pointerdown', dismissOnOutsideClick)
-    window.addEventListener('keydown', dismissOnEscape)
+
+    syncListeners()
+    const unsubscribe = uiOverlayStore.subscribe(syncListeners)
     return () => {
-      window.cancelAnimationFrame(frame)
-      document.removeEventListener('pointerdown', dismissOnOutsideClick)
-      window.removeEventListener('keydown', dismissOnEscape)
+      unsubscribe()
+      activeCleanup?.()
     }
-  }, [roomContextMenu, messageContextMenu, setMessageContextMenu, setRoomContextMenu])
+  }, [setMessageContextMenu, setRoomContextMenu, uiOverlayStore])
 
   // The reaction picker used to be toggled off by its own toolbar button, which
   // now lives in the right-click menu. Give it a dismissal path of its own.
@@ -119,7 +140,7 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
     }
   }, [reactingMessageID, setReactingMessageID])
 
-  function isNearBottom(element: HTMLElement, tolerance = 96) {
+  function isNearBottom(element: HTMLElement, tolerance = 140) {
     return element.scrollHeight - element.scrollTop - element.clientHeight <= tolerance
   }
 
@@ -127,10 +148,10 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
     return element.scrollTop <= tolerance
   }
 
-  function pinTimelineToBottom(timeline: HTMLElement) {
+  const pinTimelineToBottom = useCallback((timeline: HTMLElement) => {
     timeline.scrollTop = timeline.scrollHeight
     pinnedScrollTopRef.current = timeline.scrollTop
-  }
+  }, [pinnedScrollTopRef])
 
   function scrollTimelineToBottom(behavior: ScrollBehavior = 'auto') {
     const timeline = timelineRef.current
@@ -149,7 +170,7 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
     if (roomID && rootID.startsWith('$')) setOpenThread({ roomID, rootID })
   }
 
-  function focusTimelineMessage(eventID: string) {
+  const focusTimelineMessage = useCallback((eventID: string) => {
     const timeline = timelineRef.current
     if (!timeline || !eventID) return
     // Replies shown under a loaded thread root open their thread instead.
@@ -168,7 +189,7 @@ export function useTimelineScroll(app: ReturnType<typeof useInboxState>) {
     }
     target.scrollIntoView?.({ behavior: preferredScrollBehavior(), block: 'center' })
     target.focus({ preventScroll: true })
-  }
+  }, [messagesRef, selectedRoomRef, setOpenThread, stickToBottomRef, timelineListRef, timelineRef])
 
   function focusTimelineItem(index: number) {
     const message = visibleMessages[index]

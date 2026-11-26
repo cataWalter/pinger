@@ -4,6 +4,7 @@ const (
 	hostErrorEventName          = "matrix:host-error"
 	droppedFilesEventName       = "matrix:files-dropped"
 	preferencesUpdateEventName  = "preferences:update"
+	preferencesDeltaEventName   = "preferences:delta"
 	scheduledReminderEventName  = "scheduler:reminder"
 	notificationOpenRoomName    = "notification:open-room"
 	applicationMenuAboutName    = "application-menu:about"

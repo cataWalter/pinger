@@ -14,18 +14,42 @@ var primaryMatrixFiles = []string{"matrix.db", "matrix.db-wal", "matrix.db-shm",
 // removeOtherAccounts deletes the preferences, scheduled jobs, databases, and cached media of every account except survivorID.
 // Failures are logged so that a partial cleanup does not block startup; the next launch retries it.
 func (s *AppService) removeOtherAccounts(dataDir, survivorID, mediaCacheRoot string) {
+	s.accountCleanupMu.Lock()
+	defer s.accountCleanupMu.Unlock()
+	pending := false
 	if _, err := s.sharedPreferences.DeleteAccountsExcept(survivorID); err != nil {
+		pending = true
 		log.Printf("could not remove preferences for other accounts: %v", err)
 	}
 	if _, err := s.scheduled.keepOnlyAccount(survivorID); err != nil {
+		pending = true
 		log.Printf("could not remove scheduled jobs for other accounts: %v", err)
 	}
 	if err := removeOtherAccountDatabases(dataDir, survivorID); err != nil {
+		pending = true
 		log.Printf("could not remove databases for other accounts: %v", err)
 	}
 	if err := removeOtherMediaCache(mediaCacheRoot, survivorID); err != nil {
+		pending = true
 		log.Printf("could not remove cached media for other accounts: %v", err)
 	}
+	s.accountCleanupPending.Store(pending)
+}
+
+func (s *AppService) AccountCleanupPending() bool {
+	return s.accountCleanupPending.Load()
+}
+
+func (s *AppService) RetryAccountCleanup() bool {
+	if s.AccountCleanupPending() {
+		s.accountMu.RLock()
+		dataDir, survivorID, mediaCacheRoot := s.dataDir, s.activeAccountID, s.mediaCacheRoot
+		s.accountMu.RUnlock()
+		if dataDir != "" && (survivorID == primaryAccountID || validAccountID(survivorID)) {
+			s.removeOtherAccounts(dataDir, survivorID, mediaCacheRoot)
+		}
+	}
+	return s.AccountCleanupPending()
 }
 
 // removeOtherAccountDatabases keeps the survivor's database. When the survivor is a secondary account, the primary database lives at the data directory root and is removed too.

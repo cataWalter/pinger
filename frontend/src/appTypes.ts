@@ -5,10 +5,11 @@ import { type AIFeatureID } from './aiSettings'
 export type MatrixUpdate = {
   accountId?: string
   notificationPreferences?: PreferenceValues
-  rooms: Room[]
+  rooms?: Room[] | null
+  roomsOmitted?: boolean
   invites?: Invite[] | null
   slidingSyncListCounts?: Record<string, number> | null
-  timelineChangedRoomId: string[] | null
+  timelineChangedRoomId?: string[] | null
   typingUsers?: Record<string, string[]> | null
   notifications?: MatrixNotification[] | null
   newIncomingMessage?: boolean
@@ -17,6 +18,11 @@ export type MatrixUpdate = {
   verification?: Verification | null
   connectionState: string
   error: string
+}
+
+export type PreferenceDelta = {
+  accountId: string
+  preferences: PreferenceValues
 }
 
 export type MatrixNotification = {
@@ -54,6 +60,7 @@ export type AIPanel = {
   status?: string
   featureID: AIFeatureID
   requestID: string
+  sourceScope: string
   // conversation holds the messages sent so far. It ends with the assistant reply once a run finishes.
   conversation: AIMessage[]
   followUp: string
@@ -81,6 +88,8 @@ export type MediaGalleryFilter = 'all' | 'images' | 'videos' | 'audio' | 'files'
 export type TimelineMessageActions = {
   onDoubleClick: (message: Message) => void
   onOpenContextMenu: (message: Message, x: number, y: number) => void
+  onReply: (message: Message) => void
+  onReact: (message: Message) => void
   onFocusMessage: (eventID: string) => void
   onAudioEnded: (messageID: string) => void
   onUseTranscript: (text: string) => void

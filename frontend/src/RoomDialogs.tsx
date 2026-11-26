@@ -1,6 +1,6 @@
 import { ArrowUpRight, RotateCcw, X } from 'lucide-react'
 import type { Message, Room } from '../bindings/mychat/desktop/models.js'
-import { DialogSurface } from './DialogSurface'
+import { DialogScrim, DialogSurface } from './DialogSurface'
 import { roomDetectedChatLanguage } from './aiLanguages'
 import {
   MEDIA_GALLERY_FILTERS,
@@ -26,8 +26,8 @@ export function ForwardMessageDialog({ message, destinations, targetRoomID, busy
   onConfirm: () => void
 }) {
   return (
-    <div className="room-info-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <DialogSurface className="room-info-dialog forward-message-dialog" labelledBy="forward-message-title" onClose={onClose} onClick={(event) => event.stopPropagation()}>
+    <DialogScrim variant="modal" onDismiss={onClose}>
+      <DialogSurface className="dialog-modal-card forward-message-dialog" labelledBy="forward-message-title" onClose={onClose}>
         <header className="room-info-header">
           <div><span className="eyebrow">FORWARD MESSAGE</span><h2 id="forward-message-title">Forward message</h2></div>
           <button className="icon-button" type="button" aria-label="Close forward message" title="Close forward message" onClick={onClose}><X size={16} /></button>
@@ -44,7 +44,7 @@ export function ForwardMessageDialog({ message, destinations, targetRoomID, busy
           <button className="is-primary" type="button" onClick={onConfirm} disabled={busy || !targetRoomID}><ArrowUpRight size={15} />{busy ? 'Forwarding...' : 'Forward'}</button>
         </div>
       </DialogSurface>
-    </div>
+    </DialogScrim>
   )
 }
 
@@ -63,8 +63,8 @@ export function MediaGalleryDialog({ roomID, roomName, items, filter, loading, s
 }) {
   const visible = filterMediaGalleryItems(items, filter)
   return (
-    <div className="media-gallery-scrim" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <DialogSurface className="media-gallery-dialog" labelledBy="media-gallery-title" onClose={onClose} onClick={(event) => event.stopPropagation()}>
+    <DialogScrim variant="modal" className="media-gallery-scrim" onDismiss={onClose}>
+      <DialogSurface className="media-gallery-dialog" labelledBy="media-gallery-title" onClose={onClose}>
         <header className="room-info-header media-gallery-header">
           <div><span className="eyebrow">ROOM MEDIA</span><h2 id="media-gallery-title">Media in {roomName}</h2></div>
           <button className="icon-button" type="button" aria-label="Close media gallery" title="Close media gallery" onClick={onClose}><X size={16} /></button>
@@ -96,6 +96,6 @@ export function MediaGalleryDialog({ roomID, roomName, items, filter, loading, s
             </div>}
         </div>
       </DialogSurface>
-    </div>
+    </DialogScrim>
   )
 }

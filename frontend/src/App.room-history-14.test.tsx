@@ -177,20 +177,22 @@ describe('room history updates', () => {
 
     const filters = await screen.findByRole('group', { name: 'Filter rooms' })
     for (const [groupName, names] of [
-      ['Room categories', ['Needs reply', 'Unanswered rooms', 'Favorite rooms']],
-      ['Room visibility', ['Archived rooms', 'AI chats', 'All']],
+      ['Room visibility', ['Needs reply', 'Archived rooms', 'AI chats', 'All']],
+      ['Room categories', ['Unanswered rooms', 'Favorite rooms']],
     ] as const) {
       const filterGroup = within(filters).getByRole('group', { name: groupName })
       for (const name of names) {
         const filter = within(filterGroup).getByRole('button', { name })
         for (let click = 0; click < 2; click++) {
           await user.click(filter)
-          const shouldBeActive = !['Unanswered rooms', 'Needs reply'].includes(name) || click === 0
-          expect(filterGroup.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(shouldBeActive ? 1 : 0)
+          const shouldBeActive = !['Unanswered rooms', 'Needs reply', 'Favorite rooms'].includes(name) || click === 0
+          const expectedActiveInGroup = groupName === 'Room visibility' ? 1 : (shouldBeActive ? 1 : 0)
+          expect(filterGroup.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(expectedActiveInGroup)
           expect(filter.getAttribute('aria-pressed')).toBe(String(shouldBeActive))
         }
       }
     }
+    await user.click(within(filters).getByRole('button', { name: 'All' }))
     expect(within(roomList).getByRole('button', { name: /Unread direct/ })).toBeTruthy()
   })
 

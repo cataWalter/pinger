@@ -7,6 +7,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"mychat/logging"
 	"time"
 )
 
@@ -70,8 +71,11 @@ func (c *Client) Start(ctx context.Context) error {
 // backoff, publishing Offline state between attempts. It returns nil once
 // sync has started or when ctx is cancelled.
 func (c *Client) StartWithRetry(ctx context.Context) error {
+	logger := logging.For("matrix-sync")
 	for attempt := 1; ; attempt++ {
+		startedAt := time.Now()
 		if err := c.Start(ctx); err == nil {
+			logger.Debug().Int("attempt", attempt).Dur("duration_ms", time.Since(startedAt)).Msg("sync started")
 			return nil
 		} else if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -79,6 +83,7 @@ func (c *Client) StartWithRetry(ctx context.Context) error {
 			return fmt.Errorf("start Matrix sync after %d attempts: %w", attempt-1, err)
 		}
 		delay := reconnectDelay(attempt)
+		logger.Debug().Int("attempt", attempt).Dur("duration_ms", time.Since(startedAt)).Dur("retry_delay_ms", delay).Msg("sync startup retry")
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():

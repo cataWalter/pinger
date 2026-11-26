@@ -2,12 +2,15 @@ import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react'
 import { AppService } from '../bindings/mychat/desktop'
 import { useMediaGallery } from './hooks/useMediaGallery'
 import { useMatrixBatch } from './useMatrixBatch'
-import { type MatrixUpdate, describeError, isTextEntryTarget, preferenceBoolean } from './appShared'
+import { applyEditedMessages, applyReactionDeltas, applyRedactedEvents } from './messages'
+import { type MatrixUpdate, describeError, isTextEntryTarget, mergeTimelineMessages, preferenceBoolean } from './appShared'
 import { getVolatileAIDraft } from './volatileAIDrafts'
 import type { useTimelineScroll } from './useTimelineScroll'
 
 export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) {
-  const { activeAccountID, composeText, composerEmojiControlRef, composerInputRef, emojiPickerOpen, focusTimelineMessage, historyRoomIDRef, loadingHistory, messages, moveTimelineFocus, pendingSearchJumpRef, pinTimelineToBottom, pinnedScrollTopRef, preferences, quickSwitcherInputRef, quickSwitcherOpen, quickSwitcherQuery, roomDrafts, roomSwitchRef, roomsRef, selectedRoomID, selectedRoomRef, setAgentEditor, setAgentSettingsError, setComposeText, setEditTarget, setEmojiPickerOpen, setError, setHistoryRevision, setLeaveConfirmOpen, setMentionBindings, setMentionStart, setMessageSearch, setQuickSwitcherIndex, setReplyTarget, setRoomInfoOpen, setRoomMembers, setRoomMembersError, setRoomMembersLoading, setSearchOpen, setSearchResults, setSearchStatus, setTypingUsers, setUnreadMarker, singleKeyShortcuts, stickToBottomRef, timelineHeightBeforePrepend, timelineListRef, timelineRef, timelineResizeObserverRef, unreadMarkerID, volatileAIDrafts } = app
+  const { activeAccountID, composeDraftStore, composerEmojiControlRef, composerInputRef, emojiPickerOpen, focusTimelineMessage, historyRoomIDRef, loadingHistory, messages, moveTimelineFocus, pendingSearchJumpRef, pinTimelineToBottom, pinnedScrollTopRef, preferences, quickSwitcherInputRef, quickSwitcherQuery, roomDrafts, roomSwitchRef, roomsRef, selectedRoomID, selectedRoomRef, setAgentEditor, setAgentSettingsError, setComposeText, setEditTarget, setEmojiPickerOpen, setError, setHistoryRevision, setLeaveConfirmOpen, setMentionBindings, setMentionStart, setMessageSearch, setMessages, setQuickSwitcherIndex, setReplyTarget, setRoomInfoOpen, setRoomMembers, setRoomMembersError, setRoomMembersLoading, setSearchOpen, setSearchResults, setSearchStatus, setTypingUsers, setUnreadMarker, singleKeyShortcuts, stickToBottomRef, timelineHeightBeforePrepend, timelineListRef, timelineRef, timelineResizeObserverRef, uiOverlayStore, unreadMarkerID, volatileAIDrafts } = app
+  const volatileAIDraftsRef = useRef(volatileAIDrafts)
+  volatileAIDraftsRef.current = volatileAIDrafts
 
   function handleTimelineKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.metaKey || event.ctrlKey || event.altKey || isTextEntryTarget(event.target)) return
@@ -54,8 +57,7 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
       pinTimelineToBottom(timeline)
       if (!roomSwitchRef.current || historyRoomIDRef.current === selectedRoomID) roomSwitchRef.current = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- pinTimelineToBottom is recreated each render; the pin should follow room and message changes only
-  }, [historyRoomIDRef, messages, selectedRoomID, unreadMarkerID, roomSwitchRef, stickToBottomRef, timelineHeightBeforePrepend, timelineListRef, timelineRef])
+  }, [historyRoomIDRef, messages, pinTimelineToBottom, selectedRoomID, unreadMarkerID, roomSwitchRef, stickToBottomRef, timelineHeightBeforePrepend, timelineListRef, timelineRef])
 
   // Media, fonts, and composer or banner changes resize the timeline without changing `messages`.
   // Re-pin to the newest message after each resize while the reader is following the conversation.
@@ -72,8 +74,7 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
     observer.disconnect()
     observer.observe(timeline)
     for (const child of Array.from(timeline.children)) observer.observe(child)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- pinTimelineToBottom is recreated each render; the observer follows room and messages only
-  }, [messages, selectedRoomID, stickToBottomRef, timelineRef, timelineResizeObserverRef])
+  }, [messages, pinTimelineToBottom, selectedRoomID, stickToBottomRef, timelineRef, timelineResizeObserverRef])
 
   useEffect(() => {
     return () => {
@@ -95,7 +96,7 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
     setMentionStart(-1)
     setEmojiPickerOpen(false)
     setTypingUsers([])
-    setComposeText(getVolatileAIDraft(volatileAIDrafts, activeAccountID, selectedRoomID)?.text ?? roomDrafts.get(selectedRoomID) ?? '')
+    setComposeText(getVolatileAIDraft(volatileAIDraftsRef.current, activeAccountID, selectedRoomID)?.text ?? roomDrafts.get(selectedRoomID) ?? '')
     const openedRoom = roomsRef.current.find((room) => room.id === selectedRoomID)
     setUnreadMarker(openedRoom && openedRoom.unread > 0
       ? { scope: `${activeAccountID}:${selectedRoomID}`, count: openedRoom.unread, messageID: '', seen: false, offscreen: false }
@@ -104,7 +105,6 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
     pinnedScrollTopRef.current = null
     setReplyTarget(null)
     setEditTarget(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- volatileAIDrafts must not reset the composer on each draft update; the effect follows the room and account
   }, [selectedRoomID, activeAccountID, roomDrafts, pinnedScrollTopRef, roomsRef, stickToBottomRef, setAgentEditor, setAgentSettingsError, setComposeText, setEditTarget, setEmojiPickerOpen, setLeaveConfirmOpen, setMentionBindings, setMentionStart, setMessageSearch, setReplyTarget, setRoomInfoOpen, setSearchOpen, setSearchResults, setSearchStatus, setTypingUsers, setUnreadMarker])
 
   useEffect(() => {
@@ -127,10 +127,22 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
   }, [emojiPickerOpen, composerEmojiControlRef, setEmojiPickerOpen])
 
   useEffect(() => {
-    if (!quickSwitcherOpen) return
-    const frame = window.requestAnimationFrame(() => quickSwitcherInputRef.current?.focus())
-    return () => window.cancelAnimationFrame(frame)
-  }, [quickSwitcherOpen, quickSwitcherInputRef])
+    let wasOpen = uiOverlayStore.getSnapshot().quickSwitcherOpen
+    let frame: number | null = null
+    const focusIfOpened = () => {
+      const isOpen = uiOverlayStore.getSnapshot().quickSwitcherOpen
+      if (isOpen && !wasOpen) {
+        frame = window.requestAnimationFrame(() => quickSwitcherInputRef.current?.focus())
+      }
+      wasOpen = isOpen
+    }
+    if (wasOpen) frame = window.requestAnimationFrame(() => quickSwitcherInputRef.current?.focus())
+    const unsubscribe = uiOverlayStore.subscribe(focusIfOpened)
+    return () => {
+      unsubscribe()
+      if (frame !== null) window.cancelAnimationFrame(frame)
+    }
+  }, [quickSwitcherInputRef, uiOverlayStore])
 
   useEffect(() => {
     setQuickSwitcherIndex(0)
@@ -156,28 +168,111 @@ export function useMediaGalleryState(app: ReturnType<typeof useTimelineScroll>) 
 
   useEffect(() => {
     if (!selectedRoomID || !preferenceBoolean(preferences, 'privacy.send_typing', true)) return
-    const timeout = window.setTimeout(() => {
-      const timeoutMilliseconds = composeText.trim() ? 5000 : 0
-      void AppService.SetTyping(selectedRoomID, timeoutMilliseconds).catch((typingError: unknown) => setError(describeError(typingError)))
-    }, 350)
-    return () => window.clearTimeout(timeout)
-  }, [composeText, selectedRoomID, preferences, setError])
+    let timeout: number | null = null
+    const scheduleTyping = () => {
+      if (timeout !== null) window.clearTimeout(timeout)
+      timeout = window.setTimeout(() => {
+        timeout = null
+        const timeoutMilliseconds = composeDraftStore.getText().trim() ? 5000 : 0
+        void AppService.SetTyping(selectedRoomID, timeoutMilliseconds).catch((typingError: unknown) => setError(describeError(typingError)))
+      }, 350)
+    }
+    scheduleTyping()
+    const unsubscribe = composeDraftStore.subscribe(scheduleTyping)
+    return () => {
+      unsubscribe()
+      if (timeout !== null) window.clearTimeout(timeout)
+    }
+  }, [composeDraftStore, selectedRoomID, preferences, setError])
 
-  const matrixUpdateHandlerRef = useRef<((update: MatrixUpdate) => void) | null>(null)
+  const matrixUpdateHandlerRef = useRef<((update: MatrixUpdate, options?: { skipHistoryFallback?: boolean; deliveredMessageIDs?: Set<string> }) => void) | null>(null)
 
   useMatrixBatch<MatrixUpdate>((batch) => {
-    for (const delta of batch.room_deltas ?? []) {
-      matrixUpdateHandlerRef.current?.(delta.update)
-    }
     const selectedRoomID = selectedRoomRef.current
-    if (selectedRoomID && (
-      (batch.new_messages ?? []).some((item) => item.roomId === selectedRoomID)
-      || (batch.read_receipts ?? []).some((receipt) => receipt.roomId === selectedRoomID)
-    )) {
-      setHistoryRevision((revision) => revision + 1)
+    const incomingForSelected = selectedRoomID
+      ? (batch.new_messages ?? []).filter((item) => item.roomId === selectedRoomID).map((item) => item.message)
+      : []
+    const deliveredMessageIDs = new Set<string>()
+    for (const msg of incomingForSelected) {
+      if (msg.id) deliveredMessageIDs.add(msg.id)
     }
+
+    const handledMessagesInPlace = incomingForSelected.length > 0 && historyRoomIDRef.current === selectedRoomID
+    if (incomingForSelected.length > 0) {
+      if (handledMessagesInPlace) {
+        setMessages((current) => mergeTimelineMessages(current, incomingForSelected))
+      } else {
+        setHistoryRevision((revision) => revision + 1)
+      }
+    }
+
+    const editedForSelected = selectedRoomID
+      ? (batch.edited_messages ?? []).filter((item) => item.roomId === selectedRoomID).map((item) => item.message)
+      : []
+    const handledEditInPlace = editedForSelected.length > 0 && historyRoomIDRef.current === selectedRoomID
+    if (editedForSelected.length > 0) {
+      if (handledEditInPlace) {
+        setMessages((current) => applyEditedMessages(current, editedForSelected))
+      } else {
+        setHistoryRevision((revision) => revision + 1)
+      }
+    }
+
+    const redactedForSelected = selectedRoomID
+      ? (batch.redacted_event_ids ?? []).filter((item) => item.roomId === selectedRoomID).map((item) => item.eventId)
+      : []
+    const handledRedactionInPlace = redactedForSelected.length > 0 && historyRoomIDRef.current === selectedRoomID
+    if (redactedForSelected.length > 0) {
+      if (handledRedactionInPlace) {
+        setMessages((current) => applyRedactedEvents(current, redactedForSelected))
+      } else {
+        setHistoryRevision((revision) => revision + 1)
+      }
+    }
+
+    const reactionsForSelected = selectedRoomID
+      ? (batch.reaction_deltas ?? []).filter((item) => item.roomId === selectedRoomID)
+      : []
+    const handledReactionInPlace = reactionsForSelected.length > 0 && historyRoomIDRef.current === selectedRoomID
+    if (reactionsForSelected.length > 0) {
+      if (handledReactionInPlace) {
+        setMessages((current) => applyReactionDeltas(current, reactionsForSelected))
+      } else {
+        setHistoryRevision((revision) => revision + 1)
+      }
+    }
+
+    const receiptsForSelected = selectedRoomID
+      ? (batch.read_receipts ?? []).filter((receipt) => receipt.roomId === selectedRoomID)
+      : []
+    const handledReceiptInPlace = receiptsForSelected.some((receipt) => receipt.timestamp > 0 && Boolean(receipt.eventId))
+    if (receiptsForSelected.length > 0) {
+      const latestReceipt = receiptsForSelected[receiptsForSelected.length - 1]
+      if (latestReceipt.timestamp > 0 && latestReceipt.eventId) {
+        setMessages((current) => current.map((msg) => (
+          msg.own && msg.id === latestReceipt.eventId && msg.seenAt !== latestReceipt.timestamp
+            ? { ...msg, seenAt: latestReceipt.timestamp }
+            : msg
+        )))
+      } else {
+        setHistoryRevision((revision) => revision + 1)
+      }
+    }
+
+    for (const delta of batch.room_deltas ?? []) {
+      matrixUpdateHandlerRef.current?.(delta.update, {
+        skipHistoryFallback: handledMessagesInPlace || handledEditInPlace || handledRedactionInPlace || handledReactionInPlace || handledReceiptInPlace,
+        deliveredMessageIDs,
+      })
+    }
+
     for (const typing of batch.typing_updates ?? []) {
-      if (typing.roomId === selectedRoomID) setTypingUsers(typing.userIds)
+      if (typing.roomId === selectedRoomID) {
+        const nextUsers = typing.userIds ?? []
+        setTypingUsers((current) => current.length === nextUsers.length && current.every((user, index) => user === nextUsers[index])
+          ? current
+          : nextUsers)
+      }
     }
   })
 

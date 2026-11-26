@@ -5,11 +5,10 @@ const KEYBOARD_STEP = 16
 
 type SidebarResizeHandleProps = {
   width: number | null
-  zoom: number
   onWidthChange: (width: number) => void
 }
 
-export function SidebarResizeHandle({ width, zoom, onWidthChange }: SidebarResizeHandleProps) {
+export function SidebarResizeHandle({ width, onWidthChange }: SidebarResizeHandleProps) {
   const removeDragListeners = useRef<(() => void) | null>(null)
 
   useEffect(() => () => removeDragListeners.current?.(), [])
@@ -20,12 +19,11 @@ export function SidebarResizeHandle({ width, zoom, onWidthChange }: SidebarResiz
     if (event.button !== 0 || !sidebar || !shell) return
     event.preventDefault()
     const startX = event.clientX
-    // Dividing by zoom converts rendered pixels back to the CSS width the grid uses.
-    const startWidth = sidebar.getBoundingClientRect().width / zoom
+    const startWidth = sidebar.getBoundingClientRect().width
     let nextWidth: number | null = null
 
     const handleMove = (move: PointerEvent) => {
-      nextWidth = clampSidebarWidth(startWidth + (move.clientX - startX) / zoom)
+      nextWidth = clampSidebarWidth(startWidth + (move.clientX - startX))
       shell.style.setProperty('--sidebar-width', `${nextWidth}px`)
     }
     const removeListeners = () => {
@@ -51,7 +49,7 @@ export function SidebarResizeHandle({ width, zoom, onWidthChange }: SidebarResiz
     if (!sidebar) return
     event.preventDefault()
     event.stopPropagation()
-    const current = width ?? sidebar.getBoundingClientRect().width / zoom
+    const current = width ?? sidebar.getBoundingClientRect().width
     onWidthChange(current + (event.key === 'ArrowRight' ? KEYBOARD_STEP : -KEYBOARD_STEP))
   }
 

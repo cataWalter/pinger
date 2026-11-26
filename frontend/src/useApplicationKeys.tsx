@@ -5,9 +5,10 @@ import { isTextEntryTarget, preferenceBoolean } from './appShared'
 import type { useRoomChatExport } from './useRoomChatExport'
 
 export function useApplicationKeys(app: ReturnType<typeof useRoomChatExport>) {
-  const { appZoom, closeMessageSearch, contextMenuRooms, filteredRooms, handleAIShortcut, handleRoomActionShortcut, jumpToLatest, localAIChatId, localAIChatOpen, messageContextMenu, openInboxRoom, preferences, quickSwitcherOpen, roomContextMenu, roomSearchInputRef, rooms, roomsRef, searchOpen, selectRoomByOffset, selectedRoomID, setPreference, setQuickSwitcherIndex, setQuickSwitcherOpen, setQuickSwitcherQuery, setRoomRefinements, setRoomScope, setSearchOpen, setSettingsOpen, setSettingsTab, startLocalAIChat, undoAnswered, undoRoomID } = app
+  const { appZoom, closeMessageSearch, filteredRooms, getRoomContextMenuState, handleAIShortcut, handleRoomActionShortcut, jumpToLatest, localAIChatId, localAIChatOpen, openInboxRoom, preferences, roomSearchInputRef, rooms, roomsRef, selectRoomByOffset, selectedRoomID, setPreference, setQuickSwitcherIndex, setQuickSwitcherOpen, setQuickSwitcherQuery, setRoomRefinements, setRoomScope, setSearchOpen, setSettingsOpen, setSettingsTab, startLocalAIChat, uiOverlayStore, undoAnswered, undoRoomID } = app
 
   function handleApplicationKeyDown(event: KeyboardEvent<HTMLElement>) {
+    const { messageContextMenu, quickSwitcherOpen, roomContextMenu, searchOpen } = uiOverlayStore.getSnapshot()
     if (event.defaultPrevented || hasOpenDialog() || quickSwitcherOpen) return
     if (handleAIShortcut(event)) return
     if (messageContextMenu) return
@@ -25,7 +26,7 @@ export function useApplicationKeys(app: ReturnType<typeof useRoomChatExport>) {
     if (isTextEntryTarget(event.target)) return
 
     const shortcutRooms = roomContextMenu
-      ? contextMenuRooms
+      ? getRoomContextMenuState(roomContextMenu).contextMenuRooms
       : rooms.filter((room) => room.id === selectedRoomID)
     if (roomContextMenu) {
       handleRoomActionShortcut(event, shortcutRooms)

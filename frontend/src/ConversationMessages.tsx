@@ -1,15 +1,22 @@
-import { Fragment, useCallback } from 'react'
-import { ArrowUp, BellRing, Check, CircleAlert, MessageCircleMore, RotateCcw, Search, X, Download } from 'lucide-react'
+import { Fragment, memo, useCallback, useEffect, useState } from 'react'
+import { ArrowDown, ArrowUp, BellRing, Check, CircleAlert, MessageCircleMore, RotateCcw, Search, X, Download } from 'lucide-react'
 import { activeLocale } from './i18n'
 import { DialogPresence } from './DialogPresence'
 import { primaryShiftShortcutLabel, VIRTUAL_TIMELINE_THRESHOLD } from './appShared'
 import { chatExportStatusText, preferenceBoolean, isDirectLikeRoom, TimelineMessageList } from './appShared'
 import { themeModeForPreference } from './themes'
 import { dropUnloadedChatTranslations } from './chatTranslationStash'
-import type { AppState } from './appState'
+import { useTimeline } from './AppDomainContexts'
+import { useMessageContextMenu, useSearchOpen } from './uiOverlayStore'
 
-export function ConversationMessages({ app }: { app: AppState }) {
-  const { activeAccountID, activeUnreadMarker, appZoom, autoPlayNextMessageId, cancelChatExport, chatExportForSelectedRoom, chatTranslation, clearScheduledNotice, clearUndoToast, closeMessageSearch, dismissChatExport, editTarget, error, focusTimelineMessage, handleTimelineKeyDown, hasOlder, hasOlderRef, isNearBottom, isNearTop, loadMoreSearchResults, loadOlderMessages, loadingHistory, loadingOlder, loadingOlderRef, messageContextMenu, messageContextMenuItems, messageSearch, messages, observeUnreadDivider, openScheduledJobs, openSearchResult, pinnedScrollTopRef, preferences, reactingMessageID, revealChatExport, rooms, scheduledNotice, searchFrom, searchNextBatch, searchOpen, searchResults, searchRoomID, searchSender, searchStatus, searchTo, searching, selectedRoom, selectedRoomID, setChatTranslation, setError, setMessageContextMenu, setMessageSearch, setSearchFrom, setSearchRoomID, setSearchSender, setSearchTo, setUnreadMarker, snapshot, stickToBottomRef, submitMessageSearch, threadSummaries, timelineListRef, timelineMessageActionsRef, timelineMessages, timelineRef, typingStatus, undoAnswered, undoRoomID, unreadMarkerID, visibleMessages } = app
+export const ConversationMessages = memo(function ConversationMessages() {
+  const { activeAccountID, activeUnreadMarker, autoPlayNextMessageId, cancelChatExport, chatExportForSelectedRoom, chatTranslation, clearScheduledNotice, clearUndoToast, closeMessageSearch, dismissChatExport, editTarget, error, focusTimelineMessage, handleTimelineKeyDown, hasOlder, hasOlderRef, isNearBottom, isNearTop, loadMoreSearchResults, loadOlderMessages, loadingHistory, loadingOlder, loadingOlderRef, messageContextMenuItems, messageSearch, messages, observeUnreadDivider, openScheduledJobs, openSearchResult, pinnedScrollTopRef, preferences, reactingMessageID, revealChatExport, rooms, roomsByID, scheduledNotice, searchFrom, searchNextBatch, searchResults, searchRoomID, searchSender, searchStatus, searchTo, searching, selectedRoom, selectedRoomID, setChatTranslation, setError, setMessageContextMenu, setMessageSearch, setSearchFrom, setSearchRoomID, setSearchSender, setSearchTo, setUnreadMarker, snapshot, stickToBottomRef, submitMessageSearch, systemPrefersDark, themePreference, threadSummaries, timelineListRef, timelineMessageActionsRef, timelineMessages, timelineRef, typingStatus, uiOverlayStore, undoAnswered, undoRoomID, unreadMarkerID, visibleMessages } = useTimeline()
+  const searchOpen = useSearchOpen(uiOverlayStore)
+  const messageContextMenu = useMessageContextMenu(uiOverlayStore)
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  useEffect(() => {
+    setShowScrollToBottom(false)
+  }, [selectedRoomID])
   // Finished translations for rows that virtual loading unloads are discarded from RAM.
   // Stable identity keeps the memoized TimelineMessageList from re-rendering on every composer keystroke.
   const discardUnloadedTranslations = useCallback((messageIDs: string[]) => {
@@ -42,7 +49,7 @@ export function ConversationMessages({ app }: { app: AppState }) {
         </div>}
         <DialogPresence open={!!undoRoomID}>{undoRoomID && <div className="triage-toast" role="status">
           <Check className="triage-toast-icon" size={16} aria-hidden="true" />
-          <span>Marked {rooms.find((room) => room.id === undoRoomID)?.name || 'room'} answered</span>
+          <span>Marked {roomsByID.get(undoRoomID)?.name || 'room'} answered</span>
           <button type="button" onClick={() => void undoAnswered()}><RotateCcw size={14} />Undo</button>
           <button className="icon-button" type="button" aria-label="Dismiss notification" title="Dismiss notification" onClick={clearUndoToast}><X size={15} /></button>
         </div>}</DialogPresence>
@@ -61,7 +68,7 @@ export function ConversationMessages({ app }: { app: AppState }) {
               autoFocus
               value={messageSearch}
               onChange={(event) => setMessageSearch(event.target.value)}
-              placeholder="Search all chats"
+              placeholder="Search downloaded history"
               aria-label="Search local message history"
               spellCheck={false}
               autoCorrect="off"
@@ -99,7 +106,7 @@ export function ConversationMessages({ app }: { app: AppState }) {
           <div className="message-search-results" aria-live="polite">
             {searching && <div className="message-search-empty"><span className="loading-mark" />Searching local history</div>}
             {!searching && searchResults.map((result, index) => {
-              const room = rooms.find((candidate) => candidate.id === result.roomID)
+              const room = roomsByID.get(result.roomID)
               const message = result.message
               return <button className="message-search-result" key={`${result.roomID}:${message.id || message.transactionId || index}`} type="button" aria-label={`Open message in ${room?.name || result.roomID}`} title={`Open message in ${room?.name || result.roomID}`} onClick={() => openSearchResult(result)}>
                 <span className="message-search-room">{room?.name || result.roomID}{room?.bridge && <small>{room.bridge}</small>}</span>
@@ -123,12 +130,14 @@ export function ConversationMessages({ app }: { app: AppState }) {
           focusTimelineMessage(activeUnreadMarker.messageID)
         }}><ArrowUp size={14} aria-hidden="true" />{activeUnreadMarker.count === 1 ? '1 new message' : `${activeUnreadMarker.count} new messages`}</button>
       </div>}
-      <div className="timeline" key={selectedRoomID} ref={timelineRef} role="region" aria-label="Message timeline" data-virtualized={visibleMessages.length > VIRTUAL_TIMELINE_THRESHOLD} style={visibleMessages.length > VIRTUAL_TIMELINE_THRESHOLD ? { zoom: 100 / appZoom } : undefined} tabIndex={0} onKeyDown={handleTimelineKeyDown} onScroll={(event) => {
+      <div className="timeline" key={selectedRoomID} ref={timelineRef} role="region" aria-label="Message timeline" data-virtualized={visibleMessages.length > VIRTUAL_TIMELINE_THRESHOLD} tabIndex={0} onKeyDown={handleTimelineKeyDown} onScroll={(event) => {
         const element = event.currentTarget
         const atPinnedPosition = pinnedScrollTopRef.current !== null && Math.abs(element.scrollTop - pinnedScrollTopRef.current) < 1
+        const nearBottom = isNearBottom(element)
         // Only a scroll away from the bottom that is not our own pin stops following the newest message.
-        if (isNearBottom(element)) stickToBottomRef.current = true
+        if (nearBottom) stickToBottomRef.current = true
         else if (!atPinnedPosition) stickToBottomRef.current = false
+        setShowScrollToBottom(!nearBottom && element.scrollHeight > element.clientHeight + 80)
         // Infinite scroll: reaching the top of the loaded history fetches the
         // next older page. The refs keep a burst of scroll events from
         // starting several fetches before `loadingOlder` commits.
@@ -141,7 +150,7 @@ export function ConversationMessages({ app }: { app: AppState }) {
         {selectedRoom && !loadingHistory && visibleMessages.length === 0 && <div className="timeline-empty"><MessageCircleMore size={25} /><span>{messages.length > 0 ? 'Deleted messages are hidden' : hasOlder ? 'No messages in the past 24 hours' : 'No messages yet'}</span></div>}
         <TimelineMessageList
           messages={timelineMessages}
-          reactionColorScheme={themeModeForPreference(app.themePreference, app.systemPrefersDark)}
+          reactionColorScheme={themeModeForPreference(themePreference, systemPrefersDark)}
           threadSummaries={threadSummaries}
           header={selectedRoom && hasOlder ? (
             <button className="load-older" type="button" title={loadingOlder ? 'Loading older messages' : 'Load older messages'} onClick={loadOlderMessages} disabled={loadingOlder}>
@@ -171,13 +180,15 @@ export function ConversationMessages({ app }: { app: AppState }) {
           {chatTranslation.error && <p role="alert">{chatTranslation.error}</p>}
         </div>}
       </div>
-      {typingStatus && <div className="typing-indicator" aria-live="polite"><span className="typing-indicator-dots" aria-hidden="true"><span /><span /><span /></span><span>{typingStatus}</span></div>}
-      {messageContextMenu && <div className="message-context-scrim" aria-hidden="true">
-        <div className="message-context-scrim-panel message-context-scrim-top" style={{ height: messageContextMenu.targetBounds.top }} />
-        <div className="message-context-scrim-panel message-context-scrim-left" style={{ top: messageContextMenu.targetBounds.top, width: messageContextMenu.targetBounds.left, height: messageContextMenu.targetBounds.bottom - messageContextMenu.targetBounds.top }} />
-        <div className="message-context-scrim-panel message-context-scrim-right" style={{ left: messageContextMenu.targetBounds.right, top: messageContextMenu.targetBounds.top, height: messageContextMenu.targetBounds.bottom - messageContextMenu.targetBounds.top }} />
-        <div className="message-context-scrim-panel message-context-scrim-bottom" style={{ top: messageContextMenu.targetBounds.bottom }} />
+      {showScrollToBottom && visibleMessages.length > 0 && <div className="timeline-jump-anchor">
+        <button className="timeline-jump-pill" type="button" aria-label="Jump to latest messages" onClick={() => {
+          stickToBottomRef.current = true
+          setShowScrollToBottom(false)
+          const el = timelineRef.current
+          if (el) el.scrollTop = el.scrollHeight
+        }}><ArrowDown size={14} aria-hidden="true" />Jump to latest</button>
       </div>}
+      {typingStatus && <div className="typing-indicator" aria-live="polite"><span className="typing-indicator-dots" aria-hidden="true"><span /><span /><span /></span><span>{typingStatus}</span></div>}
       {messageContextMenu && <div className="message-context-menu" role="menu" aria-label="Message actions" style={{ left: messageContextMenu.x, top: messageContextMenu.y }}>
         {messageContextMenuItems(messageContextMenu.message).map((item) => (
           <Fragment key={item.key}>
@@ -201,4 +212,4 @@ export function ConversationMessages({ app }: { app: AppState }) {
       </div>}
     </>
   )
-}
+})

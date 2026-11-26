@@ -1,6 +1,6 @@
-@import './styles/part-01-09.css';
-@import './styles/part-10-18.css';
-@import './styles/part-19-27.css';
-@import './styles/part-28-36.css';
-@import './styles/part-37-45.css';
-@import './styles/part-46-53.css';
+@import './styles/tokens.css';
+@import './styles/layout.css';
+@import './styles/sidebar.css';
+@import './styles/timeline.css';
+@import './styles/composer.css';
+@import './styles/dialogs.css';

@@ -109,6 +109,7 @@ func (s *LanguageTutorService) Analyze(text, mode, learning, explanation, reques
 	if err != nil {
 		return TutorAnalysis{}, err
 	}
+	route = s.appService.trackAIRoute(route)
 	tuning := aiFeatureTuningFor(preferences, aiFeatureLanguageTutor)
 	ctx, release := s.appService.aiRuns.begin(s.appService.aiContext(), requestID)
 	defer release()

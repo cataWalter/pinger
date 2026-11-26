@@ -80,7 +80,11 @@ func (s *AppService) Logout() error {
 	if client == nil {
 		return errors.New("no active account to log out")
 	}
+	if !s.loggingOut.CompareAndSwap(false, true) {
+		return errors.New("logout is already in progress")
+	}
 	if err := client.Logout(s.ctx); err != nil {
+		s.loggingOut.Store(false)
 		return err
 	}
 	if s.quit != nil {
@@ -109,6 +113,9 @@ func (s *AppService) startEventPump(emit func(Update)) {
 				if !ok || s.ctx.Err() != nil {
 					return
 				}
+				if accountID != s.currentAccountID() || client != s.currentClient() {
+					return
+				}
 				if update.Error != "" {
 					logging.For("service").Warn().
 						Str("connection_state", string(update.ConnectionState)).
@@ -123,18 +130,23 @@ func (s *AppService) startEventPump(emit func(Update)) {
 
 func (s *AppService) startSync() {
 	client := s.currentClient()
+	accountID := s.currentAccountID()
 	if client == nil || !client.IsLoggedIn() || s.ctx.Err() != nil {
 		return
 	}
+	s.enforceMediaCachePolicyAsync()
 	s.workers.Add(1)
 	go func() {
 		defer s.workers.Done()
 		if err := client.StartWithRetry(s.ctx); err != nil && s.ctx.Err() == nil {
+			if accountID != s.currentAccountID() || client != s.currentClient() {
+				return
+			}
 			s.accountMu.RLock()
 			emit := s.emitUpdate
 			s.accountMu.RUnlock()
 			if emit != nil {
-				emit(Update{Error: err.Error(), ConnectionState: string(matrix.StateOffline)})
+				emit(Update{AccountID: accountID, Error: err.Error(), ConnectionState: string(matrix.StateOffline)})
 			}
 		}
 	}()
@@ -178,17 +190,35 @@ func dispatchDueScheduledMessagesForAccount(ctx context.Context, store *schedule
 		return err
 	}
 	for _, job := range jobs {
-		startedAt := time.Now().UnixMilli()
+		startedAt := time.Now()
 		sendCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		sendErr := sender.SendScheduledMessage(sendCtx, job.RoomID, job.Text, job.ReplyToEventID, job.TransactionID, func(transactionID string) error {
 			return store.recordTransaction(job.ID, transactionID)
 		})
 		cancel()
-		if finishErr := store.finishMessage(job.ID, sendErr, startedAt, time.Now().UnixMilli()); finishErr != nil {
+		logging.For("scheduler").Debug().Bool("delivered", sendErr == nil).Dur("duration_ms", time.Since(startedAt)).Msg("scheduled delivery finished")
+		if finishErr := store.finishMessage(job.ID, sendErr, startedAt.UnixMilli(), time.Now().UnixMilli()); finishErr != nil {
 			log.Printf("finish scheduled message %s: %v", job.ID, finishErr)
 		}
 	}
 	return nil
+}
+
+func (s *AppService) startDueScheduledMessage(accountID string, sender scheduledMessageSender, now int64) {
+	if s.ctx.Err() != nil || s.loggingOut.Load() || !s.scheduledMessageBusy.CompareAndSwap(false, true) {
+		return
+	}
+	s.workers.Add(1)
+	go func() {
+		defer s.workers.Done()
+		defer s.scheduledMessageBusy.Store(false)
+		if s.loggingOut.Load() {
+			return
+		}
+		if err := dispatchDueScheduledMessagesForAccount(s.ctx, s.scheduled, accountID, sender, now); err != nil && s.ctx.Err() == nil {
+			log.Printf("claim scheduled message for account %s: %v", accountID, err)
+		}
+	}()
 }
 
 func (s *AppService) processDueScheduledJobs() {
@@ -202,13 +232,7 @@ func (s *AppService) processDueScheduledJobs() {
 	accountID := s.currentAccountID()
 	client := s.currentClient()
 	if client != nil && client.IsLoggedIn() && client.ConnectionState() == matrix.StateConnected {
-		s.workers.Add(1)
-		go func() {
-			defer s.workers.Done()
-			if err := dispatchDueScheduledMessagesForAccount(s.ctx, s.scheduled, accountID, client, now); err != nil && s.ctx.Err() == nil {
-				log.Printf("claim scheduled messages for account %s: %v", accountID, err)
-			}
-		}()
+		s.startDueScheduledMessage(accountID, client, now)
 	}
 	reminders, err := s.scheduled.claimDue(scheduledReminderKind, now)
 	if err != nil {
@@ -226,6 +250,7 @@ func (s *AppService) close() {
 	s.cancel()
 	s.imageEngine.stop()
 	s.workers.Wait()
+	s.closeLocalAIChatStore()
 	if s.scheduled != nil {
 		if err := s.scheduled.flushPendingCompletions(); err != nil {
 			log.Printf("persist scheduled message completions on shutdown: %v", err)

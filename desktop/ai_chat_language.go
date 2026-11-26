@@ -42,6 +42,7 @@ func (s *AppService) AIDetectChatLanguage(roomID, requestID string) (string, err
 	if err != nil {
 		return "", err
 	}
+	route = s.trackAIRoute(route)
 	languages := tutorLanguagesFromPreferences(preferences)
 	ctx, release := s.beginAIRoomRun(requestID)
 	defer release()

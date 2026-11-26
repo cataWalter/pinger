@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
-import { harness, room, message, openMessageMenu, menuCommand, snapshot } from './appTestSetup'
+import { emitMatrixUpdate, harness, room, message, openMessageMenu, menuCommand, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
   const { clipboardSetText, harness } = await import('./appTestSetup')
@@ -237,18 +237,16 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
     const emitUnchangedUpdate = async () => {
       await act(async () => {
-        harness.eventHandlers.get('matrix:update')?.({
-          data: {
-            rooms: [room],
-            changedRoomId: [],
-            timelineChangedRoomId: [],
-            typingUsers: { [room.id]: [] },
-            notifications: [],
-            error: '',
-            initialSyncComplete: true,
-            needsVerification: false,
-            connectionState: 'connected',
-          },
+        emitMatrixUpdate({
+          rooms: [room],
+          changedRoomId: [],
+          timelineChangedRoomId: [],
+          typingUsers: { [room.id]: [] },
+          notifications: [],
+          error: '',
+          initialSyncComplete: true,
+          needsVerification: false,
+          connectionState: 'connected',
         })
         await Promise.resolve()
       })
@@ -264,5 +262,171 @@ describe('room history updates', () => {
     expect(harness.markdownRenderCount).toBe(renderCount)
     expect(harness.service.History).toHaveBeenCalledTimes(historyCalls)
     expect(screen.getByText('latest message')).toBe(message)
+  })
+
+  it('merges incremental new_messages and read_receipts without reloading full History', async () => {
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const historyCalls = harness.service.History.mock.calls.length
+
+    await act(async () => {
+      harness.eventHandlers.get('matrix:batch_update')?.({
+        data: {
+          new_messages: [{
+            roomId: room.id,
+            message: { ...message('$incremental', 'incremental delta message', 400), own: true },
+          }],
+          read_receipts: [],
+          typing_updates: [],
+          room_deltas: [{
+            update: {
+              rooms: [{ ...room, lastEventId: '$incremental', lastEventAt: 400, lastSeen: 400, preview: 'incremental delta message' }],
+              changedRoomId: [room.id],
+              timelineChangedRoomId: [room.id],
+              typingUsers: {},
+              notifications: [],
+              error: '',
+              initialSyncComplete: true,
+              needsVerification: false,
+              connectionState: 'connected',
+            },
+          }],
+        },
+      })
+      await Promise.resolve()
+    })
+
+    const timeline = screen.getByRole('region', { name: 'Message timeline' })
+    expect(await within(timeline).findByText('incremental delta message')).toBeTruthy()
+    expect(harness.service.History).toHaveBeenCalledTimes(historyCalls)
+
+    await act(async () => {
+      harness.eventHandlers.get('matrix:batch_update')?.({
+        data: {
+          new_messages: [],
+          read_receipts: [{
+            roomId: room.id,
+            eventId: '$incremental',
+            timestamp: 500,
+          }],
+          typing_updates: [],
+          room_deltas: [{
+            update: {
+              rooms: [{ ...room, lastEventId: '$incremental', lastEventAt: 400, lastSeen: 400, lastEventSeenAt: 500 }],
+              changedRoomId: [room.id],
+              timelineChangedRoomId: [room.id],
+              typingUsers: {},
+              notifications: [],
+              error: '',
+              initialSyncComplete: true,
+              needsVerification: false,
+              connectionState: 'connected',
+            },
+          }],
+        },
+      })
+      await Promise.resolve()
+    })
+
+    expect(await screen.findByText(/Seen at/)).toBeTruthy()
+    expect(harness.service.History).toHaveBeenCalledTimes(historyCalls)
+  })
+
+  it('applies edited_messages in place without reloading full History', async () => {
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const historyCalls = harness.service.History.mock.calls.length
+    const timeline = screen.getByRole('region', { name: 'Message timeline' })
+
+    await act(async () => {
+      harness.eventHandlers.get('matrix:batch_update')?.({
+        data: {
+          new_messages: [{ roomId: room.id, message: message('$edit-target', 'before edit', 410) }],
+          edited_messages: null,
+          read_receipts: [],
+          typing_updates: [],
+          room_deltas: [],
+        },
+      })
+      await Promise.resolve()
+    })
+    expect(await within(timeline).findByText('before edit')).toBeTruthy()
+
+    await act(async () => {
+      harness.eventHandlers.get('matrix:batch_update')?.({
+        data: {
+          new_messages: [],
+          edited_messages: [{
+            roomId: room.id,
+            message: { ...message('$edit-target', 'after edit', 410), edited: true, editHistory: ['before edit'] },
+          }],
+          read_receipts: [],
+          typing_updates: [],
+          room_deltas: [],
+        },
+      })
+      await Promise.resolve()
+    })
+
+    expect(await within(timeline).findByText('after edit')).toBeTruthy()
+    expect(harness.service.History).toHaveBeenCalledTimes(historyCalls)
+  })
+
+  it('applies reaction_deltas and redacted_event_ids in place without reloading full History', async () => {
+    render(<App />)
+    expect(await screen.findByText('latest message')).toBeTruthy()
+    const historyCalls = harness.service.History.mock.calls.length
+    const timeline = screen.getByRole('region', { name: 'Message timeline' })
+
+    await act(async () => {
+      harness.eventHandlers.get('matrix:batch_update')?.({
+        data: {
+          new_messages: [{ roomId: room.id, message: message('$delta-target', 'target message', 420) }],
+          edited_messages: null,
+          redacted_event_ids: null,
+          reaction_deltas: null,
+          read_receipts: [],
+          typing_updates: [],
+          room_deltas: [],
+        },
+      })
+      await Promise.resolve()
+    })
+    expect(await within(timeline).findByText('target message')).toBeTruthy()
+
+    await act(async () => {
+      harness.eventHandlers.get('matrix:batch_update')?.({
+        data: {
+          new_messages: [],
+          reaction_deltas: [{
+            roomId: room.id,
+            eventId: '$delta-target',
+            reactions: { '🎉': 3 },
+            reacted: { '🎉': true },
+          }],
+          read_receipts: [],
+          typing_updates: [],
+          room_deltas: [],
+        },
+      })
+      await Promise.resolve()
+    })
+    expect(await within(timeline).findByText('🎉 3')).toBeTruthy()
+    expect(harness.service.History).toHaveBeenCalledTimes(historyCalls)
+
+    await act(async () => {
+      harness.eventHandlers.get('matrix:batch_update')?.({
+        data: {
+          new_messages: [],
+          redacted_event_ids: [{ roomId: room.id, eventId: '$delta-target', redactedBy: '$mod' }],
+          read_receipts: [],
+          typing_updates: [],
+          room_deltas: [],
+        },
+      })
+      await Promise.resolve()
+    })
+    expect(await within(timeline).findByText('Message removed')).toBeTruthy()
+    expect(harness.service.History).toHaveBeenCalledTimes(historyCalls)
   })
 })

@@ -53,6 +53,119 @@ func TestScheduledJobWithoutAccountIDBelongsToPrimaryAccount(t *testing.T) {
 	}
 }
 
+func TestScheduledDispatchKeepsLaterMessagesPendingWhileBusy(t *testing.T) {
+	store, err := newScheduledJobStore(filepath.Join(t.TempDir(), "scheduled-jobs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dueAt := time.Now().Add(time.Hour)
+	later, err := store.scheduleMessage(primaryAccountID, "!room:example.org", "second", dueAt.UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	earliest, err := store.scheduleMessage(primaryAccountID, "!room:example.org", "first", dueAt.Add(-time.Minute).UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.jobs = append(store.jobs, ScheduledJob{
+		ID: "due-reminder", AccountID: primaryAccountID, Kind: scheduledReminderKind,
+		DueAt: time.Now().Add(-time.Second).UnixMilli(), Status: scheduledPending,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	var reminder ScheduledJob
+	service := &AppService{ctx: ctx, scheduled: store, emitReminder: func(job ScheduledJob) { reminder = job }}
+	defer func() {
+		cancel()
+		service.workers.Wait()
+	}()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	firstSender := &scheduledSenderProbe{complete: func() error {
+		close(started)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}}
+	nextSender := &scheduledSenderProbe{}
+	service.startDueScheduledMessage(primaryAccountID, firstSender, dueAt.UnixMilli())
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first scheduled send did not start")
+	}
+	for range 3 {
+		service.startDueScheduledMessage(primaryAccountID, nextSender, dueAt.UnixMilli())
+	}
+	service.processDueScheduledJobs()
+	if reminder.ID != "due-reminder" || reminder.Status != scheduledFired {
+		t.Fatalf("reminder did not fire while sending: %+v", reminder)
+	}
+	jobs := store.list()
+	if len(jobs) != 3 || jobs[1].ID != earliest.ID || jobs[1].Status != scheduledSending ||
+		jobs[2].ID != later.ID || jobs[2].Status != scheduledPending {
+		t.Fatalf("expected only the earliest message to be in flight, got %+v", jobs)
+	}
+	close(release)
+	service.workers.Wait()
+	if firstSender.messageCalls != 1 || nextSender.messageCalls != 0 {
+		t.Fatalf("dispatch overlapped: first = %d, next = %d", firstSender.messageCalls, nextSender.messageCalls)
+	}
+	service.loggingOut.Store(true)
+	service.startDueScheduledMessage(primaryAccountID, nextSender, dueAt.UnixMilli())
+	service.workers.Wait()
+	if nextSender.messageCalls != 0 {
+		t.Fatal("scheduler sent a new message during logout")
+	}
+	service.loggingOut.Store(false)
+	service.startDueScheduledMessage(primaryAccountID, nextSender, dueAt.UnixMilli())
+	service.workers.Wait()
+	if nextSender.messageCalls != 1 || len(store.list()) != 1 {
+		t.Fatalf("pending message did not send after the worker became free: calls = %d, jobs = %+v", nextSender.messageCalls, store.list())
+	}
+}
+
+func TestScheduledDispatchCancellationLeavesUnclaimedMessagesPending(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scheduled-jobs.json")
+	store, err := newScheduledJobStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dueAt := time.Now().Add(time.Hour)
+	first, err := store.scheduleMessage(primaryAccountID, "!room:example.org", "first", dueAt.UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.scheduleMessage(primaryAccountID, "!room:example.org", "second", dueAt.Add(time.Minute).UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	service := &AppService{ctx: ctx, scheduled: store}
+	sender := &scheduledSenderProbe{complete: func() error {
+		cancel()
+		return ctx.Err()
+	}}
+	now := dueAt.Add(time.Minute).UnixMilli()
+	service.startDueScheduledMessage(primaryAccountID, sender, now)
+	service.workers.Wait()
+	service.startDueScheduledMessage(primaryAccountID, sender, now)
+	service.workers.Wait()
+	reopened, err := newScheduledJobStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := reopened.list()
+	if sender.messageCalls != 1 || len(jobs) != 2 ||
+		jobs[0].ID != first.ID || jobs[0].Status != scheduledFailed || jobs[0].TransactionID != "scheduled-txn" ||
+		jobs[1].ID != second.ID || jobs[1].Status != scheduledPending || jobs[1].TransactionID != "" {
+		t.Fatalf("cancellation did not preserve the unsent queue: calls = %d, jobs = %+v", sender.messageCalls, jobs)
+	}
+}
+
 type scheduledSenderProbe struct {
 	messageCalls  int
 	replyCalls    int

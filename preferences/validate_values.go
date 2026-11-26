@@ -74,7 +74,7 @@ func validatePreference(key string, value any, languages LanguageLookup) error {
 	if strings.HasPrefix(key, "ai.feature.") {
 		return validateAIFeaturePreference(key, value)
 	}
-	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted.", "room.needs_reply.", "room.tone_guard."} {
+	for _, prefix := range []string{"room.archived.", "room.favorite.", "room.muted.", "room.needs_reply."} {
 		if strings.HasPrefix(key, prefix) {
 			if strings.TrimPrefix(key, prefix) == "" {
 				return errors.New("room preference requires a room ID")
@@ -87,7 +87,7 @@ func validatePreference(key string, value any, languages LanguageLookup) error {
 	}
 	switch key {
 	case "appearance.compact", "appearance.hide_deleted_messages", "appearance.hide_images_and_videos", "appearance.message_animations", "appearance.pointer_cursor", "appearance.show_avatars", "appearance.show_timestamps", "appearance.time_24_hour", "appearance.relative_timestamps",
-		"clipboard.copy_timestamp", "composer.arrow_up_focus_timeline", "composer.ctrl_enter", "composer.ghost_text", "composer.keep_drafts", "composer.spellcheck", "messages.url_previews", "messages.url_previews_encrypted", "notifications.enabled", "notifications.only_when_unfocused", "notifications.sound",
+		"clipboard.copy_timestamp", "composer.arrow_up_focus_timeline", "composer.ctrl_enter", "composer.ghost_text", "composer.keep_drafts", "messages.url_previews", "messages.url_previews_encrypted", "notifications.enabled", "notifications.only_when_unfocused", "notifications.sound",
 		"sidebar.compact_chat_list", "sidebar.show_previews", "sidebar.show_unread_counts", "window.minimize_to_tray", "window.room_details_visible", "window.sidebar_visible", "system.launch_at_startup", "voice.autoplay_next",
 		"notifications.direct", "notifications.mentions", "notifications.group", "notifications.otp_immediate", "notifications.otp_copy", "sidebar.transparent", "sidebar.network_icons", "reactions.quick_enabled", "window.start_minimized", "window.quit_on_close", "window.menu_bar_icon", "downloads.ask_each_time", "appearance.balanced_text", "appearance.low_spec_mode", "emoji.autocomplete", "emoji.replace_emoticons", "privacy.incognito", "archive.automatic", "ai.detect_chat_language":
 		if _, ok := value.(bool); !ok {
@@ -273,6 +273,14 @@ func validatePreference(key string, value any, languages LanguageLookup) error {
 	case "history.initial_messages":
 		if !oneOf(value, "25", "50", "100", "250", "500", "1000") {
 			return errors.New("history.initial_messages has an unsupported value")
+		}
+	case "storage.media_max_size_mb":
+		if !oneOf(value, "", "256", "512", "1024", "2048", "4096") {
+			return errors.New("storage.media_max_size_mb has an unsupported value")
+		}
+	case "storage.media_max_age_days":
+		if !oneOf(value, "", "7", "30", "90", "365") {
+			return errors.New("storage.media_max_age_days has an unsupported value")
 		}
 	default:
 		return fmt.Errorf("unknown preference %q", key)

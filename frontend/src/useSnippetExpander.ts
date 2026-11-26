@@ -11,7 +11,7 @@ interface SnippetUndo {
 }
 
 export interface UseSnippetExpanderOptions {
-  value: string
+  getValue: () => string
   snippets: Snippet[]
   roomID: string
   inputRef: { current: HTMLTextAreaElement | null }
@@ -26,25 +26,29 @@ export function useSnippetExpander(options: UseSnippetExpanderOptions) {
   const [caret, setCaret] = useState<number | null>(null)
   const latestOptions = useRef(options)
   latestOptions.current = options
-  const valueRef = useRef(options.value)
-  valueRef.current = options.value
+  const valueRef = useRef(options.getValue())
+  valueRef.current = options.getValue()
   const undoRef = useRef<SnippetUndo | null>(null)
   const expansionRequestRef = useRef(0)
   const caretPlacementRef = useRef<{ text: string; caret: number } | null>(null)
   const suggestions = match ? matchingSnippets(options.snippets, match) : []
 
-  useLayoutEffect(() => {
+  function flushCaret(currentValue: string) {
     const placement = caretPlacementRef.current
     if (!placement) return
-    if (options.value !== placement.text) {
+    if (currentValue !== placement.text) {
       caretPlacementRef.current = null
       return
     }
-    const input = options.inputRef.current
+    const input = latestOptions.current.inputRef.current
     if (!input) return
     caretPlacementRef.current = null
     input.focus()
     input.setSelectionRange(placement.caret, placement.caret)
+  }
+
+  useLayoutEffect(() => {
+    flushCaret(latestOptions.current.getValue())
   })
 
   useEffect(() => () => {
@@ -167,6 +171,7 @@ export function useSnippetExpander(options: UseSnippetExpanderOptions) {
     suggestions,
     activeIndex,
     visible: suggestions.length > 0,
+    flushCaret,
     setActiveIndex,
     handleChange,
     handleClick: updateMatch,

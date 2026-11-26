@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import './i18n'
 import { AppService } from '../bindings/mychat/desktop'
 import type { Verification } from '../bindings/mychat/desktop/models.js'
-import { DialogSurface } from './DialogSurface'
+import { DialogScrim, DialogSurface } from './DialogSurface'
 import { describeError } from './appShared'
 import { useState } from 'react'
 
@@ -50,8 +50,8 @@ export function VerificationDialog({ verification }: { verification: Verificatio
     : t(verificationMessageKey(verification), { userId: verification.userId })
 
   return (
-    <div className="room-info-scrim verification-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) void dismiss() }}>
-      <DialogSurface className="room-info-dialog verification-dialog" labelledBy="verification-title" onClose={() => void dismiss()} onClick={(event) => event.stopPropagation()}>
+    <DialogScrim variant="modal" className="verification-scrim" onDismiss={() => void dismiss()}>
+      <DialogSurface className="dialog-modal-card verification-dialog" labelledBy="verification-title" onClose={() => void dismiss()}>
         <header className="room-info-header">
           <div><span className="eyebrow">{t('verification.eyebrow')}</span><h2 id="verification-title">{t('verification.title')}</h2></div>
           {verification.phase !== 'done' && verification.phase !== 'cancelled' && (
@@ -89,6 +89,6 @@ export function VerificationDialog({ verification }: { verification: Verificatio
           {(verification.phase === 'done' || verification.phase === 'cancelled') && <button className="primary-button" type="button" disabled={busy} onClick={() => void dismiss()}>{busy ? t('verification.closing') : t('verification.close')}<Check size={15} /></button>}
         </footer>
       </DialogSurface>
-    </div>
+    </DialogScrim>
   )
 }

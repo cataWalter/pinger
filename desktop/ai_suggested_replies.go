@@ -86,6 +86,7 @@ func (s *AppService) AISuggestReplies(roomID, requestID string) (SuggestedReplie
 	if err != nil {
 		return SuggestedReplies{}, err
 	}
+	route = s.trackAIRoute(route)
 	explanation, languages := suggestedReplyLanguages(preferences, roomID)
 	tuning := aiFeatureTuningFor(preferences, aiFeatureSuggestedReplies)
 	ctx, release := s.beginAIRoomRun(requestID)
@@ -115,6 +116,7 @@ func (s *AppService) AIGenerateReplyDraft(roomID, requestID string) (string, err
 	if err != nil {
 		return "", err
 	}
+	route = s.trackAIRoute(route)
 	tuning := aiFeatureTuningFor(preferences, aiFeatureSuggestedReplies)
 	ctx, release := s.beginAIRoomRun(requestID)
 	defer release()

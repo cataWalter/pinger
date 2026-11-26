@@ -52,6 +52,24 @@ afterEach(() => {
 })
 
 describe('settings storage, integrations, help, and about', () => {
+  it('lets users retry previous account cleanup even when storage usage fails', async () => {
+    const user = userEvent.setup()
+    harness.service.AccountCleanupPending.mockResolvedValueOnce(true)
+    harness.service.MediaCacheUsage.mockRejectedValueOnce(new Error('Media usage unavailable'))
+    harness.service.RetryAccountCleanup.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    await user.click(await screen.findByRole('tab', { name: 'Storage' }))
+    expect(await screen.findByText('Media usage unavailable')).toBeTruthy()
+    const retry = await screen.findByRole('button', { name: 'Retry previous account cleanup' })
+    await user.click(retry)
+    expect(await screen.findByText(/Cleanup is still pending/)).toBeTruthy()
+    await user.click(retry)
+    expect(await screen.findByText('Previous account data was cleaned up.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Retry previous account cleanup' })).toBeNull()
+  })
+
   let confirmSpy: { mockRestore: () => void; } | undefined
 
   let snippetDownloadClickSpy: { mockRestore: () => void; } | undefined
@@ -190,6 +208,7 @@ describe('settings storage, integrations, help, and about', () => {
     const best = searchSettings('unread')[0]
     await waitFor(() => expect(screen.getByRole('tab', { name: best.tab }).getAttribute('aria-selected')).toBe('true'))
     expect(screen.queryByRole('region', { name: 'Settings search results' })).toBeNull()
+    expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: /Show unread counts/ }))
   })
 
   it('moves between settings search results with the arrow keys', async () => {
@@ -231,8 +250,8 @@ describe('settings storage, integrations, help, and about', () => {
     const composer = await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
     fireEvent.change(composer, { target: { value: 'say hello', selectionStart: 4, selectionEnd: 9 } })
 
-    const formatting = await screen.findByRole('group', { name: 'Formatting' })
-    expect(screen.queryByRole('button', { name: 'Formatting' })).toBeNull()
+    await user.click(await screen.findByRole('button', { name: 'Formatting' }))
+    const formatting = await screen.findByRole('toolbar', { name: 'Formatting' })
     await user.click(within(formatting).getByRole('button', { name: 'Bold' }))
     await waitFor(() => expect(composer.value).toBe('say **hello**'))
     await waitFor(() => expect(document.activeElement).toBe(composer))
@@ -295,20 +314,22 @@ describe('settings storage, integrations, help, and about', () => {
     }
   })
 
-  it('keeps every composer tool in one row of labelled groups with no hidden menus', async () => {
+  it('keeps all AI tools visible without an overlay and toggles formatting tools', async () => {
+    const user = userEvent.setup()
     render(<App />)
     await screen.findByRole('textbox', { name: 'Message' })
 
     const aiTools = await screen.findByRole('group', { name: 'AI tools' })
     const messageTools = await screen.findByRole('group', { name: 'Message tools' })
-    const formattingTools = within(messageTools).getByRole('group', { name: 'Formatting' })
     const contentTools = within(messageTools).getByRole('group', { name: 'Add content' })
     const deliveryTools = within(messageTools).getByRole('group', { name: 'Delivery' })
-    expect(within(formattingTools).getByRole('button', { name: 'Bold' }).querySelector('.composer-tool-caption')?.textContent).toBe('Bold')
     expect(within(aiTools).getByRole('button', { name: 'Analyze draft with Language Tutor' })).toBeTruthy()
-    expect(within(aiTools).getByRole('button', { name: 'Generate image from draft' })).toBeTruthy()
     expect(within(aiTools).getByRole('button', { name: 'Suggest replies' })).toBeTruthy()
+    expect(within(aiTools).getByRole('button', { name: 'Improve draft with AI' })).toBeTruthy()
+    expect(within(aiTools).getByRole('button', { name: 'Continue conversation' })).toBeTruthy()
+    expect(within(aiTools).getByRole('button', { name: 'Generate image from draft' })).toBeTruthy()
     expect(within(aiTools).getByRole('button', { name: 'Summarize with AI' })).toBeTruthy()
+    expect(within(aiTools).queryByRole('button', { name: 'More AI tools' })).toBeNull()
     expect(within(aiTools).queryByRole('button', { name: 'Analyze chat topics' })).toBeNull()
     expect(within(aiTools).queryByRole('button', { name: 'Analyze conversation' })).toBeNull()
     expect(within(aiTools).queryByRole('button', { name: 'Attach file' })).toBeNull()
@@ -317,8 +338,11 @@ describe('settings storage, integrations, help, and about', () => {
     expect(within(deliveryTools).getByRole('button', { name: 'Record voice note' })).toBeTruthy()
     expect(within(deliveryTools).getByRole('button', { name: 'Record video message' })).toBeTruthy()
     expect((within(deliveryTools).getByRole('button', { name: 'Schedule message' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.queryByRole('button', { name: 'Formatting' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Delivery options' })).toBeNull()
     expect(screen.queryByRole('toolbar', { name: 'Formatting' })).toBeNull()
+
+    await user.click(within(messageTools).getByRole('button', { name: 'Formatting' }))
+    const formattingToolbar = await screen.findByRole('toolbar', { name: 'Formatting' })
+    expect(within(formattingToolbar).getByRole('button', { name: 'Bold' }).querySelector('.composer-tool-caption')?.textContent).toBe('Bold')
   })
 })

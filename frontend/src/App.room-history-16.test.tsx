@@ -188,7 +188,9 @@ describe('room history updates', () => {
     expect(within(filters).getByText('Unanswered')).toBeTruthy()
     expect(within(filters).getByText('AI chats')).toBeTruthy()
     const categories = within(filters).getByRole('group', { name: 'Room categories' })
-    expect(categories.querySelectorAll('button svg')).toHaveLength(3)
+    expect(categories.querySelectorAll('button svg')).toHaveLength(2)
+    const visibility = within(filters).getByRole('group', { name: 'Room visibility' })
+    expect(visibility.querySelectorAll('button svg')).toHaveLength(4)
   })
 
   it('adds a chat to Favorites from the room menu', async () => {

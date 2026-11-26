@@ -56,7 +56,6 @@ var aiFeatureIDs = map[string]bool{
 	"conversation_analysis": true,
 	"agent":                 true,
 	"chat_translation":      true,
-	"tone_guard":            true,
 }
 
 const (

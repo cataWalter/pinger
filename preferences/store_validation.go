@@ -152,6 +152,7 @@ func touchesAnyKey(writes []write, keys ...string) bool {
 // retiredPreferenceKeys lists exact keys written by features that have been removed.
 var retiredPreferenceKeys = map[string]bool{
 	"busy_mode.enabled":           true,
+	"composer.spellcheck":         true,
 	"ghostwriter.enabled":         true,
 	"ghostwriter.endpoint":        true,
 	"ghostwriter.provider":        true,
@@ -162,8 +163,10 @@ var retiredPreferenceKeys = map[string]bool{
 // retiredPreferencePrefixes lists key prefixes written by features that have been removed.
 var retiredPreferencePrefixes = []string{
 	"room.ghostwriter.",
+	"room.tone_guard.",
 	"ai.feature.ghostwriter.",
 	"ai.feature.contact_dossier.",
+	"ai.feature.tone_guard.",
 }
 
 func isRetiredPreferenceKey(key string) bool {

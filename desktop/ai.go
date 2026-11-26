@@ -9,7 +9,6 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
-	sharedpreferences "mychat/preferences"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -23,8 +22,6 @@ import (
 const (
 	aiCompletionTimeout    = 60 * time.Second
 	aiMaxCompletionTimeout = 10 * time.Minute
-	aiToneGuardTimeout     = 1200 * time.Millisecond
-	aiToneGuardMaxTokens   = 192
 	aiHealthTimeout        = 10 * time.Second
 	aiTranscriptionTimeout = 5 * time.Minute
 	aiTranscodeTimeout     = 2 * time.Minute
@@ -139,13 +136,6 @@ func aiChatCompletionWithThinking(ctx context.Context, client *http.Client, endp
 		return "", errors.New("AI endpoint returned no choices")
 	}
 	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
-}
-
-func aiToneGuardCompletion(ctx context.Context, client *http.Client, endpoint, model string, messages []AIMessage) (string, error) {
-	if err := sharedpreferences.ValidateLocalHTTPEndpoint(endpoint); err != nil {
-		return "", fmt.Errorf("Tone Guard requires a localhost HTTP endpoint: %w", err)
-	}
-	return aiChatCompletionWithOptions(ctx, client, endpoint, model, messages, aiToneGuardTimeout, aiToneGuardMaxTokens)
 }
 
 func aiAudioTranscription(ctx context.Context, client *http.Client, endpoint, model, prompt, filename, contentType string, audio []byte) (string, error) {

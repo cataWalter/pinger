@@ -114,6 +114,7 @@ func (s *AppService) AIComplete(messages []AIMessage, requestID string, temperat
 	if err != nil {
 		return "", err
 	}
+	route = s.trackAIRoute(route)
 	thinkingLevel := stringPreference(preferences, aiThinkingLevelPreference, aiThinkingLevelDefault)
 	ctx, release := s.aiRuns.begin(s.aiContext(), requestID)
 	defer release()
@@ -131,15 +132,6 @@ func (s *AppService) AIComplete(messages []AIMessage, requestID string, temperat
 // AICancel stops a running AI request.
 func (s *AppService) AICancel(requestID string) bool {
 	return s.aiRuns.cancel(requestID)
-}
-
-// CheckMessageTone classifies a draft using only a local loopback AI endpoint.
-func (s *AppService) CheckMessageTone(messages []AIMessage) (string, error) {
-	route, err := aiLocalRoute(s.preferenceValues())
-	if err != nil {
-		return "", err
-	}
-	return aiToneGuardCompletion(s.aiContext(), route.client, route.endpoint, route.model, messages)
 }
 
 // AITranscribeMedia transcribes cached Matrix audio with the local loopback AI endpoint. Audio never goes to an online provider.
@@ -202,13 +194,17 @@ func (s *AppService) TestAIEndpoint() error {
 		_, err = route.complete(ctx, []AIMessage{{Role: "user", Content: "Reply with OK."}}, aiCompletionOptions{MaxTokens: 16}, nil)
 		if errors.Is(err, errAIEmptyResponse) {
 			// The key and model were accepted. Some models use a small token budget on reasoning and return no text.
+			s.recordAIHealthOutcome(route.provider, route.endpoint, nil)
 			return nil
 		}
+		s.recordAIHealthOutcome(route.provider, route.endpoint, err)
 		return err
 	}
 	route, err := aiLocalRoute(preferences)
 	if err != nil {
 		return err
 	}
-	return aiHealthCheck(s.aiContext(), route.client, route.endpoint)
+	err = aiHealthCheck(s.aiContext(), route.client, route.endpoint)
+	s.recordAIHealthOutcome(route.provider, route.endpoint, err)
+	return err
 }

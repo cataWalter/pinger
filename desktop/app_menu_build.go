@@ -33,9 +33,9 @@ func (m *applicationMenus) applicationMenu() *application.Menu {
 	file.AddSeparator()
 	file.AddRole(application.CloseWindow)
 
-	// Undo is custom so Cmd+Z reaches the room undo when no text field has focus.
+	// Standard Edit roles let the native WebView handle text undo/redo without document.execCommand.
 	edit := menu.AddSubmenu("Edit")
-	edit.Add("Undo").SetAccelerator("CmdOrCtrl+z").OnClick(m.dispatch(menuActionUndo))
+	edit.AddRole(application.Undo)
 	edit.AddRole(application.Redo)
 	edit.AddSeparator()
 	edit.AddRole(application.Cut)
@@ -72,6 +72,7 @@ func (m *applicationMenus) applicationMenu() *application.Menu {
 	messages.AddSeparator()
 	room := messages.AddSubmenu("Room")
 	m.track(menuActionRoomAnswered, room.Add("Mark Room as Answered").OnClick(m.dispatch(menuActionRoomAnswered)))
+	room.Add("Undo Mark Answered").OnClick(m.dispatch(menuActionUndo))
 	m.track(menuActionRoomNeedsReply, room.Add("Add Room to Needs Reply").OnClick(m.dispatch(menuActionRoomNeedsReply)))
 	m.track(menuActionRoomRead, room.Add("Mark Room as Read").OnClick(m.dispatch(menuActionRoomRead)))
 	m.track(menuActionRoomArchive, room.Add("Archive Room").OnClick(m.dispatch(menuActionRoomArchive)))

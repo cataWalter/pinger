@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
-import * as appShared from './appShared'
+import * as notifications from './notifications'
 import { harness, room, message, openMessageMenu, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
@@ -211,10 +211,7 @@ describe('room history updates', () => {
   })
 
   it('refreshes the room preview after sending a message', async () => {
-    const updatedRoom = { ...room, preview: 'sent from the composer', lastEventSender: snapshot.profile.userId, lastEventAt: 400 }
-    harness.service.Snapshot
-      .mockResolvedValueOnce(snapshot)
-      .mockResolvedValueOnce({ ...snapshot, rooms: [updatedRoom] })
+    harness.service.Snapshot.mockResolvedValue(snapshot)
     const user = userEvent.setup()
     const { container } = render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
@@ -227,7 +224,7 @@ describe('room history updates', () => {
   })
 
   it('plays an outgoing chat sound when sounds are enabled for all messages', async () => {
-    const soundSpy = vi.spyOn(appShared, 'playNotificationSound')
+    const soundSpy = vi.spyOn(notifications, 'playNotificationSound')
     const user = userEvent.setup()
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'sounds.effects': 'Incoming and sent messages' } })
 
@@ -239,7 +236,7 @@ describe('room history updates', () => {
       await user.click(await screen.findByRole('button', { name: 'Send message' }))
 
       await waitFor(() => expect(harness.service.SendMessage).toHaveBeenCalledWith(room.id, 'hello'))
-      expect(soundSpy).toHaveBeenCalledWith(50, 'Soft')
+      await waitFor(() => expect(soundSpy).toHaveBeenCalledWith(50, 'Soft'))
     } finally {
       soundSpy.mockRestore()
     }

@@ -1,16 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUpRight, Copy, FileText, Sparkles, X, Download, ZoomIn, ZoomOut } from 'lucide-react'
+import { ArrowUpRight, Copy, Download, FileText, Image as ImageIcon, Play, RotateCcw, Sparkles, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
 import { type Message } from '../bindings/mychat/desktop/models.js'
 import { AI_ACTION_SHORTCUTS } from './aiSettings'
 import { matrixMediaPreviewURL, matrixMediaURL } from './ChatMediaRenderer'
-import { VoiceMessagePlayer } from './VoiceMessagePlayer'
+import { formatAudioTime, VoiceMessagePlayer } from './VoiceMessagePlayer'
 import { DialogSurface } from './DialogSurface'
 import { observeMediaVisibility } from './avatar'
 import { describeError } from './messages'
 import { formatBytes } from './format'
 import { primaryShiftShortcutLabel } from './actionMenu'
+
+function clampedAspectRatio(width: number, height: number, fallback?: string) {
+  if (width > 0 && height > 0) {
+    const ratio = Math.min(2.2, Math.max(0.55, width / height))
+    return `${ratio.toFixed(4)}`
+  }
+  return fallback
+}
+
+// Delays before automatically retrying a failed image preview. Newly arrived media can be briefly unavailable.
+const PREVIEW_RETRY_DELAYS_MS = [1500, 3000, 8000]
 
 export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEnabled, chatLanguage = '', canUseDraft, onUseDraft }: {
   roomID: string
@@ -34,7 +45,13 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
   const [viewerOpen, setViewerOpen] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [copyFeedback, setCopyFeedback] = useState('')
+  const [imageLoaded, setImageLoaded] = useState(false)
   const [nearViewport, setNearViewport] = useState(false)
+  const [previewRetries, setPreviewRetries] = useState(0)
+  const [previewReload, setPreviewReload] = useState(0)
+  const [previewRetrying, setPreviewRetrying] = useState(false)
+  const [previewFailed, setPreviewFailed] = useState(false)
+  const previewTimerRef = useRef(0)
   const attachmentRef = useRef<HTMLDivElement>(null)
   const sourceRef = useRef('')
   const mountedRef = useRef(false)
@@ -52,13 +69,19 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
     return () => {
       mountedRef.current = false
       sourceRef.current = ''
+      window.clearTimeout(previewTimerRef.current)
     }
   }, [])
 
   useEffect(() => {
     sourceRef.current = ''
     setSource('')
+    setImageLoaded(false)
     setError('')
+    window.clearTimeout(previewTimerRef.current)
+    setPreviewRetries(0)
+    setPreviewRetrying(false)
+    setPreviewFailed(false)
   }, [roomID, message.id])
 
   useEffect(() => {
@@ -91,7 +114,38 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
     if (!isImage || nearViewport || !sourceRef.current) return
     sourceRef.current = ''
     setSource('')
+    window.clearTimeout(previewTimerRef.current)
+    setPreviewRetries(0)
+    setPreviewRetrying(false)
+    setPreviewFailed(false)
   }, [isImage, nearViewport, source])
+  const imageAspectRatio = clampedAspectRatio(message.mediaWidth, message.mediaHeight)
+  const videoAspectRatio = clampedAspectRatio(message.mediaWidth, message.mediaHeight, '16 / 9')
+  const videoDurationLabel = message.mediaDurationMs > 0 ? formatAudioTime(Math.floor(message.mediaDurationMs / 1000)) : ''
+
+  const previewSrc = previewReload > 0 ? `${matrixMediaPreviewURL(roomID, message.id)}&reload=${previewReload}` : matrixMediaPreviewURL(roomID, message.id)
+
+  function handlePreviewError() {
+    if (previewRetries >= PREVIEW_RETRY_DELAYS_MS.length) {
+      setPreviewFailed(true)
+      setError('This image could not be loaded.')
+      return
+    }
+    setPreviewRetrying(true)
+    window.clearTimeout(previewTimerRef.current)
+    previewTimerRef.current = window.setTimeout(() => {
+      setPreviewRetrying(false)
+      setPreviewRetries((retries) => retries + 1)
+      setPreviewReload((reload) => reload + 1)
+    }, PREVIEW_RETRY_DELAYS_MS[previewRetries])
+  }
+
+  function retryPreview() {
+    setError('')
+    setPreviewFailed(false)
+    setPreviewRetries(0)
+    setPreviewReload((reload) => reload + 1)
+  }
 
   async function prepareMedia() {
     if (source) return source
@@ -212,7 +266,7 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
   }
 
   return (
-    <div ref={attachmentRef} className={`message-attachment ${isAudio ? 'audio-attachment' : ''} ${isImage ? 'is-image' : ''}`}>
+    <div ref={attachmentRef} className={`message-attachment ${isAudio ? 'audio-attachment' : ''} ${isImage ? 'is-image' : ''} ${isVideo ? 'is-video' : ''}`}>
       {isAudio && <VoiceMessagePlayer key={message.id} label={filename} waveformKey={message.mediaUri} durationMs={message.mediaDurationMs} sizeBytes={message.mediaSize} source={source} autoPlay={autoPlayNext} onRequestSource={prepareMedia} onEnded={onAudioEnded} />}
       {isAudio && <div className="audio-attachment-footer">
         <span className="audio-filename" title={filename}>{filename}</span>
@@ -240,22 +294,48 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
         <p>{transcription}</p>
         {transcriptCopyFeedback && <span className="audio-transcript-feedback" role="status">{transcriptCopyFeedback}</span>}
       </section>}
-      {!source && (isImage || isVideo) && <button className="media-load" type="button" title={loading ? 'Loading media' : `Load ${filename}`} disabled={loading} onClick={() => void prepareMedia()}>
-        <Download size={14} />{loading ? 'Loading media…' : isImage ? `Preview ${filename}` : 'Load video'}
-        {message.mediaSize > 0 && <span>{formatBytes(message.mediaSize)}</span>}
-      </button>}
-      {error && <span className="media-error" role="status">{error}</span>}
-      {source && isImage && <>
-        <button className="media-preview-button" type="button" aria-label={`Open image ${filename}`} title={`Open image ${filename}`} onClick={() => void openImage()}>
-          <img className="media-preview" src={matrixMediaPreviewURL(roomID, message.id)} alt={filename} loading="lazy" onError={() => setError('This image could not be loaded.')} />
+      {!source && isImage && (
+        <button className="media-load media-placeholder-card" type="button" style={imageAspectRatio ? { aspectRatio: imageAspectRatio } : undefined} title={loading ? 'Loading media' : `Load ${filename}`} disabled={loading} onClick={() => void prepareMedia()}>
+          <span className="media-placeholder-icon" aria-hidden="true"><ImageIcon size={22} /></span>
+          <strong className="media-placeholder-title">{loading ? 'Loading image…' : `Preview ${filename}`}</strong>
+          {message.mediaSize > 0 && <span className="media-placeholder-meta">{formatBytes(message.mediaSize)}</span>}
         </button>
-        <div className="media-toolbar"><button className="media-download" type="button" aria-label={`Download ${filename}`} onClick={() => void downloadFile()}><Download size={13} />Download</button>{savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}</div>
-      </>}
-      {source && isVideo && <>
-        <video className="media-player" controls preload="metadata" src={source} aria-label={filename} onError={() => setError('This video could not be played.')} />
-        <button className="media-download" type="button" onClick={() => void downloadFile()}><Download size={13} />Download {filename}</button>
-        {savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}
-      </>}
+      )}
+      {!source && isVideo && (
+        <button className="media-load media-video-poster" type="button" style={{ aspectRatio: videoAspectRatio }} aria-label={loading ? `Loading video ${filename}` : `Load video ${filename}`} title={loading ? 'Loading video' : `Play ${filename}`} disabled={loading} onClick={() => void prepareMedia()}>
+          <span className="media-video-poster-scrim" aria-hidden="true" />
+          <span className="media-video-play-badge" aria-hidden="true">
+            {loading ? <span className="loading-mark" /> : <Play size={22} fill="currentColor" />}
+          </span>
+          <div className="media-video-poster-bar">
+            <strong className="media-video-poster-title">{loading ? 'Loading video…' : filename}</strong>
+            {(videoDurationLabel || message.mediaSize > 0) && (
+              <span className="media-video-poster-meta">
+                {[videoDurationLabel, message.mediaSize > 0 ? formatBytes(message.mediaSize) : ''].filter(Boolean).join(' · ')}
+              </span>
+            )}
+          </div>
+        </button>
+      )}
+      {error && <span className="media-error" role="status">{error}</span>}
+      {source && isImage && <div className={`media-frame is-image${imageLoaded ? ' is-loaded' : ''}`} style={imageAspectRatio ? { aspectRatio: imageAspectRatio } : undefined}>
+        {previewRetrying && <div className="media-status-card" role="status"><span className="loading-mark" />Retrying image…</div>}
+        {previewFailed && <button className="media-load media-retry-card" type="button" onClick={retryPreview}><RotateCcw size={15} />Retry image</button>}
+        {!previewRetrying && !previewFailed && <button className="media-preview-button" type="button" aria-label={`Open image ${filename}`} title={`Open image ${filename}`} onClick={() => void openImage()}>
+          <img className="media-preview" src={previewSrc} alt={filename} loading="lazy" onLoad={() => setImageLoaded(true)} onError={handlePreviewError} />
+        </button>}
+        <div className={`media-toolbar${savedPath ? ' has-status' : ''}`}>
+          <button className="media-download" type="button" title={`Download ${filename}`} aria-label={`Download ${filename}`} onClick={() => void downloadFile()}><Download size={13} />Save</button>
+          {savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}
+        </div>
+      </div>}
+      {source && isVideo && <div className="media-frame is-video">
+        <video className="media-player" controls autoPlay playsInline preload="metadata" src={source} aria-label={filename} onError={() => setError('This video could not be played.')} />
+        <div className={`media-toolbar${savedPath ? ' has-status' : ''}`}>
+          <button className="media-download" type="button" title={`Download ${filename}`} aria-label={`Download ${filename}`} onClick={() => void downloadFile()}><Download size={13} />Save</button>
+          {savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}
+        </div>
+      </div>}
       {!isImage && !isAudio && !isVideo && <div className="file-card">
         <span className="file-card-icon"><FileText size={17} /></span>
         <span className="file-card-copy"><strong title={filename}>{filename}</strong><small>{fileType}{message.mediaSize > 0 && ` · ${formatBytes(message.mediaSize)}`}</small>{savedPath && <small className="media-download-status" role="status">{renderSavedFile()}</small>}</span>
@@ -268,6 +348,7 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
               <strong>{filename}</strong>
               <div>
                 <button className="icon-button" type="button" title="Zoom out" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => setZoom((current) => Math.max(1, current / 1.25))}><ZoomOut size={15} /></button>
+                <button className="media-viewer-zoom" type="button" title="Reset zoom" aria-label="Reset zoom" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
                 <button className="icon-button" type="button" title="Zoom in" aria-label="Zoom in" disabled={zoom >= 4} onClick={() => setZoom((current) => Math.min(4, current * 1.25))}><ZoomIn size={15} /></button>
                 <button className="icon-button" type="button" title="Copy image" aria-label="Copy image" onClick={() => void copyImage()}><Copy size={14} /></button>
                 <button className="media-download" type="button" onClick={() => void downloadFile()}><Download size={14} />Download</button>
@@ -277,7 +358,7 @@ export function MessageMedia({ roomID, message, onAudioEnded, autoPlayNext, aiEn
             {copyFeedback && <span className="media-viewer-feedback" role="status">{copyFeedback}</span>}
             {savedPath && <span className="media-viewer-feedback" role="status">{renderSavedFile()}</span>}
             <div className="media-viewer-image-wrap">
-              <img className="media-viewer-image" src={source} alt={filename} style={{ maxWidth: zoom === 1 ? '100%' : 'none', maxHeight: zoom === 1 ? 'calc(100vh - 100px)' : 'none', transform: `scale(${zoom})` }} />
+              <img className="media-viewer-image" src={source} alt={filename} onDoubleClick={() => setZoom((current) => current > 1 ? 1 : 2)} style={{ maxWidth: zoom === 1 ? '100%' : 'none', maxHeight: zoom === 1 ? 'calc(100vh - 108px)' : 'none', transform: `scale(${zoom})` }} />
             </div>
           </DialogSurface>
         </div>,

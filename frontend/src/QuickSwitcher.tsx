@@ -1,7 +1,7 @@
 import { Search, X } from 'lucide-react'
 import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react'
 import type { Room } from '../bindings/mychat/desktop/models.js'
-import { DialogSurface } from './DialogSurface'
+import { DialogScrim, DialogSurface } from './DialogSurface'
 import { Avatar } from './appShared'
 
 export function QuickSwitcher({ results, query, activeIndex, inputRef, onQueryChange, onActiveIndexChange, onSelect, onClose }: {
@@ -32,7 +32,7 @@ export function QuickSwitcher({ results, query, activeIndex, inputRef, onQueryCh
   }
 
   return (
-    <div className="quick-switcher-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <DialogScrim variant="modal" className="quick-switcher-scrim" onDismiss={onClose}>
       <DialogSurface className="quick-switcher" label="Quick switcher" onClose={onClose}>
         <div className="quick-switcher-input"><Search size={17} /><input ref={inputRef} value={query} onChange={(event) => onQueryChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Search rooms" aria-label="Search rooms" autoComplete="off" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
           <button className="icon-button" type="button" aria-label="Close quick switcher" onClick={onClose}><X size={16} /></button>
@@ -46,6 +46,6 @@ export function QuickSwitcher({ results, query, activeIndex, inputRef, onQueryCh
           {results.length === 0 && <div className="quick-switcher-empty">No matching rooms</div>}
         </div>
       </DialogSurface>
-    </div>
+    </DialogScrim>
   )
 }

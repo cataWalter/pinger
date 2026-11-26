@@ -247,6 +247,40 @@ describe('room history updates', () => {
     expect(harness.service.SendReply).not.toHaveBeenCalled()
   })
 
+  it('confirms the destination before drafting an online reply and omits other messages', async () => {
+    const user = userEvent.setup()
+    const endpoint = 'https://example.org/v1'
+    harness.service.AIComplete.mockResolvedValue('A suggested reply')
+    harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: {
+      'ai.provider': 'online', 'ai.online.endpoint': endpoint, 'ai.online.consent_endpoint': endpoint, 'ai.online.model': 'test',
+    } })
+    harness.service.History.mockResolvedValue({ messages: [message('$previous', 'earlier context', 200), message('$latest', 'selected message', 300)], before: 0, hasMore: false })
+    const { container } = render(<App />)
+    await screen.findByText('selected message')
+    openMessageMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: 'Draft reply with AI' }))
+    const firstConfirm = await screen.findByRole('alertdialog', { name: 'Send Draft reply to online AI?' })
+    expect(firstConfirm.textContent).toContain(endpoint)
+    await user.click(within(firstConfirm).getByRole('button', { name: 'Cancel' }))
+    expect(harness.service.AIComplete).not.toHaveBeenCalled()
+
+    openMessageMenu(container)
+    await user.click(await screen.findByRole('menuitem', { name: 'Draft reply with AI' }))
+    const secondConfirm = await screen.findByRole('alertdialog', { name: 'Send Draft reply to online AI?' })
+    await user.click(within(secondConfirm).getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(harness.service.AIComplete).toHaveBeenCalledTimes(1))
+    const request = harness.service.AIComplete.mock.calls[0]?.[0]
+    expect(request?.[1].content).toContain('selected message')
+    expect(request?.[1].content).not.toContain('earlier context')
+
+    const dialog = await screen.findByRole('dialog', { name: 'Draft reply' })
+    await user.click(await within(dialog).findByRole('button', { name: 'Regenerate' }))
+    const thirdConfirm = await screen.findByRole('alertdialog', { name: 'Send Draft reply to online AI?' })
+    expect(thirdConfirm.textContent).toContain(`Draft reply will send the selected message and your instructions to ${endpoint}.`)
+    await user.click(within(thirdConfirm).getByRole('button', { name: 'Cancel' }))
+    expect(harness.service.AIComplete).toHaveBeenCalledTimes(1)
+  })
+
   it('does not request automatic AI text suggestions while typing', async () => {
     harness.service.Snapshot.mockResolvedValue({ ...snapshot, preferences: { 'ai.endpoint': 'http://localhost:8080' } })
     render(<App />)

@@ -84,6 +84,10 @@ func linuxWebviewGpuPolicyFor(preferences map[string]any) application.WebviewGpu
 func newApplication(service *AppService, frontend fs.FS, applicationIcon []byte, shutdown func(), backdrop application.MacBackdrop, browserArgs []string) *application.App {
 	staticAssets := application.AssetFileServerFS(frontend)
 	mediaAssets := newMediaAssetHandler(service)
+	webviewUserDataPath := ""
+	if service.smokeSnapshot != nil {
+		webviewUserDataPath = filepath.Join(service.dataDir, "webview")
+	}
 
 	app := application.New(application.Options{
 		Name:        "Pinger",
@@ -113,6 +117,7 @@ func newApplication(service *AppService, frontend fs.FS, applicationIcon []byte,
 		},
 		Windows: application.WindowsOptions{
 			AdditionalBrowserArgs: browserArgs,
+			WebviewUserDataPath:   webviewUserDataPath,
 		},
 		OnShutdown: shutdown,
 	})

@@ -56,6 +56,70 @@ export function displayMessageBody(message: Message) {
 // Matrix uses the filename as the body of an uncaptioned image. The inline preview already shows it.
 export const imageFileNameBodyPattern = /^\S+\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/i
 
+// Applies edit-derived fields only, so reactions, seen state, and other loaded details are preserved.
+export function applyEditedMessages(current: Message[], edits: Message[]) {
+  if (edits.length === 0) return current
+  const editsByID = new Map(edits.map((edit) => [edit.id, edit]))
+  let changed = false
+  const next = current.map((message) => {
+    const edit = editsByID.get(message.id)
+    if (!edit) return message
+    changed = true
+    return {
+      ...message,
+      body: edit.body,
+      formattedBody: edit.formattedBody,
+      edited: edit.edited,
+      editHistory: edit.editHistory,
+    }
+  })
+  return changed ? next : current
+}
+
+export function applyRedactedEvents(current: Message[], eventIDs: string[]) {
+  if (eventIDs.length === 0) return current
+  const targets = new Set(eventIDs)
+  let changed = false
+  const next = current.map((message) => {
+    if (!targets.has(message.id) || message.redacted) return message
+    changed = true
+    return {
+      ...message,
+      redacted: true,
+      body: '',
+      formattedBody: '',
+      mediaUri: '',
+      mediaType: '',
+      mediaName: '',
+      mediaThumbnailUri: '',
+      reactions: {},
+      reacted: {},
+      editHistory: [],
+      urlPreviews: [],
+      encrypted: false,
+      decryptionError: '',
+    }
+  })
+  return changed ? next : current
+}
+
+export function applyReactionDeltas(current: Message[], deltas: Array<{ eventId: string; reactions: Record<string, number>; reacted: Record<string, boolean> }>) {
+  if (deltas.length === 0) return current
+  const byID = new Map(deltas.map((delta) => [delta.eventId, delta]))
+  let changed = false
+  const next = current.map((message) => {
+    const delta = byID.get(message.id)
+    if (!delta) return message
+    changed = true
+    return {
+      ...message,
+      reactions: delta.reactions ?? {},
+      reacted: delta.reacted ?? {},
+    }
+  })
+  return changed ? next : current
+}
+
 export function mergeTimelineMessages(current: Message[], incoming: Message[]) {
   const merged = [...current]
   const indexes = new Map<string, number>()
@@ -73,11 +137,72 @@ export function mergeTimelineMessages(current: Message[], incoming: Message[]) {
       continue
     }
 
+    // Reconcile optimistic client-only messages (~optimistic-*) with the confirmed server/local copy.
+    if (!message.sending && message.id && !message.id.startsWith('~')) {
+      const optimisticIndex = merged.findIndex((candidate) =>
+        candidate.transactionId.startsWith('~optimistic-')
+        && candidate.sender === message.sender
+        && candidate.body === message.body,
+      )
+      if (optimisticIndex >= 0) {
+        merged[optimisticIndex] = { ...merged[optimisticIndex], ...message }
+        for (const key of keysFor(merged[optimisticIndex])) indexes.set(key, optimisticIndex)
+        continue
+      }
+    }
+
     const index = merged.push(message) - 1
     for (const key of keysFor(message)) indexes.set(key, index)
   }
 
   return merged.sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id))
+}
+
+export function createOptimisticMessage({
+  sender,
+  senderName,
+  body,
+  replyTo,
+}: {
+  sender: string
+  senderName: string
+  body: string
+  replyTo: Message | null
+}): Message {
+  const transactionId = `~optimistic-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+  return {
+    id: '',
+    transactionId,
+    sender,
+    senderName: senderName || sender,
+    avatar: '',
+    body,
+    formattedBody: '',
+    replyToEventId: replyTo?.id ?? '',
+    replyToSender: replyTo ? (replyTo.senderName || replyTo.sender) : '',
+    replyToPreview: replyTo?.body ?? '',
+    threadRootId: '',
+    timestamp: Date.now(),
+    seenAt: 0,
+    timelineCursor: 0,
+    sending: true,
+    sendError: '',
+    own: true,
+    reactions: {},
+    reacted: {},
+    mediaUri: '',
+    mediaType: '',
+    mediaMime: '',
+    mediaSize: 0,
+    mediaWidth: 0,
+    mediaHeight: 0,
+    mediaDurationMs: 0,
+    encrypted: false,
+    decryptionError: '',
+    edited: false,
+    editHistory: [],
+    redacted: false,
+  }
 }
 
 export function timelineMessageID(message: Message) {

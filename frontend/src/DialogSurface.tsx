@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MouseEventHandler, type ReactNode } from 'react'
+import { useEffect, useRef, type KeyboardEventHandler, type MouseEventHandler, type ReactNode } from 'react'
 
 // Dialogs inside a DialogPresence that is fading out no longer count as open.
 function openDialogElements(): HTMLElement[] {
@@ -7,6 +7,25 @@ function openDialogElements(): HTMLElement[] {
 
 export function hasOpenDialog(): boolean {
   return openDialogElements().length > 0
+}
+
+export function DialogScrim({ variant, className = '', onDismiss, onKeyDown, children }: {
+  variant: 'modal' | 'drawer'
+  className?: string
+  onDismiss?: () => void
+  onKeyDown?: KeyboardEventHandler<HTMLDivElement>
+  children: ReactNode
+}) {
+  return (
+    <div
+      className={`dialog-scrim dialog-scrim--${variant}${className ? ` ${className}` : ''}`}
+      role="presentation"
+      onMouseDown={onDismiss ? (event) => { if (event.target === event.currentTarget) onDismiss() } : undefined}
+      onKeyDown={onKeyDown}
+    >
+      {children}
+    </div>
+  )
 }
 
 export interface DialogSurfaceProps {

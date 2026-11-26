@@ -1,6 +1,7 @@
 package preferences
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -140,9 +141,19 @@ func (s *Store) Close() error {
 		}
 		s.subscribers = make(map[chan Change]struct{})
 		s.mu.Unlock()
-		err = s.db.Close()
+		err = errors.Join(
+			s.closeStatements(),
+			s.db.Close(),
+		)
 	})
 	return err
+}
+
+func closeStmt(stmt *sql.Stmt) error {
+	if stmt == nil {
+		return nil
+	}
+	return stmt.Close()
 }
 
 func (s *Store) watch() {
@@ -164,7 +175,7 @@ func (s *Store) watch() {
 
 func (s *Store) revision() (int64, error) {
 	var revision int64
-	if err := s.db.QueryRow("SELECT revision FROM preference_meta WHERE id = 1").Scan(&revision); err != nil {
+	if err := s.stmtReadRevision.QueryRow().Scan(&revision); err != nil {
 		return 0, fmt.Errorf("read preference revision: %w", err)
 	}
 	return revision, nil

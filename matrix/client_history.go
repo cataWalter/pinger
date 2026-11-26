@@ -175,7 +175,7 @@ func (c *Client) HistoryPageWithLimit(ctx context.Context, roomID string, before
 		}
 		c.mu.Unlock()
 	}
-	c.rememberMediaEncryption(messages)
+	c.rememberRoomMediaEncryption(roomID, messages)
 	c.populateMessageProfiles(ctx, roomID, messages)
 	c.enrichReplyPreviews(ctx, roomID, messages)
 	for i := range messages {

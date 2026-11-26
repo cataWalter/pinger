@@ -85,7 +85,6 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'notifications.sound-effects', tab: 'Notifications', title: 'Sound effects', description: 'Chat sounds play while Pinger is focused.', keywords: 'sound effects incoming outgoing received sent message' },
 
   { id: 'keyboard.ctrl-enter', tab: 'Keyboard', title: 'Use Ctrl + Enter to send', description: 'Send a message with Ctrl + Enter.', keywords: 'send enter composer' },
-  { id: 'keyboard.spellcheck', tab: 'Keyboard', title: 'Spellcheck messages', description: 'Check spelling while you type.', keywords: 'spellcheck spell check' },
   { id: 'keyboard.keep-drafts', tab: 'Keyboard', title: 'Keep unsent drafts after restarting', description: 'Save unsent messages on this device so they return after Pinger restarts. Turning this off removes saved drafts. On by default.', keywords: 'draft unsent message restore save persist composer' },
   { id: 'keyboard.emoji-autocomplete', tab: 'Keyboard', title: 'Suggest emoji for :shortcodes:', description: 'Complete :shortcodes: as you type.', keywords: 'emoji autocomplete shortcode' },
   { id: 'keyboard.emoticon-replacement', tab: 'Keyboard', title: 'Replace emoticons as you type', description: 'Turn :-) into an emoji while typing and when sending. On by default.', keywords: 'emoticon emoji replace' },
@@ -104,6 +103,8 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'storage.data-folder', tab: 'Storage', title: 'Data folder', description: 'Where Pinger keeps its database, keys and preferences.', keywords: 'data folder location directory move appdata storage restart' },
   { id: 'storage.summary', tab: 'Storage', title: 'Local storage', description: 'Sizes of the local database and media cache.', keywords: 'storage disk usage database cache', anchor: '.storage-summary' },
   { id: 'storage.clear-cache', tab: 'Storage', title: 'Clear media cache', description: 'Delete cached media files. Messages and keys are kept.', keywords: 'storage cache clear media delete' },
+  { id: 'storage.cache-limit', tab: 'Storage', title: 'Media cache size limit', description: 'Automatically trim oldest cached media files when total size exceeds this limit.', keywords: 'storage cache size limit automatic retention cleanup' },
+  { id: 'storage.cache-age', tab: 'Storage', title: 'Delete cached media older than', description: 'Automatically remove cached media files older than this age.', keywords: 'storage cache age expiration days automatic cleanup' },
   { id: 'storage.optimize', tab: 'Storage', title: 'Optimize database', description: 'Compact the local database to reclaim space.', keywords: 'storage database optimize compact' },
   { id: 'storage.by-chat', tab: 'Storage', title: 'Storage by chat', description: 'See how much space each chat uses and clean it up.', keywords: 'storage per chat room usage cleanup', anchor: '.chat-storage' },
   { id: 'storage.clear-matching', tab: 'Storage', title: 'Clear matching cached media', description: 'Remove cached media for the selected chats.', keywords: 'storage cleanup media age type' },
@@ -140,6 +141,16 @@ export const settingsEntries: SettingsEntry[] = [
   { id: 'about.feedback', tab: 'Help', title: 'Send feedback or report an issue', description: 'Open the issue tracker on GitHub.', keywords: 'about feedback issue github' },
   { id: 'about.license', tab: 'Help', title: 'License', description: 'Terms Pinger is released under.', keywords: 'about license agpl gpl', anchor: 'a[href*="LICENSE"]' },
 ]
+
+export function localizedSettingsEntries(translate: (key: string) => string) {
+  return settingsEntries.map((entry) => {
+    const tab = translate(`settings.tabs.${entry.tab.toLowerCase()}`)
+    const title = entry.id === 'general.language' ? translate('settings.language') : entry.title
+    const description = entry.id === 'general.language' ? translate('settings.languageHint') : entry.description
+    const aliases = [entry.keywords, tab !== entry.tab ? tab : '', title !== entry.title ? entry.title : ''].filter(Boolean)
+    return { ...entry, title, description, keywords: aliases.join(' ') }
+  })
+}
 
 function scoreEntry(entry: SettingsEntry, terms: string[]) {
   const title = entry.title.toLowerCase()

@@ -50,6 +50,9 @@ func imageGenerationError(err error) error {
 func (s *AppService) localAIChatStoreForUse() (*localAIChatStore, error) {
 	s.localAIChatMu.Lock()
 	defer s.localAIChatMu.Unlock()
+	if s.ctx != nil && s.ctx.Err() != nil {
+		return nil, s.ctx.Err()
+	}
 	if s.localAIChats != nil {
 		return s.localAIChats, nil
 	}

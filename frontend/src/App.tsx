@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { BootScreen, DeviceVerificationScreen, SignInScreen } from './AuthScreens'
 import { SettingsProvider } from './SettingsContext'
 import { accentCssVariables } from './accent'
@@ -7,6 +7,7 @@ import { preferenceBoolean, preferenceString } from './appShared'
 import { useSidebarWidth } from './sidebarWidth'
 import { useAppStateChain } from './appStateChain'
 import type { AppState } from './appState'
+import { AppDomainProviders } from './AppDomainContexts'
 import { AppSidebar } from './AppSidebar'
 import { ConversationHeader } from './ConversationHeader'
 import { ConversationWorkspace } from './ConversationWorkspace'
@@ -21,7 +22,21 @@ function AppBody() {
     document.documentElement.dataset.lowSpec = String(lowSpecMode)
   }, [lowSpecMode])
 
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${appZoom}%`
+    return () => {
+      document.documentElement.style.fontSize = ''
+    }
+  }, [appZoom])
+
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth()
+  const shellStyle = useMemo(() => ({
+    '--own-bubble': safeBubbleColor,
+    '--app-scale': String(appZoom / 100),
+    '--sidebar-width': sidebarWidth === null ? undefined : `${sidebarWidth}px`,
+    ...accentCssVariables(accentPalette),
+    ...themeCssVariables(themeChoice, accentPalette, safeBubbleColor),
+  } as React.CSSProperties), [accentPalette, appZoom, safeBubbleColor, sidebarWidth, themeChoice])
 
   if (!snapshot) return <BootScreen error={error} />
 
@@ -58,44 +73,39 @@ function AppBody() {
   const appState: AppState = { ...appChain, snapshot }
 
   return (
-    <main
-      className="app-shell"
-      onKeyDown={handleApplicationKeyDown}
-      data-file-drop-target=""
-      data-theme={themeChoice}
-      data-ui="desktop"
-      data-platform={/Mac|iPhone|iPad/.test(navigator.platform) ? 'macos' : 'other'}
-      data-theme-mode={themeModeForPreference(preferenceString(preferences, 'appearance.theme', SYSTEM_THEME_NAME), systemPrefersDark)}
-      data-mobile-pane={mobilePane}
-      data-content-blur={preferenceBoolean(preferences, 'privacy.incognito')}
-      data-message-animations={preferenceBoolean(preferences, 'appearance.message_animations', true)}
-      data-font-size={preferenceString(preferences, 'appearance.font_size', 'Medium').toLowerCase()}
-      data-wallpaper={preferenceString(preferences, 'appearance.chat_wallpaper', 'None').toLowerCase()}
-      data-room-previews={preferenceBoolean(preferences, 'sidebar.show_previews', true)}
-      data-unread-counts={preferenceBoolean(preferences, 'sidebar.show_unread_counts', true)}
-      data-compact-chat-list={preferenceBoolean(preferences, 'sidebar.compact_chat_list')}
-      data-pointer-cursor={preferenceBoolean(preferences, 'appearance.pointer_cursor', true)}
-      data-balanced-text={preferenceBoolean(preferences, 'appearance.balanced_text')}
-      style={{
-        '--own-bubble': safeBubbleColor,
-        '--app-zoom': `${appZoom}%`,
-        '--sidebar-width': sidebarWidth === null ? undefined : `${sidebarWidth}px`,
-        ...accentCssVariables(accentPalette),
-        ...themeCssVariables(themeChoice, accentPalette, safeBubbleColor),
-      } as React.CSSProperties}
-    >
-      <AppSidebar
-        app={appState}
-        sidebarWidth={sidebarWidth}
-        sidebarZoom={appZoom / 100}
-        onSidebarWidthChange={setSidebarWidth}
-      />
-      <section className="conversation" aria-label="Conversation">
-        <ConversationHeader app={appState} />
-        <ConversationWorkspace app={appState} />
-      </section>
-      <AppDialogs app={appState} />
-    </main>
+    <AppDomainProviders app={appState}>
+      <main
+        className="app-shell"
+        onKeyDown={handleApplicationKeyDown}
+        data-file-drop-target=""
+        data-theme={themeChoice}
+        data-ui="desktop"
+        data-platform={/Mac|iPhone|iPad/.test(navigator.platform) ? 'macos' : 'other'}
+        data-theme-mode={themeModeForPreference(preferenceString(preferences, 'appearance.theme', SYSTEM_THEME_NAME), systemPrefersDark)}
+        data-mobile-pane={mobilePane}
+        data-content-blur={preferenceBoolean(preferences, 'privacy.incognito')}
+        data-message-animations={preferenceBoolean(preferences, 'appearance.message_animations', true)}
+        data-font-size={preferenceString(preferences, 'appearance.font_size', 'Medium').toLowerCase()}
+        data-wallpaper={preferenceString(preferences, 'appearance.chat_wallpaper', 'None').toLowerCase()}
+        data-room-previews={preferenceBoolean(preferences, 'sidebar.show_previews', true)}
+        data-unread-counts={preferenceBoolean(preferences, 'sidebar.show_unread_counts', true)}
+        data-compact-chat-list={preferenceBoolean(preferences, 'sidebar.compact_chat_list')}
+        data-pointer-cursor={preferenceBoolean(preferences, 'appearance.pointer_cursor', true)}
+        data-balanced-text={preferenceBoolean(preferences, 'appearance.balanced_text')}
+        data-zoom={String(appZoom)}
+        style={shellStyle}
+      >
+        <AppSidebar
+          sidebarWidth={sidebarWidth}
+          onSidebarWidthChange={setSidebarWidth}
+        />
+        <section className="conversation" aria-label="Conversation">
+          <ConversationHeader />
+          <ConversationWorkspace />
+        </section>
+        <AppDialogs />
+      </main>
+    </AppDomainProviders>
   )
 }
 

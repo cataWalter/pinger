@@ -75,7 +75,7 @@ func (c *Client) ThreadMessages(ctx context.Context, roomID, rootID string) ([]M
 		}
 	}
 	c.mu.RUnlock()
-	c.rememberMediaEncryption(messages)
+	c.rememberRoomMediaEncryption(roomID, messages)
 	c.populateMessageProfiles(ctx, roomID, messages)
 	c.enrichReplyPreviews(ctx, roomID, messages)
 	for i := range messages {

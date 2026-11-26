@@ -243,7 +243,7 @@ export function VoiceMessagePlayer({ label, waveformKey, durationMs, sizeBytes, 
           ))}
         </div>
         <span className="audio-time audio-clock">{formatAudioTime(currentTime)} / {formatAudioTime(duration)}</span>
-        <button className="voice-speed" type="button" aria-label={`Playback speed ${rate}x`} title="Playback speed" onClick={cycleRate}>{rate}x</button>
+        <button className="voice-speed" type="button" aria-label={`Playback speed ${rate}x`} aria-live="polite" title="Playback speed" onClick={cycleRate}>{rate}x</button>
       </div>
       <audio
         ref={audioRef}

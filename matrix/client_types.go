@@ -127,12 +127,49 @@ type HistoryPage struct {
 type ConnectionState string
 
 // Update is emitted when gomuks has persisted sync data to its local database.
+type MessageItem struct {
+	RoomID  string
+	Message Message
+}
+
+type ReadReceiptItem struct {
+	RoomID    string
+	EventID   string
+	UserID    string
+	Timestamp int64
+}
+
+type RedactionItem struct {
+	RoomID     string
+	EventID    string
+	RedactedBy string
+}
+
+type ReactionDeltaItem struct {
+	RoomID    string
+	EventID   string
+	Reactions map[string]int
+	Reacted   map[string]bool
+}
+
+type TypingItem struct {
+	RoomID  string
+	UserIDs []string
+}
+
 type Update struct {
 	Rooms                 []Room
+	RoomsOmitted          bool
 	Invites               []Invite
 	SlidingSyncListCounts map[string]int
 	ChangedRoomID         []string
 	TimelineChangedRoomID []string
+	NewMessages           []MessageItem
+	EditedMessages        []MessageItem
+	RedactedEventIDs      []RedactionItem
+	ReactionDeltas        []ReactionDeltaItem
+	ReadReceipts          []ReadReceiptItem
+	TypingUpdates         []TypingItem
 	TypingUsers           map[string][]string
 	Notifications         []Notification
 	NewIncomingMessage    bool

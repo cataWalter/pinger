@@ -3,8 +3,10 @@ package desktop
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -136,6 +138,37 @@ func mediaCleanupFilter(request MediaCleanupRequest, now time.Time) (matrix.Medi
 		return matrix.MediaCleanupFilter{}, err
 	}
 	return filter, nil
+}
+
+func mediaCachePolicyLimits(preferences map[string]any) (int64, int) {
+	maxMB, _ := strconv.Atoi(strings.TrimSpace(stringPreference(preferences, "storage.media_max_size_mb", "")))
+	maxAgeDays, _ := strconv.Atoi(strings.TrimSpace(stringPreference(preferences, "storage.media_max_age_days", "")))
+	var maxBytes int64
+	if maxMB > 0 {
+		maxBytes = int64(maxMB) << 20
+	}
+	return maxBytes, maxAgeDays
+}
+
+func (s *AppService) enforceMediaCachePolicyAsync() {
+	if s.ctx == nil || s.ctx.Err() != nil {
+		return
+	}
+	client := s.currentClient()
+	if client == nil {
+		return
+	}
+	maxBytes, maxAgeDays := mediaCachePolicyLimits(s.preferenceValues())
+	if maxBytes <= 0 && maxAgeDays <= 0 {
+		return
+	}
+	s.workers.Add(1)
+	go func() {
+		defer s.workers.Done()
+		if _, err := client.EnforceMediaCachePolicy(maxBytes, maxAgeDays, time.Now()); err != nil && s.ctx.Err() == nil {
+			log.Printf("enforce media cache policy: %v", err)
+		}
+	}()
 }
 
 // saveDownload writes data to directory/name without overwriting an existing file,

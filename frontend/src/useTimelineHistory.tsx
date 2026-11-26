@@ -13,7 +13,7 @@ import { type AIStreamChunk, EMPTY_ROOMS, formatTypingStatus, newestOtherAvatar,
 import type { useAuthFormState } from './useAuthFormState'
 
 export function useTimelineHistory(app: ReturnType<typeof useAuthFormState>) {
-  const { activeAccountID, aiStreamHandlersRef, composeText, composeTextRef, currentDisplayNameRef, currentUserIDRef, imageSendRun, localAIChatId, localAIChatList, localAINewChatAgentId, messages, messagesRef, nativeNotificationsRef, openThread, pendingSearchJumpRef, preferencesRef, roomMembers, roomSwitchRef, roomsRef, selectedRoomID, selectedRoomRef, setError, setLocalAIChatId, setLocalAIFolderDeleteArmedID, setLocalAIFolderDraft, setLocalAIFolderFilter, setLocalAINewChatKind, setLocalAIRenameDraft, setMessages, snapshot, stickToBottomRef, timelineHeightBeforePrepend, timelineListRef, timelineRef, typingUsers, unreadMarker, workspaceGenerationRef } = app
+  const { activeAccountID, aiStreamHandlersRef, composeDraftStore, composeTextRef, currentDisplayNameRef, currentUserIDRef, imageSendRun, localAIChatId, localAIChatList, localAINewChatAgentId, messages, messagesRef, nativeNotificationsRef, openThread, pendingSearchJumpRef, preferencesRef, roomMembers, roomSwitchRef, roomsRef, selectedRoomID, selectedRoomRef, setError, setLocalAIChatId, setLocalAIFolderDeleteArmedID, setLocalAIFolderDraft, setLocalAIFolderFilter, setLocalAINewChatKind, setLocalAIRenameDraft, setMessages, snapshot, stickToBottomRef, timelineHeightBeforePrepend, timelineListRef, timelineRef, typingUsers, unreadMarker, workspaceGenerationRef } = app
   const {
     loadingHistory,
     setLoadingHistory,
@@ -68,7 +68,8 @@ export function useTimelineHistory(app: ReturnType<typeof useAuthFormState>) {
   const languageRoles = resolveLanguageRoles(preferences)
   const translateRecentLabel = `Translate messages received since your last message to ${languageName(chatTutorLanguage, languageRoles.languages)}`
   const rooms = snapshot?.rooms ?? EMPTY_ROOMS
-  const selectedRoom = useMemo(() => rooms.find((room) => room.id === selectedRoomID), [rooms, selectedRoomID])
+  const roomsByID = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms])
+  const selectedRoom = roomsByID.get(selectedRoomID)
   const currentUserID = snapshot?.profile.userId ?? ''
   const selectedRoomAvatar = useMemo(() => selectedRoom?.avatar || (
     historyRoomIDRef.current === selectedRoomID
@@ -154,6 +155,16 @@ export function useTimelineHistory(app: ReturnType<typeof useAuthFormState>) {
     }
   }
 
+  async function reorderLocalAIFolders(folderIDs: string[]) {
+    if (folderIDs.length < 2) return
+    try {
+      await AppService.ReorderLocalAIChatFolders(folderIDs)
+      localAIChatList.reload()
+    } catch (reorderError) {
+      setError(localAIErrorMessage(reorderError, 'The folders could not be reordered.'))
+    }
+  }
+
   const appZoom = preferenceNumber(preferences, 'appearance.zoom', 100, 75, 125)
   const scheduleTimeSuggestions = parseTimeSuggestionMinutes(preferenceString(preferences, 'schedule.suggestions_minutes', '5,15,60'))
   const answeredShortcut = preferenceString(preferences, 'shortcuts.mark_answered', 'E').trim().toUpperCase() || 'E'
@@ -170,7 +181,7 @@ export function useTimelineHistory(app: ReturnType<typeof useAuthFormState>) {
   preferencesRef.current = preferences
   roomsRef.current = rooms
   messagesRef.current = messages
-  composeTextRef.current = composeText
+  composeTextRef.current = composeDraftStore.getText()
   currentUserIDRef.current = snapshot?.profile.userId ?? ''
   currentDisplayNameRef.current = snapshot?.profile.displayName ?? ''
 
@@ -179,5 +190,5 @@ export function useTimelineHistory(app: ReturnType<typeof useAuthFormState>) {
     if (!chunk?.requestId) return
     aiStreamHandlersRef.current.get(chunk.requestId)?.(chunk)
   }), [aiStreamHandlersRef])
-  return { ...app, loadingHistory, setLoadingHistory, historyRevision, setHistoryRevision, setHistoryPageRevision, historyRoomIDRef, pendingHistoryRefreshRoomIDRef, olderCursor, setOlderCursor, hasOlder, setHasOlder, hasOlderRef, loadingOlder, setLoadingOlder, loadingOlderRef, loadOlderMessages, preferences, languagePreference, roomDrafts, chatTutorLanguage, chatLearningLanguage, languageRoles, translateRecentLabel, rooms, selectedRoom, selectedRoomAvatar, selectedRoomAvatarSource, typingStatus, imageEngineReady, imageRunHere, imageRunStatus, imageButtonTooltip, roomAgentsPreferenceKey, roomAgents, roomChatGoalKey, roomChatGoal, localAIAgents, localAIActiveChat, localAIAgentCandidate, localAIAgentId, saveLocalAIRename, renameLocalAIChat, deleteLocalAIChat, saveLocalAIFolderDraft, deleteLocalAIFolder, moveLocalAIChatToFolder, appZoom, scheduleTimeSuggestions, answeredShortcut, singleKeyShortcuts, hideDeletedMessages, automaticArchiveEnabled, timelineMessages, threadSummaries, visibleMessages, activeThread, activeUnreadMarker, unreadMarkerID, unreadMarkerSeen }
+  return { ...app, loadingHistory, setLoadingHistory, historyRevision, setHistoryRevision, setHistoryPageRevision, historyRoomIDRef, pendingHistoryRefreshRoomIDRef, olderCursor, setOlderCursor, hasOlder, setHasOlder, hasOlderRef, loadingOlder, setLoadingOlder, loadingOlderRef, loadOlderMessages, preferences, languagePreference, roomDrafts, chatTutorLanguage, chatLearningLanguage, languageRoles, translateRecentLabel, rooms, roomsByID, selectedRoom, selectedRoomAvatar, selectedRoomAvatarSource, typingStatus, imageEngineReady, imageRunHere, imageRunStatus, imageButtonTooltip, roomAgentsPreferenceKey, roomAgents, roomChatGoalKey, roomChatGoal, localAIAgents, localAIActiveChat, localAIAgentCandidate, localAIAgentId, saveLocalAIRename, renameLocalAIChat, deleteLocalAIChat, saveLocalAIFolderDraft, deleteLocalAIFolder, moveLocalAIChatToFolder, reorderLocalAIFolders, appZoom, scheduleTimeSuggestions, answeredShortcut, singleKeyShortcuts, hideDeletedMessages, automaticArchiveEnabled, timelineMessages, threadSummaries, visibleMessages, activeThread, activeUnreadMarker, unreadMarkerID, unreadMarkerSeen }
 }

@@ -1,6 +1,6 @@
 import { Fragment, lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { Virtuoso, type ListItem, type VirtuosoHandle } from 'react-virtuoso'
-import { CheckCheck, MessagesSquare } from 'lucide-react'
+import { CheckCheck, MessagesSquare, MoreHorizontal, Reply, Smile } from 'lucide-react'
 import { type Message } from '../bindings/mychat/desktop/models.js'
 import { firstPreviewableURL, LinkPreviewCard } from './LinkPreview'
 import { type ThreadSummary } from './threads'
@@ -9,7 +9,7 @@ import { VIRTUAL_TIMELINE_THRESHOLD } from './appConstants'
 import { Avatar } from './avatar'
 import { displayMessageBody, imageFileNameBodyPattern, timelineMessageID, isOwnMessage, appendedTimelineMessageIDs, timelineFirstItemIndex } from './messages'
 import { isSameDay, formatDayLabel, formatTime, createTimelineTimeFormatter } from './format'
-import { preferenceBoolean, preferenceString, preferenceNumber, linkPreviewsEnabled } from './preferences'
+import { preferenceBoolean, preferenceString, linkPreviewsEnabled } from './preferences'
 import { preferredScrollBehavior } from './dom'
 import { MessageMedia } from './messageMedia'
 import { roomDetectedChatLanguage } from './aiLanguages'
@@ -30,7 +30,7 @@ function captureTopRow(scrollParent: HTMLElement, scope: string): TimelineTopRow
 }
 
 export const virtualTimelineComponents = {
-  Header: ({ context }: { context?: { header?: ReactNode; zoom?: number } }) => <div style={{ zoom: context?.zoom ?? 1, display: 'flex', flexDirection: 'column' }}>{context?.header}</div>,
+  Header: ({ context }: { context?: { header?: ReactNode } }) => <div style={{ display: 'flex', flexDirection: 'column' }}>{context?.header}</div>,
 }
 
 export const TimelineMessageList = memo(function TimelineMessageList({
@@ -83,7 +83,6 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   const virtualized = Boolean(scrollParentRef && visibleMessages.length > VIRTUAL_TIMELINE_THRESHOLD)
   const visibleMessagesRef = useRef(visibleMessages)
   visibleMessagesRef.current = visibleMessages
-  const timelineZoom = preferenceNumber(preferences, 'appearance.zoom', 100, 75, 125) / 100
   const firstRowRef = useRef<HTMLElement>(null)
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null)
   const virtualRef = useRef<VirtuosoHandle>(null)
@@ -98,13 +97,22 @@ export const TimelineMessageList = memo(function TimelineMessageList({
   const animateMessages = preferenceBoolean(preferences, 'appearance.message_animations', true)
   const formatTimestamp = createTimelineTimeFormatter(preferences)
 
-  if (anchor.scope !== scope || anchor.source !== messages || anchor.hideDeleted !== hideDeleted) {
+  const anchorMatches = anchor.scope === scope && anchor.source === messages && anchor.hideDeleted === hideDeleted
+  const currentFirstIndex = anchorMatches
+    ? anchor.firstIndex
+    : (anchor.scope === scope ? timelineFirstItemIndex(anchor.visible, visibleMessages, anchor.firstIndex) : 1000000)
+
+  // Compute the latest index synchronously in state via React's supported
+  // "adjusting state when props change" pattern, or in an effect when only
+  // `messages` changed. Here `messages` is unchanged while typing, so checking
+  // `anchorMatches` avoids any state update during composer typing.
+  if (!anchorMatches) {
     setAnchor({
       scope,
       source: messages,
       visible: visibleMessages,
       hideDeleted,
-      firstIndex: anchor.scope === scope ? timelineFirstItemIndex(anchor.visible, visibleMessages, anchor.firstIndex) : 1000000,
+      firstIndex: currentFirstIndex,
     })
   }
 
@@ -272,6 +280,17 @@ export const TimelineMessageList = memo(function TimelineMessageList({
         }}>
           {showSender && <Avatar uri={message.avatar} label={senderName} className="message-sender-avatar" deferLoad />}
           <div className="message-body-wrap">
+            {messageID && !message.redacted && (
+              <div className="message-hover-actions" role="group" aria-label="Quick message actions">
+                <button type="button" aria-label="React to message" title="React" disabled={messageID.startsWith('~')} onClick={() => actionsRef.current.onReact(message)}><Smile size={13} /></button>
+                <button type="button" aria-label="Reply to message" title="Reply" disabled={messageID.startsWith('~')} onClick={() => actionsRef.current.onReply(message)}><Reply size={13} /></button>
+                <button type="button" aria-label="Reply in thread" title="Reply in thread" disabled={messageID.startsWith('~')} onClick={() => actionsRef.current.onOpenThread(message.threadRootId || message.id)}><MessagesSquare size={13} /></button>
+                <button type="button" aria-label="More message actions" title="More actions" onClick={(event) => {
+                  const bounds = event.currentTarget.getBoundingClientRect()
+                  actionsRef.current.onOpenContextMenu(message, bounds.left, bounds.bottom + 4)
+                }}><MoreHorizontal size={13} /></button>
+              </div>
+            )}
             {!grouped && <div className="message-meta">
               {showSender && <button className="message-sender-name" type="button" title={`Start a direct chat with ${senderName}`} aria-label={`Start a direct chat with ${senderName}`} onClick={() => actionsRef.current.onStartDirectChat(message)}>{senderName}</button>}
               {message.timestamp > 0 && preferenceBoolean(preferences, 'appearance.show_timestamps', true) && <time>{formatTimestamp(message.timestamp)}</time>}
@@ -343,21 +362,21 @@ export const TimelineMessageList = memo(function TimelineMessageList({
       const unloaded = Array.from(previous.messageIDs).filter((messageID) => !messageIDs.has(messageID))
       if (unloaded.length > 0) notifyUnloaded(unloaded)
     }
-    return <Virtuoso<Message, { header?: ReactNode; zoom?: number }>
+    return <Virtuoso<Message, { header?: ReactNode }>
       ref={virtualRef}
       className="virtual-timeline"
       components={virtualTimelineComponents}
-      context={{ header, zoom: timelineZoom }}
+      context={{ header }}
       customScrollParent={scrollParent}
       data={visibleMessages}
-      firstItemIndex={anchor.firstIndex}
+      firstItemIndex={currentFirstIndex}
       computeItemKey={(_index, message) => timelineMessageID(message)}
       itemsRendered={reportRenderedMessages}
       itemSize={(element, field) => element[field]}
       defaultItemHeight={48}
       increaseViewportBy={{ top: 240, bottom: 240 }}
       initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
-      itemContent={(index, message) => <div style={{ zoom: timelineZoom, display: 'flex', flexDirection: 'column', minWidth: 0 }}>{renderMessage(index - anchor.firstIndex, message)}</div>}
+      itemContent={(index, message) => <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>{renderMessage(index - anchor.firstIndex, message)}</div>}
     />
   }
 

@@ -42,11 +42,22 @@ func (c *Client) handleBackendEvent(raw any) {
 		} else {
 			c.typing[roomID] = users
 		}
+		syncReady := c.syncReady
+		connState := c.connectionState
+		needsVerification := c.NeedsVerification()
 		c.mu.Unlock()
-		c.publish(nil, "")
+		c.publishUpdate(Update{
+			RoomsOmitted:        true,
+			TypingUpdates:       []TypingItem{{RoomID: roomID, UserIDs: append([]string(nil), users...)}},
+			TypingUsers:         map[string][]string{roomID: append([]string(nil), users...)},
+			InitialSyncComplete: syncReady,
+			NeedsVerification:   needsVerification,
+			ConnectionState:     connState,
+		})
 	case *jsoncmd.SendComplete:
 		if evt.Event != nil {
 			c.sendMu.Lock()
+			var finalized *Message
 			if message, ok := messageFromEvent(evt.Event); ok {
 				message.Sending = false
 				message.SendError = ""
@@ -83,6 +94,7 @@ func (c *Client) handleBackendEvent(raw any) {
 					message.SendError = evt.Event.SendError
 					c.storeFailedMessage(evt.Event.RoomID.String(), message)
 				}
+				finalized = &message
 			}
 			c.completeScheduledSendLocked(evt)
 			c.sendMu.Unlock()
@@ -90,7 +102,15 @@ func (c *Client) handleBackendEvent(raw any) {
 			if evt.Error != nil {
 				errorMessage = evt.Error.Error()
 			}
-			c.publishTimeline([]string{evt.Event.RoomID.String()}, errorMessage)
+			roomID := evt.Event.RoomID.String()
+			if finalized != nil {
+				c.mu.Lock()
+				c.pendingMessages = append(c.pendingMessages, MessageItem{RoomID: roomID, Message: *finalized})
+				c.mu.Unlock()
+				c.publish([]string{roomID}, errorMessage)
+			} else {
+				c.publishTimeline([]string{roomID}, errorMessage)
+			}
 		} else if evt.Error != nil {
 			c.publish(nil, evt.Error.Error())
 		}
@@ -160,9 +180,23 @@ func (c *Client) publish(changed []string, errMessage string) {
 	}
 	update.NewIncomingMessage = c.pendingIncomingMessage
 	c.pendingIncomingMessage = false
+	update.NewMessages = append([]MessageItem(nil), c.pendingMessages...)
+	c.pendingMessages = c.pendingMessages[:0]
+	update.EditedMessages = append([]MessageItem(nil), c.pendingEditedMessages...)
+	c.pendingEditedMessages = c.pendingEditedMessages[:0]
+	update.RedactedEventIDs = append([]RedactionItem(nil), c.pendingRedactions...)
+	c.pendingRedactions = c.pendingRedactions[:0]
+	update.ReactionDeltas = append([]ReactionDeltaItem(nil), c.pendingReactionDeltas...)
+	c.pendingReactionDeltas = c.pendingReactionDeltas[:0]
+	update.ReadReceipts = append([]ReadReceiptItem(nil), c.pendingReceipts...)
+	c.pendingReceipts = c.pendingReceipts[:0]
 	update.Notifications = append([]Notification(nil), c.pendingNotifications...)
 	c.pendingNotifications = c.pendingNotifications[:0]
 	c.mu.Unlock()
+	c.publishUpdate(update)
+}
+
+func (c *Client) publishUpdate(update Update) {
 	c.eventMu.Lock()
 	defer c.eventMu.Unlock()
 	select {
@@ -186,11 +220,27 @@ func (c *Client) publish(changed []string, errMessage string) {
 	pendingError := ""
 	initialSyncComplete := update.InitialSyncComplete
 	newIncomingMessage := update.NewIncomingMessage
-	notifications := append([]Notification(nil), update.Notifications...)
+	notifications := make([]Notification, 0, len(update.Notifications))
+	pendingMessages := make([]MessageItem, 0, len(update.NewMessages))
+	pendingEdited := make([]MessageItem, 0, len(update.EditedMessages))
+	pendingRedactions := make([]RedactionItem, 0, len(update.RedactedEventIDs))
+	pendingReactionDeltas := make([]ReactionDeltaItem, 0, len(update.ReactionDeltas))
+	pendingReceipts := make([]ReadReceiptItem, 0, len(update.ReadReceipts))
+	pendingTyping := make([]TypingItem, 0, len(update.TypingUpdates))
+	roomsOmitted := update.RoomsOmitted
+	var fallbackRooms []Room
+	var fallbackInvites []Invite
+	var fallbackListCounts map[string]int
 drain:
 	for {
 		select {
 		case pending := <-c.events:
+			if !pending.RoomsOmitted {
+				roomsOmitted = false
+				fallbackRooms = pending.Rooms
+				fallbackInvites = pending.Invites
+				fallbackListCounts = pending.SlidingSyncListCounts
+			}
 			for _, roomID := range pending.ChangedRoomID {
 				changedSet[roomID] = struct{}{}
 			}
@@ -203,9 +253,21 @@ drain:
 			initialSyncComplete = initialSyncComplete || pending.InitialSyncComplete
 			newIncomingMessage = newIncomingMessage || pending.NewIncomingMessage
 			notifications = append(notifications, pending.Notifications...)
+			pendingMessages = append(pendingMessages, pending.NewMessages...)
+			pendingEdited = append(pendingEdited, pending.EditedMessages...)
+			pendingRedactions = append(pendingRedactions, pending.RedactedEventIDs...)
+			pendingReactionDeltas = append(pendingReactionDeltas, pending.ReactionDeltas...)
+			pendingReceipts = append(pendingReceipts, pending.ReadReceipts...)
+			pendingTyping = append(pendingTyping, pending.TypingUpdates...)
 		default:
 			break drain
 		}
+	}
+	if update.RoomsOmitted && !roomsOmitted {
+		update.RoomsOmitted = false
+		update.Rooms = fallbackRooms
+		update.Invites = fallbackInvites
+		update.SlidingSyncListCounts = fallbackListCounts
 	}
 	for _, roomID := range update.ChangedRoomID {
 		changedSet[roomID] = struct{}{}
@@ -215,7 +277,13 @@ drain:
 	}
 	update.InitialSyncComplete = initialSyncComplete
 	update.NewIncomingMessage = newIncomingMessage
-	update.Notifications = notifications
+	update.Notifications = append(notifications, update.Notifications...)
+	update.NewMessages = append(pendingMessages, update.NewMessages...)
+	update.EditedMessages = append(pendingEdited, update.EditedMessages...)
+	update.RedactedEventIDs = append(pendingRedactions, update.RedactedEventIDs...)
+	update.ReactionDeltas = append(pendingReactionDeltas, update.ReactionDeltas...)
+	update.ReadReceipts = append(pendingReceipts, update.ReadReceipts...)
+	update.TypingUpdates = append(pendingTyping, update.TypingUpdates...)
 	update.ChangedRoomID = update.ChangedRoomID[:0]
 	for roomID := range changedSet {
 		update.ChangedRoomID = append(update.ChangedRoomID, roomID)

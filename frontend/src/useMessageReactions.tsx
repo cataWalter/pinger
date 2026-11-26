@@ -8,7 +8,7 @@ import { textAIConfigured } from './aiProvider'
 import type { useComposerActions } from './useComposerActions'
 
 export function useMessageReactions(app: ReturnType<typeof useComposerActions>) {
-  const { archivedPreferenceKey, busy, composeText, editTarget, emojiMatch, localAIChatId, localAIChatOpen, needsReplyCount, pendingReactionsRef, preferences, preferencesRef, reactionErrorRef, redactTarget, roomRefinements, roomScope, selectedRoom, selectedRoomID, setBusy, setEditTarget, setEmojiActiveIndex, setEmojiMatch, setError, setHistoryRevision, setMentionActiveIndex, setMentionEnd, setMentionQuery, setMentionStart, setReactingMessageID, setRedactTarget, setReplyTarget, setRoomInfoOpen, setRoomRefinements, setRoomScope, setSnapshot, showRoom, stageAttachmentFiles, startingDirectChatRef } = app
+  const { archivedPreferenceKey, busy, composeDraftStore, editTarget, emojiMatch, localAIChatId, localAIChatOpen, needsReplyCount, pendingReactionsRef, preferences, preferencesRef, reactionErrorRef, redactTarget, roomRefinements, roomScope, selectedRoom, selectedRoomID, setBusy, setEditTarget, setEmojiActiveIndex, setEmojiMatch, setError, setHistoryRevision, setMentionActiveIndex, setMentionEnd, setMentionQuery, setMentionStart, setReactingMessageID, setRedactTarget, setReplyTarget, setRoomInfoOpen, setRoomRefinements, setRoomScope, setSnapshot, showRoom, stageAttachmentFiles, startingDirectChatRef } = app
 
   function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const imageItem = Array.from(event.clipboardData.items).find((item) => item.type.startsWith('image/'))
@@ -124,8 +124,9 @@ export function useMessageReactions(app: ReturnType<typeof useComposerActions>) 
     if (selectedRoomID) setRoomInfoOpen(true)
   }
 
+  const currentDraftText = composeDraftStore.getText()
   const emojiOptions: Array<[string, string]> = emojiMatch && preferenceBoolean(preferences, 'emoji.autocomplete')
-    && composeText.slice(emojiMatch.start, emojiMatch.end).toLowerCase() === `:${emojiMatch.query}`
+    && currentDraftText.slice(emojiMatch.start, emojiMatch.end).toLowerCase() === `:${emojiMatch.query}`
     ? suggestEmoji(emojiMatch.query)
     : []
 
@@ -158,24 +159,35 @@ export function useMessageReactions(app: ReturnType<typeof useComposerActions>) 
   const menuRoomNeedsReply = menuRoom ? isNeedsReplyRoom(menuRoom) : false
   const menuPrivateChatOpen = localAIChatOpen && Boolean(localAIChatId)
   const menuPrivateChatInAll = localAIChatOpen && localAIChatId ? preferenceBoolean(preferences, localAIIncludeInAllPreference(localAIChatId)) : false
-  const menuDraftReady = Boolean(selectedRoom) && composeText.trim() !== '' && !busy && aiEnabled && !editTarget
+  const canSendDraft = Boolean(selectedRoom) && !busy && aiEnabled && !editTarget
+  const menuDraftReady = canSendDraft && currentDraftText.trim() !== ''
   const menuFilter = roomScope === 'archived' ? 'archived' : roomScope === 'local-ai' ? 'private' : roomRefinements.needsReply ? 'needs-reply' : roomRefinements.unanswered ? 'unanswered' : roomRefinements.favorite ? 'favorites' : 'all'
   useEffect(() => {
-    const menuState: MenuState = {
-      roomSelected: menuRoomSelected,
-      roomUnread: menuRoomUnread,
-      roomArchived: menuRoomArchived,
-      roomFavorite: menuRoomFavorite,
-      roomUnanswered: menuRoomUnanswered,
-      roomNeedsReply: menuRoomNeedsReply,
-      needsReplyCount,
-      privateChatOpen: menuPrivateChatOpen,
-      privateChatInAll: menuPrivateChatInAll,
-      draftReady: menuDraftReady,
-      filter: menuFilter,
+    let lastHasDraft = composeDraftStore.getText().trim() !== ''
+    const pushMenuState = (hasDraft: boolean) => {
+      const menuState: MenuState = {
+        roomSelected: menuRoomSelected,
+        roomUnread: menuRoomUnread,
+        roomArchived: menuRoomArchived,
+        roomFavorite: menuRoomFavorite,
+        roomUnanswered: menuRoomUnanswered,
+        roomNeedsReply: menuRoomNeedsReply,
+        needsReplyCount,
+        privateChatOpen: menuPrivateChatOpen,
+        privateChatInAll: menuPrivateChatInAll,
+        draftReady: canSendDraft && hasDraft,
+        filter: menuFilter,
+      }
+      void AppService.SetMenuState(menuState)
     }
-    void AppService.SetMenuState(menuState)
-  }, [menuRoomSelected, menuRoomUnread, menuRoomArchived, menuRoomFavorite, menuRoomUnanswered, menuRoomNeedsReply, needsReplyCount, menuPrivateChatOpen, menuPrivateChatInAll, menuDraftReady, menuFilter])
+    pushMenuState(lastHasDraft)
+    return composeDraftStore.subscribe(() => {
+      const nextHasDraft = composeDraftStore.getText().trim() !== ''
+      if (nextHasDraft === lastHasDraft) return
+      lastHasDraft = nextHasDraft
+      pushMenuState(nextHasDraft)
+    })
+  }, [composeDraftStore, menuRoomSelected, menuRoomUnread, menuRoomArchived, menuRoomFavorite, menuRoomUnanswered, menuRoomNeedsReply, needsReplyCount, menuPrivateChatOpen, menuPrivateChatInAll, canSendDraft, menuFilter])
 
   function applyMenuFilter(filter: string) {
     setRoomScope(filter === 'archived' ? 'archived' : filter === 'private' ? 'local-ai' : 'all')
@@ -186,11 +198,12 @@ export function useMessageReactions(app: ReturnType<typeof useComposerActions>) 
     })
   }
 
-  function toggleRoomRefinement(refinement: 'unanswered' | 'needsReply') {
+  function toggleRoomRefinement(refinement: 'unanswered' | 'needsReply' | 'favorite') {
+    setRoomScope('all')
     setRoomRefinements((current) => ({
       unanswered: refinement === 'unanswered' ? !current.unanswered : false,
       needsReply: refinement === 'needsReply' ? !current.needsReply : false,
-      favorite: false,
+      favorite: refinement === 'favorite' ? !current.favorite : false,
     }))
   }
   return { ...app, startReaction, handleMessageDoubleClick, handleComposerPaste, changeReaction, sendReaction, startDirectChat, removeReaction, redactMessage, retryMessage, openRoomInfo, emojiOptions, updateMentionQuery, updateEmojiQuery, aiEnabled, menuRoom, menuRoomSelected, menuRoomUnread, menuRoomArchived, menuRoomFavorite, menuRoomUnanswered, menuRoomNeedsReply, menuPrivateChatOpen, menuPrivateChatInAll, menuDraftReady, menuFilter, applyMenuFilter, toggleRoomRefinement }

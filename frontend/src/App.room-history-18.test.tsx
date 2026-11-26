@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -54,6 +54,7 @@ describe('room history updates', () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    vi.useRealTimers()
     for (const spy of geometrySpies.splice(0)) spy.mockRestore()
   })
 
@@ -213,6 +214,46 @@ describe('room history updates', () => {
     await intersection.setIntersecting(attachment!, false)
     await waitFor(() => expect(container.querySelector('[data-event-id="$photo"] .media-preview')).toBeNull())
     expect(container.querySelector('[data-event-id="$photo"] .media-preview')).toBeNull()
+  })
+
+  it('retries a failed image preview before asking the user to retry', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const imageMessage = { ...message('$flaky', 'Attachment', 300), mediaUri: 'mxc://example.org/flaky', mediaMime: 'image/jpeg', mediaSize: 12 }
+    harness.service.History.mockResolvedValueOnce({ messages: [imageMessage], before: 0, hasMore: false })
+    const intersection = stubImageIntersectionObserver()
+
+    const { container } = render(<App />)
+    const attachment = await waitFor(() => {
+      const element = container.querySelector<HTMLElement>('[data-event-id="$flaky"] .message-attachment')
+      expect(element).toBeTruthy()
+      return element
+    })
+    await intersection.setIntersecting(attachment!, true)
+
+    const eventElement = container.querySelector<HTMLElement>('[data-event-id="$flaky"]')!
+    const preview = () => container.querySelector<HTMLImageElement>('[data-event-id="$flaky"] .media-preview')
+    const previewSrc = (suffix = '') => `/media/matrix/${encodeURIComponent(room.id)}/${encodeURIComponent('$flaky')}?size=preview${suffix}`
+
+    await waitFor(() => expect(preview()?.getAttribute('src')).toBe(previewSrc()))
+    fireEvent.error(preview()!)
+    expect(preview()).toBeNull()
+    expect(eventElement.textContent).toContain('Retrying image')
+
+    await act(async () => { vi.advanceTimersByTime(1500) })
+    await waitFor(() => expect(preview()?.getAttribute('src')).toBe(previewSrc('&reload=1')))
+    fireEvent.error(preview()!)
+    await act(async () => { vi.advanceTimersByTime(3000) })
+    await waitFor(() => expect(preview()?.getAttribute('src')).toBe(previewSrc('&reload=2')))
+    fireEvent.error(preview()!)
+    await act(async () => { vi.advanceTimersByTime(8000) })
+    await waitFor(() => expect(preview()?.getAttribute('src')).toBe(previewSrc('&reload=3')))
+    fireEvent.error(preview()!)
+
+    expect(preview()).toBeNull()
+    expect(eventElement.querySelector('.media-error')?.textContent).toBe('This image could not be loaded.')
+    fireEvent.click(within(eventElement).getByRole('button', { name: 'Retry image' }))
+    await waitFor(() => expect(preview()?.getAttribute('src')).toBe(previewSrc('&reload=4')))
+    expect(eventElement.querySelector('.media-error')).toBeNull()
   })
 
   it('saves an image from its toolbar through the app download path', async () => {

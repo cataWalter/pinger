@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type Invite, type Room } from '../bindings/mychat/desktop/models.js'
 import App from './App'
 import { ROOM_DRAFTS_STORAGE_KEY } from './roomDrafts'
-import { harness, room, message, snapshot } from './appTestSetup'
+import { emitMatrixUpdate, harness, room, message, snapshot } from './appTestSetup'
 
 vi.mock('@wailsio/runtime', async () => {
   const { clipboardSetText, harness } = await import('./appTestSetup')
@@ -213,7 +213,7 @@ describe('room history updates', () => {
     expect(await screen.findByText('latest message')).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Invitations' })).toBeNull()
 
-    act(() => harness.eventHandlers.get('matrix:update')?.({ data: { accountId: 'primary', rooms: [room], invites: [teamInvite], timelineChangedRoomId: [], initialSyncComplete: true, needsVerification: false, connectionState: 'connected', error: '' } }))
+    act(() => emitMatrixUpdate({ accountId: 'primary', rooms: [room], invites: [teamInvite], timelineChangedRoomId: [], initialSyncComplete: true, needsVerification: false, connectionState: 'connected', error: '' }))
     const invites = await screen.findByRole('region', { name: 'Invitations' })
     await user.click(within(invites).getByRole('button', { name: 'Decline invitation to Team' }))
 
@@ -225,7 +225,7 @@ describe('room history updates', () => {
     render(<App />)
     expect(await screen.findByText('latest message')).toBeTruthy()
 
-    act(() => harness.eventHandlers.get('matrix:update')?.({ data: {
+    act(() => emitMatrixUpdate({
       accountId: 'primary',
       rooms: [room],
       invites: [],
@@ -244,7 +244,7 @@ describe('room history updates', () => {
       },
       connectionState: 'connected',
       error: '',
-    } }))
+    }))
 
     expect(await screen.findByRole('dialog', { name: 'Verify another session' })).toBeTruthy()
     expect(screen.getByText('@alice:example.org wants to verify this session.')).toBeTruthy()

@@ -13,6 +13,24 @@ describe('LocalAIChat composer', () => {
 
   beforeEach(() => resetLocalAIChatMocks())
 
+  it('keeps the draft when the user declines sending an online chat', async () => {
+    const endpoint = 'https://example.org/v1'
+    renderChat({ chatId: 'chat-1', onlineEndpoint: endpoint })
+    const composer = screen.getByRole('textbox', { name: 'Message AI' }) as HTMLTextAreaElement
+    await waitFor(() => expect(composer.disabled).toBe(false))
+    fireEvent.change(composer, { target: { value: 'Unsent draft' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to AI' }))
+
+    const confirmDialog = await screen.findByRole('alertdialog', { name: 'Send to online AI?' })
+    expect(confirmDialog.textContent).toContain(endpoint)
+    fireEvent.click(within(confirmDialog).getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog', { name: 'Send to online AI?' })).toBeNull())
+    expect(composer.value).toBe('Unsent draft')
+    expect(service.AppendLocalAIChatMessage).not.toHaveBeenCalled()
+    expect(service.LocalAIChat).not.toHaveBeenCalled()
+  })
+
   it('drafts the next user message into the composer without saving it', async () => {
     service.LoadLocalAIChatMessages.mockResolvedValueOnce([
       { seq: 1, role: 'user', content: 'Tell me about the trip.', status: 'complete', attachments: [], createdAt: 1 },

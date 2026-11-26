@@ -4,7 +4,7 @@ import { AppService, LanguageTutorService } from '../bindings/mychat/desktop'
 import { type Message, type TutorAnalysis } from '../bindings/mychat/desktop/models.js'
 import { activeLocale } from './i18n'
 import { MAX_AGENT_COLLECTION_LENGTH, MAX_AGENT_INSTRUCTIONS_LENGTH, MAX_AGENT_NAME_LENGTH, MAX_CHAT_AGENTS, buildExplainPrompt, buildReplyPrompt, serializeChatAgents, type ChatAgentCollection, type ChatAgentProfile } from './aiPrompts'
-import { AI_ACTION_SHORTCUTS, languageName, resolveChatLearningLanguage, resolveChatTutorLanguage, resolveLanguageRoles } from './aiSettings'
+import { AI_ACTION_SHORTCUTS, languageName, resolveChatLearningLanguage, resolveChatTutorLanguage, resolveLanguageRoles, textAIProviderOf } from './aiSettings'
 import { type MessageMenuItem, describeError, displayMessageBody, preferenceBoolean, mergeTimelineMessages, timelineMessageID, incomingSinceOwnMessage } from './appShared'
 import { deleteVolatileAIDraft, getVolatileAIDraft } from './volatileAIDrafts'
 import type { useMenuActions } from './useMenuActions'
@@ -70,6 +70,11 @@ export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
 
       const targetMessages = sinceOwnMessage().incoming
       if (targetMessages.length === 0) throw new Error('There are no incoming text messages since your last message in this chat.')
+      if (!(await app.confirmOnlineAIRequest('Translate chat', `${targetMessages.length} incoming ${targetMessages.length === 1 ? 'message' : 'messages'} and your language settings`))) {
+        setChatTranslation((current) => current?.requestID === requestID ? null : current)
+        return
+      }
+      if (chatTranslationRequestRef.current !== requestID || selectedRoomRef.current !== roomID) return
       const targetMessageIDs = targetMessages.map(timelineMessageID)
       setChatTranslation((current) => current?.requestID === requestID
         ? { ...current, targetMessageIDs, status: 'Translating 0%…' }
@@ -122,12 +127,15 @@ export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
     let targetIndex = messages.indexOf(message)
     if (targetIndex < 0 && message.id) targetIndex = messages.findIndex((candidate) => candidate.id === message.id)
     if (targetIndex < 0 && message.transactionId) targetIndex = messages.findIndex((candidate) => candidate.transactionId === message.transactionId)
-    const context = targetIndex < 0 ? [] : messages.slice(Math.max(0, targetIndex - 8), targetIndex)
-    void runAIRequest('Draft reply', buildReplyPrompt(promptMessages([message])[0], promptMessages(context), aiInstructions('draft_reply'), roomChatGoal), 'draft_reply', { kind: 'reply', target: message })
+    const online = textAIProviderOf(preferencesRef.current) === 'online'
+    const context = online || targetIndex < 0 ? [] : messages.slice(Math.max(0, targetIndex - 8), targetIndex)
+    const goal = online ? '' : roomChatGoal
+    const sourceScope = ['the selected message', ...(context.length ? ['nearby earlier messages'] : []), ...(goal ? ['the saved chat goal'] : [])].join(', ') + ' and your instructions'
+    void runAIRequest('Draft reply', buildReplyPrompt(promptMessages([message])[0], promptMessages(context), aiInstructions('draft_reply'), goal), 'draft_reply', sourceScope, { kind: 'reply', target: message })
   }
 
   function explainMessage(message: Message) {
-    void runAIRequest('Explain message', buildExplainPrompt(promptMessages([message])[0], aiInstructions('explain')), 'explain')
+    void runAIRequest('Explain message', buildExplainPrompt(promptMessages([message])[0], aiInstructions('explain')), 'explain', 'the selected message and your instructions')
   }
 
   function editMessage(message: Message) {
@@ -232,6 +240,7 @@ export function useMessageAIActions(app: ReturnType<typeof useMenuActions>) {
   // inferChatGoal asks Local AI to describe the chat's long-term goal from its latest messages. The caller shows the result for review before saving it.
   async function inferChatGoal() {
     if (!selectedRoomID) throw new Error('Choose a chat first.')
+    if (!(await app.confirmOnlineAIRequest('Infer chat goal', 'recent messages and goal instructions'))) return ''
     cancelAIRequest(chatGoalRequestRef.current)
     const requestID = newAIRequestID()
     chatGoalRequestRef.current = requestID

@@ -267,7 +267,8 @@ describe('room history updates', () => {
     fireEvent.pointerUp(slider)
 
     await waitFor(() => {
-      expect(container.querySelector('.app-shell')?.getAttribute('style')).toContain('--app-zoom: 110%')
+      expect(document.documentElement.style.fontSize).toBe('110%')
+      expect(container.querySelector('.app-shell')?.getAttribute('data-zoom')).toBe('110')
       expect(harness.service.SetStringPreference).toHaveBeenCalledWith('appearance.zoom', '110')
     })
     expect(harness.service.SetStringPreference).not.toHaveBeenCalledWith('appearance.zoom', '105')

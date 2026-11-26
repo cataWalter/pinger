@@ -1,13 +1,14 @@
+import { memo } from 'react'
 import { ArrowLeft, BellOff, Check, Clock3, MoreHorizontal, Search, Star, UsersRound, Download, EyeOff, Images } from 'lucide-react'
 import { languageName, roomLearningLanguageChoice, roomLearningLanguageKey, roomTutorLanguageChoice, roomTutorLanguageKey } from './aiSettings'
 import { ActionMenu } from './appShared'
 import { RoomLanguageMenu } from './RoomLanguageMenu'
 import { LOCAL_AI_TITLE_CHARACTERS } from './localAIChats'
 import { Avatar, preferenceBoolean, isDirectLikeRoom, isNeedsReplyRoom, IconTooltip } from './appShared'
-import type { AppState } from './appState'
+import { useSessionRooms } from './AppDomainContexts'
 
-export function ConversationHeader({ app }: { app: AppState }) {
-  const { activeAccountID, chatExport, exportSelectedRoomChat, languageRoles, loadingHistory, localAIActiveChat, localAIChatOpen, localAIRenameDraft, markRoomAnswered, openMediaGallery, openRoomInfo, openScheduledJobs, preferences, saveLocalAIRename, scheduledJobCount, selectedRoom, selectedRoomAvatar, selectedRoomAvatarSource, selectedRoomID, setLocalAIRenameDraft, setMobilePane, setPreference, setProfilePhotoPreview, setSearchOpen } = app
+export const ConversationHeader = memo(function ConversationHeader() {
+  const { activeAccountID, chatExport, exportSelectedRoomChat, languageRoles, loadingHistory, localAIActiveChat, localAIChatOpen, localAIRenameDraft, markRoomAnswered, openMediaGallery, openRoomInfo, openScheduledJobs, preferences, saveLocalAIRename, scheduledJobCount, selectedRoom, selectedRoomAvatar, selectedRoomAvatarSource, selectedRoomID, setLocalAIRenameDraft, setMobilePane, setPreference, setProfilePhotoPreview, setSearchOpen } = useSessionRooms()
   return (
     <header className="conversation-header">
       <button className="mobile-back-button icon-button" type="button" aria-label="Back to rooms" title="Back to rooms" onClick={() => setMobilePane('rooms')}>
@@ -114,4 +115,4 @@ export function ConversationHeader({ app }: { app: AppState }) {
       )}
     </header>
   )
-}
+})

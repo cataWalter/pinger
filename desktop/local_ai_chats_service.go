@@ -74,6 +74,20 @@ func (s *AppService) DeleteLocalAIChatFolder(folderID string) error {
 	return store.deleteFolder(folderID)
 }
 
+// ReorderLocalAIChatFolders persists a custom display order for local AI folders.
+func (s *AppService) ReorderLocalAIChatFolders(folderIDs []string) error {
+	for _, folderID := range folderIDs {
+		if err := validateLocalAIFolderID(folderID); err != nil {
+			return err
+		}
+	}
+	store, err := s.localAIChatStoreForUse()
+	if err != nil {
+		return err
+	}
+	return store.reorderFolders(folderIDs)
+}
+
 // SetLocalAIChatFolder files chatID into folderID, or unfiles it when folderID is empty.
 func (s *AppService) SetLocalAIChatFolder(chatID, folderID string) error {
 	if err := validateLocalAIChatID(chatID); err != nil {
@@ -144,6 +158,7 @@ func (s *AppService) LocalAIChat(request LocalAIChatRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	route = s.trackAIRoute(route)
 	tuning := aiFeatureTuningFor(preferences, aiFeatureLocalChat)
 	systemPrompt := tuning.Prompt
 	if agentInstructions != "" {

@@ -5,9 +5,9 @@ import { type Room, type Snapshot } from '../bindings/mychat/desktop/models.js'
 import { type PreferenceValues } from './appShared'
 import { isTextEntryTarget } from './dom'
 import { type Snippet } from './snippets'
-import { SETTINGS_TABS, groupSettingsByTab, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
+import { SETTINGS_TABS, groupSettingsByTab, localizedSettingsEntries, searchSettings, type SettingsEntry, type SettingsTab } from './settings'
 import { SettingsAdvanced, SettingsAdvancedRevealContext } from './SettingsControls'
-import { DialogSurface } from './DialogSurface'
+import { DialogScrim, DialogSurface } from './DialogSurface'
 import { SnippetSettingsModal } from './SnippetSettingsModal'
 import { GeneralSettingsTab, HistorySettingsTab } from './SettingsGeneralTab'
 import { AppearanceSettingsTab } from './SettingsAppearanceTab'
@@ -96,7 +96,8 @@ export function SettingsDialog({
   const settingsPanelRef = useRef<HTMLDivElement>(null)
   const searchNonceRef = useRef(0)
 
-  const searchResults = useMemo(() => searchSettings(searchQuery), [searchQuery])
+  const searchEntries = useMemo(() => localizedSettingsEntries(t), [t])
+  const searchResults = useMemo(() => searchSettings(searchQuery, searchEntries), [searchQuery, searchEntries])
   const searchResultsByTab = useMemo(() => groupSettingsByTab(searchResults), [searchResults])
   const searchActive = searchQuery.trim().length > 0
   const bestMatch = searchResults[0]
@@ -112,12 +113,13 @@ export function SettingsDialog({
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
     event.preventDefault()
     const buttons = Array.from(settingsPanelRef.current?.querySelectorAll<HTMLButtonElement>('.settings-search-result') ?? [])
+    if (buttons.length === 0) return
     const index = buttons.indexOf(event.currentTarget)
     if (event.key === 'ArrowUp' && index <= 0) {
       searchInputRef.current?.focus()
       return
     }
-    const next = Math.min(index + (event.key === 'ArrowDown' ? 1 : -1), buttons.length - 1)
+    const next = event.key === 'ArrowDown' ? (index + 1) % buttons.length : index - 1
     buttons[next]?.focus()
   }
 
@@ -131,20 +133,28 @@ export function SettingsDialog({
     if (!panel) return
     const target = findSettingTarget(panel, searchTarget.entry)
     if (!target) return
+    const controls = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]'
+    const control = target.matches(controls) ? target : target.querySelector<HTMLElement>(controls)
+    const focusTarget = control ?? target
+    const addTabIndex = !control && !target.hasAttribute('tabindex')
+    if (addTabIndex) focusTarget.tabIndex = -1
+    focusTarget.focus({ preventScroll: true })
     if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'center' })
     target.classList.add('is-search-hit')
     const timer = window.setTimeout(() => target.classList.remove('is-search-hit'), 1800)
     return () => {
       window.clearTimeout(timer)
       target.classList.remove('is-search-hit')
+      if (addTabIndex) focusTarget.removeAttribute('tabindex')
     }
   }, [searchTarget])
 
   return (
     <>
-      <div
+      <DialogScrim
+        variant="modal"
         className="settings-scrim"
-        onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}
+        onDismiss={onClose}
         onKeyDown={(event) => {
           // The global "/" shortcut is disabled while a dialog is open, so the dialog handles it here.
           if (event.key !== '/' || event.altKey || event.metaKey || event.ctrlKey || isTextEntryTarget(event.target)) return
@@ -239,7 +249,7 @@ export function SettingsDialog({
                 </p>
                 {Array.from(searchResultsByTab.entries()).map(([group, entries]) => (
                   <section className="settings-search-group" key={group}>
-                    <h3>{group}</h3>
+                    <h3>{t(`settings.tabs.${group.toLowerCase()}`)}</h3>
                     <div className="settings-search-list">
                       {entries.map((entry) => (
                         <button
@@ -289,7 +299,7 @@ export function SettingsDialog({
             {tab === 'Storage' && (
               <>
                 <HistorySettingsTab preferences={preferences} onPreferenceChange={onPreferenceChange} />
-                <StorageSettingsTab />
+                <StorageSettingsTab preferences={preferences} onPreferenceChange={onPreferenceChange} />
               </>
             )}
             {tab === 'AI' && (
@@ -309,7 +319,7 @@ export function SettingsDialog({
           </div>
           </SettingsAdvancedRevealContext.Provider>
         </DialogSurface>
-      </div>
+      </DialogScrim>
       {snippetManagerOpen && <SnippetSettingsModal
         open
         snippets={snippets}

@@ -8,7 +8,7 @@ import { getVolatileAIDraft, updateVolatileAIDraft } from './volatileAIDrafts'
 import type { useMessageAIActions } from './useMessageAIActions'
 
 export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>) {
-  const { activeAccountID, aiPanel, closeLanguageTutor, composeText, composeTextRef, composerEmojiSelectionRef, composerInputRef, editTarget, emojiMatch, emojiOptions, focusTimelineMessage, handleMessageDoubleClick, handleTimelineAudioEnded, inviteBusyRoomID, languageTutorState, mentionEnd, mentionOptions, mentionStart, openMessageContextMenu, openThreadPanel, removeReaction, roomDrafts, selectedRoomID, selectedRoomRef, sendReaction, setAIPanel, setComposeText, setEditTarget, setEmojiMatch, setEmojiPickerOpen, setError, setInviteBusyRoomID, setMentionBindings, setMentionQuery, setMentionStart, setReplyTarget, setSnapshot, setSnippets, setSuggestedReplies, setVolatileAIDrafts, showRoom, snippets, startDirectChat, timelineMessageActionsRef, updateEmojiQuery, updateMentionQuery, volatileAIDrafts } = app
+  const { activeAccountID, aiPanel, closeLanguageTutor, composeDraftStore, composeTextRef, composerEmojiSelectionRef, composerInputRef, editTarget, emojiMatch, emojiOptions, focusTimelineMessage, handleMessageDoubleClick, handleTimelineAudioEnded, inviteBusyRoomID, languageTutorState, mentionEnd, mentionOptions, mentionStart, openMessageContextMenu, openThreadPanel, removeReaction, roomDrafts, selectedRoomID, selectedRoomRef, sendReaction, setAIPanel, setComposeText, setEditTarget, setEmojiMatch, setEmojiPickerOpen, setError, setInviteBusyRoomID, setMentionBindings, setMentionQuery, setMentionStart, setReplyTarget, setSnapshot, setSnippets, setSuggestedReplies, setVolatileAIDrafts, showRoom, snippets, startDirectChat, startReaction, timelineMessageActionsRef, updateEmojiQuery, updateMentionQuery, volatileAIDrafts } = app
 
   function setComposeDraft(text: string) {
     composeTextRef.current = text
@@ -24,6 +24,12 @@ export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>)
   timelineMessageActionsRef.current = {
     onDoubleClick: handleMessageDoubleClick,
     onOpenContextMenu: openMessageContextMenu,
+    onReply: (message) => {
+      setEditTarget(null)
+      setReplyTarget(message)
+      requestAnimationFrame(() => composerInputRef.current?.focus())
+    },
+    onReact: startReaction,
     onFocusMessage: focusTimelineMessage,
     onAudioEnded: handleTimelineAudioEnded,
     onUseTranscript: (text) => {
@@ -36,7 +42,7 @@ export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>)
     onOpenThread: openThreadPanel,
   }
   const snippetExpander = useSnippetExpander({
-    value: composeText,
+    getValue: () => composeDraftStore.getText(),
     snippets,
     roomID: selectedRoomID,
     inputRef: composerInputRef,
@@ -58,10 +64,11 @@ export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>)
 
   function applyMention(member: Member) {
     if (mentionStart < 0) return
+    const currentText = composeDraftStore.getText()
     const token = `@${member.displayName || member.id}`
-    const suffix = composeText.slice(mentionEnd)
+    const suffix = currentText.slice(mentionEnd)
     const separator = suffix.startsWith(' ') ? '' : ' '
-    const nextText = composeText.slice(0, mentionStart) + token + separator + suffix
+    const nextText = currentText.slice(0, mentionStart) + token + separator + suffix
     setComposeDraft(nextText)
     setMentionBindings((current) => [
       ...current.filter((binding) => binding.token !== token && nextText.includes(binding.token)),
@@ -115,7 +122,8 @@ export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>)
 
   function applyEmojiSuggestion(emoji: string) {
     if (!emojiMatch) return
-    const { text, caret } = insertEmoji(composeText, emojiMatch.start, emojiMatch.end, emoji)
+    const currentText = composeDraftStore.getText()
+    const { text, caret } = insertEmoji(currentText, emojiMatch.start, emojiMatch.end, emoji)
     setComposeDraft(text)
     setEmojiMatch(null)
     requestAnimationFrame(() => {
@@ -154,9 +162,10 @@ export function useComposerSnippets(app: ReturnType<typeof useMessageAIActions>)
 
   function applyFormatting(format: ComposerFormat) {
     const input = composerInputRef.current
-    const start = input?.selectionStart ?? composeText.length
-    const end = input?.selectionEnd ?? composeText.length
-    const result = formatComposerText(composeText, start, end, format)
+    const currentText = composeDraftStore.getText()
+    const start = input?.selectionStart ?? currentText.length
+    const end = input?.selectionEnd ?? currentText.length
+    const result = formatComposerText(currentText, start, end, format)
     setComposeDraft(result.text)
     requestAnimationFrame(() => {
       const target = composerInputRef.current

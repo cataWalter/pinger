@@ -62,18 +62,6 @@ func TestNotificationAllowedUsesCategoryAndRoomPreferences(t *testing.T) {
 	}
 }
 
-func TestValidateRoomToneGuardPreference(t *testing.T) {
-	if err := Validate("room.tone_guard.!room:example.org", true); err != nil {
-		t.Fatalf("Validate(room tone guard) error = %v", err)
-	}
-	if err := Validate("room.tone_guard.!room:example.org", "true"); err == nil {
-		t.Fatal("Validate(room tone guard) accepted a non-boolean value")
-	}
-	if err := Validate("room.tone_guard.", true); err == nil {
-		t.Fatal("Validate(room tone guard) accepted a missing room ID")
-	}
-}
-
 func TestValidateRoomNeedsReplyPreference(t *testing.T) {
 	if err := Validate("room.needs_reply.!room:example.org", true); err != nil {
 		t.Fatalf("Validate(room needs reply) error = %v", err)

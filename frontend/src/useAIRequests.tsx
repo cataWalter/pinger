@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { AppService, LanguageTutorService } from '../bindings/mychat/desktop'
 import { type AIMessage, type Message } from '../bindings/mychat/desktop/models.js'
 import { type PromptMessage, endsWithAssistantTurn } from './aiPrompts'
-import { resolveAIFeatureTuning, resolveChatLearningLanguage, resolveChatTutorLanguage, type AIFeatureID } from './aiSettings'
+import { onlineAIEndpointOf, resolveAIFeatureTuning, resolveChatLearningLanguage, resolveChatTutorLanguage, textAIProviderOf, type AIFeatureID } from './aiSettings'
 import { type AIAcceptAction, type AIStreamHandler, type LanguageTutorState, describeError } from './appShared'
 import { clearParkedChatTranslations, parkChatTranslation, takeParkedChatTranslation } from './chatTranslationStash'
 import type { useMessageReactions } from './useMessageReactions'
 
 export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
-  const { activeAIRequestRef, activeAccountID, aiEnabled, aiPanel, aiStreamHandlersRef, busy, chatTranslation, chatTranslationAIRequestRef, chatTranslationRequestRef, composeText, composeTextRef, editTarget, generatedImageReview, imageSendRun, languageTutorRequestRef, messages, preferences, preferencesRef, roomDrafts, scrollTimelineToBottom, selectedRoomID, selectedRoomRef, setAIPanel, setBusy, setChatTranslation, setComposeText, setError, setGeneratedImageReview, setHistoryRevision, setImageSendRun, setLanguageTutorState, setMentionBindings, setMentionStart, stageAttachmentFiles, stageDroppedFilesRef, stickToBottomRef, stoppedAIRequestRef, workspaceGenerationRef } = app
+  const { activeAIRequestRef, activeAccountID, aiEnabled, aiPanel, aiStreamHandlersRef, busy, chatTranslation, chatTranslationAIRequestRef, chatTranslationRequestRef, composeDraftStore, composeTextRef, editTarget, generatedImageReview, imageSendRun, languageTutorRequestRef, messages, preferences, preferencesRef, roomDrafts, scrollTimelineToBottom, selectedRoomID, selectedRoomRef, setAIPanel, setBusy, setChatTranslation, setComposeText, setError, setGeneratedImageReview, setHistoryRevision, setImageSendRun, setLanguageTutorState, setMentionBindings, setMentionStart, stageAttachmentFiles, stageDroppedFilesRef, stickToBottomRef, stoppedAIRequestRef, workspaceGenerationRef } = app
   stageDroppedFilesRef.current = stageAttachmentFiles
   function promptMessages(source: Message[]): PromptMessage[] {
     return source.map((message) => ({
@@ -66,11 +66,48 @@ export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
     return resolveAIFeatureTuning(preferencesRef.current, featureID).prompt
   }
 
-  async function runAIRequest(title: string, request: AIMessage[], featureID: AIFeatureID, acceptAction: AIAcceptAction = { kind: 'none' }): Promise<string> {
+  const [onlineAIConfirmation, setOnlineAIConfirmation] = useState<{ title: string; message: string; endpoint: string } | null>(null)
+  const rememberedOnlineEndpointsRef = useRef(new Set<string>())
+  const onlineAIConfirmationResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
+
+  const resolveOnlineAIConfirmation = useCallback((confirmed: boolean, remember = false) => {
+    const resolve = onlineAIConfirmationResolverRef.current
+    onlineAIConfirmationResolverRef.current = null
+    setOnlineAIConfirmation((current) => {
+      if (confirmed && remember && current?.endpoint) rememberedOnlineEndpointsRef.current.add(current.endpoint)
+      return null
+    })
+    resolve?.(confirmed)
+  }, [])
+
+  useEffect(() => () => {
+    onlineAIConfirmationResolverRef.current?.(false)
+    onlineAIConfirmationResolverRef.current = null
+  }, [])
+
+  function confirmOnlineAIRequest(title: string, scope: string): Promise<boolean> {
+    const currentPreferences = preferencesRef.current
+    if (textAIProviderOf(currentPreferences) !== 'online') return Promise.resolve(true)
+    const endpoint = onlineAIEndpointOf(currentPreferences)
+    if (rememberedOnlineEndpointsRef.current.has(endpoint)) return Promise.resolve(true)
+    onlineAIConfirmationResolverRef.current?.(false)
+    return new Promise<boolean>((resolve) => {
+      onlineAIConfirmationResolverRef.current = resolve
+      setOnlineAIConfirmation({
+        title: `Send ${title} to online AI?`,
+        message: `${title} will send ${scope} to ${endpoint}.\n\nSend to this online service?`,
+        endpoint,
+      })
+    })
+  }
+
+  async function runAIRequest(title: string, request: AIMessage[], featureID: AIFeatureID, sourceScope: string, acceptAction: AIAcceptAction = { kind: 'none' }): Promise<string> {
+    const scope = request.some((turn) => turn.role === 'assistant') ? `${sourceScope}, the previous AI exchange, and your follow-up` : sourceScope
+    if (!(await confirmOnlineAIRequest(title, scope))) return ''
     const requestID = newAIRequestID()
     const tuning = resolveAIFeatureTuning(preferencesRef.current, featureID)
     activeAIRequestRef.current = requestID
-    setAIPanel({ title, busy: true, result: '', error: '', acceptAction, featureID, requestID, conversation: request, followUp: '', stopped: false })
+    setAIPanel({ title, busy: true, result: '', error: '', acceptAction, featureID, requestID, sourceScope, conversation: request, followUp: '', stopped: false })
     const unregister = registerAIStream(requestID, (chunk) => {
       setAIPanel((current) => current?.requestID === requestID
         ? { ...current, result: (chunk.reset ? '' : current.result) + chunk.text }
@@ -112,7 +149,7 @@ export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
     if (!aiPanel || aiPanel.busy) return
     const history = endsWithAssistantTurn(aiPanel.conversation) ? aiPanel.conversation.slice(0, -1) : aiPanel.conversation
     if (history.length === 0) return
-    void runAIRequest(aiPanel.title, history, aiPanel.featureID, aiPanel.acceptAction)
+    void runAIRequest(aiPanel.title, history, aiPanel.featureID, aiPanel.sourceScope, aiPanel.acceptAction)
   }
 
   function setAIFollowUp(followUp: string) {
@@ -123,13 +160,13 @@ export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
     event.preventDefault()
     const question = aiPanel?.followUp.trim()
     if (!aiPanel || !question || aiPanel.busy || !endsWithAssistantTurn(aiPanel.conversation)) return
-    void runAIRequest(aiPanel.title, [...aiPanel.conversation, { role: 'user', content: question }], aiPanel.featureID, aiPanel.acceptAction)
+    void runAIRequest(aiPanel.title, [...aiPanel.conversation, { role: 'user', content: question }], aiPanel.featureID, aiPanel.sourceScope, aiPanel.acceptAction)
   }
 
   // generateImageToRoom generates an image from the draft for review. Nothing is sent until the review is approved.
   async function generateImageToRoom() {
     const roomID = selectedRoomID
-    const sourceDraft = composeText
+    const sourceDraft = composeDraftStore.getText()
     const prompt = sourceDraft.trim()
     if (!roomID || !prompt || busy || editTarget || imageSendRun || generatedImageReview) return
     const requestID = newAIRequestID()
@@ -186,6 +223,7 @@ export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
       setError('Set up AI in Settings > AI to use Language Tutor.')
       return
     }
+    if (!(await confirmOnlineAIRequest('Language Tutor', mode === 'draft' ? 'your draft and language settings' : 'the selected message and language settings'))) return
     const learningLanguage = resolveChatLearningLanguage(preferences, selectedRoomID)
     const explanation = resolveChatTutorLanguage(preferences, selectedRoomID)
     // A new run replaces the one in progress.
@@ -218,5 +256,5 @@ export function useAIRequests(app: ReturnType<typeof useMessageReactions>) {
     languageTutorRequestRef.current = ''
     setLanguageTutorState(null)
   }
-  return { ...app, promptMessages, hasAIConversationContext, newAIRequestID, registerAIStream, cancelAIRequest, aiInstructions, runAIRequest, stopAIRequest, regenerateAIResult, setAIFollowUp, sendAIFollowUp, generateImageToRoom, approveGeneratedImage, stopImageGeneration, analyzeWithLanguageTutor, closeLanguageTutor }
+  return { ...app, promptMessages, hasAIConversationContext, newAIRequestID, registerAIStream, cancelAIRequest, aiInstructions, onlineAIConfirmation, resolveOnlineAIConfirmation, confirmOnlineAIRequest, runAIRequest, stopAIRequest, regenerateAIResult, setAIFollowUp, sendAIFollowUp, generateImageToRoom, approveGeneratedImage, stopImageGeneration, analyzeWithLanguageTutor, closeLanguageTutor }
 }

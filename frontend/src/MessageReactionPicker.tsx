@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import EmojiPicker from 'emoji-picker-react'
 import { Plus } from 'lucide-react'
+import { LazyEmojiPicker } from './LazyEmojiPicker'
 import { type PreferenceValues } from './appTypes'
 import { quickReactionOptions } from './preferences'
 import { type ThemeMode } from './themes'
@@ -18,7 +18,7 @@ export function MessageReactionPicker({ preferences, colorScheme, onSendReaction
         <Plus size={14} aria-hidden="true" />
       </button>
       {moreOpen && <div className="reaction-more-popover" role="dialog" aria-label="All reactions">
-        <EmojiPicker
+        <LazyEmojiPicker
           className="reaction-emoji-picker"
           colorScheme={colorScheme}
           width="100%"

@@ -1,6 +1,7 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { ArrowDown } from 'lucide-react'
 import { AppService } from '../bindings/mychat/desktop'
+import { ConfirmDialog } from './ConfirmDialog'
 import { buildLocalContinueMessages } from './aiPrompts'
 import { AI_ACTION_SHORTCUTS } from './aiSettings'
 import { primaryShiftShortcutKey } from './appShared'
@@ -29,12 +30,15 @@ import LocalAIToolbar from './LocalAIToolbar'
 
 export type { LocalAIChatProps } from './localAIChatTypes'
 
-export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden, initialDraft = '', initialDraftVersion = 0, onAgentChange, onCreateAgent, onChatCreated, onChatsChanged, newChatKind = 'chat', continueInstructions = '' }: LocalAIChatProps) {
+export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden, initialDraft = '', initialDraftVersion = 0, onAgentChange, onCreateAgent, onChatCreated, onChatsChanged, newChatKind = 'chat', continueInstructions = '', onlineEndpoint }: LocalAIChatProps) {
   const [submitting, setSubmitting] = useState(false)
   const [runView, setRunView] = useState<LocalAIRun | null>(null)
   const [failure, setFailure] = useState<LocalAIFailure | null>(null)
   const [edit, setEdit] = useState<LocalAIEdit | null>(null)
   const [imageRun, setImageRun] = useState<LocalAIImageRun | null>(null)
+  const [onlineConfirmation, setOnlineConfirmation] = useState<string | null>(null)
+  const rememberedOnlineEndpointsRef = useRef(new Set<string>())
+  const onlineConfirmationResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
   const [drafting, setDrafting] = useState(false)
   const runRef = useRef<LocalAIRun | null>(null)
   const imageRunRef = useRef<LocalAIImageRun | null>(null)
@@ -90,6 +94,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
   })
   const { runModel, stopRun, stopImage } = useLocalAIRuns({
     agents,
+    allowModelTitle: !onlineEndpoint,
     chatIdRef,
     runRef,
     imageRunRef,
@@ -114,14 +119,22 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     setSubmitting,
     onChatsChanged,
     runModel,
+    confirmRun: confirmOnlineChat,
   })
+  const startEditAction = useCallback((message: { seq: number; content: string }) => setEdit({ seq: message.seq, content: message.content }), [])
+  const editChangeAction = useCallback((content: string) => setEdit((current) => (current ? { ...current, content } : current)), [])
+  const cancelEditAction = useCallback(() => setEdit(null), [])
+  const saveEditAction = useCallback(() => void saveEdit(), [saveEdit])
+  const copyAction = useCallback((message: { content: string }) => copyMessage(message.content), [copyMessage])
+  const regenerateAction = useCallback((message: { seq: number }) => void regenerate(message as Parameters<typeof regenerate>[0]), [regenerate])
+
   messageActionsRef.current = {
-    startEdit: (message) => setEdit({ seq: message.seq, content: message.content }),
-    editChange: (content) => setEdit((current) => (current ? { ...current, content } : current)),
-    cancelEdit: () => setEdit(null),
-    saveEdit: () => void saveEdit(),
-    copy: (message) => copyMessage(message.content),
-    regenerate: (message) => void regenerate(message),
+    startEdit: startEditAction,
+    editChange: editChangeAction,
+    cancelEdit: cancelEditAction,
+    saveEdit: saveEditAction,
+    copy: copyAction,
+    regenerate: regenerateAction,
   }
 
   // Creates the chat for the first message. The new chat is reported through onChatCreated.
@@ -173,8 +186,36 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
     }
   }
 
-  function retryRun() {
+  const resolveOnlineConfirmation = useCallback((confirmed: boolean, remember = false) => {
+    const resolve = onlineConfirmationResolverRef.current
+    onlineConfirmationResolverRef.current = null
+    if (confirmed && remember && onlineEndpoint) rememberedOnlineEndpointsRef.current.add(onlineEndpoint)
+    setOnlineConfirmation(null)
+    resolve?.(confirmed)
+  }, [onlineEndpoint])
+
+  useEffect(() => {
+    resolveOnlineConfirmation(false)
+  }, [chatId, hidden, resolveOnlineConfirmation])
+
+  useEffect(() => () => {
+    onlineConfirmationResolverRef.current?.(false)
+    onlineConfirmationResolverRef.current = null
+  }, [])
+
+  function confirmOnlineChat(): Promise<boolean> {
+    if (!onlineEndpoint) return Promise.resolve(true)
+    if (rememberedOnlineEndpointsRef.current.has(onlineEndpoint)) return Promise.resolve(true)
+    onlineConfirmationResolverRef.current?.(false)
+    return new Promise<boolean>((resolve) => {
+      onlineConfirmationResolverRef.current = resolve
+      setOnlineConfirmation(`This will send recent chat turns, any included images and attachment text, and model instructions to ${onlineEndpoint}.\n\nSend to this online service?`)
+    })
+  }
+
+  async function retryRun() {
     if (!failure || busy || failure.chatId !== chatId) return
+    if (!(await confirmOnlineChat())) return
     void runModel(failure.chatId, failure.history, failure.agentId)
   }
 
@@ -185,6 +226,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
       setComposerError(`Keep each message and its attached text under ${LOCAL_AI_MESSAGE_CHARACTERS.toLocaleString()} characters.`)
       return
     }
+    if (!(await confirmOnlineChat())) return
     const pending = attachments
     shouldFollowRef.current = true
     setComposerError('')
@@ -212,6 +254,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
   async function draftNextMessage() {
     const chatID = chatIdRef.current
     if (busy || !chatID || messages.length === 0 || draft.trim() !== '' || attachments.length > 0) return
+    if (!(await confirmOnlineChat())) return
     const requestID = createLocalAIRequestID()
     const ticket = composerTicket()
     draftRequestRef.current = requestID
@@ -306,7 +349,7 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
         activeImage={activeImage}
         failure={visibleFailure}
         onStarter={insertStarter}
-        onRetry={retryRun}
+        onRetry={() => void retryRun()}
       />
       {showJump && <button className="local-ai-jump" type="button" aria-label="Scroll to latest message" onClick={jumpToLatest}><ArrowDown size={14} />Latest</button>}
       <LocalAIComposer
@@ -331,6 +374,16 @@ export default function LocalAIChat({ chatId, chatTitle, agentId, agents, hidden
         runElsewhere={runElsewhere}
         imageElsewhere={imageElsewhere}
       />
+      {onlineConfirmation && (
+        <ConfirmDialog
+          title="Send to online AI?"
+          message={onlineConfirmation}
+          confirmLabel="Send"
+          rememberLabel="Remember for this session"
+          onCancel={() => resolveOnlineConfirmation(false)}
+          onConfirm={(remember) => resolveOnlineConfirmation(true, remember)}
+        />
+      )}
     </section>
   )
 }

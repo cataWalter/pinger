@@ -1,0 +1,65 @@
+
+Here is a fresh, prioritized audit of the **highest-impact improvements remaining** across the frontend, CSS, and Go backend after the recent refactors:
+
+---
+
+### 1. Startup Performance & Bundle Size (Quick Wins, High Impact)
+- **Lazy-load `EmojiPicker` (`~340 kB` raw / `~92 kB` gzip)**
+  - Both `ConversationComposer.tsx:3` and `MessageReactionPicker.tsx:2` import `emoji-picker-react` eagerly, forcing the `emoji` vendor chunk (`vite.config.ts:22`) to load at startup even if the user never opens an emoji picker.
+  - **Improvement:** Load `EmojiPicker` via `React.lazy(...)` + `<Suspense>` inside the popover containers so initial startup JS drops by ~340 kB.
+- **Complete incremental sync deltas for edits, reactions, and redactions**
+  - `client_apply_sync.go:229-240` currently pushes normal timeline messages into `pendingMessages` (`new_messages`), while edits, reactions, and redactions still mark `c.pendingTimelineRooms[key]`, triggering a full `AppService.History(roomID, 0)` reload on the frontend (`useWorkspaceEffects.tsx:73-88`).
+  - **Improvement:** Emit lightweight `edited_messages`, `redacted_event_ids`, and `reaction_deltas` inside `BatchedPayload` so active rooms update in place with zero SQLite history re-queries.
+
+---
+
+### 2. UI/UX, Accessibility & Power-User Ergonomics
+- **Scroll-to-Bottom Pill & Gentler Auto-Scroll Tolerance**
+  - `useTimelineScroll.tsx:123` sets `isNearBottom` tolerance to `96px`, and when scrolled higher in long threads there is no floating "Jump to latest" pill (only the unread divider jump pill exists in `ConversationMessages.tsx:120-125`).
+  - **Improvement:** Add a lightweight floating "Jump to bottom" pill whenever `!stickToBottom` in a room with messages, and widen `isNearBottom` tolerance to ~140px.
+- **Voice Recording Timer & Audio Preview Before Sending**
+  - Currently, `ConversationComposer.tsx:201` shows static text (`Recording voice note`) without a live elapsed timer (`0:12`), and `ConfirmDialogs.tsx:4-22` asks users to approve recorded voice/video media without letting them play/preview the captured recording first.
+  - **Improvement:** Add a live recording elapsed clock + pulsing indicator in the composer status bar, and embed an `<audio controls>` / `<video controls>` preview inside `MediaApprovalDialog`.
+- **Keyboard Dropdown Polish**
+  - In `ConversationComposer.tsx:35-45`, navigating long `@mention` or `:emoji:` lists with `ArrowUp`/`ArrowDown` updates `is-active` without scrolling the active option into view (`scrollIntoView({ block: 'nearest' })`).
+  - In `SettingsDialog.tsx`, keyboard arrow navigation across search results stops at the boundaries instead of wrapping or returning focus to the search input on `ArrowUp` from the first result.
+  - In `VoiceMessagePlayer.tsx:211-234`, cycling playback speed (`1x` / `1.5x` / `2x`) works well, and the slider has `aria-valuetext`, though adding `aria-live="polite"` feedback on speed change and a subtle visual tooltip makes keyboard usage clearer.
+- **Drag-and-Drop Attachments & Local AI Folder Reordering**
+  - Window-level drop works on `.app-shell`, and adding visual drop-target highlighting directly on `.composer` plus drag/reorder support for Local AI folders in `AppSidebar.tsx:67-94` would make organization and media workflows feel native.
+
+---
+
+### 3. CSS Token Hygiene (Finish Cleaning Leftover Hardcoded Colors)
+During the consolidation from `part-*.css` into feature files, a few earlier prototype hex values and duplicate blocks remained outside the main token replacement list:
+- `composer.css:1-16` & `composer.css:219-234`: Contains two separate `.composer` definitions using hardcoded `#fff`, `#dfe6e0`, `#92b49e`, `rgba(255, 255, 255, 0.94)`, and `rgba(30, 99, 83, 0.45)`. Merge into a single token-backed `.composer` rule (`var(--paper)`, `var(--line)`, `var(--focus-ring)`).
+- `sidebar.css:15-119`: Contains hardcoded `#81998c`, `#dce8e0`, `#f6faf7`, `#224d3e`, `#c3e1d0` instead of `--sidebar-muted`, `--sidebar-ink`, `--sidebar-hover`, and `--accent`.
+- `timeline.css:116-143`: Contains hardcoded danger/surface overrides (`#9d4938`, `#fff0ea`, `#fbfcfa`, `rgba(255, 255, 255, 0.92)`) on `.message-context-menu button.is-danger`, `.conversation`, and `.conversation-header` that bypass `--danger`, `--canvas`, and `--paper` in dark themes.
+
+---
+
+### 4. Backend Reliability, Memory & Concurrency
+- **Break up the monolithic lock in `applySync`** (`client_apply_sync.go:36-241`)
+  - `applySync()` currently holds `c.mu.Lock()` across the entire `syncEvent.Rooms` loop while inspecting events and unread counts, blocking concurrent room reads during large sync payloads.
+  - **Improvement:** Prepare room updates outside `c.mu` (or per-room) and acquire `c.mu.Lock()` only for fast map swaps, and parallelize per-room unread reaction queries when `unreadReactionCountTimeout` is active.
+- **Evict `mediaEncrypted` map & add automatic media cache limits**
+  - `client_media_download.go:41-54` caches `EncryptedMediaFile` pointers in `c.mediaEncrypted` forever without pruning when rooms are left, trimmed, or media is cleared.
+  - `room_storage.go:221` only clears cached media when triggered manually from Settings.
+  - **Improvement:** Bound/prune `c.mediaEncrypted` (e.g., LRU or cleanup on `ClearCachedMedia` / `LeaveRoom`) and add an optional background/startup max-cache-size or max-age retention policy in Settings > Storage.
+- **Prepared statement caching & batched writes in Preferences**
+  - `store.go:75-150` compiles SQL statements per read/write without prepared statement reuse. Caching prepared statements and supporting batched `SetMany` transactions reduces SQLite overhead during bulk preference updates.
+- **Multi-account consistency & AI streaming safeguards**
+  - `service_sync.go` emits async updates captured per client; validating `accountID == s.currentAccountID()` before forwarding prevents stale-account UI flashes during fast account switches.
+  - `ai_completion.go:180-230` can add a lightweight provider health/cooldown status and UI warning banner when a local Ollama/OpenAI endpoint goes unreachable mid-session.
+
+---
+
+### 5. Frontend State & Internationalization Completion
+- **Decouple remaining non-composer hooks from `AppBody`**
+  - `App.tsx:16-70` still runs `useAppStateChain()` at the root `AppBody`, meaning any non-composer state change (e.g. hover/menu state, search panel typing, `roomMembers` load) re-executes all 24 hooks and rebuilds context values in `AppDomainContexts.tsx`.
+  - **Improvement:** Move overlay/dialog UI state (`settingsOpen`, `roomContextMenu`, `messageContextMenu`, `searchOpen`, `quickSwitcherOpen`) into dedicated stores/hooks (matching the `composerDraftStore.ts` pattern) and wrap `RoomInfoDialog.tsx` and `ScheduledDialogs.tsx` in `memo`.
+- **Stabilize refs & hook dependencies**
+  - Wrap `messageActionsRef.current` assignments in `LocalAIChat.tsx:47-56` with `useCallback`, and clean up the `eslint-disable-next-line react-hooks/exhaustive-deps` suppressions in `useMediaGalleryState.tsx` by stabilizing callbacks.
+- **Finish full i18n coverage**
+  - `index.ts` currently scopes localization to Settings, verification, threads, and native menus. Moving hardcoded strings from `ConversationComposer.tsx:12-22`, `RoomInfoDialog.tsx`, `ScheduledDialogs.tsx`, and error messages in `useMessageDispatch.tsx` into `en`/`it`/`es`/`de`/`fr` catalogs gives true end-to-end localization.
+
+-

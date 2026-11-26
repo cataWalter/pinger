@@ -167,10 +167,13 @@ func TestDeleteRetiredRemovesRemovedFeatureKeys(t *testing.T) {
 		value     string
 	}{
 		{GlobalScope, "", "busy_mode.enabled", "true"},
+		{GlobalScope, "", "composer.spellcheck", "false"},
 		{GlobalScope, "", "ghostwriter.endpoint", `"http://localhost:11434"`},
 		{GlobalScope, "", "relationship_health.enabled", "true"},
 		{GlobalScope, "", "ai.feature.contact_dossier.temperature", "0.7"},
+		{GlobalScope, "", "ai.feature.tone_guard.temperature", "0.7"},
 		{AccountScope, accountID, "room.ghostwriter.!room:example.org", "true"},
+		{AccountScope, accountID, "room.tone_guard.!room:example.org", "true"},
 		{GlobalScope, "", "ai.endpoint", `"http://localhost:11434"`},
 		{GlobalScope, "", "notifications.enabled", "false"},
 		{AccountScope, accountID, "room.favorite.!room:example.org", "true"},
@@ -184,8 +187,8 @@ func TestDeleteRetiredRemovesRemovedFeatureKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteRetired() error = %v", err)
 	}
-	if deleted != 5 {
-		t.Fatalf("DeleteRetired() deleted %d rows, want 5", deleted)
+	if deleted != 8 {
+		t.Fatalf("DeleteRetired() deleted %d rows, want 8", deleted)
 	}
 	global, err := store.All(GlobalScope, "")
 	if err != nil {

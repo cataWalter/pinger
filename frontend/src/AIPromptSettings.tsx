@@ -34,7 +34,6 @@ type PromptGroup = {
 const PROMPT_GROUPS: { title: string, ids: string[] }[] = [
   { title: 'Writing and assistants', ids: ['ask_ai', 'local_chat', 'agent', 'draft_reply', 'continue_conversation', 'rewrite', 'shorten', 'suggested_replies', 'improve_draft'] },
   { title: 'Translation and understanding', ids: ['explain', 'summarize', 'topics', 'conversation_analysis', 'language_tutor'] },
-  { title: 'Checks and background tasks', ids: ['tone_guard'] },
 ]
 
 function groupPromptCards(cards: PromptCard[]): PromptGroup[] {

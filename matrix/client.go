@@ -48,11 +48,18 @@ type Client struct {
 	urlPreviews            urlPreviewCache
 	local                  map[string]map[string]Message
 	mediaEncrypted         map[string]*EncryptedMediaFile
+	mediaEncryptedOrder    []string
+	mediaEncryptedByRoom   map[string]map[string]struct{}
 	typing                 map[string][]string
 	pendingNotifications   []Notification
 	pendingIncomingMessage bool
 	notifiedEvents         map[string]struct{}
 	pendingTimelineRooms   map[string]struct{}
+	pendingMessages        []MessageItem
+	pendingEditedMessages  []MessageItem
+	pendingRedactions      []RedactionItem
+	pendingReactionDeltas  []ReactionDeltaItem
+	pendingReceipts        []ReadReceiptItem
 	dismissedEvents        map[string]string
 	removedReactions       map[id.EventID]time.Time
 	syncReady              bool

@@ -41,6 +41,13 @@ func main() {
 	desktop.AppCommit = Commit
 	desktop.AppBuildDate = BuildDate
 
+	if len(os.Args) == 2 && os.Args[1] == "--smoke-test" {
+		if err := desktop.RunSmokeTest(frontendAssets, applicationIcon); err != nil {
+			logger.Fatal().Err(err).Msg("packaged startup smoke failed")
+		}
+		return
+	}
+
 	// A previous instance may still hold the data files when Pinger is restarted.
 	desktop.WaitForPreviousInstance()
 
