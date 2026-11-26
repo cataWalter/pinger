@@ -517,7 +517,9 @@ jobs:
           trap 'rm -rf "$smoke_dir"' EXIT
           dpkg-deb --extract "dist/Pinger-${VERSION}-linux-amd64.deb" "$smoke_dir/deb"
           export XDG_CACHE_HOME="$smoke_dir/cache" XDG_CONFIG_HOME="$smoke_dir/config" XDG_DATA_HOME="$smoke_dir/data"
-          export GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 APPIMAGE_EXTRACT_AND_RUN=1
+          # Ubuntu runners block the unprivileged user namespaces WebKitGTK's sandbox needs (bwrap: uid map denied).
+          # This only affects the smoke test; the shipped app keeps the sandbox.
+          export GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 APPIMAGE_EXTRACT_AND_RUN=1 WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
           for executable in "$smoke_dir/deb/usr/bin/pinger" "dist/Pinger-${VERSION}-linux-amd64.AppImage"; do
             xvfb-run -a dbus-run-session -- "$executable" --smoke-test | tee "$smoke_dir/startup.log"
             grep -Fxq 'Pinger packaged startup smoke passed' "$smoke_dir/startup.log"
